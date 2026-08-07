@@ -1,0 +1,47 @@
+*.log
+*.pid
+.DS_Store
+.idea/
+.vscode/
+.coverage
+coverage/
+
+# Local runtime state, databases, browser sessions, and user settings.
+.runtime/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+**/settings.json
+**/browser-auth/
+**/*storage-state*.json
+**/*cookies*.json
+
+# Dependencies and generated build/package artifacts.
+node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+desktop/bin/
+desktop/resources/
+desktop/dist/
+desktop/.cache/
+backend/tmp/
+backend/bin/
+backend/server
+
+# Hermes and model/provider credentials.
+**/hermes-home/
+**/.env
+**/.env.*
+!**/.env.example
+
+# Private keys and signing credentials must never be committed.
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*

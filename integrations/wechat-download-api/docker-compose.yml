@@ -1,0 +1,10 @@
+services:
+  wechat-download-api:
+    image: tmwgsicp/wechat-download-api:latest
+    container_name: a-stock-ai-wechat
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env

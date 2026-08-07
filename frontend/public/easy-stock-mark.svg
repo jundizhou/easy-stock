@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">easy-stock</title>
+  <desc id="desc">由小写字母 e、AI 神经节点和上升行情线构成的 easy-stock 标志</desc>
+  <defs>
+    <linearGradient id="background" x1="112" y1="82" x2="908" y2="944" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#092C3F"/>
+      <stop offset="0.52" stop-color="#071827"/>
+      <stop offset="1" stop-color="#160D35"/>
+    </linearGradient>
+    <radialGradient id="aura" cx="0" cy="0" r="1" gradientTransform="translate(745 260) rotate(132) scale(640)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6946FF" stop-opacity=".42"/>
+      <stop offset=".5" stop-color="#18CFF2" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#071827" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="letter" x1="340" y1="720" x2="790" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20E4CF"/>
+      <stop offset=".48" stop-color="#36C7FF"/>
+      <stop offset="1" stop-color="#9B7BFF"/>
+    </linearGradient>
+    <linearGradient id="market" x1="426" y1="690" x2="770" y2="408" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF4F72"/>
+      <stop offset="1" stop-color="#FFB547"/>
+    </linearGradient>
+    <pattern id="grid" width="72" height="72" patternUnits="userSpaceOnUse">
+      <path d="M72 0H0V72" fill="none" stroke="#B8EAFF" stroke-opacity=".045" stroke-width="2"/>
+    </pattern>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="20" stdDeviation="28" flood-color="#020711" flood-opacity=".5"/>
+    </filter>
+    <filter id="cyanGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="13" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="warmGlow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="56" y="56" width="912" height="912" rx="226" fill="url(#background)" filter="url(#shadow)"/>
+  <rect x="56" y="56" width="912" height="912" rx="226" fill="url(#aura)"/>
+  <rect x="82" y="82" width="860" height="860" rx="202" fill="url(#grid)"/>
+  <rect x="70" y="70" width="884" height="884" rx="212" fill="none" stroke="#D9F7FF" stroke-opacity=".13" stroke-width="5"/>
+
+  <g filter="url(#cyanGlow)">
+    <path d="M752 653c-47 83-135 132-239 122-132-12-231-119-231-253 0-145 108-257 252-265 135-8 248 87 260 222H330"
+      fill="none" stroke="url(#letter)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g fill="#E6FCFF" stroke="#102F46" stroke-width="13">
+    <circle cx="282" cy="522" r="25"/>
+    <circle cx="534" cy="257" r="22"/>
+    <circle cx="752" cy="653" r="22"/>
+  </g>
+
+  <g filter="url(#warmGlow)">
+    <path d="M402 669 501 570l91 53 166-190" fill="none" stroke="url(#market)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="m692 434 79-15-15 79" fill="none" stroke="#FFB547" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g fill="#FF8C56">
+    <circle cx="402" cy="669" r="18"/>
+    <circle cx="501" cy="570" r="18"/>
+    <circle cx="592" cy="623" r="18"/>
+  </g>
+
+  <g transform="translate(774 249)" fill="#F5F1FF">
+    <path d="M0-58c8 37 21 50 58 58-37 8-50 21-58 58-8-37-21-50-58-58 37-8 50-21 58-58Z"/>
+    <circle cx="-76" cy="-62" r="13" fill="#39D5F2"/>
+    <circle cx="70" cy="67" r="10" fill="#A98CFF"/>
+  </g>
+</svg>

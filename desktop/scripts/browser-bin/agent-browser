@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Load EASY_STOCK's Playwright state before the first browser navigation."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+COMMANDS = {
+    "open", "click", "dblclick", "type", "fill", "press", "keyboard", "hover",
+    "focus", "check", "uncheck", "select", "drag", "upload", "download", "scroll",
+    "scrollintoview", "wait", "screenshot", "pdf", "snapshot", "eval", "connect",
+    "close", "get", "is", "find", "mouse", "set", "network", "cookies", "storage",
+    "tab", "diff", "trace", "profiler", "record", "console", "errors", "highlight",
+    "inspect", "clipboard", "stream", "batch", "auth", "confirm", "deny", "session",
+    "chat", "dashboard", "install", "upgrade", "profiles", "state",
+}
+
+
+def command_index(arguments: list[str]) -> int | None:
+    for index, value in enumerate(arguments):
+        if value in COMMANDS:
+            return index
+    return None
+
+
+def run_quiet(real_binary: str, arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [real_binary, *arguments],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def forward_failure(result: subprocess.CompletedProcess[bytes]) -> None:
+    if result.stdout:
+        sys.stdout.buffer.write(result.stdout)
+    if result.stderr:
+        sys.stderr.buffer.write(result.stderr)
+    raise SystemExit(result.returncode or 1)
+
+
+def state_marker(state_path: Path) -> Path | None:
+    socket_dir = os.environ.get("AGENT_BROWSER_SOCKET_DIR", "").strip()
+    if not socket_dir:
+        return None
+    digest = hashlib.sha256(str(state_path).encode("utf-8")).hexdigest()[:20]
+    return Path(socket_dir) / f".a-stock-state-{digest}"
+
+
+def state_version(state_path: Path) -> str:
+    stat = state_path.stat()
+    return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+
+def ensure_state_loaded(real_binary: str, arguments: list[str], index: int) -> None:
+    state_value = os.environ.get("AGENT_BROWSER_STATE", "").strip()
+    if arguments[index] != "open" or not state_value:
+        return
+    state_path = Path(state_value).expanduser().resolve()
+    if not state_path.is_file():
+        return
+    marker = state_marker(state_path)
+    version = state_version(state_path)
+    if marker and marker.is_file() and marker.read_text(encoding="utf-8").strip() == version:
+        return
+
+    prefix = arguments[:index]
+    bootstrap = run_quiet(real_binary, [*prefix, "open", "about:blank"])
+    if bootstrap.returncode != 0:
+        forward_failure(bootstrap)
+    loaded = run_quiet(real_binary, [*prefix, "state", "load", str(state_path)])
+    if loaded.returncode != 0:
+        forward_failure(loaded)
+    if marker:
+        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        marker.write_text(version, encoding="utf-8")
+        marker.chmod(0o600)
+
+
+def main() -> None:
+    real_binary = os.environ.get("A_STOCK_AGENT_BROWSER_REAL", "").strip()
+    if not real_binary or not Path(real_binary).is_file():
+        print("easy-stock agent-browser runtime is unavailable", file=sys.stderr)
+        raise SystemExit(127)
+    arguments = sys.argv[1:]
+    index = command_index(arguments)
+    if index is not None:
+        ensure_state_loaded(real_binary, arguments, index)
+    os.execv(real_binary, [real_binary, *arguments])
+
+
+if __name__ == "__main__":
+    main()

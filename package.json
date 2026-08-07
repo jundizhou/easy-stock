@@ -1,0 +1,24 @@
+{
+  "name": "easy-stock",
+  "private": true,
+  "scripts": {
+    "dev:backend": "cd backend && A_STOCK_ADDR=127.0.0.1:20081 go run ./cmd/server",
+    "dev:frontend": "npm --workspace frontend run dev",
+    "dev:desktop": "npm --workspace desktop run dev",
+    "restart": "bash scripts/rebuild-restart.sh",
+    "build:backend": "mkdir -p desktop/bin && cd backend && go build -o ../desktop/bin/easy-stock-backend ./cmd/server",
+    "build:frontend": "npm --workspace frontend run build",
+    "build:desktop": "npm run build:backend && npm run build:frontend && npm --workspace desktop run build",
+    "prepare:desktop-package": "npm --workspace desktop run prepare:package",
+    "package:mac": "npm --workspace desktop run package:mac",
+    "installer:mac": "npm --workspace desktop run installer:mac",
+    "test": "cd backend && go test ./... && cd .. && npm --workspace frontend test -- --run"
+  },
+  "workspaces": [
+    "frontend",
+    "desktop"
+  ],
+  "devDependencies": {
+    "agent-browser": "^0.25.3"
+  }
+}

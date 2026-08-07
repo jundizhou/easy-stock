@@ -1,0 +1,528 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/foundation"
+	"easy-stock/backend/internal/hermes"
+	"easy-stock/backend/internal/marketemotion"
+	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/providers/cls"
+	"easy-stock/backend/internal/providers/duanxianxia"
+	"easy-stock/backend/internal/providers/eastmoney"
+	"easy-stock/backend/internal/providers/sina"
+	"easy-stock/backend/internal/review"
+	"easy-stock/backend/internal/sector"
+	"easy-stock/backend/internal/strategy/inflection"
+)
+
+type Server struct {
+	mux                   *http.ServeMux
+	token                 string
+	realtimeProvider      RealtimeProvider
+	kLinePrimary          KLineProvider
+	kLineFallback         KLineProvider
+	newsProvider          NewsProvider
+	sectorMap             SectorMapProvider
+	themeOverview         ThemeOverviewProvider
+	limitUpProvider       LimitUpProvider
+	marketPools           MarketPoolProvider
+	stockConcepts         StockConceptProvider
+	inflection            InflectionEvaluator
+	themeSnapshots        *themeSnapshotCache
+	limitUpSnapshots      *limitUpLadderCache
+	marketEmotion         *marketEmotionEngine
+	marketEmotionIntraday *marketEmotionIntradayCache
+	reviewStore           *review.Store
+	reviewImporter        ReviewImporter
+	wechatAPIURL          string
+	settingsStore         *appsettings.Store
+	reviewAutomation      *review.Automation
+	hermesGateway         hermes.Gateway
+	masteryLibrary        *methodology.Library
+}
+
+func NewServer(config any) *Server {
+	cfg := normalizeConfig(config)
+	sinaClient := sina.NewClient()
+	eastMoneyClient := eastmoney.NewClient()
+	clsClient := cls.NewClient()
+	if cfg.Realtime == nil {
+		cfg.Realtime = sinaClient
+	}
+	if cfg.KLinePrimary == nil {
+		cfg.KLinePrimary = eastMoneyClient
+	}
+	if cfg.KLineFallback == nil {
+		cfg.KLineFallback = sinaClient
+	}
+	if cfg.News == nil {
+		cfg.News = clsClient
+	}
+	var kaipanlaService *duanxianxia.Service
+	if strings.TrimSpace(cfg.ThemeRadarDBPath) != "" {
+		if store, err := duanxianxia.OpenStore(cfg.ThemeRadarDBPath); err == nil {
+			client := duanxianxia.NewClient(duanxianxia.ClientConfig{BaseURL: cfg.DuanxianxiaBaseURL})
+			kaipanlaService = duanxianxia.NewService(client, store, duanxianxia.ServiceConfig{
+				RefreshInterval:  5 * time.Minute,
+				LeaderThemeLimit: 3,
+			})
+		}
+	}
+	usingDefaultLimitUp := cfg.LimitUp == nil
+	if usingDefaultLimitUp {
+		if kaipanlaService != nil {
+			cfg.LimitUp = duanxianxia.NewLimitUpProvider(kaipanlaService, eastMoneyClient)
+		} else {
+			cfg.LimitUp = eastMoneyClient
+		}
+	}
+	if cfg.MarketPools == nil {
+		cfg.MarketPools = eastMoneyClient
+	}
+	if cfg.StockConcept == nil && usingDefaultLimitUp {
+		cfg.StockConcept = eastMoneyClient
+	}
+	if cfg.SectorMap == nil {
+		mapper := sector.NewMapper(
+			eastMoneyClient,
+			sector.WithQuoteProvider(sinaClient),
+			sector.WithLimitUpProvider(cfg.LimitUp),
+			sector.WithStockCatalogProvider(eastMoneyClient),
+		)
+		var defaultSectorMap SectorMapProvider = mapper
+		var defaultThemeOverview ThemeOverviewProvider = mapper
+		if kaipanlaService != nil {
+			var radarFallback sector.RadarFallback = mapper
+			if cfg.ThemeRadarFallback != nil {
+				radarFallback = cfg.ThemeRadarFallback
+			}
+			radar := sector.NewRadarProvider(kaipanlaService, radarFallback, cfg.Realtime, sector.RadarProviderConfig{FallbackFillLimit: 16})
+			defaultSectorMap = radar
+			defaultThemeOverview = radar
+		}
+		cfg.SectorMap = defaultSectorMap
+		if cfg.ThemeOverview == nil {
+			cfg.ThemeOverview = defaultThemeOverview
+		}
+	}
+	if cfg.Inflection == nil {
+		cfg.Inflection = inflection.NewEngine(inflection.DefaultConfig())
+	}
+	if cfg.ReviewStore == nil {
+		store, err := review.OpenStore(cfg.ReviewDBPath)
+		if err == nil {
+			cfg.ReviewStore = store
+		} else {
+			cfg.ReviewStore, _ = review.OpenStore(":memory:")
+		}
+	}
+	if cfg.MarketEmotionStore == nil {
+		store, err := marketemotion.OpenStore(cfg.MarketEmotionDBPath)
+		if err == nil {
+			cfg.MarketEmotionStore = store
+		} else {
+			cfg.MarketEmotionStore, _ = marketemotion.OpenStore("")
+		}
+	}
+	if cfg.ReviewHTTP == nil {
+		cfg.ReviewHTTP = &http.Client{Timeout: 90 * time.Second}
+	}
+	if cfg.SettingsStore == nil {
+		store, err := appsettings.Open(cfg.SettingsPath)
+		if err == nil {
+			cfg.SettingsStore = store
+		} else {
+			cfg.SettingsStore, _ = appsettings.Open("")
+		}
+	}
+	if cfg.HermesGateway != nil {
+		values := cfg.SettingsStore.Snapshot()
+		var migratedKey *string
+		if strings.TrimSpace(values.LLM.APIKey) != "" {
+			key := strings.TrimSpace(values.LLM.APIKey)
+			migratedKey = &key
+			if updated, err := cfg.SettingsStore.Update(func(next *appsettings.Values) error {
+				next.LLM.APIKey = ""
+				return nil
+			}); err == nil {
+				values = updated
+			}
+		}
+		_ = cfg.HermesGateway.SyncLLM(values.LLM, migratedKey)
+	}
+	if cfg.ReviewImporter == nil {
+		cfg.ReviewImporter = review.NewImporter(cfg.ReviewHTTP, cfg.WeChatAPIURL)
+	}
+	if cfg.ReviewAutomation == nil {
+		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, cfg.WeChatAPIURL, cfg.HermesGateway)
+	}
+	s := &Server{
+		mux:                   http.NewServeMux(),
+		token:                 cfg.Token,
+		realtimeProvider:      cfg.Realtime,
+		kLinePrimary:          cfg.KLinePrimary,
+		kLineFallback:         cfg.KLineFallback,
+		newsProvider:          cfg.News,
+		sectorMap:             cfg.SectorMap,
+		themeOverview:         cfg.ThemeOverview,
+		limitUpProvider:       cfg.LimitUp,
+		marketPools:           cfg.MarketPools,
+		stockConcepts:         cfg.StockConcept,
+		inflection:            cfg.Inflection,
+		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
+		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
+		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
+		reviewStore:           cfg.ReviewStore,
+		reviewImporter:        cfg.ReviewImporter,
+		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
+		settingsStore:         cfg.SettingsStore,
+		reviewAutomation:      cfg.ReviewAutomation,
+		hermesGateway:         cfg.HermesGateway,
+		masteryLibrary:        cfg.MasteryLibrary,
+	}
+	s.marketEmotion = newMarketEmotionEngine(
+		cfg.MarketEmotionStore,
+		s.limitUpProvider,
+		s.marketPools,
+		s.kLinePrimary,
+		s.kLineFallback,
+		s.stockConcepts,
+	)
+	s.routes()
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.withCORS(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !s.authorized(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) RunReviewScheduler(ctx context.Context) {
+	if s.reviewAutomation != nil {
+		s.reviewAutomation.RunScheduler(ctx)
+	}
+}
+
+func (s *Server) RunMarketEmotionScheduler(ctx context.Context) {
+	if s.marketEmotion != nil {
+		s.marketEmotion.runScheduler(ctx)
+	}
+}
+
+func (s *Server) RunMasteryScheduler(ctx context.Context) {
+	if s.masteryLibrary == nil {
+		return
+	}
+	_, _ = s.masteryLibrary.Snapshot(ctx, false)
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _ = s.masteryLibrary.Snapshot(ctx, true)
+		}
+	}
+}
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /api/health", s.health)
+	s.mux.HandleFunc("GET /api/v1/sources", s.sources)
+	s.mux.HandleFunc("GET /api/v1/quotes/realtime", s.realtime)
+	s.mux.HandleFunc("GET /api/v1/quotes/kline", s.kline)
+	s.mux.HandleFunc("GET /api/v1/quotes/kline/batch", s.klineBatch)
+	s.mux.HandleFunc("GET /api/v1/market/news", s.news)
+	s.mux.HandleFunc("GET /api/v1/themes/overview", s.themeOverviewHandler)
+	s.mux.HandleFunc("GET /api/v1/themes/screen", s.themeScreenHandler)
+	s.mux.HandleFunc("GET /api/v1/sector-map", s.sectorMapHandler)
+	s.mux.HandleFunc("GET /api/v1/short-term/limit-up-ladder", s.limitUpLadderHandler)
+	s.mux.HandleFunc("GET /api/v1/short-term/emotion-history", s.marketEmotionHistoryHandler)
+	s.mux.HandleFunc("GET /api/v1/short-term/mastery", s.masteryIndex)
+	s.mux.HandleFunc("GET /api/v1/short-term/mastery/trader", s.masteryTrader)
+	s.mux.HandleFunc("POST /api/v1/short-term/mastery/refresh", s.masteryRefresh)
+	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
+	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
+	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)
+	s.mux.HandleFunc("GET /api/v1/reviews/posts/{id}", s.reviewPost)
+	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary", s.reviewDailySummaryGet)
+	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/status", s.reviewDailySummaryStatus)
+	s.mux.HandleFunc("POST /api/v1/reviews/daily-summary", s.reviewDailySummaryCreate)
+	s.mux.HandleFunc("POST /api/v1/reviews/import", s.reviewImport)
+	s.mux.HandleFunc("GET /api/v1/reviews/subscriptions", s.reviewSubscriptions)
+	s.mux.HandleFunc("POST /api/v1/reviews/subscriptions", s.reviewSubscriptionCreate)
+	s.mux.HandleFunc("DELETE /api/v1/reviews/subscriptions/{id}", s.reviewSubscriptionDelete)
+	s.mux.HandleFunc("POST /api/v1/reviews/sync", s.reviewSyncAll)
+	s.mux.HandleFunc("POST /api/v1/reviews/subscriptions/{id}/sync", s.reviewSyncOne)
+	s.mux.HandleFunc("POST /api/v1/reviews/posts/{id}/analyze", s.reviewAnalyzePost)
+	s.mux.HandleFunc("GET /api/v1/settings", s.settingsGet)
+	s.mux.HandleFunc("PUT /api/v1/settings", s.settingsUpdate)
+	s.mux.HandleFunc("POST /api/v1/settings/llm/models", s.settingsLLMModels)
+	s.mux.HandleFunc("POST /api/v1/settings/llm/test", s.settingsLLMTest)
+	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
+	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)
+	s.mux.HandleFunc("GET /api/v1/ws/stream", s.stream)
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":   true,
+		"name": "easy-stock data foundation",
+		"time": time.Now(),
+	})
+}
+
+func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sources": []foundation.SourceHealth{
+			{ID: "duanxianxia", Name: "短线侠 / 开盘啦", Category: "theme,leaders,limit-up,concept", OK: true, CheckedAt: time.Now()},
+			{ID: "eastmoney", Name: "东方财富", Category: "quote,kline,f10,report", OK: true, CheckedAt: time.Now()},
+			{ID: "sina", Name: "新浪财经", Category: "quote,kline,money-flow", OK: true, CheckedAt: time.Now()},
+			{ID: "tencent", Name: "腾讯财经", Category: "quote,index,hk", OK: true, CheckedAt: time.Now()},
+			{ID: "cls", Name: "财联社", Category: "news,calendar", OK: true, CheckedAt: time.Now()},
+			{ID: "tradingview", Name: "TradingView", Category: "news", OK: true, CheckedAt: time.Now()},
+			{ID: "tushare", Name: "Tushare", Category: "basic,daily,index", OK: false, Message: "requires token", CheckedAt: time.Now()},
+		},
+	})
+}
+
+func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
+	symbolsParam := strings.TrimSpace(r.URL.Query().Get("symbols"))
+	if symbolsParam == "" {
+		writeError(w, http.StatusBadRequest, "symbols is required")
+		return
+	}
+	symbols, err := foundation.SplitSymbols(symbolsParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	quotes, err := s.realtimeProvider.Realtime(r.Context(), symbols)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": quotes})
+}
+
+func (s *Server) kline(w http.ResponseWriter, r *http.Request) {
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	if symbol == "" {
+		writeError(w, http.StatusBadRequest, "symbol is required")
+		return
+	}
+	period := firstNonEmpty(r.URL.Query().Get("period"), "day")
+	limit := 120
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	lines, err := s.loadKLine(ctx, symbol, period, limit)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": lines})
+}
+
+func (s *Server) klineBatch(w http.ResponseWriter, r *http.Request) {
+	symbolsParam := strings.TrimSpace(r.URL.Query().Get("symbols"))
+	if symbolsParam == "" {
+		writeError(w, http.StatusBadRequest, "symbols is required")
+		return
+	}
+	symbols, err := foundation.SplitSymbols(symbolsParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(symbols) > 30 {
+		writeError(w, http.StatusBadRequest, "batch kline supports at most 30 symbols")
+		return
+	}
+	period := firstNonEmpty(r.URL.Query().Get("period"), "day")
+	limit := 40
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed <= 0 || parsed > 240 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 240")
+			return
+		}
+		limit = parsed
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+	data := make(map[string][]foundation.KLine, len(symbols))
+	errorsBySymbol := map[string]string{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 4)
+	for _, symbol := range symbols {
+		symbol := symbol
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				mu.Lock()
+				errorsBySymbol[symbol] = ctx.Err().Error()
+				mu.Unlock()
+				return
+			}
+			lines, loadErr := s.loadKLine(ctx, symbol, period, limit)
+			mu.Lock()
+			defer mu.Unlock()
+			if loadErr != nil {
+				errorsBySymbol[symbol] = loadErr.Error()
+				return
+			}
+			data[symbol] = lines
+		}()
+	}
+	wg.Wait()
+	if len(data) == 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "all batch kline requests failed", "errors": errorsBySymbol})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "errors": errorsBySymbol})
+}
+
+func (s *Server) loadKLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
+	lines, err := s.kLinePrimary.KLine(ctx, symbol, period, limit)
+	if err == nil {
+		return lines, nil
+	}
+	return s.kLineFallback.KLine(ctx, symbol, period, limit)
+}
+
+func (s *Server) news(w http.ResponseWriter, r *http.Request) {
+	source := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
+	if source == "" {
+		source = "cls"
+	}
+	if source != "cls" {
+		writeError(w, http.StatusBadRequest, "unsupported news source")
+		return
+	}
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+	}
+	items, err := s.newsProvider.LatestNews(r.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (s *Server) sectorMapHandler(w http.ResponseWriter, r *http.Request) {
+	theme := strings.TrimSpace(r.URL.Query().Get("theme"))
+	if theme == "" {
+		theme = "semiconductor_materials"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	sectorMap, err := s.sectorMap.Build(ctx, theme)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": sectorMap})
+}
+
+func (s *Server) themeOverviewHandler(w http.ResponseWriter, r *http.Request) {
+	if s.themeOverview == nil {
+		writeError(w, http.StatusServiceUnavailable, "theme overview provider is unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	items, meta, err := s.themeOverview.Overviews(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items, "meta": meta})
+}
+
+func (s *Server) inflectionEvaluate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request inflection.EvaluationRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid inflection request: "+err.Error())
+		return
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.inflection.Evaluate(request)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err == io.EOF {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return io.ErrUnexpectedEOF
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}

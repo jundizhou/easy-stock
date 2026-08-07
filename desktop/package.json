@@ -1,0 +1,18 @@
+{
+  "name": "easy-stock-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "ELECTRON_RENDERER_URL=http://127.0.0.1:20073 electron .",
+    "build": "npm run test",
+    "test": "node --test test/*.test.cjs",
+    "prepare:package": "node scripts/prepare-package.mjs",
+    "package:mac": "npm run prepare:package && node scripts/package-mac.mjs",
+    "installer:mac": "npm run package:mac && node scripts/create-dmg.mjs"
+  },
+  "devDependencies": {
+    "electron": "^38.2.2",
+    "@electron/packager": "^20.2.0"
+  }
+}
