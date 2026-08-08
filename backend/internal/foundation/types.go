@@ -132,6 +132,19 @@ type LimitUpEvent struct {
 	Meta            SourceMeta `json:"meta"`
 }
 
+// StockThemeAttribution is an authoritative or cached per-stock theme label.
+// It keeps source provenance so downstream analysis can prefer Kaipanla data
+// without conflating it with broad industry/catalog fallbacks.
+type StockThemeAttribution struct {
+	Symbol    string   `json:"symbol"`
+	Theme     string   `json:"theme"`
+	Concepts  []string `json:"concepts,omitempty"`
+	Source    string   `json:"source"`
+	TradeDate string   `json:"trade_date,omitempty"`
+	Rank      int      `json:"rank,omitempty"`
+	Role      string   `json:"role,omitempty"`
+}
+
 // MarketLimitEvent represents one stock in a daily limit-event pool that is
 // not necessarily still sealed at the close. It is used for final broken-board
 // and limit-down pools while LimitUpEvent remains the richer sealed-limit-up

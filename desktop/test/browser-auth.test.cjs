@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  LEGACY_TAOGUBA_AUTH_MARKER,
   TAOGUBA_AUTH_MARKER,
   hasLoggedInTaogubaSession,
   hasLoggedInXueqiuSession,
@@ -19,6 +20,7 @@ const {
 test('xueqiu profiles use stable isolated partitions and state paths', () => {
   assert.equal(partitionForXueqiuProfile('xueqiu-default'), partitionForXueqiuProfile('xueqiu-default'));
   assert.notEqual(partitionForXueqiuProfile('xueqiu-default'), partitionForXueqiuProfile('xueqiu-second'));
+  assert.match(partitionForXueqiuProfile('xueqiu-default'), /^persist:a-stock-ai-xueqiu-/);
   assert.match(statePathForProfile('/tmp/auth', 'xueqiu-default'), /^\/tmp\/auth\/xueqiu\/[a-f0-9]{32}\.json$/);
 });
 
@@ -65,4 +67,12 @@ test('taoguba login status is persisted from verified page state without exposin
   assert.equal(status.configured, true);
   assert.match(status.message, /淘股吧登录态已保存在本机/);
   assert.doesNotMatch(JSON.stringify(status), /secret|session|verified/i);
+});
+
+test('legacy taoguba login marker remains valid after the product rename', () => {
+  const storageState = {
+    cookies: [],
+    origins: [{ origin: 'https://www.tgb.cn', localStorage: [{ name: LEGACY_TAOGUBA_AUTH_MARKER, value: '1' }] }],
+  };
+  assert.equal(hasLoggedInTaogubaSession(storageState), true);
 });

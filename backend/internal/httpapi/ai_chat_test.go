@@ -78,6 +78,7 @@ func TestEnrichHermesPromptInjectsMatchingMasteryContext(t *testing.T) {
 		TreeURL:         upstream.URL + "/tree",
 		RawBaseURL:      upstream.URL + "/raw/",
 		RefreshInterval: time.Hour,
+		DisableBuiltin:  true,
 	})
 	if _, err := library.Snapshot(context.Background(), false); err != nil {
 		t.Fatal(err)

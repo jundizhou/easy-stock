@@ -3,6 +3,7 @@ package duanxianxia
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"easy-stock/backend/internal/foundation"
@@ -24,6 +25,88 @@ type LimitUpProvider struct {
 
 func NewLimitUpProvider(primary *Service, fallback RecentLimitUpProvider) *LimitUpProvider {
 	return &LimitUpProvider{primary: primary, fallback: fallback}
+}
+
+// StockThemes returns retained Kaipanla per-stock attributions without
+// requiring the stock to appear in the current trading day's limit-up pool.
+// It deliberately returns both short-term pool concepts and trend-theme leader
+// labels so the analysis engine can choose the right source for each route.
+func (p *LimitUpProvider) StockThemes(ctx context.Context, symbol string, lookbackDays int) ([]foundation.StockThemeAttribution, error) {
+	if p.primary == nil {
+		return nil, fmt.Errorf("kaipanla theme cache is unavailable")
+	}
+	limit := max(lookbackDays, 2)
+	pools, _, poolErr := p.primary.LimitUpPools(ctx, limit)
+	snapshots, _, snapshotErr := p.primary.Snapshots(ctx, limit)
+	if poolErr != nil && snapshotErr != nil {
+		return nil, fmt.Errorf("kaipanla theme cache failed: pools: %v; themes: %w", poolErr, snapshotErr)
+	}
+
+	items := make([]foundation.StockThemeAttribution, 0, 8)
+	for _, pool := range pools {
+		for _, event := range pool.Events {
+			if event.Symbol != symbol {
+				continue
+			}
+			theme := firstCachedConcept(event.Concepts)
+			if theme == "" {
+				continue
+			}
+			source := strings.TrimSpace(event.Meta.Source)
+			if source == "" {
+				source = "duanxianxia:kaipanla-limit-up"
+			}
+			items = append(items, foundation.StockThemeAttribution{
+				Symbol: symbol, Theme: theme, Concepts: append([]string(nil), event.Concepts...),
+				Source: source, TradeDate: pool.TradeDate,
+			})
+		}
+	}
+	for _, snapshot := range snapshots {
+		for _, theme := range snapshot.Themes {
+			name := strings.TrimSpace(theme.Name)
+			if name == "" || !theme.LeadersLoaded {
+				continue
+			}
+			for _, leader := range theme.Leaders {
+				if leader.Symbol != symbol {
+					continue
+				}
+				items = append(items, foundation.StockThemeAttribution{
+					Symbol: symbol, Theme: name, Concepts: []string{name},
+					Source: kaipanlaThemeLeaderSource, TradeDate: snapshot.TradeDate,
+					Rank: theme.Rank, Role: leader.Role,
+				})
+			}
+		}
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].TradeDate != items[j].TradeDate {
+			return items[i].TradeDate > items[j].TradeDate
+		}
+		leftPriority := cachedThemeSourcePriority(items[i].Source)
+		rightPriority := cachedThemeSourcePriority(items[j].Source)
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return items[i].Rank < items[j].Rank
+	})
+	seen := map[string]struct{}{}
+	result := make([]foundation.StockThemeAttribution, 0, len(items))
+	for _, item := range items {
+		themeKey := compactCachedTheme(item.Theme)
+		if themeKey == "" {
+			continue
+		}
+		key := item.Source + "|" + themeKey
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func (p *LimitUpProvider) RecentLimitUps(ctx context.Context, lookbackDays int) ([]foundation.LimitUpEvent, error) {
@@ -135,6 +218,30 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func firstCachedConcept(values []string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func cachedThemeSourcePriority(source string) int {
+	if strings.Contains(source, "kaipanla-theme-leader") {
+		return 0
+	}
+	if strings.Contains(source, "kaipanla-limit-up") {
+		return 1
+	}
+	return 2
+}
+
+func compactCachedTheme(value string) string {
+	replacer := strings.NewReplacer("概念", "", "板块", "", "产业链", "", " ", "", "-", "", "_", "")
+	return strings.ToLower(replacer.Replace(strings.TrimSpace(value)))
 }
 
 func mergeLimitUpEvents(primary []foundation.LimitUpEvent, fallback []foundation.LimitUpEvent, primaryErr error) []foundation.LimitUpEvent {

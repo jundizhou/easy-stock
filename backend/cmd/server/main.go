@@ -22,36 +22,28 @@ func main() {
 	themeRadarDBPath := os.Getenv("A_STOCK_THEME_RADAR_DB")
 	settingsPath := os.Getenv("A_STOCK_SETTINGS_PATH")
 	masteryCacheDir := os.Getenv("A_STOCK_MASTERY_CACHE")
+	dataDir := ""
+	if configDir, err := os.UserConfigDir(); err == nil {
+		dataDir = preferredDataDir(configDir)
+	}
 	if reviewDBPath == "" {
-		if configDir, err := os.UserConfigDir(); err == nil {
-			reviewDBPath = filepath.Join(configDir, "easy-stock", "reviews.db")
-		}
+		reviewDBPath = dataPath(dataDir, "reviews.db")
 	}
 	if settingsPath == "" {
-		if configDir, err := os.UserConfigDir(); err == nil {
-			settingsPath = filepath.Join(configDir, "easy-stock", "settings.json")
-		}
+		settingsPath = dataPath(dataDir, "settings.json")
 	}
 	if marketEmotionDBPath == "" {
-		if configDir, err := os.UserConfigDir(); err == nil {
-			marketEmotionDBPath = filepath.Join(configDir, "easy-stock", "market-emotion.db")
-		}
+		marketEmotionDBPath = dataPath(dataDir, "market-emotion.db")
 	}
 	if themeRadarDBPath == "" {
-		if configDir, err := os.UserConfigDir(); err == nil {
-			themeRadarDBPath = filepath.Join(configDir, "easy-stock", "theme-radar.db")
-		}
+		themeRadarDBPath = dataPath(dataDir, "theme-radar.db")
 	}
 	if masteryCacheDir == "" {
-		if configDir, err := os.UserConfigDir(); err == nil {
-			masteryCacheDir = filepath.Join(configDir, "easy-stock", "trading-mastery")
-		}
+		masteryCacheDir = dataPath(dataDir, "trading-mastery")
 	}
 	hermesHome := os.Getenv("A_STOCK_HERMES_HOME")
 	if hermesHome == "" {
-		if configDir, err := os.UserConfigDir(); err == nil {
-			hermesHome = filepath.Join(configDir, "easy-stock", "hermes-home")
-		}
+		hermesHome = dataPath(dataDir, "hermes-home")
 	}
 	hermesWorkDir := os.Getenv("A_STOCK_HERMES_WORKDIR")
 	if hermesWorkDir == "" {
@@ -85,6 +77,30 @@ func main() {
 	if err := http.ListenAndServe(addr, server); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func preferredDataDir(configDir string) string {
+	current := filepath.Join(configDir, "easy-stock")
+	if isFile(filepath.Join(current, "settings.json")) {
+		return current
+	}
+	legacy := filepath.Join(configDir, "a-stock-ai")
+	if isFile(filepath.Join(legacy, "settings.json")) {
+		return legacy
+	}
+	return current
+}
+
+func isFile(filePath string) bool {
+	info, err := os.Stat(filePath)
+	return err == nil && !info.IsDir()
+}
+
+func dataPath(dataDir, name string) string {
+	if dataDir == "" {
+		return ""
+	}
+	return filepath.Join(dataDir, name)
 }
 
 func resolveHermesRuntimeRoot() string {

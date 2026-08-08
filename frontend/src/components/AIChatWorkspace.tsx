@@ -40,7 +40,18 @@ type ModelSwitchState = 'idle' | 'switching' | 'saved' | 'error';
 type ChatLLMConfig = Pick<AppSettings['llm'], 'provider' | 'base_url' | 'model' | 'api_mode'>;
 
 const STORAGE_KEY = 'easy-stock.ai-conversations.v1';
+const LEGACY_STORAGE_KEY = 'a-stock-ai.ai-conversations.v1';
 const manualModelOption = '__manual_model_input__';
+
+function loadStoredConversations() {
+	const current = window.localStorage.getItem(STORAGE_KEY);
+	if (current !== null) return parseStoredConversations(current);
+	const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+	if (legacy === null) return [];
+	const conversations = parseStoredConversations(legacy);
+	window.localStorage.setItem(STORAGE_KEY, JSON.stringify(storeableConversations(conversations)));
+	return conversations;
+}
 
 const starterPrompts = [
 	'结合这套交易体系，梳理大拐点、小拐点和锚定物之间的关系。',
@@ -52,7 +63,7 @@ const starterPrompts = [
 export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPromptConsumed, onOpenSettings }: Props) {
 	const [conversations, setConversations] = useState<ChatConversation[]>(() => {
 		try {
-			return parseStoredConversations(window.localStorage.getItem(STORAGE_KEY));
+			return loadStoredConversations();
 		} catch {
 			return [];
 		}

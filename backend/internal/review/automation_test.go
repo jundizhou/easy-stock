@@ -205,7 +205,8 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 	if summary.ArticleCount != 3 || summary.AuthorCount != 2 || len(summary.Consensus) != 1 || summary.Consensus[0].SupportCount != 2 {
 		t.Fatalf("summary = %+v", summary)
 	}
-	if summary.WindowStart.IsZero() || summary.WindowEnd.IsZero() || !strings.Contains(summary.FreshnessRule, "上上个交易日") {
+	expectedWindow := effectiveReviewWindow(summary.GeneratedAt)
+	if summary.WindowStart.IsZero() || summary.WindowEnd.IsZero() || summary.FreshnessRule != expectedWindow.Rule {
 		t.Fatalf("freshness metadata = %+v", summary)
 	}
 	prompts := prompter.Prompts()
@@ -592,6 +593,17 @@ func TestAutomationRequiresXueqiuBrowserLoginState(t *testing.T) {
 	result := automation.SyncOne(context.Background(), sub.ID)
 	if !strings.Contains(result.Error, "打开雪球登录窗口") {
 		t.Fatalf("sync error = %q, want login guidance", result.Error)
+	}
+}
+
+func TestBrowserStateLoggedInAcceptsLegacyTaogubaMarker(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "taoguba.json")
+	state := `{"cookies":[],"origins":[{"origin":"https://www.tgb.cn","localStorage":[{"name":"__a_stock_ai_taoguba_login_verified","value":"1"}]}]}`
+	if err := os.WriteFile(statePath, []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !browserStateLoggedIn(statePath, "taoguba") {
+		t.Fatal("legacy taoguba marker should remain logged in after rename")
 	}
 }
 

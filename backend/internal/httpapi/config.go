@@ -47,6 +47,10 @@ type LimitUpProvider interface {
 	RecentLimitUps(ctx context.Context, lookbackDays int) ([]foundation.LimitUpEvent, error)
 }
 
+type StockThemeAttributionProvider interface {
+	StockThemes(ctx context.Context, symbol string, lookbackDays int) ([]foundation.StockThemeAttribution, error)
+}
+
 type MarketPoolProvider interface {
 	BrokenLimitUpPool(ctx context.Context, date time.Time) ([]foundation.MarketLimitEvent, error)
 	LimitDownPool(ctx context.Context, date time.Time) ([]foundation.MarketLimitEvent, error)

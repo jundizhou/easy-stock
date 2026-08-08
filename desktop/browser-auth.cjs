@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const TAOGUBA_AUTH_MARKER = '__easy_stock_taoguba_login_verified';
+const LEGACY_TAOGUBA_AUTH_MARKER = '__a_stock_ai_taoguba_login_verified';
+const TAOGUBA_AUTH_MARKERS = new Set([TAOGUBA_AUTH_MARKER, LEGACY_TAOGUBA_AUTH_MARKER]);
 
 function profileKey(profileId) {
   const value = String(profileId || '').trim();
@@ -18,7 +20,8 @@ function normalizeSource(source = 'xueqiu') {
 
 function partitionForProfile(source, profileId) {
   const normalized = normalizeSource(source);
-  return `persist:easy-stock-${normalized}-${profileKey(profileId)}`;
+  // Keep the pre-rename namespace so existing Electron login sessions remain usable.
+  return `persist:a-stock-ai-${normalized}-${profileKey(profileId)}`;
 }
 
 function partitionForXueqiuProfile(profileId) {
@@ -73,7 +76,7 @@ function hasLoggedInXueqiuSession(storageState) {
 
 function hasLoggedInTaogubaSession(storageState) {
   const origins = Array.isArray(storageState?.origins) ? storageState.origins : [];
-  if (origins.some((origin) => Array.isArray(origin?.localStorage) && origin.localStorage.some((item) => item?.name === TAOGUBA_AUTH_MARKER && item?.value === '1'))) return true;
+  if (origins.some((origin) => Array.isArray(origin?.localStorage) && origin.localStorage.some((item) => TAOGUBA_AUTH_MARKERS.has(item?.name) && item?.value === '1'))) return true;
   const cookies = Array.isArray(storageState?.cookies) ? storageState.cookies : [];
   const now = Date.now() / 1000;
   return cookies.some((cookie) => {
@@ -126,6 +129,7 @@ function readBrowserAuthStatus(filePath, source = 'xueqiu') {
 }
 
 module.exports = {
+  LEGACY_TAOGUBA_AUTH_MARKER,
   TAOGUBA_AUTH_MARKER,
   hasLoggedInBrowserSession,
   hasLoggedInTaogubaSession,

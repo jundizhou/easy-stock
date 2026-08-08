@@ -635,7 +635,7 @@ func browserStateLoggedIn(statePath string, sources ...string) bool {
 	if source == "taoguba" {
 		for _, origin := range state.Origins {
 			for _, item := range origin.LocalStorage {
-				if item.Name == "__easy_stock_taoguba_login_verified" && item.Value == "1" {
+				if (item.Name == "__easy_stock_taoguba_login_verified" || item.Name == "__a_stock_ai_taoguba_login_verified") && item.Value == "1" {
 					return true
 				}
 			}

@@ -44,6 +44,7 @@ func TestLibraryCachesRemoteDocumentsAndSyncsHermes(t *testing.T) {
 		RawBaseURL:      upstream.URL + "/raw/",
 		SourceURL:       upstream.URL + "/source",
 		RefreshInterval: time.Hour,
+		DisableBuiltin:  true,
 	})
 
 	snapshot, err := library.Snapshot(context.Background(), false)
@@ -79,6 +80,44 @@ func TestLibraryCachesRemoteDocumentsAndSyncsHermes(t *testing.T) {
 	contextText, err := library.ContextForPrompt(context.Background(), "测试游资的龙头战法和仓位管理是什么？", 4000)
 	if err != nil || !strings.Contains(contextText, "只在情绪启动期观察龙头") || !strings.Contains(contextText, "历史交易经验") {
 		t.Fatalf("unexpected prompt context: err=%v context=%s", err, contextText)
+	}
+}
+
+func TestLibrarySeedsBundledBaselineWithoutNetwork(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "rate limited", http.StatusForbidden)
+	}))
+	defer upstream.Close()
+
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	library := NewLibrary(Config{
+		CacheDir:        cacheDir,
+		HermesHome:      filepath.Join(t.TempDir(), "hermes"),
+		TreeURL:         upstream.URL + "/tree",
+		RawBaseURL:      upstream.URL + "/raw/",
+		RefreshInterval: 24 * time.Hour,
+	})
+	snapshot, err := library.Snapshot(context.Background(), false)
+	if err != nil {
+		t.Fatalf("seed bundled snapshot: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("first load unexpectedly requested remote data %d times", calls.Load())
+	}
+	if len(snapshot.Traders) != 21 || snapshot.KnowledgeStatus != "ready" {
+		t.Fatalf("unexpected bundled snapshot: traders=%d status=%s", len(snapshot.Traders), snapshot.KnowledgeStatus)
+	}
+	if snapshot.Traders[0].Name != "炒股养家" || snapshot.Traders[0].Quote == "" {
+		t.Fatalf("bundled trader metadata missing: %+v", snapshot.Traders[0])
+	}
+	manifestContent, err := os.ReadFile(filepath.Join(cacheDir, "manifest.json"))
+	if err != nil || !strings.Contains(string(manifestContent), `"version": 4`) {
+		t.Fatalf("bundled manifest not persisted: err=%v content=%s", err, manifestContent)
+	}
+	if files, err := os.ReadDir(filepath.Join(cacheDir, "documents")); err != nil || len(files) != 42 {
+		t.Fatalf("bundled documents not persisted: count=%d err=%v", len(files), err)
 	}
 }
 

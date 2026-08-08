@@ -9,6 +9,7 @@ const {
   waitForHealth,
 } = require('./backend-process.cjs');
 const {
+  LEGACY_TAOGUBA_AUTH_MARKER,
   TAOGUBA_AUTH_MARKER,
   partitionForProfile,
   playwrightCookie,
@@ -25,8 +26,18 @@ const {
   syncWechatServiceSource,
   waitForWechatHealth,
 } = require('./wechat-service.cjs');
+const { resolveUserDataPath } = require('./user-data.cjs');
 
 app.setName('easy-stock');
+const defaultUserDataPath = app.getPath('userData');
+const selectedUserDataPath = resolveUserDataPath({
+  appDataPath: app.getPath('appData'),
+  currentUserDataPath: defaultUserDataPath,
+  configuredPath: process.env.A_STOCK_USER_DATA_DIR,
+});
+if (selectedUserDataPath !== defaultUserDataPath) {
+  app.setPath('userData', selectedUserDataPath);
+}
 
 let backendProcess;
 let backendConfig;
@@ -303,7 +314,7 @@ async function exportReviewStorageState(source, profileId, window) {
       })()`, true);
       if (originState?.origin) {
         const localStorage = (Array.isArray(originState.localStorage) ? originState.localStorage : [])
-          .filter((item) => item?.name !== TAOGUBA_AUTH_MARKER);
+          .filter((item) => item?.name !== TAOGUBA_AUTH_MARKER && item?.name !== LEGACY_TAOGUBA_AUTH_MARKER);
         if (normalized === 'taoguba' && originState.authenticated) {
           localStorage.push({ name: TAOGUBA_AUTH_MARKER, value: '1' });
         }

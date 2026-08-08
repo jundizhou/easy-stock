@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,6 +37,8 @@ type Config struct {
 	RawBaseURL      string
 	SourceURL       string
 	RefreshInterval time.Duration
+	BuiltinFS       fs.FS
+	DisableBuiltin  bool
 }
 
 type Library struct {
@@ -129,6 +133,9 @@ func NewLibrary(cfg Config) *Library {
 	if cfg.RefreshInterval <= 0 {
 		cfg.RefreshInterval = 24 * time.Hour
 	}
+	if cfg.BuiltinFS == nil && !cfg.DisableBuiltin {
+		cfg.BuiltinFS = builtinMasteryFS
+	}
 	return &Library{config: cfg}
 }
 
@@ -137,6 +144,11 @@ func (l *Library) Snapshot(ctx context.Context, force bool) (Snapshot, error) {
 	defer l.mu.Unlock()
 
 	current, _ := l.loadManifest()
+	if (current == nil || !l.manifestFilesReady(current)) && l.config.BuiltinFS != nil {
+		if seeded, seedErr := l.seedBuiltinCache(); seedErr == nil {
+			current = seeded
+		}
+	}
 	if current != nil && !force && time.Since(current.FetchedAt) < l.config.RefreshInterval && l.manifestFilesReady(current) {
 		l.cache = current
 		return l.snapshotFromManifest(current, false)
@@ -157,6 +169,54 @@ func (l *Library) Snapshot(ctx context.Context, force bool) (Snapshot, error) {
 	}
 	l.cache = refreshed
 	return l.snapshotFromManifest(refreshed, false)
+}
+
+func (l *Library) seedBuiltinCache() (*manifest, error) {
+	if l.config.BuiltinFS == nil {
+		return nil, errors.New("内置游资心法资料未配置")
+	}
+	content, err := fs.ReadFile(l.config.BuiltinFS, "builtin/manifest.json")
+	if err != nil {
+		return nil, fmt.Errorf("读取内置游资心法清单: %w", err)
+	}
+	var current manifest
+	if err := json.Unmarshal(content, &current); err != nil {
+		return nil, fmt.Errorf("解析内置游资心法清单: %w", err)
+	}
+	if len(current.Documents) == 0 {
+		return nil, errors.New("内置游资心法资料为空")
+	}
+	current.Version = manifestVersion
+	current.FetchedAt = time.Now()
+	current.SourceURL = firstNonEmpty(current.SourceURL, l.config.SourceURL)
+	for _, item := range current.Documents {
+		cacheFile, err := safeBuiltinCachePath(item.CacheFile)
+		if err != nil {
+			return nil, fmt.Errorf("内置游资心法文件路径无效 %q: %w", item.CacheFile, err)
+		}
+		document, err := fs.ReadFile(l.config.BuiltinFS, path.Join("builtin", cacheFile))
+		if err != nil {
+			return nil, fmt.Errorf("读取内置游资心法 %s: %w", item.TraderName, err)
+		}
+		if len(strings.TrimSpace(string(document))) < 20 {
+			return nil, fmt.Errorf("内置游资心法 %s 内容为空", item.TraderName)
+		}
+		if err := atomicWrite(filepath.Join(l.config.CacheDir, filepath.FromSlash(cacheFile)), document, 0o644); err != nil {
+			return nil, fmt.Errorf("初始化内置游资心法 %s: %w", item.TraderName, err)
+		}
+	}
+	if err := l.saveManifest(&current); err != nil {
+		return nil, fmt.Errorf("保存内置游资心法清单: %w", err)
+	}
+	return &current, nil
+}
+
+func safeBuiltinCachePath(value string) (string, error) {
+	cleaned := path.Clean(strings.TrimSpace(filepath.ToSlash(value)))
+	if cleaned == "" || cleaned == "." || path.IsAbs(cleaned) || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
+		return "", errors.New("路径必须位于缓存目录内")
+	}
+	return cleaned, nil
 }
 
 func (l *Library) Trader(ctx context.Context, id string) (TraderDetail, error) {

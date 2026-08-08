@@ -103,6 +103,56 @@ func TestApplyKaipanlaThemeLeadersAttributesMatchingTradingDay(t *testing.T) {
 	}
 }
 
+func TestStockThemesReturnsPoolAndLeaderAttributionsSeparately(t *testing.T) {
+	store, err := OpenStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	location := time.FixedZone("CST", 8*60*60)
+	tradeDate := time.Date(2026, 8, 7, 0, 0, 0, 0, location)
+	if err := store.SaveLimitUpSuccess(context.Background(), LimitUpPoolSnapshot{
+		ID: "pool", TradeDate: "2026-08-07", FetchedAt: tradeDate.Add(10 * time.Hour),
+		Events: []foundation.LimitUpEvent{{
+			Symbol: "003032.SZ", Name: "传智教育", Date: tradeDate,
+			Concepts: []string{"机器人概念", "职业教育"},
+			Meta:     foundation.SourceMeta{Source: "duanxianxia:kaipanla-limit-up"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSuccess(context.Background(), Snapshot{
+		ID: "themes", TradeDate: "2026-08-07", FetchedAt: tradeDate.Add(10 * time.Hour),
+		Themes: []Theme{{
+			Name: "机器人概念", Rank: 2, LeadersLoaded: true,
+			Leaders: []Leader{{Rank: 2, Role: "龙二", Symbol: "003032.SZ", Name: "传智教育"}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := tradeDate.Add(11 * time.Hour)
+	if allowed, _, err := store.TryBegin(context.Background(), now, 5*time.Minute); err != nil || !allowed {
+		t.Fatalf("reserve refresh gate: allowed=%v err=%v", allowed, err)
+	}
+	provider := NewLimitUpProvider(NewService(nil, store, ServiceConfig{Now: func() time.Time { return now }}), nil)
+	items, err := provider.StockThemes(context.Background(), "003032.SZ", 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySource := map[string]foundation.StockThemeAttribution{}
+	for _, item := range items {
+		bySource[item.Source] = item
+	}
+	pool := bySource["duanxianxia:kaipanla-limit-up"]
+	leader := bySource[kaipanlaThemeLeaderSource]
+	if pool.Theme != "机器人概念" || len(pool.Concepts) != 2 {
+		t.Fatalf("pool attribution missing: %+v", items)
+	}
+	if leader.Theme != "机器人概念" || leader.Role != "龙二" {
+		t.Fatalf("leader attribution missing: %+v", items)
+	}
+}
+
 func encryptPoolFixture(t *testing.T, plain []byte) string {
 	t.Helper()
 	block, err := aes.NewCipher(poolCipherKey)

@@ -150,6 +150,244 @@ export type KLine = {
   meta: SourceMeta;
 };
 
+export type StockAIProfile = {
+	primary_type: 'emotion_leader' | 'trend_capacity' | 'trend_growth' | 'range_watch' | 'weak_risk' | string;
+	type_label: string;
+	price_phase: string;
+	market_role: string;
+	tags: string[];
+	confidence: number;
+};
+
+export type StockAITrend = {
+	score: number;
+	strength: string;
+	phase: string;
+	setup: string;
+	latest_close: number;
+	ma20: number;
+	ma60: number;
+	ma120: number;
+	return_20d: number;
+	return_60d: number;
+	return_120d: number;
+	range_position_60d: number;
+	drawdown_from_high_120d: number;
+	volume_ratio_5d_20d: number;
+	atr_14_percent: number;
+	support: number;
+	resistance: number;
+	invalidation: string;
+	reasons: string[];
+};
+
+export type StockAIDimensionScore = {
+	key: string;
+	label: string;
+	score: number;
+	weight: number;
+	status: string;
+	detail: string;
+};
+
+export type StockAIScorecard = {
+	overall: number;
+	grade: string;
+	direction: string;
+	conviction: string;
+	dimensions: StockAIDimensionScore[];
+	positive_signals: string[];
+	negative_signals: string[];
+};
+
+export type StockAITimeframe = {
+	key: string;
+	label: string;
+	window: number;
+	score: number;
+	state: string;
+	return_percent: number;
+	moving_average: number;
+	slope_percent: number;
+	above_moving_average: boolean;
+	support: number;
+	resistance: number;
+};
+
+export type StockAIRelativeStrength = {
+	available: boolean;
+	benchmark_symbol?: string;
+	benchmark_name?: string;
+	stock_return_20d: number;
+	stock_return_60d: number;
+	benchmark_return_20d: number;
+	benchmark_return_60d: number;
+	excess_return_20d: number;
+	excess_return_60d: number;
+	score: number;
+	state: string;
+	detail: string;
+};
+
+export type StockAISignal = {
+	key: string;
+	label: string;
+	tone: 'positive' | 'negative' | 'neutral' | string;
+	strength: number;
+	detail: string;
+};
+
+export type StockAIPriceLevel = {
+	label: string;
+	price: number;
+	detail: string;
+};
+
+export type StockAINextDayScenario = {
+	key: string;
+	name: string;
+	priority: string;
+	trigger: string;
+	confirmation: string;
+	action: string;
+	invalidation: string;
+};
+
+export type StockAINextDayPlan = {
+	bias: string;
+	score: number;
+	expectation: string;
+	expected_low: number;
+	expected_high: number;
+	levels: StockAIPriceLevel[];
+	scenarios: StockAINextDayScenario[];
+	pre_open_checks: string[];
+	opening_checks: string[];
+	intraday_checks: string[];
+	close_checks: string[];
+};
+
+export type StockAIRiskControl = {
+	level: string;
+	score: number;
+	entry_reference: number;
+	stop_price: number;
+	stop_percent: number;
+	take_profit_first: number;
+	take_profit_second: number;
+	risk_reward: number;
+	suggested_position_min_percent: number;
+	suggested_position_max_percent: number;
+	single_trade_risk_percent: number;
+	position_formula: string;
+	rules: string[];
+};
+
+export type StockAIShortTerm = {
+	state: string;
+	limit_up_count_20d: number;
+	max_limit_streak_20d: number;
+	exact_limit_up_data: boolean;
+	latest_streak: number;
+	latest_open_count: number;
+	latest_turnover_rate: number;
+	average_amount_20d: number;
+	return_5d: number;
+	return_10d: number;
+	tradability: string;
+	reasons: string[];
+};
+
+export type StockAITheme = {
+	primary: string;
+	concepts: string[];
+	source: string;
+	as_of?: string;
+	evidence?: string[];
+	route: 'short_term' | 'trend' | string;
+	trend_score: number;
+	trend_stage: string;
+	active_days: number;
+	max_streak: number;
+	role: string;
+	description: string;
+};
+
+export type StockAIMarket = {
+	trade_date: string;
+	phase: string;
+	score: number;
+	confidence: string;
+	source: string;
+};
+
+export type StockAIActionPlan = {
+	current_action: string;
+	entry_conditions: string[];
+	hold_conditions: string[];
+	avoid_conditions: string[];
+	invalidation: string;
+	position_hint: string;
+};
+
+export type StockAIEvidence = {
+	category: string;
+	title: string;
+	detail: string;
+	source: string;
+	as_of?: string;
+};
+
+export type StockAIDataQuality = {
+	key: string;
+	status: 'ready' | 'limited' | 'missing' | string;
+	message: string;
+};
+
+export type StockAITrendPoint = {
+	date: string;
+	close: number;
+	ma20?: number;
+	ma60?: number;
+	ma120?: number;
+};
+
+export type StockAIAnalysis = {
+	symbol: string;
+	name: string;
+	generated_at: string;
+	quote: Quote;
+	profile: StockAIProfile;
+	conclusion: {
+		headline: string;
+		summary: string;
+		action: string;
+		best_path: string;
+		main_risk: string;
+		source: string;
+	};
+	trend: StockAITrend;
+	short_term: StockAIShortTerm;
+	theme: StockAITheme;
+	market?: StockAIMarket;
+	scorecard: StockAIScorecard;
+	timeframes: StockAITimeframe[];
+	relative_strength: StockAIRelativeStrength;
+	signals: StockAISignal[];
+	next_day: StockAINextDayPlan;
+	risk_control: StockAIRiskControl;
+	action_plan: StockAIActionPlan;
+	risks: string[];
+	evidence: StockAIEvidence[];
+	data_quality: StockAIDataQuality[];
+	chart: StockAITrendPoint[];
+	ai: {
+		status: 'ready' | 'rules' | 'unavailable' | 'error' | string;
+		message?: string;
+		model?: string;
+	};
+};
+
 export type NewsItem = {
 	id?: string;
 	title: string;

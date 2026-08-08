@@ -17,6 +17,12 @@ coverage/
 **/browser-auth/
 **/*storage-state*.json
 **/*cookies*.json
+**/.credentials.json
+**/Cookies
+**/Cookies-journal
+**/Local Storage/
+**/Session Storage/
+**/Partitions/
 
 # Dependencies and generated build/package artifacts.
 node_modules/

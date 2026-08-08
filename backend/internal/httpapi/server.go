@@ -258,6 +258,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery", s.masteryIndex)
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery/trader", s.masteryTrader)
 	s.mux.HandleFunc("POST /api/v1/short-term/mastery/refresh", s.masteryRefresh)
+	s.mux.HandleFunc("POST /api/v1/stocks/ai-analysis", s.stockAIAnalysis)
 	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)
