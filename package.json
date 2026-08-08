@@ -12,6 +12,9 @@
     "prepare:desktop-package": "npm --workspace desktop run prepare:package",
     "package:mac": "npm --workspace desktop run package:mac",
     "installer:mac": "npm --workspace desktop run installer:mac",
+    "release:mac": "npm --workspace desktop run release:mac",
+    "package:windows": "npm --workspace desktop run package:windows",
+    "release:windows": "npm --workspace desktop run release:windows",
     "test": "cd backend && go test ./... && cd .. && npm --workspace frontend test -- --run"
   },
   "workspaces": [

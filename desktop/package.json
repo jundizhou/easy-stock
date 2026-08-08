@@ -9,7 +9,10 @@
     "test": "node --test test/*.test.cjs",
     "prepare:package": "node scripts/prepare-package.mjs",
     "package:mac": "npm run prepare:package && node scripts/package-mac.mjs",
-    "installer:mac": "npm run package:mac && node scripts/create-dmg.mjs"
+    "installer:mac": "npm run release:mac",
+    "release:mac": "npm run package:mac && node scripts/create-dmg.mjs",
+    "package:windows": "npm run prepare:package && node scripts/package-windows.mjs",
+    "release:windows": "npm run package:windows && node scripts/create-windows-archive.mjs"
   },
   "devDependencies": {
     "electron": "^38.2.2",

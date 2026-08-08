@@ -7,16 +7,15 @@ const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const out = path.join(desktopRoot, 'dist');
 const packageManifest = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
 const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
-if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported macOS architecture: ${arch}`);
+if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported Windows architecture: ${arch}`);
+
 const options = {
 	dir: desktopRoot,
 	name: 'easy-stock',
-	platform: 'darwin',
+	platform: 'win32',
 	arch,
 	out,
 	overwrite: true,
-	appBundleId: 'com.jundizhou.easystock',
-	appCategoryType: 'public.app-category.finance',
 	appVersion: packageManifest.version,
 	download: {
 		mirrorOptions: {
@@ -31,9 +30,16 @@ const options = {
 		/^\/scripts($|\/)/,
 		/^\/test($|\/)/,
 	],
+	win32metadata: {
+		CompanyName: 'easy-stock',
+		FileDescription: 'easy-stock A-share research desktop app',
+		InternalName: 'easy-stock',
+		OriginalFilename: 'easy-stock.exe',
+		ProductName: 'easy-stock',
+	},
 };
-const icon = path.join(desktopRoot, 'assets', 'easy-stock.icns');
+const icon = path.join(desktopRoot, 'assets', 'easy-stock.ico');
 if (fs.existsSync(icon)) options.icon = icon;
 
 await packager(options);
-console.log(`macOS ${arch} app created in ${out}`);
+console.log(`Windows ${arch} app created in ${out}`);
