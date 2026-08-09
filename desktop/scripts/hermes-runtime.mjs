@@ -130,15 +130,15 @@ function readPythonBasePrefix(python, cwd) {
 }
 
 export function bundleWindowsRuntime(runtimeRoot, sourceRoot) {
-	const sourcePython = path.join(sourceRoot, 'python.exe');
+	const sourceRealRoot = fs.realpathSync(sourceRoot);
+	const sourcePython = path.join(sourceRealRoot, 'python.exe');
 	const sourceSitePackages = path.join(runtimeRoot, 'venv', 'Lib', 'site-packages');
 	if (!fs.existsSync(sourcePython)) throw new Error(`Managed Windows Python executable not found: ${sourcePython}`);
 	if (!fs.existsSync(sourceSitePackages)) throw new Error(`Hermes virtual environment site-packages not found: ${sourceSitePackages}`);
 
 	const bundledRoot = path.join(runtimeRoot, 'python');
 	fs.rmSync(bundledRoot, { recursive: true, force: true });
-	fs.cpSync(sourceRoot, bundledRoot, { recursive: true });
-	rewriteCopiedSymlinks(bundledRoot, sourceRoot);
+	fs.cpSync(sourceRealRoot, bundledRoot, { recursive: true, dereference: true });
 
 	const bundledSitePackages = path.join(bundledRoot, 'Lib', 'site-packages');
 	fs.mkdirSync(bundledSitePackages, { recursive: true });

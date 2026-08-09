@@ -16,15 +16,18 @@ test('bundleWindowsRuntime copies base Python and merges installed packages', as
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-hermes-runtime-'));
   const runtimeRoot = path.join(root, 'runtime');
   const sourceRoot = path.join(root, 'managed-python');
+  const sourceLink = path.join(root, 'managed-python-link');
   fs.mkdirSync(path.join(sourceRoot, 'Lib'), { recursive: true });
   fs.writeFileSync(path.join(sourceRoot, 'python.exe'), 'python');
   fs.writeFileSync(path.join(sourceRoot, 'Lib', 'os.py'), 'stdlib');
+  fs.symlinkSync(sourceRoot, sourceLink, 'dir');
   fs.mkdirSync(path.join(runtimeRoot, 'venv', 'Lib', 'site-packages', 'hermes_cli'), { recursive: true });
   fs.writeFileSync(path.join(runtimeRoot, 'venv', 'Lib', 'site-packages', 'hermes_cli', '__init__.py'), 'hermes');
   fs.writeFileSync(path.join(runtimeRoot, 'venv', 'pyvenv.cfg'), `home = ${sourceRoot}\n`);
 
-  bundleWindowsRuntime(runtimeRoot, sourceRoot);
+  bundleWindowsRuntime(runtimeRoot, sourceLink);
 
+  assert.equal(fs.lstatSync(path.join(runtimeRoot, 'python')).isSymbolicLink(), false);
   assert.equal(fs.readFileSync(path.join(runtimeRoot, 'python', 'python.exe'), 'utf8'), 'python');
   assert.equal(fs.readFileSync(path.join(runtimeRoot, 'python', 'Lib', 'os.py'), 'utf8'), 'stdlib');
   assert.equal(fs.readFileSync(path.join(runtimeRoot, 'python', 'Lib', 'site-packages', 'hermes_cli', '__init__.py'), 'utf8'), 'hermes');
