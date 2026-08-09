@@ -170,6 +170,29 @@ func TestRuntimePythonUsesStandaloneWindowsInterpreter(t *testing.T) {
 	}
 }
 
+func TestChineseLLMProviderDefaults(t *testing.T) {
+	tests := []struct {
+		provider string
+		baseURL  string
+		model    string
+	}{
+		{provider: "moonshot", baseURL: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k"},
+		{provider: "minimax", baseURL: "https://api.minimaxi.com/v1", model: "MiniMax-Text-01"},
+		{provider: "zhipu", baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-plus"},
+		{provider: "siliconflow", baseURL: "https://api.siliconflow.cn/v1", model: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			if got := defaultBaseURL(tt.provider); got != tt.baseURL {
+				t.Fatalf("base URL = %q, want %q", got, tt.baseURL)
+			}
+			if got := defaultModel(tt.provider); got != tt.model {
+				t.Fatalf("model = %q, want %q", got, tt.model)
+			}
+		})
+	}
+}
+
 func TestHermesFailureIncludesRuntimeDetailAndRedactsSecrets(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

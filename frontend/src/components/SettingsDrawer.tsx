@@ -18,8 +18,9 @@ import {
 	Trash2,
 	X,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, ReviewAutomationProfile, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
+import { llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 
 type Props = {
 	config: BackendConfig | null;
@@ -35,15 +36,6 @@ type ModelListState = 'idle' | 'loading' | 'success' | 'error';
 
 const manualModelOption = '__manual_model_input__';
 
-const providerDefaults: Record<string, string> = {
-	openai: 'https://api.openai.com/v1',
-	deepseek: 'https://api.deepseek.com',
-	qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-	moonshot: 'https://api.moonshot.cn/v1',
-	anthropic: 'https://api.anthropic.com',
-	custom: '',
-};
-
 const emptySecrets = (): Record<SecretKey, string> => ({
 	llm_api_key: '',
 	tushare_token: '',
@@ -56,7 +48,7 @@ const emptySecrets = (): Record<SecretKey, string> => ({
 export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	const [settings, setSettings] = useState<AppSettings | null>(null);
 	const [provider, setProvider] = useState('openai');
-	const [baseURL, setBaseURL] = useState(providerDefaults.openai);
+	const [baseURL, setBaseURL] = useState(llmProviderDefinition('openai').baseURL);
 	const [model, setModel] = useState('');
 	const [apiMode, setAPIMode] = useState('chat_completions');
 	const [reviewSource, setReviewSource] = useState<ReviewSource>('xueqiu');
@@ -76,6 +68,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	const [wechatServiceStatus, setWechatServiceStatus] = useState<WechatServiceStatus>({ available: false, configured: false, authenticated: false, state: 'starting', message: '内置微信公众号服务正在启动' });
 	const [wechatLoginURL, setWechatLoginURL] = useState('');
 	const [wechatLoginBaseline, setWechatLoginBaseline] = useState('');
+	const modelFetchSequence = useRef(0);
 
 	useEffect(() => {
 		if (!open) return;
@@ -89,6 +82,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	useEffect(() => {
 		if (!open || !config) return;
 		let cancelled = false;
+		modelFetchSequence.current += 1;
 		setState('loading');
 		setMessage('');
 		setTestState('idle');
@@ -102,7 +96,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 				if (cancelled) return;
 				setSettings(payload.data);
 				setProvider(payload.data.llm.provider || 'openai');
-				setBaseURL(payload.data.llm.base_url || providerDefaults[payload.data.llm.provider] || '');
+				setBaseURL(payload.data.llm.base_url || llmProviderDefinition(payload.data.llm.provider || 'openai').baseURL);
 				setModel(payload.data.llm.model || '');
 				setAPIMode(payload.data.llm.api_mode === 'responses' ? 'codex_responses' : payload.data.llm.api_mode || (payload.data.llm.provider === 'anthropic' ? 'anthropic_messages' : 'chat_completions'));
 				const profiles = toProfileDrafts(payload.data.review_automation?.profiles || []);
@@ -117,7 +111,10 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 				setState('error');
 				setMessage(error instanceof Error ? error.message : '读取设置失败');
 			});
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+			modelFetchSequence.current += 1;
+		};
 	}, [config, open]);
 
 	useEffect(() => {
@@ -157,6 +154,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	}, [model, modelOptions]);
 
 	const resetModelList = () => {
+		modelFetchSequence.current += 1;
 		setModelOptions([]);
 		setModelListState('idle');
 		setModelListMessage('');
@@ -164,14 +162,17 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	};
 
 	const updateProvider = (nextProvider: string) => {
-		const currentDefault = providerDefaults[provider] || '';
+		const nextDefinition = llmProviderDefinition(nextProvider);
 		setProvider(nextProvider);
-		if (!baseURL || baseURL === currentDefault) setBaseURL(providerDefaults[nextProvider] || '');
-		if (nextProvider === 'anthropic') setAPIMode('anthropic_messages');
-		else if (apiMode === 'anthropic_messages') setAPIMode('chat_completions');
+		setBaseURL(nextDefinition.baseURL);
+		setModel(nextDefinition.defaultModel);
+		setAPIMode(nextDefinition.apiMode);
 		resetModelList();
 		setTestState('idle');
 		setTestResult(null);
+		setModelListMessage(nextDefinition.baseURL
+			? '输入模型 API Key 后将自动获取模型，也可手动点击“获取模型”。'
+			: '请输入兼容接口的 Base URL 和 API Key，再获取模型列表。');
 	};
 
 	const updateSecret = (key: SecretKey, value: string) => {
@@ -214,28 +215,45 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		setTestResult(null);
 	};
 
-	const fetchModels = async () => {
+	const fetchModels = async (overrides: { provider?: string; baseURL?: string; apiKey?: string; automatic?: boolean } = {}) => {
 		if (!config) return;
+		const fetchID = ++modelFetchSequence.current;
+		const requestProvider = overrides.provider || provider;
+		const requestBaseURL = overrides.baseURL ?? baseURL.trim();
+		const requestAPIKey = overrides.apiKey ?? secrets.llm_api_key.trim();
 		setModelListState('loading');
-		setModelListMessage('正在读取模型服务的模型列表…');
+		setModelListMessage(overrides.automatic ? `正在自动读取 ${llmProviderDefinition(requestProvider).label} 的模型列表…` : '正在读取模型服务的模型列表…');
 		try {
-			const request: { provider: string; base_url: string; api_key?: string } = { provider, base_url: baseURL.trim() };
-			if (secrets.llm_api_key.trim() || clearSecrets.has('llm_api_key')) request.api_key = secrets.llm_api_key.trim();
+			const request: { provider: string; base_url: string; api_key?: string } = { provider: requestProvider, base_url: requestBaseURL };
+			if (requestAPIKey || clearSecrets.has('llm_api_key')) request.api_key = requestAPIKey;
 			const payload = await requestJSON<{ data: LLMModelsResult }>(config, '/api/v1/settings/llm/models', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(request),
 			});
+			if (fetchID !== modelFetchSequence.current) return;
 			setModelOptions(payload.data.models);
 			setModelListState('success');
 			setModelListMessage(`已从 ${payload.data.source_url} 获取 ${payload.data.models.length} 个模型`);
 			setManualModel(false);
 		} catch (error) {
+			if (fetchID !== modelFetchSequence.current) return;
 			setModelOptions([]);
 			setModelListState('error');
 			setModelListMessage(error instanceof Error ? error.message : '获取模型列表失败');
 			setManualModel(true);
 		}
+	};
+
+	const fetchModelsAfterAPIKeyInput = (apiKey: string) => {
+		const trimmedAPIKey = apiKey.trim();
+		if (!trimmedAPIKey) return;
+		if (!baseURL.trim()) {
+			setModelListState('error');
+			setModelListMessage('请先填写 API Base URL，再自动获取模型列表。');
+			return;
+		}
+		void fetchModels({ apiKey: trimmedAPIKey, automatic: true });
 	};
 
 	const updateReviewProfile = (id: string, patch: Partial<ReviewProfileDraft>) => setReviewProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
@@ -380,21 +398,21 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 								<div><Bot size={17} /><span><strong>{settings?.hermes.available ? `Hermes ${settings.hermes.version || 'Runtime'} 已安装` : 'Hermes 运行时不可用'}</strong><small>{settings?.hermes.message || (settings?.hermes.configured ? '运行时和模型配置均已就绪。' : '运行时已就绪，请继续配置模型连接。')}</small></span></div>
 							</div>
 							<div className="settings-grid two-columns">
-								<label><span>服务商</span><select value={provider} onChange={(event) => updateProvider(event.target.value)}><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问</option><option value="moonshot">Moonshot</option><option value="anthropic">Anthropic</option><option value="custom">OpenAI 兼容接口</option></select></label>
+								<label><span>服务商</span><select value={provider} onChange={(event) => updateProvider(event.target.value)}>{llmProviders.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
 								<label><span>接口协议</span><select value={apiMode} onChange={(event) => { setAPIMode(event.target.value); setTestState('idle'); setTestResult(null); }}><option value="chat_completions">Chat Completions</option><option value="codex_responses">Responses API</option><option value="anthropic_messages">Anthropic Messages</option></select></label>
 							</div>
+							<SecretField label="模型 API Key" secretKey="llm_api_key" status={settings?.llm.api_key} value={secrets.llm_api_key} clearing={clearSecrets.has('llm_api_key')} onChange={updateSecret} onBlur={(_key, value) => fetchModelsAfterAPIKeyInput(value)} onClear={toggleClear} hint="安全写入 Hermes .env；输入完成后自动获取模型" />
 							<div className="settings-grid two-columns">
 								<div className="model-field">
 									<span className="model-field-heading"><span>模型</span>{modelListState === 'success' && <button type="button" onClick={() => setManualModel((current) => !current)}>{manualModel ? '使用下拉' : '手动输入'}</button>}</span>
 									<span className="model-picker-row">
 										{modelListState === 'success' && !manualModel ? <select value={model} onChange={(event) => { if (event.target.value === manualModelOption) setManualModel(true); else updateModel(event.target.value); }}><option value="">请选择模型</option>{selectableModels.map((option) => <option value={option.id} key={option.id}>{modelOptionLabel(option)}</option>)}<option value={manualModelOption}>手动输入其他模型…</option></select> : <input value={model} onChange={(event) => updateModel(event.target.value)} placeholder="例如 gpt-5.5 或 deepseek-chat" />}
-										<button type="button" className="model-refresh-button" onClick={fetchModels} disabled={!config || state === 'saving' || modelListState === 'loading'}>{modelListState === 'loading' ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{modelListState === 'success' ? '刷新' : '获取模型'}</button>
+										<button type="button" className="model-refresh-button" onClick={() => void fetchModels()} disabled={!config || state === 'saving' || modelListState === 'loading'}>{modelListState === 'loading' ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{modelListState === 'success' ? '刷新' : '获取模型'}</button>
 									</span>
 									<small className={`model-list-message ${modelListState}`}>{modelListMessage || '从当前 Base URL 的 /models 接口读取，也可继续手动输入。'}</small>
 								</div>
 								<label><span>API Base URL</span><input value={baseURL} onChange={(event) => updateBaseURL(event.target.value)} placeholder="https://api.example.com/v1" /></label>
 							</div>
-							<SecretField label="模型 API Key" secretKey="llm_api_key" status={settings?.llm.api_key} value={secrets.llm_api_key} clearing={clearSecrets.has('llm_api_key')} onChange={updateSecret} onClear={toggleClear} hint="安全写入 Hermes .env" />
 							<div className={`llm-connection-test ${testState}`}>
 								<div><PlugZap size={17} /><span><strong>{testState === 'success' ? 'Hermes 模型连接可用' : testState === 'error' ? '连接测试未通过' : testState === 'testing' ? 'Hermes 正在请求模型' : 'Hermes 真实模型探针'}</strong><small>{testResult ? `Hermes · ${testResult.model} · ${testResult.api_mode} · ${testResult.latency_ms}ms · ${testResult.response}` : '保存当前配置后由 Hermes 发送最小提示词，并验证模型确实返回内容。'}</small></span></div>
 								<button type="button" onClick={testConnection} disabled={!config || state === 'saving' || testState === 'testing'}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>
@@ -502,13 +520,14 @@ function modelOptionLabel(option: LLMModelOption) {
 	return detail && detail !== option.id ? `${option.id} · ${detail}` : option.id;
 }
 
-function SecretField({ label, secretKey, status, value, clearing, onChange, onClear, hint }: {
+function SecretField({ label, secretKey, status, value, clearing, onChange, onBlur, onClear, hint }: {
 	label: string;
 	secretKey: SecretKey;
 	status?: SecretSettingStatus;
 	value: string;
 	clearing: boolean;
 	onChange: (key: SecretKey, value: string) => void;
+	onBlur?: (key: SecretKey, value: string) => void;
 	onClear: (key: SecretKey) => void;
 	hint?: string;
 }) {
@@ -517,7 +536,7 @@ function SecretField({ label, secretKey, status, value, clearing, onChange, onCl
 			<span className="secret-field-heading"><span>{label}{hint && <small>{hint}</small>}</span>{status?.configured && <em>{clearing ? '等待清除' : `已配置 ${status.masked || ''}`}</em>}</span>
 			<span className="secret-input-row">
 				<KeyRound size={15} />
-				<input type="password" autoComplete="new-password" value={value} disabled={clearing} onChange={(event) => onChange(secretKey, event.target.value)} placeholder={status?.configured ? '输入新值可覆盖，留空保持不变' : '输入凭据'} />
+				<input type="password" autoComplete="new-password" value={value} disabled={clearing} onChange={(event) => onChange(secretKey, event.target.value)} onBlur={(event) => onBlur?.(secretKey, event.target.value)} placeholder={status?.configured ? '输入新值可覆盖，留空保持不变' : '输入凭据'} />
 				{status?.configured && <button type="button" onClick={() => onClear(secretKey)} title={clearing ? '取消清除' : '清除已保存凭据'}><Trash2 size={14} />{clearing ? '撤销' : '清除'}</button>}
 			</span>
 		</label>

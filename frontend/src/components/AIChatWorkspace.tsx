@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, LLMModelOption, LLMModelsResult, requestJSON } from '../lib/backend';
+import { llmProviderDefaultModel, llmProviderName } from '../lib/llm-providers';
 import {
 	ChatConversation,
 	ChatMessage,
@@ -145,13 +146,13 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 			const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings');
 			const { hermes, llm } = payload.data;
 			const provider = llm.provider || 'openai';
-			const model = llm.model || defaultModelLabel(provider);
+			const model = llm.model || llmProviderDefaultModel(provider);
 			const nextLLM = { provider, base_url: llm.base_url, model, api_mode: llm.api_mode };
 			const usable = hermes.available && hermes.configured;
 			setLLMConfig(nextLLM);
 			setModelState(usable ? 'ready' : hermes.available ? 'missing' : 'error');
 			setModelLabel(usable
-				? `Hermes · ${providerName(provider)} · ${model}`
+				? `Hermes · ${llmProviderName(provider)} · ${model}`
 				: hermes.message || (hermes.available ? '需要配置 Hermes 模型' : 'Hermes 运行时不可用'));
 			try {
 				const models = await requestChatModels(config, nextLLM);
@@ -217,7 +218,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 			const usable = hermes.available && hermes.configured;
 			setModelState(usable ? 'ready' : hermes.available ? 'missing' : 'error');
 			setModelLabel(usable
-				? `Hermes · ${providerName(llm.provider)} · ${llm.model}`
+				? `Hermes · ${llmProviderName(llm.provider)} · ${llm.model}`
 				: hermes.message || (hermes.available ? '需要配置 Hermes 模型' : 'Hermes 运行时不可用'));
 			setModelSwitchState('saved');
 			setModelSwitchMessage(`已切换为 ${llm.model}，下一条消息生效`);
@@ -467,16 +468,6 @@ function MessageContent({ content }: { content: string }) {
 			})}
 		</div>
 	);
-}
-
-function providerName(provider: string) {
-	const names: Record<string, string> = { openai: 'OpenAI', deepseek: 'DeepSeek', qwen: '通义千问', moonshot: 'Moonshot', anthropic: 'Anthropic', custom: '自定义模型' };
-	return names[provider] || provider;
-}
-
-function defaultModelLabel(provider: string) {
-	const models: Record<string, string> = { openai: 'gpt-4o-mini', deepseek: 'deepseek-chat', qwen: 'qwen-plus', moonshot: 'moonshot-v1-8k', anthropic: 'claude-3-5-haiku-latest' };
-	return models[provider] || '';
 }
 
 async function requestChatModels(config: BackendConfig, llm: ChatLLMConfig) {

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -177,5 +178,37 @@ func TestSettingsAPISupportsMultipleReviewProfilesAndMasksCredentials(t *testing
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || store.Snapshot().ReviewAutomation.Profiles[0].Credential != "wx-secret-1234" {
 		t.Fatalf("credential was not preserved: status=%d values=%+v", rec.Code, store.Snapshot().ReviewAutomation.Profiles)
+	}
+}
+
+func TestSettingsAPIAcceptsAdditionalLLMProviders(t *testing.T) {
+	store, err := appsettings.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{SettingsStore: store, HermesGateway: &fakeHermesGateway{status: hermes.Status{Available: true}}})
+	providers := []struct {
+		provider string
+		baseURL  string
+		model    string
+	}{
+		{provider: "moonshot", baseURL: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k"},
+		{provider: "minimax", baseURL: "https://api.minimaxi.com/v1", model: "MiniMax-Text-01"},
+		{provider: "zhipu", baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-plus"},
+		{provider: "siliconflow", baseURL: "https://api.siliconflow.cn/v1", model: "vendor/model"},
+	}
+	for _, tt := range providers {
+		t.Run(tt.provider, func(t *testing.T) {
+			body := fmt.Sprintf(`{"llm":{"provider":%q,"base_url":%q,"model":%q,"api_mode":"chat_completions"}}`, tt.provider, tt.baseURL, tt.model)
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if got := store.Snapshot().LLM.Provider; got != tt.provider {
+				t.Fatalf("stored provider=%q, want %q", got, tt.provider)
+			}
+		})
 	}
 }

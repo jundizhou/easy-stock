@@ -109,3 +109,30 @@ func TestSettingsLLMModelsValidatesURLAndRequiresOfficialProviderKey(t *testing.
 		t.Fatalf("missing key status=%d body=%s", missingKeyRec.Code, missingKeyRec.Body.String())
 	}
 }
+
+func TestSupportedLLMProvidersBuildTheirOfficialModelsURLs(t *testing.T) {
+	tests := []struct {
+		provider string
+		baseURL  string
+		wantURL  string
+	}{
+		{provider: "moonshot", baseURL: "https://api.moonshot.cn/v1", wantURL: "https://api.moonshot.cn/v1/models"},
+		{provider: "minimax", baseURL: "https://api.minimaxi.com/v1", wantURL: "https://api.minimaxi.com/v1/models"},
+		{provider: "zhipu", baseURL: "https://open.bigmodel.cn/api/paas/v4", wantURL: "https://open.bigmodel.cn/api/paas/v4/models"},
+		{provider: "siliconflow", baseURL: "https://api.siliconflow.cn/v1", wantURL: "https://api.siliconflow.cn/v1/models"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			if !supportedLLMProvider(tt.provider) {
+				t.Fatalf("provider %q is not supported", tt.provider)
+			}
+			got, err := buildModelsURL(tt.provider, tt.baseURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.wantURL {
+				t.Fatalf("models URL = %q, want %q", got, tt.wantURL)
+			}
+		})
+	}
+}

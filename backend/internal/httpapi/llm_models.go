@@ -132,7 +132,7 @@ func (s *Server) settingsLLMModels(w http.ResponseWriter, r *http.Request) {
 
 func supportedLLMProvider(provider string) bool {
 	switch provider {
-	case "openai", "deepseek", "qwen", "moonshot", "anthropic", "custom":
+	case "openai", "deepseek", "qwen", "moonshot", "minimax", "zhipu", "siliconflow", "anthropic", "custom":
 		return true
 	default:
 		return false

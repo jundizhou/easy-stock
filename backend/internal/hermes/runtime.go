@@ -565,8 +565,16 @@ func defaultBaseURL(provider string) string {
 		return "https://dashscope.aliyuncs.com/compatible-mode/v1"
 	case "moonshot":
 		return "https://api.moonshot.cn/v1"
+	case "minimax":
+		return "https://api.minimaxi.com/v1"
+	case "zhipu":
+		return "https://open.bigmodel.cn/api/paas/v4"
+	case "siliconflow":
+		return "https://api.siliconflow.cn/v1"
 	case "anthropic":
 		return "https://api.anthropic.com"
+	case "custom":
+		return ""
 	default:
 		return "https://api.openai.com/v1"
 	}
@@ -580,6 +588,12 @@ func defaultModel(provider string) string {
 		return "qwen-plus"
 	case "moonshot":
 		return "moonshot-v1-8k"
+	case "minimax":
+		return "MiniMax-Text-01"
+	case "zhipu":
+		return "glm-4-plus"
+	case "siliconflow":
+		return ""
 	case "anthropic":
 		return "claude-3-5-haiku-latest"
 	case "custom":
