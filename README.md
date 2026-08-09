@@ -178,87 +178,13 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 
 ## 快速开始
 
-### 环境要求
+### 1. 用户
 
-- Node.js 与 npm
-- Go 1.26（以后端 `go.mod` 为准）
-- AI 功能需要 Hermes Runtime 和可用的模型 API Key
-- macOS 桌面打包需要 Electron 对应架构的运行环境
+无需安装 Node.js、Go 或 Python。前往 [GitHub Releases](https://github.com/jundizhou/easy-stock/releases/latest) 下载适合当前系统的桌面安装包或压缩包。
 
-### 安装并启动 Web 工作台
+### 2. 开发者
 
-```bash
-git clone <your-repository-url>
-cd easy-stock
-npm install
-npm run restart
-```
-
-默认地址：
-
-| 服务 | 地址 |
-| --- | --- |
-| 前端 | `http://127.0.0.1:20073` |
-| 后端 | `http://127.0.0.1:20081` |
-| 日志 | `.runtime/` |
-
-<details>
-<summary><strong>分别启动前后端</strong></summary>
-
-```bash
-# 终端 1
-npm run dev:backend
-```
-
-```bash
-# 终端 2
-VITE_A_STOCK_BACKEND_URL=http://127.0.0.1:20081 npm run dev:frontend
-```
-
-</details>
-
-<details>
-<summary><strong>启动 Electron 桌面应用</strong></summary>
-
-```bash
-# 终端 1：Vite 页面
-npm run dev:frontend
-```
-
-```bash
-# 终端 2：Electron 桌面端
-npm run dev:desktop
-```
-
-Electron 会自动分配本机端口、生成一次性 Token 并启动 Go 后端，不需要手动维护服务进程。
-
-</details>
-
-### 配置 Hermes 与模型
-
-开发环境可以指定已经准备好的 Hermes Runtime：
-
-```bash
-export A_STOCK_HERMES_RUNTIME_ROOT=/absolute/path/to/hermes-runtime
-export A_STOCK_HERMES_HOME="$PWD/.runtime/hermes-home"
-export A_STOCK_HERMES_WORKDIR="$PWD/.runtime/hermes-workspace"
-```
-
-随后在应用的「设置 → 模型服务」中选择服务商、填写模型名称与 API Key，并运行连接测试。模型 API Key 只写入 Hermes 用户目录下的 `.env`，不会保存到前端页面或通用设置文件。
-
-
-### 测试与构建
-
-```bash
-npm test
-```
-
-```bash
-cd backend && go test ./...
-npm --workspace frontend test -- --run
-npm --workspace frontend run build
-npm --workspace desktop test
-```
+需要从源码运行、调试、测试或打包，请阅读 [开发者文档](./docs/development.md)。
 
 ---
 
