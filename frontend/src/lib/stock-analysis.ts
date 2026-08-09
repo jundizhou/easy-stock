@@ -1,7 +1,66 @@
-import { StockAIAnalysis } from './backend';
+import { StockAIAnalysis, StockDirectoryEntry } from './backend';
 
 export function normalizeAnalysisSymbol(value: string) {
 	return value.trim().toUpperCase().replace(/\s+/g, '');
+}
+
+export function searchStockDirectory(stocks: StockDirectoryEntry[], query: string, limit = 8) {
+	const needle = normalizeStockSearchText(query);
+	if (!needle || limit <= 0) return [];
+	return stocks
+		.map((stock) => ({ stock, score: stockDirectoryMatchScore(stock, needle) }))
+		.filter((item) => item.score >= 0)
+		.sort((left, right) => left.score - right.score || left.stock.code.localeCompare(right.stock.code))
+		.slice(0, limit)
+		.map((item) => item.stock);
+}
+
+export function resolveStockDirectorySymbol(value: string, stocks: StockDirectoryEntry[]) {
+	const normalized = normalizeAnalysisSymbol(value);
+	if (/^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(normalized)) return normalized;
+
+	const needle = normalizeStockSearchText(value);
+	const exactMatches = stocks.filter((stock) => {
+		return normalizeStockSearchText(stock.symbol) === needle
+			|| normalizeStockSearchText(stock.code) === needle
+			|| normalizeStockSearchText(stock.name) === needle;
+	});
+	if (exactMatches.length === 1) return exactMatches[0].symbol;
+
+	const embeddedCode = value.toUpperCase().match(/(?:^|\D)(\d{6})(?:\s*\.\s*(SH|SZ|BJ))?(?:$|\D)/);
+	if (embeddedCode) return `${embeddedCode[1]}${embeddedCode[2] ? `.${embeddedCode[2]}` : ''}`;
+
+	const matches = searchStockDirectory(stocks, value, 2);
+	return matches.length === 1 ? matches[0].symbol : '';
+}
+
+function stockDirectoryMatchScore(stock: StockDirectoryEntry, needle: string) {
+	const code = normalizeStockSearchText(stock.code);
+	const symbol = normalizeStockSearchText(stock.symbol);
+	const name = normalizeStockSearchText(stock.name);
+	if (code === needle || symbol === needle) return 0;
+	if (name === needle) return 1;
+	if (code.startsWith(needle)) return 2;
+	if (name.startsWith(needle)) return 3;
+	if (symbol.startsWith(needle)) return 4;
+	if (code.includes(needle)) return 5;
+	if (name.includes(needle)) return 6;
+	if (symbol.includes(needle)) return 7;
+	if (isSubsequence(needle, name) || isSubsequence(needle, symbol)) return 8;
+	return -1;
+}
+
+function normalizeStockSearchText(value: string) {
+	return value.trim().toLowerCase().replace(/[\s.·_\-]+/g, '');
+}
+
+function isSubsequence(needle: string, candidate: string) {
+	let index = 0;
+	for (const character of candidate) {
+		if (character === needle[index]) index++;
+		if (index === needle.length) return true;
+	}
+	return false;
 }
 
 export function analysisTone(analysis: Pick<StockAIAnalysis, 'profile' | 'trend'>) {

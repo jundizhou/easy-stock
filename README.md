@@ -294,6 +294,7 @@ export A_STOCK_HERMES_WORKDIR="$PWD/.runtime/hermes-workspace"
 | `GET /api/v1/themes/overview` | 趋势题材总览 |
 | `GET /api/v1/short-term/limit-up-ladder` | 涨停与连板梯队 |
 | `POST /api/v1/stocks/ai-analysis` | 个股多路径分析、证据链与风险计划 |
+| `GET /api/v1/stocks/directory` | 缓存全市场股票名称与代码，供名称/代码模糊搜索 |
 | `GET /api/v1/reviews/*` | 文章、订阅、同步与 AI 分析 |
 | `GET /api/v1/ai/ws` | Hermes AI 流式会话 |
 

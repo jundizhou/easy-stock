@@ -150,6 +150,21 @@ export type KLine = {
   meta: SourceMeta;
 };
 
+export type StockDirectoryEntry = {
+	symbol: string;
+	code: string;
+	name: string;
+};
+
+export type StockDirectoryData = {
+	stocks: StockDirectoryEntry[];
+	total: number;
+	source: string;
+	updated_at: string;
+	expires_at: string;
+	stale: boolean;
+};
+
 export type StockAIProfile = {
 	primary_type: 'emotion_leader' | 'trend_capacity' | 'trend_growth' | 'range_watch' | 'weak_risk' | string;
 	type_label: string;

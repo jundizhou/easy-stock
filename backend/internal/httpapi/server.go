@@ -36,9 +36,11 @@ type Server struct {
 	limitUpProvider       LimitUpProvider
 	marketPools           MarketPoolProvider
 	stockConcepts         StockConceptProvider
+	stockDirectory        StockDirectoryProvider
 	inflection            InflectionEvaluator
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
+	stockDirectories      *stockDirectoryCache
 	marketEmotion         *marketEmotionEngine
 	marketEmotionIntraday *marketEmotionIntradayCache
 	reviewStore           *review.Store
@@ -90,6 +92,9 @@ func NewServer(config any) *Server {
 	}
 	if cfg.StockConcept == nil && usingDefaultLimitUp {
 		cfg.StockConcept = eastMoneyClient
+	}
+	if cfg.StockDirectory == nil {
+		cfg.StockDirectory = eastMoneyClient
 	}
 	if cfg.SectorMap == nil {
 		mapper := sector.NewMapper(
@@ -177,9 +182,11 @@ func NewServer(config any) *Server {
 		limitUpProvider:       cfg.LimitUp,
 		marketPools:           cfg.MarketPools,
 		stockConcepts:         cfg.StockConcept,
+		stockDirectory:        cfg.StockDirectory,
 		inflection:            cfg.Inflection,
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
 		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
+		stockDirectories:      newStockDirectoryCache(6 * time.Hour),
 		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
 		reviewStore:           cfg.ReviewStore,
 		reviewImporter:        cfg.ReviewImporter,
@@ -259,6 +266,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery/trader", s.masteryTrader)
 	s.mux.HandleFunc("POST /api/v1/short-term/mastery/refresh", s.masteryRefresh)
 	s.mux.HandleFunc("POST /api/v1/stocks/ai-analysis", s.stockAIAnalysis)
+	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)

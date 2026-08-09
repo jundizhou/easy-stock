@@ -60,6 +60,10 @@ type StockConceptProvider interface {
 	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
 }
 
+type StockDirectoryProvider interface {
+	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
+}
+
 type InflectionEvaluator interface {
 	Evaluate(request inflection.EvaluationRequest) (inflection.Evaluation, error)
 }
@@ -80,6 +84,7 @@ type Config struct {
 	LimitUp             LimitUpProvider
 	MarketPools         MarketPoolProvider
 	StockConcept        StockConceptProvider
+	StockDirectory      StockDirectoryProvider
 	Inflection          InflectionEvaluator
 	ReviewDBPath        string
 	MarketEmotionDBPath string

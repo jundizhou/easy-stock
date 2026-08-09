@@ -26,6 +26,7 @@ WebSocket 可以通过 query 传 token：
 | `GET` | `/api/v1/quotes/kline?symbol=000001.SZ&period=day&limit=120` | K-line data. Current implementation tries EastMoney then falls back to Sina. |
 | `GET` | `/api/v1/quotes/kline/batch?symbols=000001.SZ,600000.SH&period=day&limit=40` | Batch K-line histories for up to 30 symbols, with per-symbol fallback and error reporting. |
 | `GET` | `/api/v1/market/news?source=cls&limit=20` | Market news. Current implementation supports `cls`. |
+| `GET` | `/api/v1/stocks/directory` | Cached A-share stock names and codes for local fuzzy search. |
 | `GET` | `/api/v1/themes/overview` | One-snapshot overview of all configured themes, including average change, breadth, fund flow, and strongest node. |
 | `GET` | `/api/v1/sector-map?theme=semiconductor_materials` | Industry chain map. Current implementation uses a local theme rule layer, EastMoney board quotes, and EastMoney board constituents. |
 | `POST` | `/api/v1/strategy/inflections/evaluate` | Evaluate one market snapshot for old anchors, new carriers, and big/small inflection signals. |

@@ -4281,7 +4281,8 @@ a:focus-visible {
 }
 .stock-ai-search-hero h2 { margin: 5px 0; font-size: 28px; }
 .stock-ai-search-hero p { max-width: 720px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-.stock-ai-search-hero form { display: grid; grid-template-columns: minmax(260px, 360px) auto; gap: 8px; flex: 0 1 520px; }
+.stock-ai-search-hero form { display: grid; grid-template-columns: minmax(300px, 400px) auto; align-items: start; gap: 8px; flex: 0 1 570px; }
+.stock-ai-search-control { position: relative; min-width: 0; }
 .stock-ai-search-hero label {
 	display: grid;
 	grid-template-columns: 20px minmax(0, 1fr);
@@ -4296,6 +4297,42 @@ a:focus-visible {
 }
 .stock-ai-search-hero label:focus-within { border-color: #7dafe1; box-shadow: 0 0 0 3px rgba(36, 118, 210, 0.1); }
 .stock-ai-search-hero input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; }
+.stock-ai-search-control > small { display: block; min-height: 14px; margin: 5px 3px 0; color: #6e8298; font-size: 8px; line-height: 1.35; }
+.stock-ai-search-control > small.error { color: #b44a52; }
+.stock-ai-search-suggestions {
+	position: absolute;
+	z-index: 40;
+	top: 49px;
+	left: 0;
+	right: 0;
+	display: grid;
+	overflow: hidden;
+	border: 1px solid #c9d7e6;
+	border-radius: 9px;
+	background: #ffffff;
+	box-shadow: 0 16px 34px rgba(30, 52, 78, .18);
+}
+.stock-ai-search-suggestions button {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-width: 0;
+	padding: 9px 11px;
+	border: 0;
+	border-bottom: 1px solid #edf1f5;
+	background: #ffffff;
+	color: var(--text);
+	text-align: left;
+	cursor: pointer;
+}
+.stock-ai-search-suggestions button:last-child { border-bottom: 0; }
+.stock-ai-search-suggestions button:hover,
+.stock-ai-search-suggestions button.active { background: #edf5ff; }
+.stock-ai-search-suggestions button > span { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.stock-ai-search-suggestions strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.stock-ai-search-suggestions small { color: #8494a7; font-size: 8px; }
+.stock-ai-search-suggestions em { flex: none; color: #315f8e; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; font-style: normal; }
 .stock-ai-search-hero form > button,
 .stock-ai-error > button,
 .stock-ai-verdict-actions button,

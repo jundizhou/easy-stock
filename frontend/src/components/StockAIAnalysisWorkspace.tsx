@@ -30,20 +30,23 @@ import {
 	WalletCards,
 	Zap,
 } from 'lucide-react';
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
 	BackendConfig,
 	StockAIAnalysis,
 	StockAIDataQuality,
 	StockAINextDayScenario,
 	StockAITrendPoint,
+	StockDirectoryData,
+	StockDirectoryEntry,
 	requestJSON,
 } from '../lib/backend';
 import {
 	analysisTone,
 	calculatePositionSizing,
 	formatCompactAmount,
-	normalizeAnalysisSymbol,
+	resolveStockDirectorySymbol,
+	searchStockDirectory,
 	signedPercent,
 } from '../lib/stock-analysis';
 
@@ -72,7 +75,11 @@ type AnalysisHistoryItem = {
 const symbolStorageKey = 'easy-stock.stock-ai-symbol.v1';
 const historyStorageKey = 'easy-stock.stock-ai-history.v2';
 const capitalStorageKey = 'easy-stock.stock-ai-capital.v1';
+const directoryStorageKey = 'easy-stock.stock-directory.v1';
+const directoryStorageTTL = 24 * 60 * 60 * 1000;
 const examples = ['600519', '300750', '002594', '601138', '688981'];
+
+type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
 
 export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, onOpenSettings }: Props) {
 	const [query, setQuery] = useState(() => window.localStorage.getItem(symbolStorageKey) || '');
@@ -81,6 +88,8 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
 	const [copied, setCopied] = useState(false);
+	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedStockDirectory);
+	const [directoryState, setDirectoryState] = useState<DirectoryState>(() => directory.length > 0 ? 'cached' : 'idle');
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
 		setHistory((current) => {
@@ -99,9 +108,9 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	}, []);
 
 	const runAnalysis = useCallback(async (rawSymbol: string) => {
-		const symbol = normalizeAnalysisSymbol(rawSymbol);
+		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
 		if (!symbol) {
-			setError('请输入股票代码，例如 600519');
+			setError(directory.length > 0 ? '未找到唯一匹配的股票，请从搜索结果中选择' : '请输入6位股票代码，例如 600519');
 			setState('error');
 			return;
 		}
@@ -127,7 +136,26 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 			setError(loadError instanceof Error ? loadError.message : '个股AI分析失败');
 			setState('error');
 		}
-	}, [config, saveAnalysis]);
+	}, [config, directory, saveAnalysis]);
+
+	useEffect(() => {
+		if (!config) return;
+		let cancelled = false;
+		setDirectoryState((current) => current === 'cached' ? 'cached' : 'loading');
+		void requestJSON<{ data: StockDirectoryData }>(config, '/api/v1/stocks/directory')
+			.then((payload) => {
+				if (cancelled) return;
+				const stocks = payload.data.stocks || [];
+				setDirectory(stocks);
+				setDirectoryState('ready');
+				saveCachedStockDirectory(stocks);
+			})
+			.catch(() => {
+				if (cancelled) return;
+				setDirectoryState(directory.length > 0 ? 'cached' : 'error');
+			});
+		return () => { cancelled = true; };
+	}, [config]);
 
 	useEffect(() => {
 		if (refreshKey <= 0 || !analysis?.symbol) return;
@@ -163,7 +191,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearch query={query} mode={mode} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
+			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
 			{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
 
 			{state === 'loading' && (
@@ -194,18 +222,49 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	);
 }
 
-function AnalysisSearch({ query, mode, onQuery, onSubmit, loading }: {
+function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSubmit, loading }: {
 	query: string;
 	mode: StockAIWorkspaceMode;
+	directory: StockDirectoryEntry[];
+	directoryState: DirectoryState;
 	onQuery: (value: string) => void;
 	onSubmit: (event: FormEvent) => void;
 	loading: boolean;
 }) {
+	const [expanded, setExpanded] = useState(false);
+	const [activeIndex, setActiveIndex] = useState(0);
+	const suggestions = useMemo(() => searchStockDirectory(directory, query), [directory, query]);
+	const resolvedSymbol = useMemo(() => resolveStockDirectorySymbol(query, directory), [directory, query]);
 	const descriptions: Record<StockAIWorkspaceMode, string> = {
 		analysis: '自动路由趋势容量、成长趋势、情绪短线与风险结构，形成多周期、相对强度和题材共振结论。',
 		expectation: '将确定性预测改为可验证的隔日情景，覆盖高开承接、平开确认、低开修复与破位失效。',
 		risk: '依据结构失效位、账户风险预算和仓位上限，反推可执行股数、止盈与纪律清单。',
 	};
+	const chooseSuggestion = (stock: StockDirectoryEntry) => {
+		onQuery(stock.symbol);
+		setExpanded(false);
+		setActiveIndex(0);
+	};
+	const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+		if (!expanded || suggestions.length === 0) return;
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			setActiveIndex((current) => (current + 1) % suggestions.length);
+		} else if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			setActiveIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
+		} else if (event.key === 'Enter' && !resolvedSymbol) {
+			event.preventDefault();
+			chooseSuggestion(suggestions[activeIndex] || suggestions[0]);
+		} else if (event.key === 'Escape') {
+			setExpanded(false);
+		}
+	};
+	const directoryHint = directoryState === 'loading' || directoryState === 'idle'
+		? '正在缓存全市场股票目录…'
+		: directoryState === 'error'
+			? '目录暂不可用，可直接输入6位代码'
+			: `${directoryState === 'cached' ? '本机缓存' : '已缓存'} ${directory.length.toLocaleString('zh-CN')} 只A股 · 名称/代码均可搜索`;
 	return (
 		<header className="stock-ai-search-hero">
 			<div>
@@ -214,11 +273,51 @@ function AnalysisSearch({ query, mode, onQuery, onSubmit, loading }: {
 				<p>{descriptions[mode]}</p>
 			</div>
 			<form onSubmit={onSubmit}>
-				<label><Search size={17} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="输入股票代码，如 600519" aria-label="股票代码" /></label>
+				<div className="stock-ai-search-control" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(false); }}>
+					<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="输入股票名称或代码，如 贵州茅台 / 600519" aria-label="股票名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
+					<small className={directoryState === 'error' ? 'error' : ''}>{directoryHint}</small>
+					{expanded && query.trim() && suggestions.length > 0 && (
+						<div className="stock-ai-search-suggestions" id="stock-ai-search-suggestions" role="listbox">
+							{suggestions.map((stock, index) => (
+								<button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseSuggestion(stock)} onMouseEnter={() => setActiveIndex(index)} key={stock.symbol}>
+									<span><strong>{stock.name}</strong><small>{stockMarketLabel(stock.symbol)}</small></span>
+									<em>{stock.code}</em>
+								</button>
+							))}
+						</div>
+					)}
+				</div>
 				<button type="submit" disabled={loading || !query.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}完整分析</button>
 			</form>
 		</header>
 	);
+}
+
+function stockMarketLabel(symbol: string) {
+	if (symbol.endsWith('.SH')) return '沪市';
+	if (symbol.endsWith('.SZ')) return '深市';
+	if (symbol.endsWith('.BJ')) return '北交所';
+	return 'A股';
+}
+
+function loadCachedStockDirectory(): StockDirectoryEntry[] {
+	try {
+		const raw = window.localStorage.getItem(directoryStorageKey);
+		if (!raw) return [];
+		const cached = JSON.parse(raw) as { cachedAt?: number; stocks?: StockDirectoryEntry[] };
+		if (!cached.cachedAt || Date.now() - cached.cachedAt > directoryStorageTTL || !Array.isArray(cached.stocks)) return [];
+		return cached.stocks.filter((stock) => stock && typeof stock.symbol === 'string' && typeof stock.code === 'string' && typeof stock.name === 'string');
+	} catch {
+		return [];
+	}
+}
+
+function saveCachedStockDirectory(stocks: StockDirectoryEntry[]) {
+	try {
+		window.localStorage.setItem(directoryStorageKey, JSON.stringify({ cachedAt: Date.now(), stocks }));
+	} catch {
+		// Search remains available from the in-memory directory when storage quota is unavailable.
+	}
 }
 
 function AnalysisHistory({ items, activeSymbol, onSelect, onRemove }: {
