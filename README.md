@@ -108,6 +108,9 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 
 #### 把经验材料变成可持续研读的知识，让 AI 越用越懂你的研究方式
 
+<p align="center">
+  <img src="./docs/assets/easy-stock-trading-mastery.png" width="2560" height="1696" alt="easy-stock 游资心法库、人物资料与 Hermes 深度研读" />
+</p>
 
 ### 每日研究闭环
 
