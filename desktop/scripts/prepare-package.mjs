@@ -10,11 +10,16 @@ const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const repoRoot = path.resolve(desktopRoot, '..');
 const resourcesRoot = path.join(desktopRoot, 'resources');
 const backendName = process.platform === 'win32' ? 'easy-stock-backend.exe' : 'easy-stock-backend';
+const targetArch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
+
+if (targetArch !== process.arch) {
+	throw new Error(`Desktop target architecture ${targetArch} must match runner architecture ${process.arch} because native runtimes are bundled`);
+}
 
 fs.rmSync(resourcesRoot, { recursive: true, force: true });
 fs.mkdirSync(path.join(resourcesRoot, 'backend'), { recursive: true });
 
-run('npm', ['--workspace', 'frontend', 'run', 'build'], repoRoot);
+runNpm(['--workspace', 'frontend', 'run', 'build'], repoRoot);
 run('go', ['build', '-trimpath', '-o', path.join(resourcesRoot, 'backend', backendName), './cmd/server'], path.join(repoRoot, 'backend'), { CGO_ENABLED: process.env.CGO_ENABLED || '0' });
 fs.cpSync(path.join(repoRoot, 'frontend', 'dist'), path.join(resourcesRoot, 'frontend', 'dist'), { recursive: true });
 prepareAgentBrowser();
@@ -48,4 +53,10 @@ function run(command, args, cwd, env = {}) {
 	const result = spawnSync(command, args, { cwd, stdio: 'inherit', env: { ...process.env, ...env } });
 	if (result.error) throw result.error;
 	if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+function runNpm(args, cwd) {
+	const npmExecPath = process.env.npm_execpath;
+	if (!npmExecPath) throw new Error('npm_execpath is unavailable; run desktop packaging through an npm script');
+	run(process.execPath, [npmExecPath, ...args], cwd);
 }

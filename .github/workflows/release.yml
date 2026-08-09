@@ -4,12 +4,22 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish or update
+        required: true
+        default: v0.1.0
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +46,7 @@ jobs:
         run: npm ci
 
       - name: Verify release tag
-        run: node desktop/scripts/check-release-tag.mjs
+        run: node desktop/scripts/check-release-tag.mjs "$RELEASE_TAG"
 
       - name: Test backend and frontend
         run: npm test
@@ -51,9 +61,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15-intel
             arch: x64
-          - runner: macos-14-arm64
+          - runner: macos-15
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -163,7 +173,6 @@ jobs:
       - name: Publish or update release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/* --clobber
