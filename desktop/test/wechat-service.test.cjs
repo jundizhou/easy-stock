@@ -25,7 +25,7 @@ test('buildWechatEnv configures a local-only sidecar', () => {
 
 test('resolveWechatPython follows the bundled Hermes runtime layout', () => {
   assert.equal(resolveWechatPython('/runtime', 'darwin'), path.join('/runtime', 'venv', 'bin', 'python'));
-  assert.equal(resolveWechatPython('C:\\runtime', 'win32'), path.join('C:\\runtime', 'venv', 'Scripts', 'python.exe'));
+  assert.equal(resolveWechatPython('C:\\runtime', 'win32'), path.join('C:\\runtime', 'python', 'python.exe'));
 });
 
 test('syncWechatServiceSource upgrades code without replacing login credentials', () => {

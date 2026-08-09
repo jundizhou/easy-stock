@@ -10,18 +10,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"easy-stock/backend/internal/appsettings"
 )
 
 const (
-	providerSlug       = "easy-stock"
-	modelAPIKeyEnvName = "MODEL_API_KEY"
+	providerSlug        = "easy-stock"
+	modelAPIKeyEnvName  = "MODEL_API_KEY"
+	hermesErrorTailSize = 32 << 10
 )
+
+var diagnosticSecretPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[_ -]?key|token)\s*[:=]\s*)[^\s,;]+`)
 
 const systemPrompt = `你是 easy-stock 的 AI 投研助手。easy-stock 是面向 A 股市场的 AI 原生行情分析与研究工作台。像 Codex 一样协作：先理解目标，再基于可追踪的数据和原文证据给出清晰、可执行、可验证的回答；主动区分事实、推断、市场预期与待验证条件，不编造实时数据，不承诺收益。涉及游资、心法、情绪周期、龙头战法、首板、打板、仓位或预期差时，优先使用本机的 a-stock-short-term-masters 技能核对原文，并说明这些内容属于历史经验与二次整理材料。默认使用中文，除非用户要求其他语言。`
 
@@ -277,11 +282,18 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 	if err != nil {
 		return PromptResult{}, err
 	}
+	promptContext, cancelPrompt := context.WithCancel(ctx)
 	defer func() {
+		cancelPrompt()
 		_ = process.Stop()
 		_ = process.Wait()
 	}()
-	go io.Copy(io.Discard, process.Errors())
+	diagnostics := newTailBuffer(hermesErrorTailSize)
+	diagnosticsDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(diagnostics, process.Errors())
+		close(diagnosticsDone)
+	}()
 
 	type lineResult struct {
 		line []byte
@@ -295,11 +307,14 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 			line := append([]byte(nil), scanner.Bytes()...)
 			select {
 			case lines <- lineResult{line: line}:
-			case <-ctx.Done():
+			case <-promptContext.Done():
 				return
 			}
 		}
-		lines <- lineResult{err: scanner.Err()}
+		select {
+		case lines <- lineResult{err: scanner.Err()}:
+		case <-promptContext.Done():
+		}
 	}()
 
 	writeRPC := func(id, method string, params map[string]any) error {
@@ -322,17 +337,19 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 			return PromptResult{}, ctx.Err()
 		case item := <-lines:
 			if item.err != nil {
-				return PromptResult{}, fmt.Errorf("Hermes 会话结束: %w", item.err)
+				waitForDiagnostics(diagnosticsDone)
+				return PromptResult{}, r.hermesFailure(fmt.Sprintf("Hermes 会话结束: %v", item.err), diagnostics.String())
 			}
 			if len(item.line) == 0 {
-				return PromptResult{}, errors.New("Hermes 会话意外结束")
+				waitForDiagnostics(diagnosticsDone)
+				return PromptResult{}, r.hermesFailure("Hermes 会话意外结束", diagnostics.String())
 			}
 			var frame rpcFrame
 			if err := json.Unmarshal(item.line, &frame); err != nil {
 				continue
 			}
 			if frame.Error != nil {
-				return PromptResult{}, fmt.Errorf("Hermes: %s", frame.Error.Message)
+				return PromptResult{}, r.hermesFailure(fmt.Sprintf("Hermes: %s", frame.Error.Message), diagnostics.String())
 			}
 			if eventType(frame) == "gateway.ready" && !created {
 				created = true
@@ -363,10 +380,70 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 				}
 				return result, nil
 			case "message.error", "session.error", "run.error":
-				return PromptResult{}, errors.New(firstNonEmpty(eventText(frame, "message"), "Hermes 执行失败"))
+				return PromptResult{}, r.hermesFailure(firstNonEmpty(eventText(frame, "message"), "Hermes 执行失败"), diagnostics.String())
 			}
 		}
 	}
+}
+
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	data  []byte
+}
+
+func newTailBuffer(limit int) *tailBuffer {
+	return &tailBuffer{limit: limit}
+}
+
+func (b *tailBuffer) Write(value []byte) (int, error) {
+	written := len(value)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.limit <= 0 {
+		return written, nil
+	}
+	if len(value) >= b.limit {
+		b.data = append(b.data[:0], value[len(value)-b.limit:]...)
+		return written, nil
+	}
+	b.data = append(b.data, value...)
+	if overflow := len(b.data) - b.limit; overflow > 0 {
+		copy(b.data, b.data[overflow:])
+		b.data = b.data[:b.limit]
+	}
+	return written, nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(append([]byte(nil), b.data...))
+}
+
+func waitForDiagnostics(done <-chan struct{}) {
+	select {
+	case <-done:
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func (r *Runtime) hermesFailure(summary, diagnostic string) error {
+	apiKey, _ := r.ModelAPIKey()
+	summary = sanitizeHermesDiagnostic(summary, apiKey)
+	diagnostic = sanitizeHermesDiagnostic(diagnostic, apiKey)
+	if diagnostic == "" {
+		return errors.New(summary)
+	}
+	return fmt.Errorf("%s\n运行时详情：%s", summary, diagnostic)
+}
+
+func sanitizeHermesDiagnostic(value, apiKey string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\r\n", "\n"))
+	if apiKey != "" {
+		value = strings.ReplaceAll(value, apiKey, "[REDACTED]")
+	}
+	return diagnosticSecretPattern.ReplaceAllString(value, "$1[REDACTED]")
 }
 
 type commandProcess struct {
@@ -513,8 +590,12 @@ func defaultModel(provider string) string {
 }
 
 func runtimePython(root string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(root, "venv", "Scripts", "python.exe")
+	return runtimePythonForOS(root, runtime.GOOS)
+}
+
+func runtimePythonForOS(root, goos string) string {
+	if goos == "windows" {
+		return filepath.Join(root, "python", "python.exe")
 	}
 	return filepath.Join(root, "venv", "bin", "python")
 }

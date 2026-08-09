@@ -66,9 +66,11 @@ Electron 开发模式同样读取这两个变量。若 `desktop/resources/hermes
 运行时准备脚本支持两种来源：
 
 1. `HERMES_RUNTIME_SOURCE=/path/to/hermes-runtime`：复制一套已验证的 Runtime，并从已安装包读取真实 Hermes 版本；
-2. 未指定来源：使用 `uv` 创建 Python 3.11 可迁移环境并安装 `hermes-agent[all]==0.18.2`。
+2. 未指定来源：使用 `uv` 创建 Python 3.11 构建环境并安装 `hermes-agent[all]==0.18.2`。
 
-准备脚本会把 Runtime 内的符号链接实体化，并在打包前拒绝任何仍指向 Runtime 目录之外的链接。这样 Electron 复制资源时不会把相对链接改写为开发机绝对路径，DMG 安装到其他目录或其他电脑后仍可直接启动。`runtime-manifest.json` 中记录的是实际安装版本，而不是脚本期望版本。
+macOS 准备脚本会复制 uv 托管的基础 Python，并把 Runtime 内的符号链接实体化；Windows 准备脚本会复制完整的 uv 托管 Python 到 `hermes-runtime/python`，再把构建用 venv 的 `site-packages` 合并进去并删除带有构建机绝对路径的 venv。两个平台都会拒绝指向 Runtime 目录之外的链接，安装后的应用不依赖 GitHub Actions runner 或开发机上的 Python。
+
+发布包生成前还会直接调用包内 Python，以隔离模式导入 `hermes_cli`、`tui_gateway` 和微信公众号服务入口。只有真实的独立运行时通过检查后才允许生成归档。`runtime-manifest.json` 中记录的是实际安装版本，而不是脚本期望版本。
 
 生成 macOS 应用：
 

@@ -6,6 +6,12 @@ export const HERMES_AGENT_VERSION = process.env.HERMES_AGENT_VERSION || '0.18.2'
 
 export function hermesRuntimePython(runtimeRoot, platform = process.platform) {
 	return platform === 'win32'
+		? path.join(runtimeRoot, 'python', 'python.exe')
+		: path.join(runtimeRoot, 'venv', 'bin', 'python');
+}
+
+export function hermesVenvPython(runtimeRoot, platform = process.platform) {
+	return platform === 'win32'
 		? path.join(runtimeRoot, 'venv', 'Scripts', 'python.exe')
 		: path.join(runtimeRoot, 'venv', 'bin', 'python');
 }
@@ -34,7 +40,8 @@ export function prepareHermesRuntime({
 		}
 		fs.mkdirSync(runtimeRoot, { recursive: true });
 		run(uv, ['venv', path.join(runtimeRoot, 'venv'), '--python', process.env.HERMES_RUNTIME_PYTHON || '3.11', '--managed-python', '--relocatable', '--link-mode', 'copy'], runtimeRoot);
-		run(uv, ['pip', 'install', '--python', hermesRuntimePython(runtimeRoot, platform), '--link-mode', 'copy', `hermes-agent[all]==${HERMES_AGENT_VERSION}`], runtimeRoot);
+		const venvPython = hermesVenvPython(runtimeRoot, platform);
+		run(uv, ['pip', 'install', '--python', venvPython, '--link-mode', 'copy', `hermes-agent[all]==${HERMES_AGENT_VERSION}`], runtimeRoot);
 		vendorRuntimePython(runtimeRoot, platform);
 	}
 
@@ -76,7 +83,12 @@ function readHermesVersion(python, cwd) {
 }
 
 function vendorRuntimePython(runtimeRoot, platform) {
-	if (platform === 'win32') return;
+	if (platform === 'win32') {
+		const venvPython = hermesVenvPython(runtimeRoot, platform);
+		const sourceRoot = readPythonBasePrefix(venvPython, runtimeRoot);
+		bundleWindowsRuntime(runtimeRoot, sourceRoot);
+		return;
+	}
 	const python = hermesRuntimePython(runtimeRoot, platform);
 	let stat;
 	try {
@@ -98,6 +110,44 @@ function vendorRuntimePython(runtimeRoot, platform) {
 		fs.rmSync(aliasPath, { force: true });
 		fs.symlinkSync('python', aliasPath);
 	}
+}
+
+function readPythonBasePrefix(python, cwd) {
+	const result = spawnSync(python, ['-I', '-c', 'import sys; print(sys.base_prefix)'], {
+		cwd,
+		encoding: 'utf8',
+		env: { ...process.env, PYTHONNOUSERSITE: '1' },
+	});
+	if (result.error) throw result.error;
+	if (result.status !== 0) {
+		throw new Error(`Unable to locate the managed Python runtime: ${(result.stderr || '').trim() || `python exited with status ${result.status}`}`);
+	}
+	const reportedRoot = (result.stdout || '').trim();
+	if (!reportedRoot) throw new Error('Managed Python runtime did not report sys.base_prefix');
+	const sourceRoot = path.resolve(reportedRoot);
+	if (!fs.existsSync(sourceRoot)) throw new Error(`Managed Python runtime not found: ${sourceRoot}`);
+	return sourceRoot;
+}
+
+export function bundleWindowsRuntime(runtimeRoot, sourceRoot) {
+	const sourcePython = path.join(sourceRoot, 'python.exe');
+	const sourceSitePackages = path.join(runtimeRoot, 'venv', 'Lib', 'site-packages');
+	if (!fs.existsSync(sourcePython)) throw new Error(`Managed Windows Python executable not found: ${sourcePython}`);
+	if (!fs.existsSync(sourceSitePackages)) throw new Error(`Hermes virtual environment site-packages not found: ${sourceSitePackages}`);
+
+	const bundledRoot = path.join(runtimeRoot, 'python');
+	fs.rmSync(bundledRoot, { recursive: true, force: true });
+	fs.cpSync(sourceRoot, bundledRoot, { recursive: true });
+	rewriteCopiedSymlinks(bundledRoot, sourceRoot);
+
+	const bundledSitePackages = path.join(bundledRoot, 'Lib', 'site-packages');
+	fs.mkdirSync(bundledSitePackages, { recursive: true });
+	fs.cpSync(sourceSitePackages, bundledSitePackages, { recursive: true, force: true });
+
+	// A Windows venv launcher keeps an absolute `home` path in pyvenv.cfg.
+	// Removing the build-only venv ensures the shipped runtime cannot silently
+	// depend on the GitHub Actions runner's uv-managed Python installation.
+	fs.rmSync(path.join(runtimeRoot, 'venv'), { recursive: true, force: true });
 }
 
 function assertNoExternalSymlinks(runtimeRoot) {

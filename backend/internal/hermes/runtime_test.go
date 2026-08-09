@@ -160,6 +160,46 @@ func TestHermesEnvironmentIncludesWorkspaceNodeBin(t *testing.T) {
 	}
 }
 
+func TestRuntimePythonUsesStandaloneWindowsInterpreter(t *testing.T) {
+	root := filepath.Join("runtime", "hermes")
+	if got := runtimePythonForOS(root, "windows"); got != filepath.Join(root, "python", "python.exe") {
+		t.Fatalf("Windows runtime Python = %q", got)
+	}
+	if got := runtimePythonForOS(root, "darwin"); got != filepath.Join(root, "venv", "bin", "python") {
+		t.Fatalf("macOS runtime Python = %q", got)
+	}
+}
+
+func TestHermesFailureIncludesRuntimeDetailAndRedactsSecrets(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const key = "test-model-key-value"
+	if err := writeEnvValue(filepath.Join(home, ".env"), modelAPIKeyEnvName, key); err != nil {
+		t.Fatal(err)
+	}
+	runtime := NewRuntime(Config{Home: home})
+	err := runtime.hermesFailure("Hermes 会话意外结束", "Authorization: Bearer "+key+"\nMODEL_API_KEY="+key+"\npython runtime missing")
+	message := err.Error()
+	if strings.Contains(message, key) {
+		t.Fatalf("Hermes error leaked API key: %s", message)
+	}
+	if !strings.Contains(message, "[REDACTED]") || !strings.Contains(message, "python runtime missing") {
+		t.Fatalf("Hermes error omitted safe diagnostic detail: %s", message)
+	}
+}
+
+func TestTailBufferKeepsOnlyTheLatestDiagnosticBytes(t *testing.T) {
+	buffer := newTailBuffer(8)
+	_, _ = buffer.Write([]byte("first-"))
+	_, _ = buffer.Write([]byte("second"))
+	if got := buffer.String(); got != "t-second" {
+		t.Fatalf("tail buffer = %q, want %q", got, "t-second")
+	}
+}
+
 func envValue(values []string, key string) string {
 	prefix := key + "="
 	for _, value := range values {

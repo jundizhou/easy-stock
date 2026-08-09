@@ -48,7 +48,7 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 
 	const python = hermesRuntimePython(resolvedRuntimeRoot);
 	if (process.platform === 'win32') {
-		run(uv, ['pip', 'install', '--python', python, '--link-mode', 'copy', ...pythonDependencies], resolvedRuntimeRoot);
+		run(uv, ['pip', 'install', '--target', runtimeSitePackages(resolvedRuntimeRoot), '--python', python, '--link-mode', 'copy', ...pythonDependencies], resolvedRuntimeRoot);
 	} else {
 		const sitePackages = runtimeSitePackages(resolvedRuntimeRoot);
 		const basePython = bundledRuntimePython(resolvedRuntimeRoot);
@@ -63,6 +63,7 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 }
 
 function runtimeSitePackages(runtimeRoot) {
+	if (process.platform === 'win32') return path.join(runtimeRoot, 'python', 'Lib', 'site-packages');
 	const libRoot = path.join(runtimeRoot, 'venv', 'lib');
 	const pythonLib = fs.readdirSync(libRoot, { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.startsWith('python'));
 	if (!pythonLib) throw new Error(`Python site-packages directory not found in ${libRoot}`);

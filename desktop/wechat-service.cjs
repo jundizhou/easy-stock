@@ -7,7 +7,7 @@ const PERSISTED_ENTRIES = new Set(['.env', 'data']);
 
 function resolveWechatPython(runtimeRoot, platform = process.platform) {
   return platform === 'win32'
-    ? path.join(runtimeRoot, 'venv', 'Scripts', 'python.exe')
+    ? path.join(runtimeRoot, 'python', 'python.exe')
     : path.join(runtimeRoot, 'venv', 'bin', 'python');
 }
 
