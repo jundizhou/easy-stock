@@ -254,6 +254,8 @@ func sourceName(source string) string {
 		return "雪球作者"
 	case "taoguba":
 		return "淘股吧作者"
+	case "official":
+		return "每日复盘"
 	default:
 		return source
 	}

@@ -73,33 +73,35 @@ type ReviewImporter interface {
 }
 
 type Config struct {
-	Token               string
-	Realtime            RealtimeProvider
-	KLinePrimary        KLineProvider
-	KLineFallback       KLineProvider
-	News                NewsProvider
-	SectorMap           SectorMapProvider
-	ThemeOverview       ThemeOverviewProvider
-	ThemeRadarFallback  ThemeRadarFallback
-	LimitUp             LimitUpProvider
-	MarketPools         MarketPoolProvider
-	StockConcept        StockConceptProvider
-	StockDirectory      StockDirectoryProvider
-	Inflection          InflectionEvaluator
-	ReviewDBPath        string
-	MarketEmotionDBPath string
-	ThemeRadarDBPath    string
-	DuanxianxiaBaseURL  string
-	WeChatAPIURL        string
-	ReviewHTTP          *http.Client
-	ReviewStore         *review.Store
-	MarketEmotionStore  *marketemotion.Store
-	ReviewImporter      ReviewImporter
-	SettingsPath        string
-	SettingsStore       *appsettings.Store
-	ReviewAutomation    *review.Automation
-	HermesGateway       hermes.Gateway
-	MasteryLibrary      *methodology.Library
+	Token                string
+	Realtime             RealtimeProvider
+	KLinePrimary         KLineProvider
+	KLineFallback        KLineProvider
+	News                 NewsProvider
+	SectorMap            SectorMapProvider
+	ThemeOverview        ThemeOverviewProvider
+	ThemeRadarFallback   ThemeRadarFallback
+	LimitUp              LimitUpProvider
+	MarketPools          MarketPoolProvider
+	StockConcept         StockConceptProvider
+	StockDirectory       StockDirectoryProvider
+	Inflection           InflectionEvaluator
+	ReviewDBPath         string
+	MarketEmotionDBPath  string
+	ThemeRadarDBPath     string
+	DuanxianxiaBaseURL   string
+	WeChatAPIURL         string
+	ReviewHTTP           *http.Client
+	ReviewStore          *review.Store
+	MarketEmotionStore   *marketemotion.Store
+	ReviewImporter       ReviewImporter
+	SettingsPath         string
+	SettingsStore        *appsettings.Store
+	ReviewAutomation     *review.Automation
+	RemoteDailyReviewURL string
+	RemoteDailySync      *review.RemoteDailySync
+	HermesGateway        hermes.Gateway
+	MasteryLibrary       *methodology.Library
 }
 
 func normalizeConfig(value any) Config {

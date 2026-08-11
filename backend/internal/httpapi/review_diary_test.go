@@ -72,10 +72,10 @@ func TestReviewSourcesPutWechatLastAndMarkAutomaticSyncUnavailable(t *testing.T)
 	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Data) != 3 || payload.Data[0].ID != "xueqiu" || payload.Data[1].ID != "taoguba" || payload.Data[2].ID != "wechat" {
+	if len(payload.Data) != 4 || payload.Data[0].ID != "official" || payload.Data[1].ID != "xueqiu" || payload.Data[2].ID != "taoguba" || payload.Data[3].ID != "wechat" {
 		t.Fatalf("source order = %+v", payload.Data)
 	}
-	wechat := payload.Data[2]
+	wechat := payload.Data[3]
 	if wechat.Status != "limited" || !wechat.ImportReady || wechat.SyncReady || !strings.Contains(wechat.Message, "历史文章列表接口") {
 		t.Fatalf("wechat status = %+v", wechat)
 	}

@@ -177,6 +177,14 @@ func (s *Store) GetPostByURL(ctx context.Context, originalURL string) (Post, err
 	return scanPost(s.db.QueryRowContext(ctx, postSelect+` WHERE original_url = ?`, originalURL))
 }
 
+func (s *Store) HasPostBySourceExternalID(ctx context.Context, source, externalID string) (bool, error) {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM review_posts WHERE source=? AND external_id=?)`, strings.TrimSpace(source), strings.TrimSpace(externalID)).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check review post: %w", err)
+	}
+	return exists == 1, nil
+}
+
 func (s *Store) ListPosts(ctx context.Context, query Query) ([]Post, int, error) {
 	where := []string{"1=1"}
 	args := []any{}

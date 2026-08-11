@@ -838,6 +838,12 @@ export type ReviewDailyDisagreement = {
 	topic: string;
 	views: string[];
 	authors: string[];
+	positions: Array<{
+		author: string;
+		stance: string;
+		view: string;
+		evidence: string;
+	}>;
 };
 
 export type ReviewDailyStockView = {
@@ -852,6 +858,35 @@ export type ReviewDailyStockView = {
 	risk?: string;
 };
 
+export type ReviewDailySummarySource = {
+	post_id?: string;
+	author: string;
+	title: string;
+	source: string;
+	url?: string;
+	published_at?: string;
+};
+
+export type ReviewDailyAuthorView = {
+	author: string;
+	source: string;
+	article_count: number;
+	available_article_count: number;
+	time_range: string;
+	core_view: string;
+	market_interpretation: string;
+	view_evolution: string[];
+	themes: string[];
+	today_surprises: ReviewDailyStockView[];
+	tomorrow_focus: ReviewDailyStockView[];
+	tomorrow_outlook: string;
+	catalysts: string[];
+	risks: string[];
+	confidence: string;
+	evidence: string[];
+	sources: ReviewDailySummarySource[];
+};
+
 export type ReviewDailySummary = {
 	trade_date: string;
 	generated_at: string;
@@ -862,12 +897,39 @@ export type ReviewDailySummary = {
 	article_count: number;
 	author_count: number;
 	authors: string[];
-	sources: Array<{ author: string; title: string; source: string }>;
+	sources: ReviewDailySummarySource[];
+	author_views: ReviewDailyAuthorView[];
 	executive_summary: string;
 	market_regime: string;
 	market_analysis: string;
+	market_framework: {
+		cycle: string;
+		capital_pricing: string;
+		direction_competition: string;
+		trading_method: string;
+	};
 	consensus: ReviewDailyConsensus[];
 	disagreements: ReviewDailyDisagreement[];
+	scenarios: Array<{
+		key: 'base' | 'strong' | 'weak';
+		name: string;
+		summary: string;
+		trigger: string;
+		confirmation: string;
+		invalidation: string;
+		focus: string[];
+	}>;
+	directions: Array<{
+		name: string;
+		stance: string;
+		summary: string;
+		supporting_authors: string[];
+		opposing_authors: string[];
+		stocks: string[];
+		trigger: string;
+		invalidation: string;
+		risks: string[];
+	}>;
 	today_surprises: ReviewDailyStockView[];
 	tomorrow_focus: ReviewDailyStockView[];
 	tomorrow_outlook: string;

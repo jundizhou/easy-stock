@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v2"
+	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v3"
 	maxDailySummaryAuthors       = 30
 	maxDailySummaryPosts         = 1000
 	maxAuthorSummaryConcurrency  = 3
@@ -70,47 +70,31 @@ type authorViewpointModel struct {
 	Evidence             []string               `json:"evidence"`
 }
 
-type dailyAuthorViewpoint struct {
-	Author                string           `json:"author"`
-	Source                string           `json:"source"`
-	ArticleCount          int              `json:"article_count"`
-	AvailableArticleCount int              `json:"available_article_count"`
-	TimeRange             string           `json:"time_range"`
-	CoreView              string           `json:"core_view"`
-	MarketInterpretation  string           `json:"market_interpretation"`
-	ViewEvolution         []string         `json:"view_evolution"`
-	Themes                []string         `json:"themes"`
-	TodaySurprises        []DailyStockView `json:"today_surprises"`
-	TomorrowFocus         []DailyStockView `json:"tomorrow_focus"`
-	TomorrowOutlook       string           `json:"tomorrow_outlook"`
-	Catalysts             []string         `json:"catalysts"`
-	Risks                 []string         `json:"risks"`
-	Confidence            string           `json:"confidence"`
-	Evidence              []string         `json:"evidence"`
-}
-
 type authorSummaryResult struct {
 	Group    dailySummaryAuthorGroup
-	View     dailyAuthorViewpoint
+	View     DailyAuthorView
 	Articles []dailySummaryArticle
 	Sources  []DailySummarySource
 	Err      error
 }
 
 type dailySummaryModel struct {
-	ExecutiveSummary      string              `json:"executive_summary"`
-	MarketRegime          string              `json:"market_regime"`
-	MarketAnalysis        string              `json:"market_analysis"`
-	Consensus             []DailyConsensus    `json:"consensus"`
-	Disagreements         []DailyDisagreement `json:"disagreements"`
-	TodaySurprises        []DailyStockView    `json:"today_surprises"`
-	TomorrowFocus         []DailyStockView    `json:"tomorrow_focus"`
-	TomorrowOutlook       string              `json:"tomorrow_outlook"`
-	TomorrowPlaybook      DailyPlaybook       `json:"tomorrow_playbook"`
-	Catalysts             []string            `json:"catalysts"`
-	Risks                 []string            `json:"risks"`
-	VerificationChecklist []string            `json:"verification_checklist"`
-	Limitations           []string            `json:"limitations"`
+	ExecutiveSummary      string               `json:"executive_summary"`
+	MarketRegime          string               `json:"market_regime"`
+	MarketAnalysis        string               `json:"market_analysis"`
+	MarketFramework       DailyMarketFramework `json:"market_framework"`
+	Consensus             []DailyConsensus     `json:"consensus"`
+	Disagreements         []DailyDisagreement  `json:"disagreements"`
+	Scenarios             []DailyScenario      `json:"scenarios"`
+	Directions            []DailyDirectionView `json:"directions"`
+	TodaySurprises        []DailyStockView     `json:"today_surprises"`
+	TomorrowFocus         []DailyStockView     `json:"tomorrow_focus"`
+	TomorrowOutlook       string               `json:"tomorrow_outlook"`
+	TomorrowPlaybook      DailyPlaybook        `json:"tomorrow_playbook"`
+	Catalysts             []string             `json:"catalysts"`
+	Risks                 []string             `json:"risks"`
+	VerificationChecklist []string             `json:"verification_checklist"`
+	Limitations           []string             `json:"limitations"`
 }
 
 type dailySummaryProgress func(stage string, completedAuthors, totalAuthors, articleCount int, message string)
@@ -339,7 +323,7 @@ func (a *Automation) summarizeToday(ctx context.Context, progress dailySummaryPr
 		}
 	})
 
-	viewpoints := make([]dailyAuthorViewpoint, 0, len(results))
+	viewpoints := make([]DailyAuthorView, 0, len(results))
 	authors := make([]string, 0, len(results))
 	sources := []DailySummarySource{}
 	articleCount := 0
@@ -380,7 +364,7 @@ func (a *Automation) summarizeToday(ctx context.Context, progress dailySummaryPr
 	if err != nil {
 		return DailySummary{}, err
 	}
-	normalizeDailySummaryModel(&model, authors)
+	normalizeDailySummaryModel(&model, viewpoints)
 	if len(allGroups) > len(selectedGroups) {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("有效窗口内共有%d位作者，按最近更新时间选取最多%d位参与总结", len(allGroups), maxDailySummaryAuthors))
 	}
@@ -403,11 +387,15 @@ func (a *Automation) summarizeToday(ctx context.Context, progress dailySummaryPr
 		AuthorCount:           len(authors),
 		Authors:               authors,
 		Sources:               sources,
+		AuthorViews:           viewpoints,
 		ExecutiveSummary:      model.ExecutiveSummary,
 		MarketRegime:          model.MarketRegime,
 		MarketAnalysis:        model.MarketAnalysis,
+		MarketFramework:       model.MarketFramework,
 		Consensus:             model.Consensus,
 		Disagreements:         model.Disagreements,
+		Scenarios:             model.Scenarios,
+		Directions:            model.Directions,
 		TodaySurprises:        model.TodaySurprises,
 		TomorrowFocus:         model.TomorrowFocus,
 		TomorrowOutlook:       model.TomorrowOutlook,
@@ -537,24 +525,24 @@ func (a *Automation) summarizeDailyAuthors(ctx context.Context, groups []dailySu
 	return results
 }
 
-func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummaryAuthorGroup) (dailyAuthorViewpoint, []dailySummaryArticle, []DailySummarySource, error) {
+func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummaryAuthorGroup) (DailyAuthorView, []dailySummaryArticle, []DailySummarySource, error) {
 	articles, sources := authorSummaryInputs(group)
 	if len(articles) == 0 {
-		return dailyAuthorViewpoint{}, nil, nil, errors.New("作者文章正文不足")
+		return DailyAuthorView{}, nil, nil, errors.New("作者文章正文不足")
 	}
 	prompt, err := buildAuthorSummaryPrompt(group.Author, articles)
 	if err != nil {
-		return dailyAuthorViewpoint{}, nil, nil, err
+		return DailyAuthorView{}, nil, nil, err
 	}
 	response, err := a.prompter.Prompt(ctx, prompt)
 	if err != nil {
-		return dailyAuthorViewpoint{}, nil, nil, fmt.Errorf("归纳作者%s: %w", group.Author, err)
+		return DailyAuthorView{}, nil, nil, fmt.Errorf("归纳作者%s: %w", group.Author, err)
 	}
 	model, err := parseAuthorViewpointModel(response.Content)
 	if err != nil {
-		return dailyAuthorViewpoint{}, nil, nil, fmt.Errorf("归纳作者%s: %w", group.Author, err)
+		return DailyAuthorView{}, nil, nil, fmt.Errorf("归纳作者%s: %w", group.Author, err)
 	}
-	view := dailyAuthorViewpoint{
+	view := DailyAuthorView{
 		Author:                group.Author,
 		Source:                sourceName(group.Source),
 		ArticleCount:          len(articles),
@@ -571,6 +559,7 @@ func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummar
 		Risks:                 cleanStringList(model.Risks),
 		Confidence:            strings.TrimSpace(model.Confidence),
 		Evidence:              cleanStringList(model.Evidence),
+		Sources:               sources,
 	}
 	return view, articles, sources, nil
 }
@@ -596,7 +585,14 @@ func authorSummaryInputs(group dailySummaryAuthorGroup) ([]dailySummaryArticle, 
 			PublishedAt: post.PublishedAt.In(shanghaiLocation()).Format("2006-01-02 15:04"),
 			Content:     content,
 		})
-		sources = append(sources, DailySummarySource{Author: group.Author, Title: cleanInline(post.Title), Source: post.Source})
+		sources = append(sources, DailySummarySource{
+			PostID:      post.ID,
+			Author:      group.Author,
+			Title:       cleanInline(post.Title),
+			Source:      post.Source,
+			URL:         post.OriginalURL,
+			PublishedAt: post.PublishedAt.In(shanghaiLocation()).Format(time.RFC3339),
+		})
 	}
 	// Selection is newest-first so recent corrections win the context budget;
 	// present the chosen articles chronologically so the model can see evolution.
@@ -689,7 +685,7 @@ func authorArticleTimeRange(articles []dailySummaryArticle) string {
 	return articles[0].PublishedAt + " 至 " + articles[len(articles)-1].PublishedAt
 }
 
-func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []dailyAuthorViewpoint) (string, error) {
+func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAuthorView) (string, error) {
 	data, err := json.Marshal(viewpoints)
 	if err != nil {
 		return "", fmt.Errorf("整理作者观点卡: %w", err)
@@ -706,20 +702,30 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []dailyAut
 4. 区分三层信息：已发生的盘面事实、作者对事实的解释、面向明日的推演。不要把预测写成事实。
 5. “今日超预期个股”必须来自观点卡明确保留的超预期证据；若证据不足返回空数组。
 6. “明日预期个股”应优先选择多作者反复提及、具有明确逻辑和可验证条件的个股。每只都要给出逻辑、明日触发条件、失效条件和主要风险；不得直接给买卖指令。
-7. 对同一题材或个股出现相反看法时，放入 disagreements，保留不同观点，不要强行求同。
-8. 识别可能的叙事拥挤、幸存者偏差、盘后归因、情绪一致性过高、利好兑现、缩量加速、后排掉队等风险。
-9. 明日剧本必须覆盖竞价/盘前、开盘前30分钟、盘中确认和收盘验证，写成可观察条件，而不是确定性预测。
-10. verification_checklist 给出5至10条次日可以逐项核对的信号，优先关注主线强弱、核心股反馈、容量/高度/补涨关系、分歧修复、负反馈扩散和量价承接。
-11. evidence 使用“[作者] 观点摘要”的短句，不能杜撰原文引语。limitations 要主动说明样本数量、作者同质化、数据缺口和低置信度结论。
-12. 语言应简洁、专业、可复盘。避免空泛表述，避免“建议买入/卖出”，避免把大V共识当作事实真相。
+7. market_framework 必须分别回答四个问题：周期处于哪里、资金正在奖励/惩罚什么、主要方向如何竞争、次日应采用何种观察与执行方法。证据不足时明确写“样本不足”，不要强行填满。
+8. 对同一题材或个股出现相反看法时，放入 disagreements。positions 要按作者逐项保留立场、观点和证据；不要强行求同，也不要把模型自己的判断伪装成作者观点。
+9. scenarios 必须恰好覆盖基础、偏强、偏弱三种情景，key 分别只能为 base、strong、weak；每个情景写清触发、确认、失效和关注点，彼此条件应可区分。
+10. directions 按次日研究优先级组织题材或风格方向，stance 只能优先使用“优先观察、等待证明、谨慎追高、事件博弈、回避”之一。每个方向写清支持/反对作者、相关个股、确认条件、失效条件和风险；不得把没有作者依据的方向加入列表。
+11. 识别可能的叙事拥挤、幸存者偏差、盘后归因、情绪一致性过高、利好兑现、缩量加速、后排掉队等风险。
+12. 明日剧本必须覆盖竞价/盘前、开盘前30分钟、盘中确认和收盘验证，写成可观察条件，而不是确定性预测。
+13. verification_checklist 给出5至10条次日可以逐项核对的信号，优先关注主线强弱、核心股反馈、容量/高度/补涨关系、分歧修复、负反馈扩散和量价承接。
+14. evidence 使用“[作者] 观点摘要”的短句，不能杜撰原文引语。limitations 要主动说明样本数量、作者同质化、数据缺口和低置信度结论。
+15. 语言应简洁、专业、可复盘。避免空泛表述，避免“建议买入/卖出”，避免把大V共识当作事实真相。
 
 只返回严格JSON，不要Markdown，不要解释，字段必须完整：
 {
   "executive_summary":"150至300字的今日核心结论，突出最强共识、最大分歧和明日核心变量",
   "market_regime":"用一个短语概括情绪/周期阶段，例如修复、分歧、加速、退潮或混沌；证据不足写样本不足",
   "market_analysis":"今日盘面结构分析，说明主线、支线、情绪、核心与后排关系，以及文章共同认可的驱动",
+  "market_framework":{"cycle":"周期位置与依据","capital_pricing":"资金奖励与惩罚的交易特征","direction_competition":"主线、支线和潜在切换关系","trading_method":"与当前周期匹配的观察和执行方法"},
   "consensus":[{"topic":"共识主题","conclusion":"跨作者共同结论","support_count":2,"authors":["作者"],"evidence":["[作者] 观点摘要"]}],
-  "disagreements":[{"topic":"分歧主题","views":["观点A","观点B"],"authors":["作者"]}],
+  "disagreements":[{"topic":"分歧主题","views":["观点A","观点B"],"authors":["作者"],"positions":[{"author":"作者","stance":"看强/中性/谨慎等作者真实立场","view":"该作者的具体判断","evidence":"[作者] 证据摘要"}]}],
+  "scenarios":[
+    {"key":"base","name":"基础情景","summary":"最大概率的路径","trigger":"进入该路径的触发","confirmation":"盘中确认信号","invalidation":"失效条件","focus":["关注方向或变量"]},
+    {"key":"strong","name":"偏强情景","summary":"超预期走强的路径","trigger":"进入该路径的触发","confirmation":"盘中确认信号","invalidation":"失效条件","focus":["关注方向或变量"]},
+    {"key":"weak","name":"偏弱情景","summary":"负反馈扩散的路径","trigger":"进入该路径的触发","confirmation":"盘中确认信号","invalidation":"失效条件","focus":["关注方向或变量"]}
+  ],
+  "directions":[{"name":"题材或风格方向","stance":"优先观察/等待证明/谨慎追高/事件博弈/回避","summary":"方向定位与竞争关系","supporting_authors":["作者"],"opposing_authors":["作者"],"stocks":["原观点卡明确提到的个股"],"trigger":"转强或延续确认条件","invalidation":"失效条件","risks":["风险"]}],
   "today_surprises":[{"name":"个股名","symbol":"仅在观点卡明确给出时填写","logic":"为何超预期","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"今日被确认的信号","invalidation":"后续什么现象会否定该判断","risk":"主要风险"}],
   "tomorrow_focus":[{"name":"个股名","symbol":"仅在观点卡明确给出时填写","logic":"为何进入明日预期","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"明日需要出现的确认信号","invalidation":"明日失效条件","risk":"主要风险"}],
   "tomorrow_outlook":"按基础情景、偏强情景、偏弱情景描述明日预期和最关键变量",
@@ -756,13 +762,39 @@ func jsonObject(content string) string {
 	return content
 }
 
-func normalizeDailySummaryModel(model *dailySummaryModel, authors []string) {
-	knownAuthors := make(map[string]bool, len(authors))
-	for _, author := range authors {
-		knownAuthors[author] = true
+func normalizeDailySummaryModel(model *dailySummaryModel, viewpoints []DailyAuthorView) {
+	knownAuthors := make(map[string]bool, len(viewpoints))
+	knownStocks := map[string]bool{}
+	knownSymbols := map[string]map[string]bool{}
+	for _, viewpoint := range viewpoints {
+		knownAuthors[viewpoint.Author] = true
+		for _, item := range append(append([]DailyStockView{}, viewpoint.TodaySurprises...), viewpoint.TomorrowFocus...) {
+			name := strings.TrimSpace(item.Name)
+			if name == "" {
+				continue
+			}
+			knownStocks[name] = true
+			symbol := strings.TrimSpace(item.Symbol)
+			if symbol != "" {
+				if knownSymbols[name] == nil {
+					knownSymbols[name] = map[string]bool{}
+				}
+				knownSymbols[name][symbol] = true
+			}
+		}
 	}
+	model.ExecutiveSummary = strings.TrimSpace(model.ExecutiveSummary)
+	model.MarketRegime = strings.TrimSpace(model.MarketRegime)
+	model.MarketAnalysis = strings.TrimSpace(model.MarketAnalysis)
+	model.TomorrowOutlook = strings.TrimSpace(model.TomorrowOutlook)
+	model.MarketFramework.Cycle = strings.TrimSpace(model.MarketFramework.Cycle)
+	model.MarketFramework.CapitalPricing = strings.TrimSpace(model.MarketFramework.CapitalPricing)
+	model.MarketFramework.DirectionCompetition = strings.TrimSpace(model.MarketFramework.DirectionCompetition)
+	model.MarketFramework.TradingMethod = strings.TrimSpace(model.MarketFramework.TradingMethod)
 	consensus := make([]DailyConsensus, 0, len(model.Consensus))
 	for _, item := range model.Consensus {
+		item.Topic = strings.TrimSpace(item.Topic)
+		item.Conclusion = strings.TrimSpace(item.Conclusion)
 		item.Authors = filterKnownAuthors(item.Authors, knownAuthors)
 		item.Evidence = cleanStringList(item.Evidence)
 		item.SupportCount = len(item.Authors)
@@ -773,15 +805,34 @@ func normalizeDailySummaryModel(model *dailySummaryModel, authors []string) {
 	model.Consensus = consensus
 	disagreements := make([]DailyDisagreement, 0, len(model.Disagreements))
 	for _, item := range model.Disagreements {
+		item.Topic = strings.TrimSpace(item.Topic)
 		item.Views = cleanStringList(item.Views)
 		item.Authors = filterKnownAuthors(item.Authors, knownAuthors)
-		if strings.TrimSpace(item.Topic) != "" && len(item.Views) > 1 && len(item.Authors) > 0 {
+		positions := make([]DailyDisagreementPosition, 0, len(item.Positions))
+		for _, position := range item.Positions {
+			position.Author = strings.TrimSpace(position.Author)
+			position.Stance = strings.TrimSpace(position.Stance)
+			position.View = strings.TrimSpace(position.View)
+			position.Evidence = strings.TrimSpace(position.Evidence)
+			if !knownAuthors[position.Author] || position.View == "" {
+				continue
+			}
+			positions = append(positions, position)
+			item.Authors = append(item.Authors, position.Author)
+			item.Views = append(item.Views, position.View)
+		}
+		item.Positions = positions
+		item.Authors = filterKnownAuthors(item.Authors, knownAuthors)
+		item.Views = cleanStringList(item.Views)
+		if item.Topic != "" && len(item.Views) > 1 && len(item.Authors) > 0 {
 			disagreements = append(disagreements, item)
 		}
 	}
 	model.Disagreements = disagreements
-	model.TodaySurprises = normalizeStockViews(model.TodaySurprises, knownAuthors)
-	model.TomorrowFocus = normalizeStockViews(model.TomorrowFocus, knownAuthors)
+	model.Scenarios = normalizeScenarios(model.Scenarios)
+	model.Directions = normalizeDirections(model.Directions, knownAuthors, knownStocks)
+	model.TodaySurprises = normalizeStockViews(model.TodaySurprises, knownAuthors, knownSymbols)
+	model.TomorrowFocus = normalizeStockViews(model.TomorrowFocus, knownAuthors, knownSymbols)
 	model.TomorrowPlaybook.PreOpen = cleanStringList(model.TomorrowPlaybook.PreOpen)
 	model.TomorrowPlaybook.Opening = cleanStringList(model.TomorrowPlaybook.Opening)
 	model.TomorrowPlaybook.Intraday = cleanStringList(model.TomorrowPlaybook.Intraday)
@@ -792,17 +843,87 @@ func normalizeDailySummaryModel(model *dailySummaryModel, authors []string) {
 	model.Limitations = cleanStringList(model.Limitations)
 }
 
-func normalizeStockViews(items []DailyStockView, knownAuthors map[string]bool) []DailyStockView {
-	result := make([]DailyStockView, 0, len(items))
+func normalizeScenarios(items []DailyScenario) []DailyScenario {
+	allowed := map[string]string{"base": "基础情景", "strong": "偏强情景", "weak": "偏弱情景"}
+	seen := map[string]bool{}
+	result := make([]DailyScenario, 0, 3)
 	for _, item := range items {
-		item.Authors = filterKnownAuthors(item.Authors, knownAuthors)
-		item.Evidence = cleanStringList(item.Evidence)
-		item.SupportCount = len(item.Authors)
-		if strings.TrimSpace(item.Name) != "" && strings.TrimSpace(item.Logic) != "" && item.SupportCount > 0 {
+		item.Key = strings.ToLower(strings.TrimSpace(item.Key))
+		defaultName, ok := allowed[item.Key]
+		if !ok || seen[item.Key] {
+			continue
+		}
+		item.Name = strings.TrimSpace(item.Name)
+		if item.Name == "" {
+			item.Name = defaultName
+		}
+		item.Summary = strings.TrimSpace(item.Summary)
+		item.Trigger = strings.TrimSpace(item.Trigger)
+		item.Confirmation = strings.TrimSpace(item.Confirmation)
+		item.Invalidation = strings.TrimSpace(item.Invalidation)
+		item.Focus = cleanStringList(item.Focus)
+		if item.Summary == "" {
+			continue
+		}
+		seen[item.Key] = true
+		result = append(result, item)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		order := map[string]int{"base": 0, "strong": 1, "weak": 2}
+		return order[result[i].Key] < order[result[j].Key]
+	})
+	return result
+}
+
+func normalizeDirections(items []DailyDirectionView, knownAuthors, knownStocks map[string]bool) []DailyDirectionView {
+	result := make([]DailyDirectionView, 0, len(items))
+	for _, item := range items {
+		item.Name = strings.TrimSpace(item.Name)
+		item.Stance = strings.TrimSpace(item.Stance)
+		item.Summary = strings.TrimSpace(item.Summary)
+		item.SupportingAuthors = filterKnownAuthors(item.SupportingAuthors, knownAuthors)
+		item.OpposingAuthors = filterKnownAuthors(item.OpposingAuthors, knownAuthors)
+		item.Stocks = filterKnownValues(item.Stocks, knownStocks)
+		item.Trigger = strings.TrimSpace(item.Trigger)
+		item.Invalidation = strings.TrimSpace(item.Invalidation)
+		item.Risks = cleanStringList(item.Risks)
+		if item.Name != "" && item.Summary != "" && (len(item.SupportingAuthors) > 0 || len(item.OpposingAuthors) > 0) {
 			result = append(result, item)
 		}
 	}
 	return result
+}
+
+func normalizeStockViews(items []DailyStockView, knownAuthors map[string]bool, knownSymbols map[string]map[string]bool) []DailyStockView {
+	result := make([]DailyStockView, 0, len(items))
+	for _, item := range items {
+		item.Name = strings.TrimSpace(item.Name)
+		item.Symbol = strings.TrimSpace(item.Symbol)
+		item.Logic = strings.TrimSpace(item.Logic)
+		item.Trigger = strings.TrimSpace(item.Trigger)
+		item.Invalidation = strings.TrimSpace(item.Invalidation)
+		item.Risk = strings.TrimSpace(item.Risk)
+		item.Authors = filterKnownAuthors(item.Authors, knownAuthors)
+		item.Evidence = cleanStringList(item.Evidence)
+		item.SupportCount = len(item.Authors)
+		if item.Symbol != "" && !knownSymbols[item.Name][item.Symbol] {
+			item.Symbol = ""
+		}
+		if item.Name != "" && item.Logic != "" && item.SupportCount > 0 {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func filterKnownValues(values []string, known map[string]bool) []string {
+	filtered := []string{}
+	for _, value := range cleanStringList(values) {
+		if known[value] {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }
 
 func filterKnownAuthors(values []string, known map[string]bool) []string {

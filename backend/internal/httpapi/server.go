@@ -48,6 +48,7 @@ type Server struct {
 	wechatAPIURL          string
 	settingsStore         *appsettings.Store
 	reviewAutomation      *review.Automation
+	remoteDailySync       *review.RemoteDailySync
 	hermesGateway         hermes.Gateway
 	masteryLibrary        *methodology.Library
 }
@@ -170,6 +171,12 @@ func NewServer(config any) *Server {
 	if cfg.ReviewAutomation == nil {
 		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, cfg.WeChatAPIURL, cfg.HermesGateway)
 	}
+	if cfg.RemoteDailySync == nil {
+		cfg.RemoteDailySync = review.NewRemoteDailySync(cfg.ReviewStore, review.RemoteDailySyncConfig{
+			BaseURL: cfg.RemoteDailyReviewURL,
+			Client:  cfg.ReviewHTTP,
+		})
+	}
 	s := &Server{
 		mux:                   http.NewServeMux(),
 		token:                 cfg.Token,
@@ -193,6 +200,7 @@ func NewServer(config any) *Server {
 		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
 		settingsStore:         cfg.SettingsStore,
 		reviewAutomation:      cfg.ReviewAutomation,
+		remoteDailySync:       cfg.RemoteDailySync,
 		hermesGateway:         cfg.HermesGateway,
 		masteryLibrary:        cfg.MasteryLibrary,
 	}
@@ -224,6 +232,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) RunReviewScheduler(ctx context.Context) {
 	if s.reviewAutomation != nil {
 		s.reviewAutomation.RunScheduler(ctx)
+	}
+}
+
+func (s *Server) RunRemoteDailyReviewScheduler(ctx context.Context) {
+	if s.remoteDailySync != nil {
+		s.remoteDailySync.Run(ctx)
 	}
 }
 
@@ -281,6 +295,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reviews/sync", s.reviewSyncAll)
 	s.mux.HandleFunc("POST /api/v1/reviews/subscriptions/{id}/sync", s.reviewSyncOne)
 	s.mux.HandleFunc("POST /api/v1/reviews/posts/{id}/analyze", s.reviewAnalyzePost)
+	s.mux.HandleFunc("GET /api/v1/reviews/remote-daily/status", s.reviewRemoteDailyStatus)
+	s.mux.HandleFunc("POST /api/v1/reviews/remote-daily/sync", s.reviewRemoteDailySync)
 	s.mux.HandleFunc("GET /api/v1/settings", s.settingsGet)
 	s.mux.HandleFunc("PUT /api/v1/settings", s.settingsUpdate)
 	s.mux.HandleFunc("POST /api/v1/settings/llm/models", s.settingsLLMModels)

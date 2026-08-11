@@ -60,17 +60,19 @@ func main() {
 		HermesHome: hermesHome,
 	})
 	server := httpapi.NewServer(httpapi.Config{
-		Token:               os.Getenv("A_STOCK_TOKEN"),
-		ReviewDBPath:        reviewDBPath,
-		MarketEmotionDBPath: marketEmotionDBPath,
-		ThemeRadarDBPath:    themeRadarDBPath,
-		DuanxianxiaBaseURL:  os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
-		WeChatAPIURL:        os.Getenv("A_STOCK_WECHAT_API_URL"),
-		SettingsPath:        settingsPath,
-		HermesGateway:       hermesGateway,
-		MasteryLibrary:      masteryLibrary,
+		Token:                os.Getenv("A_STOCK_TOKEN"),
+		ReviewDBPath:         reviewDBPath,
+		RemoteDailyReviewURL: os.Getenv("A_STOCK_DAILY_REVIEW_BASE_URL"),
+		MarketEmotionDBPath:  marketEmotionDBPath,
+		ThemeRadarDBPath:     themeRadarDBPath,
+		DuanxianxiaBaseURL:   os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
+		WeChatAPIURL:         os.Getenv("A_STOCK_WECHAT_API_URL"),
+		SettingsPath:         settingsPath,
+		HermesGateway:        hermesGateway,
+		MasteryLibrary:       masteryLibrary,
 	})
 	go server.RunReviewScheduler(context.Background())
+	go server.RunRemoteDailyReviewScheduler(context.Background())
 	go server.RunMarketEmotionScheduler(context.Background())
 	go server.RunMasteryScheduler(context.Background())
 	log.Printf("easy-stock data foundation listening on http://%s", addr)

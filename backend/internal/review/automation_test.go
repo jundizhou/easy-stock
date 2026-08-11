@@ -188,9 +188,12 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 		"executive_summary":"两位作者共同认为市场处于修复阶段，算力分歧后回流，但明日仍需核心股量价与板块扩散确认。",
 		"market_regime":"分歧修复",
 		"market_analysis":"算力是共同关注方向，核心容量承接强于后排。",
+		"market_framework":{"cycle":"分歧修复","capital_pricing":"奖励核心承接，惩罚后排跟风","direction_competition":"算力占优但扩散不足","trading_method":"先看核心反馈再判断扩散"},
 		"consensus":[{"topic":"算力回流","conclusion":"分歧后仍有资金承接","support_count":9,"authors":["作者甲","作者乙","不存在的作者"],"evidence":["[作者甲] 核心容量承接较强","[作者乙] 算力仍受关注"]}],
-		"disagreements":[],
-		"today_surprises":[{"name":"核心股","symbol":"","logic":"弱转强超预期","support_count":1,"authors":["作者乙"],"evidence":["[作者乙] 弱转强超预期"],"trigger":"主动走强","invalidation":"次日无承接","risk":"单一来源"}],
+		"disagreements":[{"topic":"扩散强度","views":["扩散不足","等待扩散确认"],"authors":["作者甲","不存在的作者"],"positions":[{"author":"作者甲","stance":"谨慎","view":"扩散不足","evidence":"后排不足"},{"author":"作者乙","stance":"中性","view":"等待扩散确认","evidence":"观察板块扩散"},{"author":"不存在的作者","stance":"看强","view":"伪造观点","evidence":"无"}]}],
+		"scenarios":[{"key":"weak","name":"偏弱情景","summary":"核心负反馈扩散","trigger":"核心低开","confirmation":"后排同步走弱","invalidation":"核心快速修复","focus":["负反馈"]},{"key":"base","name":"基础情景","summary":"分歧中延续","trigger":"核心平稳","confirmation":"承接仍在","invalidation":"核心破位","focus":["核心承接"]},{"key":"strong","name":"偏强情景","summary":"板块扩散","trigger":"核心超预期","confirmation":"后排跟随","invalidation":"冲高回落","focus":["扩散"]},{"key":"invented","name":"伪造情景","summary":"不应保留","trigger":"","confirmation":"","invalidation":"","focus":[]}],
+		"directions":[{"name":"算力","stance":"优先观察","summary":"共同关注但等待扩散","supporting_authors":["作者甲","作者乙","不存在的作者"],"opposing_authors":[],"stocks":["核心股","伪造个股"],"trigger":"核心承接并扩散","invalidation":"核心负反馈","risks":["拥挤"]}],
+		"today_surprises":[{"name":"核心股","symbol":"999999","logic":"弱转强超预期","support_count":1,"authors":["作者乙"],"evidence":["[作者乙] 弱转强超预期"],"trigger":"主动走强","invalidation":"次日无承接","risk":"单一来源"}],
 		"tomorrow_focus":[{"name":"核心容量股","symbol":"","logic":"观察量价承接和扩散","support_count":2,"authors":["作者甲","作者乙"],"evidence":[],"trigger":"竞价与开盘承接","invalidation":"核心负反馈","risk":"一致性过高"}],
 		"tomorrow_outlook":"基础情景为分歧中延续，偏强看板块扩散，偏弱看核心负反馈。",
 		"tomorrow_playbook":{"pre_open":["观察竞价"],"opening":["观察核心承接"],"intraday":["观察扩散"],"close":["确认强弱"]},
@@ -202,8 +205,17 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.ArticleCount != 3 || summary.AuthorCount != 2 || len(summary.Consensus) != 1 || summary.Consensus[0].SupportCount != 2 {
+	if summary.ArticleCount != 3 || summary.AuthorCount != 2 || len(summary.AuthorViews) != 2 || len(summary.Consensus) != 1 || summary.Consensus[0].SupportCount != 2 {
 		t.Fatalf("summary = %+v", summary)
+	}
+	if summary.AuthorViews[0].Sources[0].URL == "" || summary.AuthorViews[0].Sources[0].PostID == "" {
+		t.Fatalf("author sources were not persisted: %+v", summary.AuthorViews)
+	}
+	if len(summary.Scenarios) != 3 || summary.Scenarios[0].Key != "base" || len(summary.Directions) != 1 || len(summary.Directions[0].SupportingAuthors) != 2 || len(summary.Directions[0].Stocks) != 1 {
+		t.Fatalf("structured framework was not normalized: scenarios=%+v directions=%+v", summary.Scenarios, summary.Directions)
+	}
+	if len(summary.Disagreements) != 1 || len(summary.Disagreements[0].Positions) != 2 || summary.TodaySurprises[0].Symbol != "" {
+		t.Fatalf("unknown authors or symbols were not filtered: disagreements=%+v surprises=%+v", summary.Disagreements, summary.TodaySurprises)
 	}
 	expectedWindow := effectiveReviewWindow(summary.GeneratedAt)
 	if summary.WindowStart.IsZero() || summary.WindowEnd.IsZero() || summary.FreshnessRule != expectedWindow.Rule {
@@ -228,11 +240,11 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 			t.Fatalf("过期文章进入模型提示词：%q", prompt)
 		}
 	}
-	if authorPromptCount != 2 || !strings.Contains(finalPrompt, "输入作者观点卡JSON") || !strings.Contains(finalPrompt, "算力分歧回流但后排扩散不足") || strings.Contains(finalPrompt, "甲作者早文独有标记") {
+	if authorPromptCount != 2 || !strings.Contains(finalPrompt, "输入作者观点卡JSON") || !strings.Contains(finalPrompt, "\"scenarios\"") || !strings.Contains(finalPrompt, "\"directions\"") || !strings.Contains(finalPrompt, "算力分歧回流但后排扩散不足") || strings.Contains(finalPrompt, "甲作者早文独有标记") {
 		t.Fatalf("staged prompts = %#v", prompts)
 	}
 	stored, err := automation.GetTodaySummary(context.Background())
-	if err != nil || stored == nil || stored.ExecutiveSummary != summary.ExecutiveSummary {
+	if err != nil || stored == nil || stored.ExecutiveSummary != summary.ExecutiveSummary || len(stored.AuthorViews) != 2 || len(stored.Scenarios) != 3 {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
 }

@@ -83,9 +83,17 @@ type DailyConsensus struct {
 }
 
 type DailyDisagreement struct {
-	Topic   string   `json:"topic"`
-	Views   []string `json:"views"`
-	Authors []string `json:"authors"`
+	Topic     string                      `json:"topic"`
+	Views     []string                    `json:"views"`
+	Authors   []string                    `json:"authors"`
+	Positions []DailyDisagreementPosition `json:"positions"`
+}
+
+type DailyDisagreementPosition struct {
+	Author   string `json:"author"`
+	Stance   string `json:"stance"`
+	View     string `json:"view"`
+	Evidence string `json:"evidence"`
 }
 
 type DailyStockView struct {
@@ -108,9 +116,61 @@ type DailyPlaybook struct {
 }
 
 type DailySummarySource struct {
-	Author string `json:"author"`
-	Title  string `json:"title"`
-	Source string `json:"source"`
+	PostID      string `json:"post_id,omitempty"`
+	Author      string `json:"author"`
+	Title       string `json:"title"`
+	Source      string `json:"source"`
+	URL         string `json:"url,omitempty"`
+	PublishedAt string `json:"published_at,omitempty"`
+}
+
+type DailyAuthorView struct {
+	Author                string               `json:"author"`
+	Source                string               `json:"source"`
+	ArticleCount          int                  `json:"article_count"`
+	AvailableArticleCount int                  `json:"available_article_count"`
+	TimeRange             string               `json:"time_range"`
+	CoreView              string               `json:"core_view"`
+	MarketInterpretation  string               `json:"market_interpretation"`
+	ViewEvolution         []string             `json:"view_evolution"`
+	Themes                []string             `json:"themes"`
+	TodaySurprises        []DailyStockView     `json:"today_surprises"`
+	TomorrowFocus         []DailyStockView     `json:"tomorrow_focus"`
+	TomorrowOutlook       string               `json:"tomorrow_outlook"`
+	Catalysts             []string             `json:"catalysts"`
+	Risks                 []string             `json:"risks"`
+	Confidence            string               `json:"confidence"`
+	Evidence              []string             `json:"evidence"`
+	Sources               []DailySummarySource `json:"sources"`
+}
+
+type DailyMarketFramework struct {
+	Cycle                string `json:"cycle"`
+	CapitalPricing       string `json:"capital_pricing"`
+	DirectionCompetition string `json:"direction_competition"`
+	TradingMethod        string `json:"trading_method"`
+}
+
+type DailyScenario struct {
+	Key          string   `json:"key"`
+	Name         string   `json:"name"`
+	Summary      string   `json:"summary"`
+	Trigger      string   `json:"trigger"`
+	Confirmation string   `json:"confirmation"`
+	Invalidation string   `json:"invalidation"`
+	Focus        []string `json:"focus"`
+}
+
+type DailyDirectionView struct {
+	Name              string   `json:"name"`
+	Stance            string   `json:"stance"`
+	Summary           string   `json:"summary"`
+	SupportingAuthors []string `json:"supporting_authors"`
+	OpposingAuthors   []string `json:"opposing_authors"`
+	Stocks            []string `json:"stocks"`
+	Trigger           string   `json:"trigger"`
+	Invalidation      string   `json:"invalidation"`
+	Risks             []string `json:"risks"`
 }
 
 type DailySummary struct {
@@ -124,11 +184,15 @@ type DailySummary struct {
 	AuthorCount           int                  `json:"author_count"`
 	Authors               []string             `json:"authors"`
 	Sources               []DailySummarySource `json:"sources"`
+	AuthorViews           []DailyAuthorView    `json:"author_views"`
 	ExecutiveSummary      string               `json:"executive_summary"`
 	MarketRegime          string               `json:"market_regime"`
 	MarketAnalysis        string               `json:"market_analysis"`
+	MarketFramework       DailyMarketFramework `json:"market_framework"`
 	Consensus             []DailyConsensus     `json:"consensus"`
 	Disagreements         []DailyDisagreement  `json:"disagreements"`
+	Scenarios             []DailyScenario      `json:"scenarios"`
+	Directions            []DailyDirectionView `json:"directions"`
 	TodaySurprises        []DailyStockView     `json:"today_surprises"`
 	TomorrowFocus         []DailyStockView     `json:"tomorrow_focus"`
 	TomorrowOutlook       string               `json:"tomorrow_outlook"`
