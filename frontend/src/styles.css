@@ -2667,13 +2667,12 @@ a:focus-visible {
 .billboard-seat-name > i { display: grid; place-items: center; width: 22px; height: 20px; border-radius: 5px; background: #edf5ff; color: #2476d2; font-size: 9px; font-style: normal; font-weight: 700; }
 .billboard-seat-panel.sell .billboard-seat-name > i { background: #effaf5; color: #14865f; }
 .billboard-seat-name > span { display: grid; gap: 2px; min-width: 0; }
-.billboard-seat-name strong { overflow: hidden; color: var(--text); font-family: inherit; font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.billboard-seat-name strong { overflow: hidden; color: var(--text); font-family: inherit; font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 .billboard-seat-name small { width: fit-content; padding: 1px 5px; border-radius: 999px; background: #eef2f7; color: #64768b; font-family: inherit; font-size: 9px; }
 .billboard-seat-label.institution { background: #f2ebff; color: #7651c9; }
 .billboard-seat-label.trader { background: #fff0ee; color: #c25650; }
 .billboard-seat-label.quant { background: #eaf4ff; color: #2476d2; }
 .billboard-seat-label.retail { background: #effaf5; color: #14865f; }
-.billboard-seat-label.unknown { background: #f3f5f7; color: #7a899a; }
 .billboard-seat-panel article > strong.up { color: var(--up); }
 .billboard-seat-panel article > strong.down { color: var(--down); }
 .billboard-modal-state { display: grid; place-items: center; gap: 8px; min-height: 260px; padding: 30px; color: var(--muted); text-align: center; }
@@ -5564,7 +5563,7 @@ a:focus-visible {
 .market-billboard-seat-panel.buy .market-seat-name > i { background: #fff0ee; color: #b75d55; }
 .market-billboard-seat-panel.sell .market-seat-name > i { background: #eaf6ee; color: #43825a; }
 .market-seat-name > span { display: grid; gap: 2px; min-width: 0; }
-.market-seat-name strong { overflow: hidden; color: #40536a; font-size: 7px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.market-seat-name strong { overflow: hidden; color: #40536a; font-size: 7px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 .market-seat-name small { width: fit-content; padding: 1px 4px; border-radius: 99px; background: #f3f5f7; color: #718095; font-size: 6px; }
 .market-seat-label.institution { background: #eee8ff; color: #735aae; }
 .market-seat-label.trader { background: #fff0ee; color: #b75d55; }
