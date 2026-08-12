@@ -3,10 +3,12 @@ package hermes
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"easy-stock/backend/internal/appsettings"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
@@ -27,7 +29,14 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	configText := string(configData)
-	if !strings.Contains(configText, `provider: easy-stock`) || !strings.Contains(configText, `default: "deepseek-chat"`) || !strings.Contains(configText, `transport: "chat_completions"`) {
+	var config map[string]any
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		t.Fatalf("invalid Hermes config: %v\n%s", err, configText)
+	}
+	model, _ := stringMap(config["model"])
+	providers, _ := stringMap(config["providers"])
+	provider, _ := stringMap(providers[providerSlug])
+	if stringValue(model["provider"]) != providerSlug || stringValue(model["default"]) != "deepseek-chat" || stringValue(provider["transport"]) != "chat_completions" {
 		t.Fatalf("unexpected Hermes config:\n%s", configText)
 	}
 	if strings.Contains(configText, key) {
@@ -43,6 +52,71 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	status := runtime.Status()
 	if !status.Available || !status.Configured || !status.APIKeyConfigured {
 		t.Fatalf("unexpected runtime status: %+v", status)
+	}
+}
+
+func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	skillDir := filepath.Join(home, "skills", "trading", "test-skill")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: test description\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := NewRuntime(Config{Home: home, WorkDir: root, PythonPath: filepath.Join(root, "python")})
+	key := "model-secret"
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-test"}, &key); err != nil {
+		t.Fatal(err)
+	}
+	config, err := runtime.readConfigMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, _ := stringMap(config["skills"])
+	skills["disabled"] = []string{"missing-local-skill"}
+	config["skills"] = skills
+	config["mcp_servers"] = map[string]any{"github": map[string]any{
+		"enabled": true, "command": "npx", "args": []string{"-y", "server"},
+		"env": map[string]string{"TOKEN": "mcp-secret"}, "keepalive_interval": 15,
+	}}
+	if err := runtime.writeConfigMap(config); err != nil {
+		t.Fatal(err)
+	}
+	view, err := runtime.AgentSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Skills) != 1 || !view.Skills[0].Enabled || len(view.MCPServers) != 1 || view.MCPServers[0].Env["TOKEN"] != "mcp-secret" {
+		t.Fatalf("unexpected agent settings: %+v", view)
+	}
+	view.Skills[0].Enabled = false
+	view.MCPServers[0].SupportsParallelToolCall = true
+	if err := runtime.SyncAgentSettings(view); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "mcp_servers:") || !strings.Contains(text, "disabled:") || !strings.Contains(text, "gpt-test") {
+		t.Fatalf("merged config missing managed sections:\n%s", text)
+	}
+	merged, _ := runtime.readConfigMap()
+	mergedSkills, _ := stringMap(merged["skills"])
+	servers, _ := stringMap(merged["mcp_servers"])
+	github, _ := stringMap(servers["github"])
+	if !slices.Contains(stringSlice(mergedSkills["disabled"]), "missing-local-skill") || intValue(github["keepalive_interval"]) != 15 {
+		t.Fatalf("unmanaged Hermes settings were overwritten:\n%s", text)
+	}
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-test-2"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := runtime.AgentSettings()
+	if len(after.MCPServers) != 1 || after.MCPServers[0].Env["TOKEN"] != "mcp-secret" || after.Skills[0].Enabled {
+		t.Fatalf("model save overwrote agent settings: %+v", after)
 	}
 }
 

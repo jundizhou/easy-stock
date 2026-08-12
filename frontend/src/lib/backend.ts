@@ -88,6 +88,32 @@ export type AppSettings = {
 	updated_at?: string;
 };
 
+export type HermesSkillSetting = {
+	name: string;
+	description: string;
+	category: string;
+	enabled: boolean;
+};
+
+export type HermesMCPServerSetting = {
+	name: string;
+	enabled: boolean;
+	transport: 'stdio' | 'http' | 'sse';
+	command?: string;
+	args?: string[];
+	env?: Record<string, SecretSettingStatus>;
+	url?: string;
+	headers?: Record<string, SecretSettingStatus>;
+	timeout?: number;
+	connect_timeout?: number;
+	supports_parallel_tool_calls?: boolean;
+};
+
+export type HermesAgentSettings = {
+	skills: HermesSkillSetting[];
+	mcp_servers: HermesMCPServerSetting[];
+};
+
 export type LLMConnectionTestResult = {
 	ok: boolean;
 	provider: string;

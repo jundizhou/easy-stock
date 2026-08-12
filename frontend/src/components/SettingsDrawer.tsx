@@ -22,6 +22,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, ReviewAutomationProfile, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
 import { llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { AppUpdatePanel } from './AppUpdatePanel';
+import { HermesAgentSettingsPanel } from './HermesAgentSettingsPanel';
 
 type Props = {
 	config: BackendConfig | null;
@@ -392,6 +393,8 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 							<div><strong>模型密钥由 Hermes 管理</strong><span>API Key 只写入 Hermes 的本机 .env；页面仅读取是否已配置，不会取回密钥原文。</span></div>
 							<em>{configuredCount} 项已配置</em>
 						</section>
+
+						<HermesAgentSettingsPanel config={config} open={open} />
 
 						<section className="settings-section">
 							<div className="settings-section-title"><Bot size={18} /><div><h3>Hermes 模型运行时</h3><p>侧边栏对话、模型探针和复盘 AI 提炼统一由本机 Hermes 驱动。</p></div></div>

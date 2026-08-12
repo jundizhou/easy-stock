@@ -12,12 +12,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"easy-stock/backend/internal/appsettings"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -68,6 +70,39 @@ type Gateway interface {
 	Start(ctx context.Context) (Process, error)
 }
 
+type SettingsGateway interface {
+	Gateway
+	AgentSettings() (AgentSettings, error)
+	SyncAgentSettings(AgentSettings) error
+}
+
+type AgentSettings struct {
+	Skills     []SkillInfo     `json:"skills" yaml:"-"`
+	MCPServers []MCPServerInfo `json:"mcp_servers" yaml:"-"`
+}
+
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Enabled     bool   `json:"enabled"`
+}
+
+type MCPServerInfo struct {
+	Name                     string            `json:"name"`
+	Enabled                  bool              `json:"enabled"`
+	Transport                string            `json:"transport"`
+	Command                  string            `json:"command,omitempty"`
+	Args                     []string          `json:"args,omitempty"`
+	Env                      map[string]string `json:"env,omitempty"`
+	URL                      string            `json:"url,omitempty"`
+	Headers                  map[string]string `json:"headers,omitempty"`
+	Timeout                  int               `json:"timeout,omitempty"`
+	ConnectTimeout           int               `json:"connect_timeout,omitempty"`
+	SupportsParallelToolCall bool              `json:"supports_parallel_tool_calls,omitempty"`
+	raw                      map[string]any
+}
+
 type Config struct {
 	RuntimeRoot string
 	Home        string
@@ -82,6 +117,7 @@ type Runtime struct {
 	pythonPath  string
 
 	mu         sync.RWMutex
+	configMu   sync.Mutex
 	llm        appsettings.LLM
 	configured bool
 	hasAPIKey  bool
@@ -146,6 +182,8 @@ func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
 	if err := os.MkdirAll(r.home, 0o700); err != nil {
 		return fmt.Errorf("创建 Hermes 用户目录: %w", err)
 	}
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
 
 	envPath := filepath.Join(r.home, ".env")
 	existingKey, err := readEnvValue(envPath, modelAPIKeyEnvName)
@@ -168,7 +206,10 @@ func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
 	}
 
 	normalized := normalizeLLM(cfg)
-	configText := renderConfig(normalized, r.workDir)
+	configText, err := r.renderMergedConfig(normalized)
+	if err != nil {
+		return err
+	}
 	if err := writeSecureFile(filepath.Join(r.home, "config.yaml"), []byte(configText)); err != nil {
 		return fmt.Errorf("写入 Hermes 模型配置: %w", err)
 	}
@@ -180,6 +221,152 @@ func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
 	r.hasAPIKey = effectiveKey != ""
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *Runtime) AgentSettings() (AgentSettings, error) {
+	if strings.TrimSpace(r.home) == "" {
+		return AgentSettings{}, errors.New("Hermes 用户目录未配置")
+	}
+	config, err := r.readConfigMap()
+	if err != nil {
+		return AgentSettings{}, err
+	}
+	disabled := map[string]bool{}
+	if skills, ok := stringMap(config["skills"]); ok {
+		for _, name := range stringSlice(skills["disabled"]) {
+			disabled[name] = true
+		}
+	}
+	settings := AgentSettings{Skills: discoverSkills(filepath.Join(r.home, "skills"))}
+	for index := range settings.Skills {
+		settings.Skills[index].Enabled = !disabled[settings.Skills[index].Name]
+	}
+	if servers, ok := stringMap(config["mcp_servers"]); ok {
+		for name, value := range servers {
+			serverConfig, ok := stringMap(value)
+			if !ok {
+				continue
+			}
+			server := MCPServerInfo{
+				Name:                     name,
+				Enabled:                  boolValue(serverConfig["enabled"], true),
+				Command:                  stringValue(serverConfig["command"]),
+				Args:                     stringSlice(serverConfig["args"]),
+				Env:                      stringStringMap(serverConfig["env"]),
+				URL:                      stringValue(serverConfig["url"]),
+				Headers:                  stringStringMap(serverConfig["headers"]),
+				Timeout:                  intValue(serverConfig["timeout"]),
+				ConnectTimeout:           intValue(serverConfig["connect_timeout"]),
+				SupportsParallelToolCall: boolValue(serverConfig["supports_parallel_tool_calls"], false),
+				raw:                      cloneStringAnyMap(serverConfig),
+			}
+			server.Transport = strings.ToLower(strings.TrimSpace(stringValue(serverConfig["transport"])))
+			if server.Transport == "" {
+				if server.URL != "" {
+					server.Transport = "http"
+				} else {
+					server.Transport = "stdio"
+				}
+			}
+			settings.MCPServers = append(settings.MCPServers, server)
+		}
+	}
+	slices.SortFunc(settings.MCPServers, func(a, b MCPServerInfo) int { return strings.Compare(a.Name, b.Name) })
+	return settings, nil
+}
+
+func (r *Runtime) SyncAgentSettings(settings AgentSettings) error {
+	if strings.TrimSpace(r.home) == "" {
+		return errors.New("Hermes 用户目录未配置")
+	}
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+	config, err := r.readConfigMap()
+	if err != nil {
+		return err
+	}
+	skills, _ := stringMap(config["skills"])
+	if skills == nil {
+		skills = map[string]any{}
+	}
+	disabled := make([]string, 0)
+	knownSkills := map[string]bool{}
+	for _, skill := range settings.Skills {
+		name := strings.TrimSpace(skill.Name)
+		knownSkills[name] = true
+		if !skill.Enabled {
+			disabled = append(disabled, name)
+		}
+	}
+	for _, name := range stringSlice(skills["disabled"]) {
+		if name = strings.TrimSpace(name); name != "" && !knownSkills[name] {
+			disabled = append(disabled, name)
+		}
+	}
+	slices.Sort(disabled)
+	disabled = slices.Compact(disabled)
+	skills["disabled"] = disabled
+	if _, ok := skills["creation_nudge_interval"]; !ok {
+		skills["creation_nudge_interval"] = 0
+	}
+	config["skills"] = skills
+	servers := map[string]any{}
+	for _, server := range settings.MCPServers {
+		entry := cloneStringAnyMap(server.raw)
+		if entry == nil {
+			entry = map[string]any{}
+		}
+		entry["enabled"] = server.Enabled
+		if server.Transport == "stdio" {
+			delete(entry, "url")
+			delete(entry, "headers")
+			delete(entry, "transport")
+			entry["command"] = strings.TrimSpace(server.Command)
+			if len(server.Args) > 0 {
+				entry["args"] = server.Args
+			} else {
+				delete(entry, "args")
+			}
+			if len(server.Env) > 0 {
+				entry["env"] = server.Env
+			} else {
+				delete(entry, "env")
+			}
+		} else {
+			delete(entry, "command")
+			delete(entry, "args")
+			delete(entry, "env")
+			entry["url"] = strings.TrimSpace(server.URL)
+			if server.Transport == "sse" {
+				entry["transport"] = "sse"
+			} else {
+				delete(entry, "transport")
+			}
+			if len(server.Headers) > 0 {
+				entry["headers"] = server.Headers
+			} else {
+				delete(entry, "headers")
+			}
+		}
+		if server.Timeout > 0 {
+			entry["timeout"] = server.Timeout
+		} else {
+			delete(entry, "timeout")
+		}
+		if server.ConnectTimeout > 0 {
+			entry["connect_timeout"] = server.ConnectTimeout
+		} else {
+			delete(entry, "connect_timeout")
+		}
+		if server.SupportsParallelToolCall {
+			entry["supports_parallel_tool_calls"] = true
+		} else {
+			delete(entry, "supports_parallel_tool_calls")
+		}
+		servers[strings.TrimSpace(server.Name)] = entry
+	}
+	config["mcp_servers"] = servers
+	return r.writeConfigMap(config)
 }
 
 func (r *Runtime) Start(ctx context.Context) (Process, error) {
@@ -544,6 +731,210 @@ func renderConfig(cfg appsettings.LLM, workDir string) string {
 	}
 	text.WriteString("\nmemory:\n  memory_enabled: true\n  user_profile_enabled: false\n  nudge_interval: 0\nskills:\n  creation_nudge_interval: 0\ncurator:\n  enabled: false\nsecurity:\n  allow_lazy_installs: false\n")
 	return text.String()
+}
+
+func (r *Runtime) renderMergedConfig(cfg appsettings.LLM) (string, error) {
+	config, err := r.readConfigMap()
+	if err != nil {
+		return "", err
+	}
+	managed := map[string]any{}
+	if err := yaml.Unmarshal([]byte(renderConfig(cfg, r.workDir)), &managed); err != nil {
+		return "", fmt.Errorf("生成 Hermes 配置: %w", err)
+	}
+	for _, key := range []string{"model", "providers", "agent", "terminal", "memory", "curator", "security"} {
+		if value, ok := managed[key]; ok {
+			config[key] = value
+		} else {
+			delete(config, key)
+		}
+	}
+	existingSkills, _ := stringMap(config["skills"])
+	if existingSkills == nil {
+		existingSkills = map[string]any{}
+	}
+	existingSkills["creation_nudge_interval"] = 0
+	config["skills"] = existingSkills
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("编码 Hermes 配置: %w", err)
+	}
+	return string(data), nil
+}
+
+func (r *Runtime) readConfigMap() (map[string]any, error) {
+	config := map[string]any{}
+	data, err := os.ReadFile(filepath.Join(r.home, "config.yaml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return config, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("读取 Hermes 配置: %w", err)
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return config, nil
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("解析 Hermes 配置: %w", err)
+	}
+	return config, nil
+}
+
+func (r *Runtime) writeConfigMap(config map[string]any) error {
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("编码 Hermes 配置: %w", err)
+	}
+	if err := writeSecureFile(filepath.Join(r.home, "config.yaml"), data); err != nil {
+		return fmt.Errorf("写入 Hermes 配置: %w", err)
+	}
+	return nil
+}
+
+func discoverSkills(root string) []SkillInfo {
+	result := []SkillInfo{}
+	seen := map[string]bool{}
+	_ = filepath.WalkDir(root, func(skillPath string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Name() != "SKILL.md" {
+			return nil
+		}
+		data, readErr := os.ReadFile(skillPath)
+		if readErr != nil {
+			return nil
+		}
+		name, description := skillFrontmatter(string(data))
+		skillDir := filepath.Dir(skillPath)
+		if name == "" {
+			name = filepath.Base(skillDir)
+		}
+		if seen[name] {
+			return nil
+		}
+		seen[name] = true
+		category := "未分类"
+		if relative, relativeErr := filepath.Rel(root, skillDir); relativeErr == nil {
+			parts := strings.Split(filepath.ToSlash(relative), "/")
+			if len(parts) > 1 && parts[0] != "." {
+				category = parts[0]
+			}
+		}
+		result = append(result, SkillInfo{Name: name, Description: description, Category: category, Enabled: true})
+		return nil
+	})
+	slices.SortFunc(result, func(a, b SkillInfo) int { return strings.Compare(a.Name, b.Name) })
+	return result
+}
+
+func skillFrontmatter(content string) (string, string) {
+	content = strings.TrimPrefix(content, "\ufeff")
+	lines := strings.Split(content, "\n")
+	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
+		return "", ""
+	}
+	end := -1
+	for index, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			end = index + 1
+			break
+		}
+	}
+	if end < 0 {
+		return "", ""
+	}
+	var metadata struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(strings.Join(lines[1:end], "\n")), &metadata); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(metadata.Name), strings.TrimSpace(metadata.Description)
+}
+
+func cloneStringAnyMap(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	result := make(map[string]any, len(value))
+	for key, item := range value {
+		result[key] = item
+	}
+	return result
+}
+
+func stringMap(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, true
+	case map[any]any:
+		result := map[string]any{}
+		for key, item := range typed {
+			result[fmt.Sprint(key)] = item
+		}
+		return result, true
+	default:
+		return nil, false
+	}
+}
+
+func stringSlice(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		if values, stringOK := value.([]string); stringOK {
+			return append([]string(nil), values...)
+		}
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func stringStringMap(value any) map[string]string {
+	items, ok := stringMap(value)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	result := map[string]string{}
+	for key, item := range items {
+		if text, ok := item.(string); ok {
+			result[key] = text
+		}
+	}
+	return result
+}
+
+func boolValue(value any, fallback bool) bool {
+	if boolean, ok := value.(bool); ok {
+		return boolean
+	}
+	if text, ok := value.(string); ok {
+		parsed, err := strconv.ParseBool(text)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func intValue(value any) int {
+	switch number := value.(type) {
+	case int:
+		return number
+	case int64:
+		return int(number)
+	case float64:
+		return int(number)
+	case string:
+		parsed, _ := strconv.Atoi(number)
+		return parsed
+	default:
+		return 0
+	}
 }
 
 func transportForAPIMode(apiMode string) string {

@@ -12,14 +12,15 @@ import (
 )
 
 type fakeHermesGateway struct {
-	status       hermes.Status
-	promptResult hermes.PromptResult
-	promptErr    error
-	modelAPIKey  string
-	modelKeyErr  error
-	start        func(context.Context) (hermes.Process, error)
-	lastLLM      appsettings.LLM
-	lastKey      *string
+	status        hermes.Status
+	promptResult  hermes.PromptResult
+	promptErr     error
+	modelAPIKey   string
+	modelKeyErr   error
+	start         func(context.Context) (hermes.Process, error)
+	lastLLM       appsettings.LLM
+	lastKey       *string
+	agentSettings hermes.AgentSettings
 }
 
 func (g *fakeHermesGateway) Status() hermes.Status { return g.status }
@@ -49,6 +50,13 @@ func (g *fakeHermesGateway) SyncLLM(cfg appsettings.LLM, key *string) error {
 		g.status.APIKeyConfigured = value != ""
 	}
 	g.status.Configured = stringsConfigured(cfg, g.status.APIKeyConfigured)
+	return nil
+}
+func (g *fakeHermesGateway) AgentSettings() (hermes.AgentSettings, error) {
+	return g.agentSettings, nil
+}
+func (g *fakeHermesGateway) SyncAgentSettings(settings hermes.AgentSettings) error {
+	g.agentSettings = settings
 	return nil
 }
 

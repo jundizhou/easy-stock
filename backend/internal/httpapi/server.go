@@ -364,6 +364,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reviews/remote-daily/sync", s.reviewRemoteDailySync)
 	s.mux.HandleFunc("GET /api/v1/settings", s.settingsGet)
 	s.mux.HandleFunc("PUT /api/v1/settings", s.settingsUpdate)
+	s.mux.HandleFunc("GET /api/v1/settings/agent", s.settingsAgentGet)
+	s.mux.HandleFunc("PUT /api/v1/settings/agent", s.settingsAgentUpdate)
 	s.mux.HandleFunc("POST /api/v1/settings/llm/models", s.settingsLLMModels)
 	s.mux.HandleFunc("POST /api/v1/settings/llm/test", s.settingsLLMTest)
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
