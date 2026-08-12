@@ -429,16 +429,20 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 						</div>
 					) : (
 						<div className="ai-message-list">
-							{activeConversation.messages.map((message) => (
-								<article className={`ai-message ${message.role} ${message.error ? 'error' : ''}`} key={message.id}>
+							{activeConversation.messages.map((message) => {
+								const pending = message.id === pendingMessageID;
+								return (
+								<article className={`ai-message ${message.role} ${message.error ? 'error' : ''} ${pending ? 'pending' : ''}`} key={message.id}>
 									<div className="ai-message-avatar">{message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}</div>
 									<div className="ai-message-body">
 										<header><strong>{message.role === 'user' ? '你' : 'AI 助手'}</strong><time>{formatMessageTime(message.created_at)}</time></header>
-										{message.content ? <MessageContent content={message.content} markdown={message.role === 'assistant' && !message.error} /> : message.id === pendingMessageID ? <div className="ai-thinking"><i /><i /><i /></div> : null}
-										<button type="button" className="ai-copy-message" onClick={() => void copyMessage(message)}>{copiedID === message.id ? <Check size={13} /> : <Copy size={13} />}{copiedID === message.id ? '已复制' : '复制'}</button>
+										{message.content && <MessageContent content={message.content} markdown={message.role === 'assistant' && !message.error} />}
+										{pending && <div className="ai-answering" role="status" aria-live="polite"><span className="ai-answering-bars" aria-hidden="true"><i /><i /><i /><i /></span><strong>AI 正在回答</strong><small>{message.content ? '正在继续分析并生成后续内容…' : '正在理解问题并组织答案…'}</small></div>}
+										{!pending && <button type="button" className="ai-copy-message" onClick={() => void copyMessage(message)}>{copiedID === message.id ? <Check size={13} /> : <Copy size={13} />}{copiedID === message.id ? '已复制' : '复制'}</button>}
 									</div>
 								</article>
-							))}
+								);
+							})}
 							<div ref={messageEndRef} />
 						</div>
 					)}
