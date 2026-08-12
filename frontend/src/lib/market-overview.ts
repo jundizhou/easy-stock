@@ -10,6 +10,7 @@ import type {
 	ThemeOverview,
 	LimitUpLadderData,
 } from './backend';
+import { BILLBOARD_SEAT_MAPPINGS } from '../data/billboard-seat-mappings';
 
 export type MarketOverviewView =
 	| 'pulse'
@@ -216,20 +217,7 @@ function uniqueSeats(seats: MarketBillboardDetail['buy_seats']) {
 }
 
 function detectSeatLabels(names: string[]) {
-	const labels = [
-		{ keyword: '财通证券股份有限公司杭州上塘路证券营业部', label: '上塘路常用席位标签' },
-		{ keyword: '南京太平南路证券营业部', label: '作手新一常用席位标签' },
-		{ keyword: '上海江苏路证券营业部', label: '章盟主常用席位标签' },
-		{ keyword: '中国银河证券股份有限公司绍兴证券营业部', label: '赵老哥常用席位标签' },
-		{ keyword: '上海溧阳路证券营业部', label: '孙哥常用席位标签' },
-		{ keyword: '上海宛平南路证券营业部', label: '炒股养家常用席位标签' },
-		{ keyword: '东方财富证券股份有限公司拉萨', label: '拉萨活跃营业部集群标签' },
-	];
-	const directNames = ['赵老哥', '炒股养家', '方新侠', '呼家楼', '作手新一', '上塘路', '著名刺客', '小鳄鱼', '陈小群', '章盟主', '欢乐海岸', '涅槃重生', '瑞鹤仙', '乔帮主'];
-	const result = names.flatMap((name) => [
-		...labels.filter((item) => name.includes(item.keyword)).map((item) => item.label),
-		...directNames.filter((keyword) => name.includes(keyword)).map((keyword) => `${keyword}（席位名称直接包含该标签）`),
-	]);
+	const result = names.flatMap((name) => BILLBOARD_SEAT_MAPPINGS.filter((item) => item.keywords.some((keyword) => name.replace(/\s+/g, '').includes(keyword.replace(/\s+/g, '')))).map((item) => `${item.label}（${item.confidence}置信度，${item.note}）`));
 	return result.filter((label, index) => result.indexOf(label) === index);
 }
 

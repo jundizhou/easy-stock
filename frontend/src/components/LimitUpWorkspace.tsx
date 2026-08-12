@@ -7,6 +7,7 @@ import {
 	GitBranch,
 	History,
 	Layers3,
+	Landmark,
 	LineChart,
 	RefreshCw,
 	ShieldAlert,
@@ -22,14 +23,19 @@ import {
 	LimitUpLadderDay,
 	LimitUpLadderLevel,
 	LimitUpLadderStock,
+	MarketBillboardDetail,
+	MarketBillboardItem,
+	MarketBillboardSeat,
 	MarketEmotionHistory,
 	MarketEmotionIntraday,
 	MarketEmotionPoint,
 	requestJSON,
 } from '../lib/backend';
 import { KLineChart } from './KLineChart';
+import { classifyBillboardSeat } from '../lib/billboard';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
+type BillboardState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 type KLinePeriodKey = 'intraday' | 'five-day' | 'day' | 'week' | 'month';
 
@@ -68,7 +74,13 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 	const [selectedKLineState, setSelectedKLineState] = useState<LoadState>('idle');
 	const [selectedKLineError, setSelectedKLineError] = useState('');
 	const [selectedKLinePeriod, setSelectedKLinePeriod] = useState<KLinePeriodKey>('day');
+	const [selectedBillboard, setSelectedBillboard] = useState<{ stock: LimitUpLadderStock; tradeDate: string } | null>(null);
+	const [billboardItem, setBillboardItem] = useState<MarketBillboardItem | null>(null);
+	const [billboardDetail, setBillboardDetail] = useState<MarketBillboardDetail | null>(null);
+	const [billboardState, setBillboardState] = useState<BillboardState>('idle');
+	const [billboardError, setBillboardError] = useState('');
 	const selectedKLineCache = useRef(new Map<string, KLine[]>());
+	const billboardCache = useRef(new Map<string, { item: MarketBillboardItem | null; detail: MarketBillboardDetail | null }>());
 	const current = useMemo(() => summarizeVisibleDay(data?.current, showST), [data?.current, showST]);
 	const previous = useMemo(() => summarizeVisibleDay(data?.previous, showST), [data?.previous, showST]);
 
@@ -107,6 +119,56 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 			});
 		return () => { cancelled = true; };
 	}, [config, selectedStock, selectedKLinePeriod]);
+
+	useEffect(() => {
+		if (!selectedBillboard || !config) return;
+		const { stock, tradeDate } = selectedBillboard;
+		const cacheKey = `${tradeDate}:${stock.symbol}`;
+		const cached = billboardCache.current.get(cacheKey);
+		if (cached) {
+			setBillboardItem(cached.item);
+			setBillboardDetail(cached.detail);
+			setBillboardState(cached.item ? 'ready' : 'empty');
+			setBillboardError('');
+			return;
+		}
+		let cancelled = false;
+		setBillboardItem(null);
+		setBillboardDetail(null);
+		setBillboardState('loading');
+		setBillboardError('');
+		const load = async () => {
+			try {
+				const listPayload = await requestJSON<{ data: MarketBillboardItem[] }>(config, `/api/v1/market/billboard?trade_date=${encodeURIComponent(tradeDate)}&limit=200`);
+				if (cancelled) return;
+				const item = (listPayload.data || []).find((candidate) => candidate.symbol === stock.symbol || normalizeSymbol(candidate.symbol) === normalizeSymbol(stock.symbol)) || null;
+				if (!item) {
+					billboardCache.current.set(cacheKey, { item: null, detail: null });
+					setBillboardState('empty');
+					return;
+				}
+				setBillboardItem(item);
+				const params = new URLSearchParams({ symbol: item.symbol, trade_date: item.trade_date, reason: item.reason || '' });
+				let detail: MarketBillboardDetail | null = null;
+				try {
+					const detailPayload = await requestJSON<{ data: MarketBillboardDetail }>(config, `/api/v1/market/billboard/detail?${params.toString()}`);
+					detail = detailPayload.data || null;
+				} catch (detailLoadError) {
+					setBillboardError(detailLoadError instanceof Error ? detailLoadError.message : '买卖席位明细暂不可用');
+				}
+				if (cancelled) return;
+				billboardCache.current.set(cacheKey, { item, detail });
+				setBillboardDetail(detail);
+				setBillboardState('ready');
+			} catch (error) {
+				if (cancelled) return;
+				setBillboardState('error');
+				setBillboardError(error instanceof Error ? error.message : '龙虎榜数据加载失败');
+			}
+		};
+		void load();
+		return () => { cancelled = true; };
+	}, [config, selectedBillboard]);
 
 	if (!data && state === 'loading') {
 		return <div className="limit-up-loading"><RefreshCw className="spin" size={24} /><strong>载入短线连板结构</strong><span>正在读取开盘啦涨停池并补充东方财富历史梯队。</span></div>;
@@ -149,7 +211,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						<div><span>今日结构</span><h3>连板梯队</h3></div>
 						<small>按高度降序；同层优先无开板、早封板</small>
 					</div>
-					<LadderRows levels={current.levels} onSelectStock={setSelectedStock} emptyText="当前涨停池没有可展示股票" />
+					<LadderRows levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />
 				</section>
 
 				<aside className="limit-up-side-stack">
@@ -202,7 +264,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						</button>
 					</div>
 				</div>
-				{previousExpanded && <div id="previous-ladder-content"><LadderRows levels={previous.levels} compact showCurrentChange onSelectStock={setSelectedStock} emptyText="暂无昨日梯队数据" /></div>}
+				{previousExpanded && <div id="previous-ladder-content"><LadderRows levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} emptyText="暂无昨日梯队数据" /></div>}
 			</section>
 
 			<footer className="limit-up-note">
@@ -210,6 +272,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 				<span>当日及本地已留存交易日的涨停结构、连续板数和逐股炒作题材优先采用开盘啦，5 分钟内复用快照；东方财富只补充尚无开盘啦快照的历史交易日、缺失股票和行情字段。主炒题材仍会剔除本股后检验同题材梯队，并对宽泛标签降权。</span>
 			</footer>
 			{selectedStock && <KLineModal stock={selectedStock} lines={selectedKLines} state={selectedKLineState} error={selectedKLineError} periodKey={selectedKLinePeriod} onPeriodChange={setSelectedKLinePeriod} onClose={() => setSelectedStock(null)} />}
+			{selectedBillboard && <BillboardModal stock={selectedBillboard.stock} tradeDate={selectedBillboard.tradeDate} item={billboardItem} detail={billboardDetail} state={billboardState} error={billboardError} onClose={() => setSelectedBillboard(null)} />}
 		</section>
 	);
 }
@@ -385,7 +448,7 @@ function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNo
 	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function LadderRows({ levels, compact = false, showCurrentChange = false, onSelectStock, emptyText }: { levels: LimitUpLadderLevel[]; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; emptyText: string }) {
+function LadderRows({ levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
 	const [collapsedLevels, setCollapsedLevels] = useState<Set<number>>(() => new Set([1]));
 
 	if (!levels.length) {
@@ -418,7 +481,7 @@ function LadderRows({ levels, compact = false, showCurrentChange = false, onSele
 						<ChevronDown size={17} aria-hidden="true" />
 					</summary>
 									<div className="limit-stock-grid">
-										{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} key={stock.symbol} />)}
+										{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
 					</div>
 				</details>
 			))}
@@ -426,7 +489,7 @@ function LadderRows({ levels, compact = false, showCurrentChange = false, onSele
 	);
 }
 
-function LadderStockChip({ stock, compact, showCurrentChange, onSelect }: { stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void }) {
+function LadderStockChip({ stock, compact, showCurrentChange, onSelect, onSelectBillboard }: { stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void }) {
 	const primaryTheme = stock.primary_theme || stock.industry || '待归因';
 	const secondary = stock.secondary_themes?.length ? stock.secondary_themes.join(' / ') : stock.industry || '暂无辅助题材';
 	const tooltip = [
@@ -449,9 +512,48 @@ function LadderStockChip({ stock, compact, showCurrentChange, onSelect }: { stoc
 			</div>
 			<div className="limit-stock-theme"><span>主炒</span><strong>{primaryTheme}</strong>{stock.theme_confidence > 0 && <em>{Math.round(stock.theme_confidence * 100)}%</em>}</div>
 			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{secondary}</em></div>
-			{!compact && <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><span>{stock.streak_label || formatMoney(stock.amount)}</span></div>}
+			{!compact ? <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><button type="button" className="limit-billboard-button" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button></div> : <button type="button" className="limit-billboard-button compact" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>}
 		</article>
 	);
+}
+
+function BillboardModal({ stock, tradeDate, item, detail, state, error, onClose }: { stock: LimitUpLadderStock; tradeDate: string; item: MarketBillboardItem | null; detail: MarketBillboardDetail | null; state: BillboardState; error: string; onClose: () => void }) {
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	}, [onClose]);
+	const titleDate = item?.trade_date || tradeDate || '--';
+	return (
+		<div className="billboard-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<section className="billboard-modal" role="dialog" aria-modal="true" aria-label={`${stock.name} 龙虎榜`}>
+				<header className="billboard-modal-header">
+					<div><span>连板梯队 · 龙虎榜</span><h2>{stock.name}<small>{stock.symbol}</small></h2><p>{titleDate} · {stock.streak}板 · {stock.primary_theme || stock.industry || '题材待归因'}</p></div>
+					<button type="button" className="kline-modal-close" onClick={onClose} aria-label="关闭龙虎榜弹窗"><X size={19} /></button>
+				</header>
+				{state === 'loading' && <div className="billboard-modal-state"><RefreshCw className="spin" size={22} /><strong>正在读取龙虎榜</strong><span>查询 {titleDate} 的上榜记录与买卖席位…</span></div>}
+				{state === 'empty' && <div className="billboard-modal-state empty"><Landmark size={26} /><strong>该交易日未上榜</strong><span>{stock.name} 在 {titleDate} 暂无龙虎榜记录。</span></div>}
+				{state === 'error' && <div className="billboard-modal-state error"><ShieldAlert size={24} /><strong>龙虎榜数据暂不可用</strong><span>{error || '请稍后重试。'}</span></div>}
+				{state === 'ready' && item && <>
+					<div className="billboard-tag-row"><span className="billboard-tag primary">上榜</span><span className="billboard-tag">{item.reason || '上榜原因未提供'}</span>{item.institution_buyers > 0 && <span className="billboard-tag institution">机构参与</span>}<span className="billboard-tag">买方 {item.buy_seats}席</span><span className="billboard-tag">卖方 {item.sell_seats}席</span><span className={`billboard-tag ${item.net_amount >= 0 ? 'positive' : 'negative'}`}>{item.net_amount >= 0 ? '净买入' : '净卖出'} {formatMoney(Math.abs(item.net_amount))}</span></div>
+					<div className="billboard-stat-grid"><BillboardStat label="收盘价" value={formatPrice(item.close_price)} /><BillboardStat label="涨跌幅" value={formatSignedPercent(item.change_percent)} tone={item.change_percent >= 0 ? 'up' : 'down'} /><BillboardStat label="换手率" value={`${item.turnover_rate.toFixed(2)}%`} /><BillboardStat label="买入金额" value={formatMoney(item.buy_amount)} /><BillboardStat label="卖出金额" value={formatMoney(item.sell_amount)} /><BillboardStat label="净买额" value={formatMoney(item.net_amount)} tone={item.net_amount >= 0 ? 'up' : 'down'} /><BillboardStat label="机构买方" value={`${item.institution_buyers}席`} /></div>
+					{item.summary && <blockquote className="billboard-summary">{item.summary}</blockquote>}
+					{!detail && <div className="billboard-detail-warning"><ShieldAlert size={15} /><span>买卖席位明细暂不可用，已展示榜单汇总。</span></div>}
+					<div className="billboard-seat-grid"><BillboardSeatPanel title="买方五席" prefix="买" seats={detail?.buy_seats || []} /><BillboardSeatPanel title="卖方五席" prefix="卖" seats={detail?.sell_seats || []} /></div>
+				</>}
+				<footer className="billboard-modal-footer">数据源：龙虎榜行情接口 · 席位信息仅供研究参考。</footer>
+			</section>
+		</div>
+	);
+}
+
+function BillboardStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+	return <div className="billboard-stat"><span>{label}</span><strong className={tone || ''}>{value}</strong></div>;
+}
+
+function BillboardSeatPanel({ title, prefix, seats }: { title: string; prefix: '买' | '卖'; seats: MarketBillboardSeat[] }) {
+	const seatByRank = new Map(seats.map((seat) => [seat.rank, seat]));
+	return <section className={`billboard-seat-panel ${prefix === '买' ? 'buy' : 'sell'}`}><header><strong>{title}</strong><span>{prefix === '买' ? '按买入额排名' : '按卖出额排名'}</span></header><div className="billboard-seat-head"><span>排名 / 席位</span><span>买入</span><span>卖出</span><span>净额</span></div>{Array.from({ length: 5 }, (_, index) => { const rank = index + 1; const seat = seatByRank.get(rank); const label = seat ? classifyBillboardSeat(seat) : null; return <article key={rank}><span className="billboard-seat-name"><i>{prefix}{rank}</i><span><strong>{seat?.name || '数据源未提供'}</strong>{label && <small className={`billboard-seat-label ${label.kind}`} title={label.note}>{label.label}</small>}</span></span><span>{seat ? formatMoney(seat.buy_amount) : '--'}</span><span>{seat ? formatMoney(seat.sell_amount) : '--'}</span><strong className={seat ? (seat.net_amount >= 0 ? 'up' : 'down') : ''}>{seat ? formatMoney(seat.net_amount) : '--'}</strong></article>; })}</section>;
 }
 
 function KLineModal({ stock, lines, state, error, periodKey, onPeriodChange, onClose }: { stock: LimitUpLadderStock; lines: KLine[]; state: LoadState; error: string; periodKey: KLinePeriodKey; onPeriodChange: (period: KLinePeriodKey) => void; onClose: () => void }) {
@@ -545,4 +647,13 @@ function formatMoney(value: number) {
 	if (Math.abs(value) >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
 	if (Math.abs(value) >= 10_000) return `${(value / 10_000).toFixed(0)}万`;
 	return value.toFixed(0);
+}
+
+function formatPrice(value?: number) {
+	if (value == null || !Number.isFinite(value)) return '--';
+	return value.toFixed(2);
+}
+
+function normalizeSymbol(value: string) {
+	return value.replace(/[^0-9]/g, '');
 }

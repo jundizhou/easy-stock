@@ -26,6 +26,7 @@ import type {
 	MarketResearchItem,
 	SourceMeta,
 } from '../../lib/backend';
+import { classifyBillboardSeat } from '../../lib/billboard';
 
 type DataState = 'idle' | 'loading' | 'ready' | 'error';
 type SortDirection = 'asc' | 'desc';
@@ -275,8 +276,9 @@ function BillboardSeatPanel({ title, prefix, seats }: { title: string; prefix: '
 		{Array.from({ length: 5 }, (_, index) => {
 			const rank = index + 1;
 			const seat = seatByRank.get(rank);
+			const label = seat ? classifyBillboardSeat(seat) : null;
 			return <article key={rank}>
-				<span className="market-seat-name"><i>{prefix}{rank}</i><span><strong>{seat?.name || '数据源未提供'}</strong>{seat?.institution && <small>机构专用</small>}</span></span>
+				<span className="market-seat-name"><i>{prefix}{rank}</i><span><strong>{seat?.name || '数据源未提供'}</strong>{label && <small className={`market-seat-label ${label.kind}`} title={label.note}>{label.label}</small>}</span></span>
 				<SeatAmount amount={seat?.buy_amount} ratio={seat?.buy_ratio} />
 				<SeatAmount amount={seat?.sell_amount} ratio={seat?.sell_ratio} />
 				<strong className={seat ? toneClass(seat.net_amount) : 'flat'}>{seat ? formatMoney(seat.net_amount) : '--'}</strong>
