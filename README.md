@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
 </p>
 
 <h1 align="center">easy-stock</h1>
@@ -58,13 +58,13 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 大 V 的盘后复盘通常分散在雪球、淘股吧和微信公众号中，手工逐个打开主页、筛选当天文章、复制正文并整理观点非常耗时。easy-stock 将这些内容组织为统一的复盘时间流：
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-auto-review.png" width="2560" height="1692" alt="easy-stock 大 V 自动复盘与每日同步工作台" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-auto-review.png" width="2560" height="1692" alt="easy-stock 大 V 自动复盘与每日同步工作台" />
 </p>
 
 文章收集完成后，可以一键生成「今日大 V 观点共识」，从文章集合中提炼共同关注方向、主要分歧、盘面事实与下一交易日需要验证的条件。
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-ai-daily-consensus.png" width="2560" height="1692" alt="easy-stock AI 今日大 V 观点共识与明日预期" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-ai-daily-consensus.png" width="2560" height="1692" alt="easy-stock AI 今日大 V 观点共识与明日预期" />
 </p>
 
 这套能力希望解决的不是“让 AI 猜明天涨什么”，而是把几十篇非结构化文章转化为一份可阅读、可核验、可在次日继续跟踪的观点地图。
@@ -76,7 +76,7 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 系统将涨停池、连板梯队、昨日反馈、晋级率和情绪历史放在同一视图中,并设计一套算法分析情绪周期：
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-short-term-analysis.png" width="2560" height="1692" alt="easy-stock 超短连板、市场情绪与晋级结构分析" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-short-term-analysis.png" width="2560" height="1692" alt="easy-stock 超短连板、市场情绪与晋级结构分析" />
 </p>
 
 ### 03 · 趋势题材雷达
@@ -85,7 +85,7 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 聚合题材排名、涨跌强度、资金流、上涨宽度和持续天数，通过题材地图拆解产业链、概念节点和细分方向。结合 AI 分析市场趋势、题材阶段和趋势股的条件化介入点
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-theme-radar.png" width="2560" height="1696" alt="easy-stock 趋势题材雷达、主线热度与个股梯队分析" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-theme-radar.png" width="2560" height="1696" alt="easy-stock 趋势题材雷达、主线热度与个股梯队分析" />
 </p>
 
 ### 04 · 行情总览
@@ -95,11 +95,11 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 行情总览将市场核心指数、新闻快讯、行业趋势强度、行业资金、题材概念、个股资金流入流出、龙虎榜、公告雷达、机构观点与产业透视统一到同一个研究入口。每个页面保留数据来源与抓取时间，并可将当前上下文直接交给 AI 解读，减少在多个行情终端和资讯页面之间来回切换。
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-market-overview-indices.png" width="2560" height="1696" alt="easy-stock 行情总览、市场核心指数与跨市场走势分析" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png" width="2560" height="1696" alt="easy-stock 行情总览、市场核心指数与跨市场走势分析" />
 </p>
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-market-overview-research.png" width="2560" height="1696" alt="easy-stock 行情总览、机构观点与研报证据检索" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-research.png" width="2560" height="1696" alt="easy-stock 行情总览、机构观点与研报证据检索" />
 </p>
 
 ### 05 · 个股 AI 分析
@@ -109,11 +109,11 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 个股 AI 分析会系统判断个股更接近情绪连板、趋势容量、趋势成长、震荡观察还是弱势风险路径，再为不同路径分配不同权重，结合你的个人操作经验，复盘文章，游资心得等差异化内容让ai定制你的专属个股报告。
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-stock-ai-analysis-overview.png" width="2560" height="1696" alt="easy-stock 个股 AI 分析总览、多维评分与题材定位" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-stock-ai-analysis-overview.png" width="2560" height="1696" alt="easy-stock 个股 AI 分析总览、多维评分与题材定位" />
 </p>
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-stock-ai-analysis-evidence.png" width="2560" height="1696" alt="easy-stock 个股 AI 分析条件决策、事实链与风险边界" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-stock-ai-analysis-evidence.png" width="2560" height="1696" alt="easy-stock 个股 AI 分析条件决策、事实链与风险边界" />
 </p>
 
 <p align="center"><sub>截图用于展示页面结构；股票状态、题材标签、评分和风险参数会随交易日、缓存快照与数据源可用性动态变化。</sub></p>
@@ -123,7 +123,7 @@ easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
 #### 把经验材料变成可持续研读的知识，让 AI 越用越懂你的研究方式
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-trading-mastery.png" width="2560" height="1696" alt="easy-stock 游资心法库、人物资料与 Hermes 深度研读" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-trading-mastery.png" width="2560" height="1696" alt="easy-stock 游资心法库、人物资料与 Hermes 深度研读" />
 </p>
 
 ### 每日研究闭环
@@ -172,7 +172,7 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 ## AI 原生架构
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-ai-architecture.svg" width="1680" height="1180" alt="easy-stock AI 原生架构图" />
+  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-ai-architecture.svg" width="1680" height="1180" alt="easy-stock AI 原生架构图" />
 </p>
 
 | 层级 | 核心职责 |
