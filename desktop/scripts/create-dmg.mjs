@@ -8,14 +8,17 @@ const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported macOS architecture: ${arch}`);
 const packageManifest = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
-const builderAppPath = path.join(desktopRoot, 'dist', 'builder-release', `mac-${arch}`, 'easy-stock.app');
-const legacyAppPath = path.join(desktopRoot, 'dist', `easy-stock-darwin-${arch}`, 'easy-stock.app');
-const appPath = fs.existsSync(builderAppPath) ? builderAppPath : legacyAppPath;
+const appPathCandidates = [
+	path.join(desktopRoot, 'dist', 'builder-release', arch === 'x64' ? 'mac' : `mac-${arch}`, 'easy-stock.app'),
+	path.join(desktopRoot, 'dist', 'builder-release', `mac-${arch}`, 'easy-stock.app'),
+	path.join(desktopRoot, 'dist', `easy-stock-darwin-${arch}`, 'easy-stock.app'),
+];
+const appPath = appPathCandidates.find((candidate) => fs.existsSync(candidate));
 const releaseRoot = path.join(desktopRoot, 'dist', 'release');
 const assetBase = `easy-stock-v${packageManifest.version}-macos-${arch}`;
 const dmgPath = path.join(releaseRoot, `${assetBase}.dmg`);
 const zipPath = path.join(releaseRoot, `${assetBase}.zip`);
-if (!fs.existsSync(appPath)) throw new Error(`Packaged app not found: ${appPath}`);
+if (!appPath) throw new Error(`Packaged app not found. Checked:\n${appPathCandidates.map((candidate) => `- ${candidate}`).join('\n')}`);
 fs.mkdirSync(releaseRoot, { recursive: true });
 fs.rmSync(dmgPath, { force: true });
 
