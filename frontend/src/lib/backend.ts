@@ -112,6 +112,7 @@ export type SourceHealth = {
 export type SourceMeta = {
   source: string;
   source_url?: string;
+  available_fields?: string[];
   fetched_at: string;
   latency_ms: number;
   stale: boolean;
@@ -148,6 +149,141 @@ export type KLine = {
   turnover_rate?: number;
   change_percent?: number;
   meta: SourceMeta;
+};
+
+export type MarketIndexSnapshot = {
+	id: string;
+	secid: string;
+	code: string;
+	name: string;
+	region: string;
+	market: string;
+	currency: string;
+	price: number;
+	change: number;
+	change_percent: number;
+	trade_time?: string;
+	status: string;
+	meta: SourceMeta;
+};
+
+export type MarketIndexSeries = {
+	index: MarketIndexSnapshot;
+	lines: KLine[];
+	meta: SourceMeta;
+};
+
+export type MarketIndustryMomentum = {
+	code: string;
+	name: string;
+	change_percent: number;
+	five_day_change_percent: number;
+	twenty_day_change_percent: number;
+	turnover_rate: number;
+	rising_count: number;
+	falling_count: number;
+	main_net_inflow: number;
+	leader_name?: string;
+	leader_change_percent: number;
+	score: number;
+	meta: SourceMeta;
+};
+
+export type MarketFundFlow = {
+	dimension: 'industry' | 'theme' | 'stock' | string;
+	code: string;
+	symbol?: string;
+	name: string;
+	price: number;
+	change_percent: number;
+	inflow: number;
+	outflow: number;
+	net_inflow: number;
+	net_inflow_ratio: number;
+	main_inflow: number;
+	main_outflow: number;
+	main_net_inflow: number;
+	main_net_inflow_ratio: number;
+	retail_inflow: number;
+	retail_outflow: number;
+	retail_net_inflow: number;
+	retail_net_inflow_ratio: number;
+	super_large_net_inflow: number;
+	super_large_net_inflow_ratio: number;
+	large_net_inflow: number;
+	large_net_inflow_ratio: number;
+	medium_net_inflow: number;
+	medium_net_inflow_ratio: number;
+	small_net_inflow: number;
+	small_net_inflow_ratio: number;
+	leader_symbol?: string;
+	leader_name?: string;
+	leader_price: number;
+	leader_change_percent: number;
+	leader_net_inflow_ratio: number;
+	meta: SourceMeta;
+};
+
+export type MarketBillboardItem = {
+	trade_date: string;
+	symbol: string;
+	name: string;
+	close_price: number;
+	change_percent: number;
+	turnover_rate: number;
+	reason: string;
+	summary?: string;
+	buy_amount: number;
+	sell_amount: number;
+	net_amount: number;
+	institution_buyers: number;
+	buy_seats: number;
+	sell_seats: number;
+	meta: SourceMeta;
+};
+
+export type MarketBillboardSeat = {
+	direction: 'buy' | 'sell' | string;
+	rank: number;
+	name: string;
+	buy_amount: number;
+	buy_ratio: number;
+	sell_amount: number;
+	sell_ratio: number;
+	net_amount: number;
+	institution: boolean;
+};
+
+export type MarketBillboardDetail = {
+	trade_date: string;
+	symbol: string;
+	reason: string;
+	buy_seats: MarketBillboardSeat[];
+	sell_seats: MarketBillboardSeat[];
+	meta: SourceMeta;
+};
+
+export type MarketResearchItem = {
+	kind: 'announcement' | 'stock' | 'industry' | string;
+	id: string;
+	symbol?: string;
+	stock_name?: string;
+	industry_code?: string;
+	industry_name?: string;
+	title: string;
+	organization?: string;
+	researchers?: string;
+	rating?: string;
+	previous_rating?: string;
+	rating_change?: string;
+	target_low?: number;
+	target_high?: number;
+	eps?: number;
+	pe?: number;
+	category?: string;
+	published_at: string;
+	url: string;
+	meta: SourceMeta;
 };
 
 export type StockDirectoryEntry = {

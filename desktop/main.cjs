@@ -27,6 +27,7 @@ const {
   waitForWechatHealth,
 } = require('./wechat-service.cjs');
 const { resolveUserDataPath } = require('./user-data.cjs');
+const { resolveHermesRuntimeRoot } = require('./hermes-runtime-root.cjs');
 
 app.setName('easy-stock');
 const defaultUserDataPath = app.getPath('userData');
@@ -188,8 +189,11 @@ function buildRuntimeEnv(resourcesRoot) {
   const packagedBrowserReal = path.join(packagedBrowserWrapperDir, process.platform === 'win32' ? 'agent-browser-real.exe' : 'agent-browser-real');
   const developmentBrowserReal = path.resolve(__dirname, '..', 'node_modules', 'agent-browser', 'bin', agentBrowserBinaryName());
   const browserReal = fs.existsSync(packagedBrowserReal) ? packagedBrowserReal : developmentBrowserReal;
-  const hermesRuntimeRoot = process.env.A_STOCK_HERMES_RUNTIME_ROOT
-    || (fs.existsSync(bundledRuntime) ? bundledRuntime : '');
+  const hermesRuntimeRoot = resolveHermesRuntimeRoot({
+    configuredRoot: process.env.A_STOCK_HERMES_RUNTIME_ROOT,
+    bundledRoot: resourcesRoot,
+    projectRoot: path.resolve(__dirname, '..'),
+  });
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.mkdirSync(hermesWorkDir, { recursive: true });
   fs.mkdirSync(browserStateDir, { recursive: true, mode: 0o700 });
