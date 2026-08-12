@@ -5278,6 +5278,7 @@ a:focus-visible {
 .market-filter-bar select { cursor: pointer; }
 .market-filter-bar button { display: inline-flex; align-items: center; gap: 5px; background: #edf5ff; color: #2873c4; cursor: pointer; }
 .market-filter-bar .market-date-control { display: flex; align-items: center; gap: 6px; width: auto; margin: 0; background: #fff; }
+.market-sort-hint { color: #8a97a6; font-size: 8px; white-space: nowrap; }
 .market-date-control input { width: 118px; }
 .market-flow-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 
@@ -5301,6 +5302,29 @@ a:focus-visible {
 .market-data-table.momentum > article > span:nth-child(2) { position: relative; display: flex; align-items: center; gap: 6px; }
 .market-data-table.momentum > article > span:nth-child(2) b { display: block; max-width: 52px; height: 5px; border-radius: 99px; background: linear-gradient(90deg, #6aa0da, #4d7fc9); }
 .market-data-table.momentum > article > span:nth-child(2) strong { color: #3d5d80; font-size: 8px; }
+.market-sort-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 4px;
+	min-width: 0;
+	padding: 4px 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-weight: 650;
+	text-align: left;
+	cursor: pointer;
+}
+.market-sort-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-sort-button svg { flex: 0 0 auto; color: #a3afbc; }
+.market-sort-button:hover:not(:disabled) { color: #2476d2; }
+.market-sort-button:hover:not(:disabled) svg,
+.market-sort-button.active,
+.market-sort-button.active svg { color: #2476d2; }
+.market-sort-button:focus-visible { border-radius: 4px; outline: 2px solid rgba(36, 118, 210, .28); outline-offset: 2px; }
+.market-sort-button:disabled { color: #b4bdc7; cursor: default; opacity: .55; }
 .market-flow-leader { display: grid; gap: 3px; min-width: 0; }
 .market-flow-leader strong,
 .market-flow-leader small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5401,6 +5425,7 @@ a:focus-visible {
 	.market-filter-bar { align-items: stretch; flex-direction: column; }
 	.market-filter-bar > label:first-child { min-width: 0; width: 100%; }
 	.market-filter-bar .market-date-control { width: 100%; }
+	.market-sort-hint { align-self: flex-end; }
 	.market-index-chart-wrap > aside { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.market-billboard-list > article > footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

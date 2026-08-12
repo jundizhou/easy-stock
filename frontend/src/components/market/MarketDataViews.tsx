@@ -1,6 +1,9 @@
 import {
 	Activity,
 	AlertTriangle,
+	ArrowDown,
+	ArrowDownUp,
+	ArrowUp,
 	Building2,
 	CalendarDays,
 	ChevronDown,
@@ -25,6 +28,8 @@ import type {
 } from '../../lib/backend';
 
 type DataState = 'idle' | 'loading' | 'ready' | 'error';
+type SortDirection = 'asc' | 'desc';
+type SortState = { key: string; direction: SortDirection };
 
 export type BillboardDetailEntry = {
 	state: DataState;
@@ -84,19 +89,31 @@ export function CoreIndexView({ indexes, selectedID, onSelect, series, seriesLoa
 
 export function IndustryMomentumView({ items, meta }: { items: MarketIndustryMomentum[]; meta: SourceMeta | null }) {
 	const [query, setQuery] = useState('');
-	const [sort, setSort] = useState<'score' | 'change' | 'flow'>('score');
+	const [sortState, setSortState] = useState<SortState>({ key: 'score', direction: 'desc' });
 	const flowAvailable = hasField(meta, 'main_net_inflow');
 	const breadthAvailable = hasField(meta, 'rising_count') && hasField(meta, 'falling_count');
 	const leaderAvailable = hasField(meta, 'leader_name');
 	const visible = useMemo(() => items.filter((item) => !query || `${item.name}${item.leader_name || ''}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
-		if (sort === 'change') return b.change_percent - a.change_percent;
-		if (sort === 'flow') return b.main_net_inflow - a.main_net_inflow;
-		return b.score - a.score;
-	}), [items, query, sort]);
+		const left = industrySortValue(a, sortState.key);
+		const right = industrySortValue(b, sortState.key);
+		return compareSortValues(left, right, sortState.direction);
+	}), [items, query, sortState]);
+	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => {
+		if (!available) return;
+		setSortState((current) => nextSortState(current, key, defaultDirection));
+	};
 	return <div className="market-data-view">
 		<SourceNotice meta={meta} />
-		<MarketFilter query={query} onQuery={setQuery}><select aria-label="行业趋势强度排序" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="score">按综合强度</option><option value="change">按当日涨幅</option>{flowAvailable && <option value="flow">按主力净流入</option>}</select></MarketFilter>
-		{visible.length ? <div className="market-data-table momentum"><header><span>行业 / 领涨</span><span>动能</span><span>当日</span><span>5 日</span><span>20 日</span><span>涨跌家数</span><span>主力净流入</span></header>{visible.map((item, index) => <article key={item.code}>
+		<MarketFilter query={query} onQuery={setQuery}><span className="market-sort-hint">点击列名排序</span></MarketFilter>
+		{visible.length ? <div className="market-data-table momentum"><header>
+			<SortButton label="行业 / 领涨" active={sortState.key === 'name'} direction={sortState.direction} onClick={() => toggleSort('name', true, 'asc')} />
+			<SortButton label="动能" active={sortState.key === 'score'} direction={sortState.direction} onClick={() => toggleSort('score')} />
+			<SortButton label="当日" active={sortState.key === 'change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'change_percent')} onClick={() => toggleSort('change_percent', hasField(meta, 'change_percent'))} />
+			<SortButton label="5 日" active={sortState.key === 'five_day_change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'five_day_change_percent')} onClick={() => toggleSort('five_day_change_percent', hasField(meta, 'five_day_change_percent'))} />
+			<SortButton label="20 日" active={sortState.key === 'twenty_day_change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'twenty_day_change_percent')} onClick={() => toggleSort('twenty_day_change_percent', hasField(meta, 'twenty_day_change_percent'))} />
+			<SortButton label="涨跌家数" active={sortState.key === 'breadth'} direction={sortState.direction} disabled={!breadthAvailable} onClick={() => toggleSort('breadth', breadthAvailable)} />
+			<SortButton label="主力净流入" active={sortState.key === 'main_net_inflow'} direction={sortState.direction} disabled={!flowAvailable} onClick={() => toggleSort('main_net_inflow', flowAvailable)} />
+		</header>{visible.map((item, index) => <article key={item.code}>
 			<span><i>{String(index + 1).padStart(2, '0')}</i><span><strong>{item.name}</strong><small>{leaderAvailable ? <>{item.leader_name || '暂无领涨标的'} {item.leader_name && formatPercent(item.leader_change_percent)}</> : '数据源未提供领涨标的'}</small></span></span>
 			<span><b style={{ width: `${Math.max(3, item.score)}%` }} /><strong>{item.score.toFixed(1)}</strong></span>
 			<em className={availableTone(item.change_percent, hasField(meta, 'change_percent'))}>{formatAvailable(item.change_percent, hasField(meta, 'change_percent'), formatPercent)}</em>
@@ -108,23 +125,22 @@ export function IndustryMomentumView({ items, meta }: { items: MarketIndustryMom
 	</div>;
 }
 
-export function FundFlowView({ items, dimension, sort, onSort, meta }: {
+export function FundFlowView({ items, dimension, meta }: {
 	items: MarketFundFlow[];
 	dimension: 'industry' | 'theme' | 'stock';
-	sort: 'net' | 'change' | 'ratio';
-	onSort: (sort: 'net' | 'change' | 'ratio') => void;
 	meta: SourceMeta | null;
 }) {
 	const [query, setQuery] = useState('');
 	const visible = items.filter((item) => !query || `${item.name}${item.code}${item.symbol || ''}${item.leader_name || ''}`.toLowerCase().includes(query.toLowerCase()));
 	const flowValues = items.map((item) => primaryNetInflow(item, meta));
-	const topFlow = flowValues[0] || 0;
+	const topFlowItem = items.reduce<MarketFundFlow | null>((best, item) => !best || primaryNetInflow(item, meta) > primaryNetInflow(best, meta) ? item : best, null);
+	const topFlow = topFlowItem ? primaryNetInflow(topFlowItem, meta) : 0;
 	return <div className="market-data-view">
 		<SourceNotice meta={meta} />
-		<MarketFilter query={query} onQuery={setQuery}><select aria-label="资金榜排序" value={sort} onChange={(event) => onSort(event.target.value as typeof sort)}><option value="net">按净流入</option><option value="ratio">按净流入率</option><option value="change">按涨跌幅</option></select></MarketFilter>
+		<MarketFilter query={query} onQuery={setQuery}><span className="market-sort-hint">点击列名排序</span></MarketFilter>
 		<section className="market-flow-summary">
 			<SummaryMetric icon={<TrendingUp size={17} />} label="净流入项目" value={String(flowValues.filter((value) => value > 0).length)} detail={`共 ${items.length} 项`} tone="up" />
-			<SummaryMetric icon={<Building2 size={17} />} label="榜首净流入" value={items.length ? formatMoney(topFlow) : '--'} detail={items[0]?.name || '等待数据'} tone={toneClass(topFlow)} />
+			<SummaryMetric icon={<Building2 size={17} />} label="榜首净流入" value={topFlowItem ? formatMoney(topFlow) : '--'} detail={topFlowItem?.name || '等待数据'} tone={toneClass(topFlow)} />
 			<SummaryMetric icon={<Activity size={17} />} label="口径" value={dimension === 'industry' ? '行业' : dimension === 'theme' ? '题材' : '个股'} detail={fundFlowSourceLabel(meta)} />
 		</section>
 		{visible.length ? dimension === 'stock'
@@ -137,7 +153,19 @@ export function FundFlowView({ items, dimension, sort, onSort, meta }: {
 function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: SourceMeta | null }) {
 	const netAvailable = hasField(meta, 'net_inflow');
 	const fallbackMainAvailable = hasField(meta, 'main_net_inflow');
-	return <div className="market-data-table flow sector"><header><span>名称 / 代码</span><span>均价</span><span>涨跌幅</span><span>资金流入</span><span>资金流出</span><span>净流入</span><span>净流入率</span><span>领涨标的</span></header>{items.map((item, index) => {
+	const [sortState, setSortState] = useState<SortState>({ key: 'net_value', direction: 'desc' });
+	const sortedItems = useMemo(() => [...items].sort((a, b) => compareSortValues(sectorSortValue(a, sortState.key, meta), sectorSortValue(b, sortState.key, meta), sortState.direction)), [items, meta, sortState]);
+	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => { if (available) setSortState((current) => nextSortState(current, key, defaultDirection)); };
+	return <div className="market-data-table flow sector"><header>
+		<SortButton label="名称 / 代码" active={sortState.key === 'name'} direction={sortState.direction} onClick={() => toggleSort('name', true, 'asc')} />
+		<SortButton label="均价" active={sortState.key === 'price'} direction={sortState.direction} disabled={!hasField(meta, 'price')} onClick={() => toggleSort('price', hasField(meta, 'price'))} />
+		<SortButton label="涨跌幅" active={sortState.key === 'change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'change_percent')} onClick={() => toggleSort('change_percent', hasField(meta, 'change_percent'))} />
+		<SortButton label="资金流入" active={sortState.key === 'inflow'} direction={sortState.direction} disabled={!hasField(meta, 'inflow')} onClick={() => toggleSort('inflow', hasField(meta, 'inflow'))} />
+		<SortButton label="资金流出" active={sortState.key === 'outflow'} direction={sortState.direction} disabled={!hasField(meta, 'outflow')} onClick={() => toggleSort('outflow', hasField(meta, 'outflow'))} />
+		<SortButton label="净流入" active={sortState.key === 'net_value'} direction={sortState.direction} disabled={!netAvailable && !fallbackMainAvailable} onClick={() => toggleSort('net_value', netAvailable || fallbackMainAvailable)} />
+		<SortButton label="净流入率" active={sortState.key === 'net_inflow_ratio'} direction={sortState.direction} disabled={!hasField(meta, 'net_inflow_ratio')} onClick={() => toggleSort('net_inflow_ratio', hasField(meta, 'net_inflow_ratio'))} />
+		<SortButton label="领涨标的" active={sortState.key === 'leader_name'} direction={sortState.direction} disabled={!hasField(meta, 'leader_name')} onClick={() => toggleSort('leader_name', hasField(meta, 'leader_name'), 'asc')} />
+	</header>{sortedItems.map((item, index) => {
 		const netValue = netAvailable ? item.net_inflow : item.main_net_inflow;
 		const netValueAvailable = netAvailable || fallbackMainAvailable;
 		return <article key={`${item.dimension}-${item.code}`}>
@@ -154,7 +182,20 @@ function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: S
 }
 
 function StockFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: SourceMeta | null }) {
-	return <div className="market-data-table flow stock"><header><span>名称 / 代码</span><span>价格</span><span>涨跌幅</span><span>总净流入</span><span>总净流入率</span><span>主力净流入</span><span>主力净流入率</span><span>散户净流入</span><span>散户净流入率</span></header>{items.map((item, index) => <article key={`${item.dimension}-${item.code}`}>
+	const [sortState, setSortState] = useState<SortState>({ key: 'net_inflow', direction: 'desc' });
+	const sortedItems = useMemo(() => [...items].sort((a, b) => compareSortValues(stockSortValue(a, sortState.key, meta), stockSortValue(b, sortState.key, meta), sortState.direction)), [items, meta, sortState]);
+	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => { if (available) setSortState((current) => nextSortState(current, key, defaultDirection)); };
+	return <div className="market-data-table flow stock"><header>
+		<SortButton label="名称 / 代码" active={sortState.key === 'name'} direction={sortState.direction} onClick={() => toggleSort('name', true, 'asc')} />
+		<SortButton label="价格" active={sortState.key === 'price'} direction={sortState.direction} disabled={!hasField(meta, 'price')} onClick={() => toggleSort('price', hasField(meta, 'price'))} />
+		<SortButton label="涨跌幅" active={sortState.key === 'change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'change_percent')} onClick={() => toggleSort('change_percent', hasField(meta, 'change_percent'))} />
+		<SortButton label="总净流入" active={sortState.key === 'net_inflow'} direction={sortState.direction} disabled={!hasField(meta, 'net_inflow')} onClick={() => toggleSort('net_inflow', hasField(meta, 'net_inflow'))} />
+		<SortButton label="总净流入率" active={sortState.key === 'net_inflow_ratio'} direction={sortState.direction} disabled={!hasField(meta, 'net_inflow_ratio')} onClick={() => toggleSort('net_inflow_ratio', hasField(meta, 'net_inflow_ratio'))} />
+		<SortButton label="主力净流入" active={sortState.key === 'main_net_inflow'} direction={sortState.direction} disabled={!hasField(meta, 'main_net_inflow')} onClick={() => toggleSort('main_net_inflow', hasField(meta, 'main_net_inflow'))} />
+		<SortButton label="主力净流入率" active={sortState.key === 'main_net_inflow_ratio'} direction={sortState.direction} disabled={!hasField(meta, 'main_net_inflow_ratio')} onClick={() => toggleSort('main_net_inflow_ratio', hasField(meta, 'main_net_inflow_ratio'))} />
+		<SortButton label="散户净流入" active={sortState.key === 'retail_net_inflow'} direction={sortState.direction} disabled={!hasField(meta, 'retail_net_inflow')} onClick={() => toggleSort('retail_net_inflow', hasField(meta, 'retail_net_inflow'))} />
+		<SortButton label="散户净流入率" active={sortState.key === 'retail_net_inflow_ratio'} direction={sortState.direction} disabled={!hasField(meta, 'retail_net_inflow_ratio')} onClick={() => toggleSort('retail_net_inflow_ratio', hasField(meta, 'retail_net_inflow_ratio'))} />
+	</header>{sortedItems.map((item, index) => <article key={`${item.dimension}-${item.code}`}>
 		<FlowIdentity item={item} index={index} />
 		<strong>{formatAvailable(item.price, hasField(meta, 'price'), formatPrice)}</strong>
 		<em className={availableTone(item.change_percent, hasField(meta, 'change_percent'))}>{formatAvailable(item.change_percent, hasField(meta, 'change_percent'), formatPercent)}</em>
@@ -284,6 +325,47 @@ function SummaryMetric({ icon, label, value, detail, tone = '' }: { icon: React.
 
 function MiniStat({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
 	return <article><small>{label}</small><strong className={tone}>{value}</strong></article>;
+}
+
+function SortButton({ label, active, direction, disabled = false, onClick }: { label: string; active: boolean; direction: SortDirection; disabled?: boolean; onClick: () => void }) {
+	const Icon = active ? direction === 'asc' ? ArrowUp : ArrowDown : ArrowDownUp;
+	return <button type="button" className={`market-sort-button ${active ? 'active' : ''}`} disabled={disabled} aria-label={`${label}${disabled ? '不可排序' : active ? direction === 'asc' ? '升序' : '降序' : '排序'}`} aria-pressed={active} onClick={onClick}>
+		<span>{label}</span><Icon size={11} aria-hidden="true" />
+	</button>;
+}
+
+export function nextSortState(current: SortState, key: string, defaultDirection: SortDirection): SortState {
+	return current.key === key ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: defaultDirection };
+}
+
+export function compareSortValues(left: string | number | null | undefined, right: string | number | null | undefined, direction: SortDirection) {
+	const leftMissing = left === null || left === undefined || (typeof left === 'number' && !Number.isFinite(left)) || (typeof left === 'string' && !left.trim());
+	const rightMissing = right === null || right === undefined || (typeof right === 'number' && !Number.isFinite(right)) || (typeof right === 'string' && !right.trim());
+	if (leftMissing || rightMissing) {
+		if (leftMissing && rightMissing) return 0;
+		return leftMissing ? 1 : -1;
+	}
+	const multiplier = direction === 'asc' ? 1 : -1;
+	if (typeof left === 'number' && typeof right === 'number') return (left - right) * multiplier;
+	return String(left).localeCompare(String(right), 'zh-CN', { numeric: true, sensitivity: 'base' }) * multiplier;
+}
+
+function industrySortValue(item: MarketIndustryMomentum, key: string): string | number | null {
+	if (key === 'name') return item.name;
+	if (key === 'breadth') return item.rising_count - item.falling_count;
+	return item[key as keyof MarketIndustryMomentum] as string | number | null;
+}
+
+function sectorSortValue(item: MarketFundFlow, key: string, meta: SourceMeta | null): string | number | null {
+	if (key === 'name') return item.name || item.code;
+	if (key === 'net_value') return hasField(meta, 'net_inflow') ? item.net_inflow : item.main_net_inflow;
+	if (key === 'leader_name') return item.leader_name || '';
+	return item[key as keyof MarketFundFlow] as string | number | null;
+}
+
+function stockSortValue(item: MarketFundFlow, key: string, _meta: SourceMeta | null): string | number | null {
+	if (key === 'name') return item.name || item.symbol || item.code;
+	return item[key as keyof MarketFundFlow] as string | number | null;
 }
 
 function IndexLineChart({ lines }: { lines: MarketIndexSeries['lines'] }) {

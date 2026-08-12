@@ -60,8 +60,6 @@ type Props = {
 };
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-type FlowSort = 'net' | 'change' | 'ratio';
-
 const moduleIcons = {
 	pulse: Newspaper,
 	'core-indexes': ChartCandlestick,
@@ -93,7 +91,6 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	const [seriesLoading, setSeriesLoading] = useState(false);
 	const [industries, setIndustries] = useState<MarketIndustryMomentum[]>([]);
 	const [flows, setFlows] = useState<MarketFundFlow[]>([]);
-	const [flowSort, setFlowSort] = useState<FlowSort>('net');
 	const [billboard, setBillboard] = useState<MarketBillboardItem[]>([]);
 	const [billboardDetails, setBillboardDetails] = useState<Record<string, BillboardDetailEntry>>({});
 	const [tradeDate, setTradeDate] = useState('');
@@ -153,7 +150,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				setModuleMeta(payload.meta);
 			} else if (isFlowView(activeView)) {
 				const dimension = flowDimension(activeView);
-				const payload = await requestJSON<{ data: MarketFundFlow[]; meta: SourceMeta }>(config, `/api/v1/market/flows?dimension=${dimension}&sort=${flowSort}&limit=100`);
+				const payload = await requestJSON<{ data: MarketFundFlow[]; meta: SourceMeta }>(config, `/api/v1/market/flows?dimension=${dimension}&sort=net&limit=100`);
 				setFlows(payload.data);
 				setModuleMeta(payload.meta);
 			} else if (activeView === 'billboard') {
@@ -179,7 +176,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 			setModuleError(errorMessage(error, `${activeModule.name}加载失败`));
 			setModuleState('error');
 		}
-	}, [activeModule.name, activeView, announcementCategory, config, flowSort, submittedQuery, tradeDate]);
+	}, [activeModule.name, activeView, announcementCategory, config, submittedQuery, tradeDate]);
 
 	const loadBillboardDetail = useCallback(async (item: MarketBillboardItem) => {
 		if (!config) return;
@@ -272,7 +269,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 			{activeView === 'pulse' ? <PulseView news={news} themes={themes} themeMeta={themeMeta} sources={sources} state={pulseState} error={pulseError} lastUpdated={lastUpdated} /> : <ModuleState state={moduleState} error={moduleError}>
 				{activeView === 'core-indexes' && <CoreIndexView indexes={indexes} selectedID={selectedIndexID} onSelect={setSelectedIndexID} series={indexSeries} seriesLoading={seriesLoading} meta={moduleMeta} />}
 				{activeView === 'industry-momentum' && <IndustryMomentumView items={industries} meta={moduleMeta} />}
-				{isFlowView(activeView) && <FundFlowView key={activeView} items={flows} dimension={flowDimension(activeView)} sort={flowSort} onSort={setFlowSort} meta={moduleMeta} />}
+				{isFlowView(activeView) && <FundFlowView key={activeView} items={flows} dimension={flowDimension(activeView)} meta={moduleMeta} />}
 				{activeView === 'billboard' && <BillboardView items={billboard} tradeDate={tradeDate} onTradeDate={setTradeDate} meta={moduleMeta} details={billboardDetails} onLoadDetail={loadBillboardDetail} />}
 				{isResearchView(activeView) && <ResearchView kind={researchKind(activeView)} items={research} queryDraft={searchDraft} onQueryDraft={setSearchDraft} onSearch={submitResearch} category={announcementCategory} onCategory={setAnnouncementCategory} meta={moduleMeta} />}
 			</ModuleState>}
