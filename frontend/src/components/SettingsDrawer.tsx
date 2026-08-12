@@ -21,6 +21,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, ReviewAutomationProfile, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
 import { llmProviderDefinition, llmProviders } from '../lib/llm-providers';
+import { AppUpdatePanel } from './AppUpdatePanel';
 
 type Props = {
 	config: BackendConfig | null;
@@ -442,6 +443,8 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 							<SecretField label="同花顺 Cookie / Token" secretKey="ths_cookie" status={settings?.credentials.ths_cookie} value={secrets.ths_cookie} clearing={clearSecrets.has('ths_cookie')} onChange={updateSecret} onClear={toggleClear} hint="预留：涨停原因与题材催化数据" />
 							<SecretField label="东方财富 Cookie" secretKey="eastmoney_cookie" status={settings?.credentials.eastmoney_cookie} value={secrets.eastmoney_cookie} clearing={clearSecrets.has('eastmoney_cookie')} onChange={updateSecret} onClear={toggleClear} hint="当前公共行情不需要，预留登录态接口" />
 						</section>
+
+						<AppUpdatePanel />
 
 						<footer className="settings-footer">
 							<div className={`settings-message ${state}`}>{state === 'saved' && <CheckCircle2 size={15} />}{state === 'error' && <KeyRound size={15} />}<span>{message || '留空的模型密钥会保留 Hermes .env 中的现有值。'}</span></div>

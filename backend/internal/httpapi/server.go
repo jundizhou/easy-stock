@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -55,10 +57,14 @@ type Server struct {
 	remoteDailySync       *review.RemoteDailySync
 	hermesGateway         hermes.Gateway
 	masteryLibrary        *methodology.Library
+	marketEmotionStore    *marketemotion.Store
+	themeRadarStore       *duanxianxia.Store
+	startupError          error
 }
 
 func NewServer(config any) *Server {
 	cfg := normalizeConfig(config)
+	var startupErrors []error
 	sinaClient := sina.NewClient()
 	eastMoneyClient := eastmoney.NewClient()
 	tencentClient := tencent.NewClient()
@@ -83,6 +89,8 @@ func NewServer(config any) *Server {
 				RefreshInterval:  5 * time.Minute,
 				LeaderThemeLimit: 3,
 			})
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open theme radar database: %w", err))
 		}
 	}
 	usingDefaultLimitUp := cfg.LimitUp == nil
@@ -135,6 +143,9 @@ func NewServer(config any) *Server {
 		store, err := review.OpenStore(cfg.ReviewDBPath)
 		if err == nil {
 			cfg.ReviewStore = store
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open review database: %w", err))
+			cfg.ReviewStore, _ = review.OpenStore(":memory:")
 		} else {
 			cfg.ReviewStore, _ = review.OpenStore(":memory:")
 		}
@@ -143,6 +154,9 @@ func NewServer(config any) *Server {
 		store, err := marketemotion.OpenStore(cfg.MarketEmotionDBPath)
 		if err == nil {
 			cfg.MarketEmotionStore = store
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open market emotion database: %w", err))
+			cfg.MarketEmotionStore, _ = marketemotion.OpenStore("")
 		} else {
 			cfg.MarketEmotionStore, _ = marketemotion.OpenStore("")
 		}
@@ -154,11 +168,14 @@ func NewServer(config any) *Server {
 		store, err := appsettings.Open(cfg.SettingsPath)
 		if err == nil {
 			cfg.SettingsStore = store
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open settings: %w", err))
+			cfg.SettingsStore, _ = appsettings.Open("")
 		} else {
 			cfg.SettingsStore, _ = appsettings.Open("")
 		}
 	}
-	if cfg.HermesGateway != nil {
+	if cfg.HermesGateway != nil && (!cfg.StrictPersistence || len(startupErrors) == 0) {
 		values := cfg.SettingsStore.Snapshot()
 		var migratedKey *string
 		if strings.TrimSpace(values.LLM.APIKey) != "" {
@@ -213,6 +230,11 @@ func NewServer(config any) *Server {
 		remoteDailySync:       cfg.RemoteDailySync,
 		hermesGateway:         cfg.HermesGateway,
 		masteryLibrary:        cfg.MasteryLibrary,
+		marketEmotionStore:    cfg.MarketEmotionStore,
+		startupError:          errors.Join(startupErrors...),
+	}
+	if kaipanlaService != nil {
+		s.themeRadarStore = kaipanlaService.Store()
 	}
 	s.marketEmotion = newMarketEmotionEngine(
 		cfg.MarketEmotionStore,
@@ -224,6 +246,30 @@ func NewServer(config any) *Server {
 	)
 	s.routes()
 	return s
+}
+
+func (s *Server) StartupError() error {
+	if s == nil {
+		return errors.New("server is nil")
+	}
+	return s.startupError
+}
+
+func (s *Server) Close() error {
+	if s == nil {
+		return nil
+	}
+	var closeErrors []error
+	if s.reviewStore != nil {
+		closeErrors = append(closeErrors, s.reviewStore.Close())
+	}
+	if s.marketEmotionStore != nil {
+		closeErrors = append(closeErrors, s.marketEmotionStore.Close())
+	}
+	if s.themeRadarStore != nil {
+		closeErrors = append(closeErrors, s.themeRadarStore.Close())
+	}
+	return errors.Join(closeErrors...)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

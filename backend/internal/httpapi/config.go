@@ -114,6 +114,7 @@ type Config struct {
 	RemoteDailySync      *review.RemoteDailySync
 	HermesGateway        hermes.Gateway
 	MasteryLibrary       *methodology.Library
+	StrictPersistence    bool
 }
 
 func normalizeConfig(value any) Config {

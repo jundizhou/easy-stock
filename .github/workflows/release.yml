@@ -95,7 +95,18 @@ jobs:
         env:
           A_STOCK_DESKTOP_ARCH: ${{ matrix.arch }}
           ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:mac
+
+      - name: Verify macOS updater metadata
+        run: node desktop/scripts/verify-updater-artifacts.mjs desktop/dist/release latest-mac.yml
+
+      - name: Preserve architecture-specific updater metadata
+        run: mv desktop/dist/release/latest-mac.yml desktop/dist/release/latest-mac-${{ matrix.arch }}.yml
 
       - name: Upload macOS release assets
         uses: actions/upload-artifact@v4
@@ -138,7 +149,12 @@ jobs:
         env:
           A_STOCK_DESKTOP_ARCH: x64
           ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npm run release:windows
+
+      - name: Verify Windows updater metadata
+        run: node desktop/scripts/verify-updater-artifacts.mjs desktop/dist/release latest.yml
 
       - name: Upload Windows release asset
         uses: actions/upload-artifact@v4
@@ -165,6 +181,11 @@ jobs:
           pattern: easy-stock-*
           path: release-assets
           merge-multiple: true
+
+      - name: Merge and verify macOS updater metadata
+        run: |
+          node desktop/scripts/merge-mac-updater-metadata.mjs release-assets
+          node desktop/scripts/verify-updater-artifacts.mjs release-assets latest-mac.yml latest.yml
 
       - name: Generate SHA-256 checksums
         working-directory: release-assets

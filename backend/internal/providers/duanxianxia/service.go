@@ -52,6 +52,13 @@ func NewService(client Fetcher, store *Store, config ServiceConfig) *Service {
 	return &Service{client: client, poolClient: poolClient, store: store, refreshInterval: interval, leaderThemeLimit: leaderLimit, now: now}
 }
 
+func (s *Service) Store() *Store {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, FetchMeta, error) {
 	snapshots, meta, err := s.Snapshots(ctx, 1)
 	if err != nil {

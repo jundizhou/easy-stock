@@ -2784,6 +2784,31 @@ a:focus-visible {
 .settings-message.error { color: #bc303a; }
 .settings-message span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.app-update-status { display: grid; gap: 11px; padding: 13px; border: 1px solid #cfe0f2; border-radius: 10px; background: #f7faff; }
+.app-update-status.downloaded { border-color: #b9dfd0; background: #f1fbf7; }
+.app-update-status.error { border-color: #edc7ca; background: #fff7f7; }
+.app-update-version { display: flex; align-items: center; gap: 10px; }
+.app-update-version span { display: grid; gap: 2px; }
+.app-update-version strong { color: var(--text); font: 700 14px "SFMono-Regular", Consolas, monospace; }
+.app-update-version small { color: var(--subtle); font-size: 9px; }
+.app-update-version em { color: var(--subtle); font-style: normal; }
+.app-update-message { display: flex; align-items: flex-start; gap: 7px; color: #175ea9; font-size: 11px; line-height: 1.5; }
+.app-update-message > svg { flex: 0 0 auto; margin-top: 1px; }
+.app-update-status.error .app-update-message { color: #bc303a; }
+.app-update-status.downloaded .app-update-message { color: #167653; }
+.app-update-progress { position: relative; height: 19px; border-radius: 999px; background: #dfeaf6; overflow: hidden; }
+.app-update-progress > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: #2476d2; transition: width .2s ease; }
+.app-update-progress > em { position: relative; display: grid; place-items: center; height: 100%; color: #173c62; font-size: 9px; font-style: normal; font-weight: 700; }
+.app-update-notes { border-top: 1px solid rgba(111, 145, 179, .2); padding-top: 9px; }
+.app-update-notes summary { color: #175ea9; font-size: 10px; font-weight: 650; cursor: pointer; }
+.app-update-notes p { max-height: 120px; margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; white-space: pre-wrap; overflow-y: auto; }
+.app-update-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.app-update-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 0 10px; border: 1px solid #b9cce0; border-radius: 7px; background: #ffffff; color: #315573; font-size: 10px; font-weight: 650; cursor: pointer; }
+.app-update-actions button.primary { border-color: #2476d2; background: #2476d2; color: #ffffff; }
+.app-update-actions button:hover:not(:disabled) { background: #eaf4ff; }
+.app-update-actions button.primary:hover:not(:disabled) { background: #1d67ba; }
+.app-update-actions button:disabled { opacity: .52; cursor: default; }
+
 @media (max-width: 720px) {
 	.settings-drawer { width: 100vw; }
 	.settings-grid.two-columns { grid-template-columns: 1fr; }
@@ -2794,6 +2819,7 @@ a:focus-visible {
 	.settings-security-note em { grid-column: 2; justify-self: start; }
 	.llm-connection-test { align-items: stretch; flex-direction: column; }
 	.llm-connection-test > button { width: 100%; }
+	.app-update-actions button { flex: 1 1 120px; }
 }
 
 .mastery-workspace {

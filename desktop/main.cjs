@@ -1,7 +1,8 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, session } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const {
   findFreePort,
   resolveBackendCommand,
@@ -28,6 +29,8 @@ const {
 } = require('./wechat-service.cjs');
 const { resolveUserDataPath } = require('./user-data.cjs');
 const { resolveHermesRuntimeRoot } = require('./hermes-runtime-root.cjs');
+const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs');
+const { UpdateManager } = require('./update-manager.cjs');
 
 app.setName('easy-stock');
 const defaultUserDataPath = app.getPath('userData');
@@ -49,6 +52,8 @@ let taogubaBrowserBridgeConfig;
 let wechatServiceProcess;
 let wechatServiceConfig;
 let wechatServiceError = '';
+let updateManager;
+let updateCheckTimer;
 const reviewLoginWindows = new Map();
 
 function resourcesRoot() {
@@ -175,6 +180,93 @@ async function createWindow() {
   await window.loadFile(frontendPath);
 }
 
+function terminateChild(child, timeoutMs = 10000) {
+  if (!child || child.killed || child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer;
+    let forceTimer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(forceTimer);
+      resolve();
+    };
+    child.once('exit', finish);
+    child.kill();
+    timer = setTimeout(() => {
+      if (child.exitCode !== null) return finish();
+      try { child.kill('SIGKILL'); } catch {}
+      forceTimer = setTimeout(() => {
+        if (child.exitCode !== null) return finish();
+        if (settled) return;
+        settled = true;
+        reject(new Error('本机后台服务未能及时停止'));
+      }, 2000);
+    }, timeoutMs);
+  });
+}
+
+async function stopRuntime() {
+  const loginSessions = [...reviewLoginWindows.values()]
+    .filter((entry) => !entry.window.isDestroyed())
+    .map((entry) => entry.window.webContents.session);
+  await Promise.all([
+    session.defaultSession?.flushStorageData(),
+    ...loginSessions.map((persistentSession) => persistentSession.flushStorageData()),
+  ].filter(Boolean));
+  for (const entry of reviewLoginWindows.values()) {
+    if (!entry.window.isDestroyed()) entry.window.destroy();
+  }
+  reviewLoginWindows.clear();
+  await Promise.all([
+    xueqiuBrowserBridge?.close(),
+    taogubaBrowserBridge?.close(),
+    terminateChild(backendProcess),
+    terminateChild(wechatServiceProcess),
+  ].filter(Boolean));
+  xueqiuBrowserBridge = undefined;
+  xueqiuBrowserBridgeConfig = undefined;
+  taogubaBrowserBridge = undefined;
+  taogubaBrowserBridgeConfig = undefined;
+  backendProcess = undefined;
+  backendConfig = undefined;
+  wechatServiceProcess = undefined;
+  wechatServiceConfig = undefined;
+}
+
+function initializeUpdateManager() {
+  const enabled = app.isPackaged && ['darwin', 'win32'].includes(process.platform);
+  if (enabled && process.env.A_STOCK_UPDATE_FEED_URL) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: process.env.A_STOCK_UPDATE_FEED_URL });
+  }
+  updateManager = new UpdateManager({
+    updater: autoUpdater,
+    enabled,
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    stopRuntime,
+    createBackup: ({ fromVersion, toVersion }) => createUpdateBackup({
+      userDataPath: app.getPath('userData'),
+      backupRoot: resolveBackupRoot(app.getPath('userData')),
+      fromVersion,
+      toVersion,
+    }),
+    logger: console,
+  });
+  updateManager.on('status', (status) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('app-update-status-changed', status);
+    }
+  });
+  if (enabled) {
+    setTimeout(() => void updateManager.checkForUpdates().catch(() => {}), 30000).unref?.();
+    updateCheckTimer = setInterval(() => void updateManager.checkForUpdates().catch(() => {}), 12 * 60 * 60 * 1000);
+    updateCheckTimer.unref?.();
+  }
+}
+
 function buildRuntimeEnv(resourcesRoot) {
   const userData = app.getPath('userData');
   const hermesHome = process.env.A_STOCK_HERMES_HOME || path.join(userData, 'hermes-home');
@@ -200,7 +292,9 @@ function buildRuntimeEnv(resourcesRoot) {
   return {
     A_STOCK_SETTINGS_PATH: path.join(userData, 'settings.json'),
     A_STOCK_REVIEW_DB: path.join(userData, 'reviews.db'),
-		A_STOCK_MASTERY_CACHE: path.join(userData, 'trading-mastery'),
+    A_STOCK_MARKET_EMOTION_DB: path.join(userData, 'market-emotion.db'),
+    A_STOCK_THEME_RADAR_DB: path.join(userData, 'theme-radar.db'),
+    A_STOCK_MASTERY_CACHE: path.join(userData, 'trading-mastery'),
     A_STOCK_HERMES_HOME: hermesHome,
     A_STOCK_HERMES_WORKDIR: hermesWorkDir,
     A_STOCK_HERMES_RUNTIME_ROOT: hermesRuntimeRoot,
@@ -262,6 +356,19 @@ ipcMain.handle('review-browser-login-complete', (event) => {
   const entry = [...reviewLoginWindows.values()].find((item) => item.window === window);
   if (!entry) throw new Error('登录窗口已失效');
   return entry.complete();
+});
+ipcMain.handle('app-update-status', () => updateManager?.getStatus() || {
+  state: 'disabled', supported: false, currentVersion: app.getVersion(), progress: 0, message: '自动更新尚未初始化',
+});
+ipcMain.handle('app-update-check', () => updateManager.checkForUpdates());
+ipcMain.handle('app-update-download', () => updateManager.downloadUpdate());
+ipcMain.handle('app-update-install', () => updateManager.installUpdate());
+ipcMain.handle('app-update-open-release', () => shell.openExternal(`https://github.com/jundizhou/easy-stock/releases/tag/v${updateManager?.getStatus().latestVersion || app.getVersion()}`));
+ipcMain.handle('app-update-open-backups', async () => {
+  const backupRoot = resolveBackupRoot(app.getPath('userData'));
+  fs.mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
+  const error = await shell.openPath(backupRoot);
+  if (error) throw new Error(error);
 });
 
 function browserAuthRoot() {
@@ -442,8 +549,9 @@ function isReviewSourceHost(value, source) {
 }
 
 app.whenReady().then(() => {
-	const dockIcon = path.join(__dirname, 'assets', 'easy-stock.png');
-	if (process.platform === 'darwin' && app.dock && fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
+  const dockIcon = path.join(__dirname, 'assets', 'easy-stock.png');
+  if (process.platform === 'darwin' && app.dock && fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
+  initializeUpdateManager();
   createWindow().catch((error) => {
     console.error(error);
     app.quit();
@@ -452,22 +560,11 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
-  if (xueqiuBrowserBridge) {
-    void xueqiuBrowserBridge.close();
-    xueqiuBrowserBridge = undefined;
-    xueqiuBrowserBridgeConfig = undefined;
-  }
-  if (taogubaBrowserBridge) {
-    void taogubaBrowserBridge.close();
-    taogubaBrowserBridge = undefined;
-    taogubaBrowserBridgeConfig = undefined;
-  }
-  if (backendProcess && !backendProcess.killed) {
-    backendProcess.kill();
-  }
-  if (wechatServiceProcess && !wechatServiceProcess.killed) {
-    wechatServiceProcess.kill();
-  }
+  clearInterval(updateCheckTimer);
+  if (xueqiuBrowserBridge) void xueqiuBrowserBridge.close();
+  if (taogubaBrowserBridge) void taogubaBrowserBridge.close();
+  if (backendProcess && !backendProcess.killed) backendProcess.kill();
+  if (wechatServiceProcess && !wechatServiceProcess.killed) wechatServiceProcess.kill();
 });
 
 app.on('window-all-closed', () => {

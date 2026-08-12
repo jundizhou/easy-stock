@@ -5,7 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/httpapi"
@@ -70,14 +73,30 @@ func main() {
 		SettingsPath:         settingsPath,
 		HermesGateway:        hermesGateway,
 		MasteryLibrary:       masteryLibrary,
+		StrictPersistence:    true,
 	})
-	go server.RunReviewScheduler(context.Background())
-	go server.RunRemoteDailyReviewScheduler(context.Background())
-	go server.RunMarketEmotionScheduler(context.Background())
-	go server.RunMasteryScheduler(context.Background())
+	if err := server.StartupError(); err != nil {
+		log.Fatalf("persistent data startup failed: %v", err)
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	go server.RunReviewScheduler(ctx)
+	go server.RunRemoteDailyReviewScheduler(ctx)
+	go server.RunMarketEmotionScheduler(ctx)
+	go server.RunMasteryScheduler(ctx)
+	httpServer := &http.Server{Addr: addr, Handler: server}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = httpServer.Shutdown(shutdownCtx)
+	}()
 	log.Printf("easy-stock data foundation listening on http://%s", addr)
-	if err := http.ListenAndServe(addr, server); err != nil {
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		log.Printf("close persistent data: %v", err)
 	}
 }
 

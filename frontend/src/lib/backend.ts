@@ -10,6 +10,31 @@ export type BackendBridge = {
   getBrowserAuthStatus?: (profileId: string, source?: 'xueqiu' | 'taoguba') => Promise<BrowserAuthStatus>;
   openReviewSourceLogin?: (source: 'xueqiu' | 'taoguba', profileId: string, homepageURL: string) => Promise<BrowserAuthStatus>;
   openXueqiuLogin?: (profileId: string, homepageURL: string) => Promise<BrowserAuthStatus>;
+  getUpdateStatus?: () => Promise<AppUpdateStatus>;
+  checkForUpdates?: () => Promise<AppUpdateStatus>;
+  downloadUpdate?: () => Promise<AppUpdateStatus>;
+  installUpdate?: () => Promise<AppUpdateStatus>;
+  openUpdateRelease?: () => Promise<void>;
+  openUpdateBackups?: () => Promise<void>;
+  onUpdateStatus?: (listener: (status: AppUpdateStatus) => void) => () => void;
+};
+
+export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'installing';
+
+export type AppUpdateStatus = {
+	state: AppUpdateState;
+	supported: boolean;
+	currentVersion: string;
+	latestVersion?: string;
+	releaseName?: string;
+	releaseNotes?: string;
+	message: string;
+	progress: number;
+	transferred?: number;
+	total?: number;
+	bytesPerSecond?: number;
+	backupPath?: string;
+	backupCreatedAt?: string;
 };
 
 export type WechatServiceStatus = {
