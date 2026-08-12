@@ -22,6 +22,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
 	BackendConfig,
+	LimitUpLadderData,
 	MarketBillboardDetail,
 	MarketBillboardItem,
 	MarketFundFlow,
@@ -37,6 +38,7 @@ import type {
 import { requestJSON } from '../lib/backend';
 import {
 	type MarketOverviewView,
+	buildMarketBillboardPrompt,
 	buildMarketModulePrompt,
 	buildMarketPulsePrompt,
 	findMarketOverviewModule,
@@ -98,6 +100,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	const [searchDraft, setSearchDraft] = useState('');
 	const [submittedQuery, setSubmittedQuery] = useState('');
 	const [announcementCategory, setAnnouncementCategory] = useState('all');
+	const [aiPreparing, setAIPreparing] = useState(false);
 	const activeModule = useMemo(() => findMarketOverviewModule(activeView), [activeView]);
 
 	const loadPulse = useCallback(async () => {
@@ -178,18 +181,24 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		}
 	}, [activeModule.name, activeView, announcementCategory, config, submittedQuery, tradeDate]);
 
+	const requestBillboardDetail = useCallback(async (item: MarketBillboardItem) => {
+		if (!config) throw new Error('后端尚未连接');
+		const params = new URLSearchParams({ symbol: item.symbol, trade_date: item.trade_date, reason: item.reason });
+		const payload = await requestJSON<{ data: MarketBillboardDetail; meta: SourceMeta }>(config, `/api/v1/market/billboard/detail?${params.toString()}`);
+		return payload.data;
+	}, [config]);
+
 	const loadBillboardDetail = useCallback(async (item: MarketBillboardItem) => {
 		if (!config) return;
 		const key = billboardDetailKey(item);
 		setBillboardDetails((current) => ({ ...current, [key]: { state: 'loading' } }));
-		const params = new URLSearchParams({ symbol: item.symbol, trade_date: item.trade_date, reason: item.reason });
 		try {
-			const payload = await requestJSON<{ data: MarketBillboardDetail; meta: SourceMeta }>(config, `/api/v1/market/billboard/detail?${params.toString()}`);
-			setBillboardDetails((current) => ({ ...current, [key]: { state: 'ready', detail: payload.data } }));
+			const detail = await requestBillboardDetail(item);
+			setBillboardDetails((current) => ({ ...current, [key]: { state: 'ready', detail } }));
 		} catch (error) {
 			setBillboardDetails((current) => ({ ...current, [key]: { state: 'error', error: errorMessage(error, '买卖五席加载失败') } }));
 		}
-	}, [config]);
+	}, [config, requestBillboardDetail]);
 
 	useEffect(() => {
 		if (activeView === 'pulse') void loadPulse();
@@ -239,9 +248,46 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		? Boolean(news.length || themes.length)
 		: Boolean(activeEvidence.indexes?.length || activeEvidence.industries?.length || activeEvidence.flows?.length || activeEvidence.billboard?.length || activeEvidence.research?.length);
 
-	const askAI = () => {
+	const askAI = async () => {
 		const asOf = formatDateTime(lastUpdated || new Date().toISOString());
-		onAskAI(activeView === 'pulse' ? buildMarketPulsePrompt(news, themes, asOf) : buildMarketModulePrompt(activeView, activeEvidence, asOf));
+		if (activeView !== 'billboard') {
+			onAskAI(activeView === 'pulse' ? buildMarketPulsePrompt(news, themes, asOf) : buildMarketModulePrompt(activeView, activeEvidence, asOf));
+			return;
+		}
+		if (!config || !billboard.length || aiPreparing) return;
+		setAIPreparing(true);
+		const evidenceItems = uniqueBillboardItems(billboard, 20);
+		try {
+			const [detailResults, limitUpResult] = await Promise.all([
+				mapWithConcurrency(evidenceItems, 4, async (item) => {
+					const key = billboardDetailKey(item);
+					const existing = billboardDetails[key];
+					if (existing?.state === 'ready' && existing.detail) return { key, detail: existing.detail };
+					try {
+						return { key, detail: await requestBillboardDetail(item) };
+					} catch (error) {
+						return { key, error: errorMessage(error, '买卖五席加载失败') };
+					}
+				}),
+				requestJSON<{ data: LimitUpLadderData }>(config, '/api/v1/short-term/limit-up-ladder').then((payload) => payload.data).catch(() => null),
+			]);
+			const details: Record<string, MarketBillboardDetail | undefined> = Object.fromEntries(Object.entries(billboardDetails).filter(([, entry]) => entry.state === 'ready' && entry.detail).map(([key, entry]) => [key, entry.detail]));
+			for (const result of detailResults) {
+				if (result.detail) details[result.key] = result.detail;
+			}
+			setBillboardDetails((current) => {
+				const next = { ...current };
+				for (const result of detailResults) {
+					if (result.detail) {
+						next[result.key] = { state: 'ready', detail: result.detail };
+					} else next[result.key] = { state: 'error', error: result.error };
+				}
+				return next;
+			});
+			onAskAI(buildMarketBillboardPrompt({ items: billboard, details, limitUp: limitUpResult, meta: moduleMeta }, asOf));
+		} finally {
+			setAIPreparing(false);
+		}
 	};
 
 	const refresh = () => activeView === 'pulse' ? void loadPulse() : void loadModule();
@@ -263,7 +309,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		<div className="market-overview-main">
 			<header className="market-overview-hero">
 				<div><span>{marketOverviewGroups.find((group) => group.modules.some((module) => module.id === activeView))?.name}</span><h2>{activeModule.name}</h2><p>{activeModule.description}</p></div>
-				<div><button type="button" className="market-ai-button" onClick={askAI} disabled={!hasEvidence}><Bot size={16} />交给 AI 解读</button><button type="button" className="market-refresh-button" onClick={refresh} disabled={(activeView === 'pulse' ? pulseState : moduleState) === 'loading'}>{(activeView === 'pulse' ? pulseState : moduleState) === 'loading' ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
+				<div><button type="button" className="market-ai-button" onClick={() => void askAI()} disabled={!hasEvidence || aiPreparing}>{aiPreparing ? <LoaderCircle className="spin" size={16} /> : <Bot size={16} />}{aiPreparing ? '正在聚合席位与连板证据' : '交给 AI 解读'}</button><button type="button" className="market-refresh-button" onClick={refresh} disabled={(activeView === 'pulse' ? pulseState : moduleState) === 'loading'}>{(activeView === 'pulse' ? pulseState : moduleState) === 'loading' ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
 			</header>
 
 			{activeView === 'pulse' ? <PulseView news={news} themes={themes} themeMeta={themeMeta} sources={sources} state={pulseState} error={pulseError} lastUpdated={lastUpdated} /> : <ModuleState state={moduleState} error={moduleError}>
@@ -279,6 +325,15 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 
 function billboardDetailKey(item: MarketBillboardItem) {
 	return `${item.trade_date}|${item.symbol}|${item.reason}`;
+}
+
+function uniqueBillboardItems(items: MarketBillboardItem[], limit: number) {
+	const seen = new Set<string>();
+	return items.filter((item) => {
+		if (seen.has(item.symbol)) return false;
+		seen.add(item.symbol);
+		return true;
+	}).slice(0, limit);
 }
 
 function PulseView({ news, themes, themeMeta, sources, state, error, lastUpdated }: { news: NewsItem[]; themes: ThemeOverview[]; themeMeta: SourceMeta | null; sources: SourceHealth[]; state: LoadState; error: string; lastUpdated: string }) {
@@ -344,6 +399,20 @@ function formatDateTime(value: string) {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return value;
 	return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let nextIndex = 0;
+	const workers = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+		while (nextIndex < items.length) {
+			const index = nextIndex;
+			nextIndex += 1;
+			results[index] = await mapper(items[index], index);
+		}
+	});
+	await Promise.all(workers);
+	return results;
 }
 
 function formatPercent(value: number) {

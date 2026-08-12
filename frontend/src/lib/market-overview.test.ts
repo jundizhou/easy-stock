@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMarketModulePrompt, buildMarketPulsePrompt, marketOverviewGroups, resolveMarketOverviewView } from './market-overview';
+import { buildMarketBillboardPrompt, buildMarketModulePrompt, buildMarketPulsePrompt, marketOverviewGroups, resolveMarketOverviewView } from './market-overview';
 
 describe('market overview navigation', () => {
 	it('uses the approved product names and grouping', () => {
@@ -41,6 +41,45 @@ describe('market module AI prompt', () => {
 		expect(prompt).toContain('eastmoney:fund-flow');
 		expect(prompt).toContain('使用最近快照');
 		expect(prompt).toContain('不得补造');
+	});
+});
+
+describe('market billboard AI prompt', () => {
+	it('includes seats, institution net flow, concentration, themes, streaks and two three-stock lists', () => {
+		const item = {
+			trade_date: '2026-08-11', symbol: '600001.SH', name: '样本股份', close_price: 12.3,
+			change_percent: 10.01, turnover_rate: 18.2, reason: '日涨幅偏离值达7%',
+			buy_amount: 100_000_000, sell_amount: 40_000_000, net_amount: 60_000_000,
+			institution_buyers: 1, buy_seats: 5, sell_seats: 5,
+			meta: { source: 'eastmoney:billboard', fetched_at: '2026-08-11T18:00:00+08:00', latency_ms: 10, stale: false },
+		};
+		const prompt = buildMarketBillboardPrompt({
+			items: [item],
+			details: {
+				'2026-08-11|600001.SH|日涨幅偏离值达7%': {
+					trade_date: '2026-08-11', symbol: '600001.SH', reason: item.reason,
+					buy_seats: [{ direction: 'buy', rank: 1, name: '机构专用', buy_amount: 30_000_000, buy_ratio: 30, sell_amount: 2_000_000, sell_ratio: 5, net_amount: 28_000_000, institution: true }],
+					sell_seats: [{ direction: 'sell', rank: 1, name: '样本营业部', buy_amount: 1_000_000, buy_ratio: 1, sell_amount: 12_000_000, sell_ratio: 30, net_amount: -11_000_000, institution: false }],
+					meta: { source: 'eastmoney:billboard-seats', fetched_at: '2026-08-11T18:00:00+08:00', latency_ms: 10, stale: false },
+				},
+			},
+			limitUp: {
+				session_status: 'closed',
+				current: { trade_date: '2026-08-11', limit_up_count: 30, board_count: 8, first_board_count: 22, max_streak: 5, reopened_count: 2, st_count: 0, total_amount: 0, levels: [{ level: 3, label: '3板', count: 1, stocks: [{ symbol: '600001.SH', name: '样本股份', price: 12.3, change_percent: 10.01, amount: 500_000_000, float_market_cap: 0, turnover_rate: 18.2, streak: 3, open_count: 0, industry: '软件', days: 3, count: 3, is_st: false, limit_regime: '10cm', raw_concepts: ['AI应用'], primary_theme: 'AI应用', secondary_themes: ['算力'], theme_confidence: 0.9, theme_evidence: [], theme_leader_role: '龙头' }] }], },
+				previous: { trade_date: '2026-08-10', limit_up_count: 0, board_count: 0, first_board_count: 0, max_streak: 0, reopened_count: 0, st_count: 0, total_amount: 0, levels: [] },
+				advance: [], industry_heat: [], concept_heat: [{ name: 'AI应用', count: 5, board_count: 2, max_streak: 3, previous_count: 3, heat: 88, leaders: ['样本股份'] }],
+				meta: { source: 'limit-up:test', fetched_at: '2026-08-11T18:00:00+08:00', latency_ms: 10, stale: false },
+			},
+			meta: item.meta,
+		}, '2026-08-11 18:10');
+
+		expect(prompt).toContain('机构席位净额 2800.0万');
+		expect(prompt).toContain('买方买一/前三集中度 30.00% / 30.00%');
+		expect(prompt).toContain('连板高度 3板');
+		expect(prompt).toContain('题材 AI应用、算力');
+		expect(prompt).toContain('明日最值得观察的3个名单');
+		expect(prompt).toContain('明日需要优先止损/割肉评估的3个名单');
+		expect(prompt).toContain('身份未确认');
 	});
 });
 

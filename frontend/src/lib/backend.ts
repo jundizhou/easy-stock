@@ -735,6 +735,7 @@ export type LimitUpLadderStock = {
 	secondary_themes: string[];
 	theme_confidence: number;
 	theme_evidence: string[];
+	theme_leader_role?: string;
 	theme_source?: string;
 	source?: string;
 };
