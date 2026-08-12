@@ -225,7 +225,7 @@ func parseKLine(raw string, symbol string, meta foundation.SourceMeta) (foundati
 	if len(fields) < 7 {
 		return foundation.KLine{}, fmt.Errorf("invalid eastmoney kline %q", raw)
 	}
-	day, err := time.ParseInLocation("2006-01-02", fields[0], time.Local)
+	day, err := parseKLineTime(fields[0])
 	if err != nil {
 		return foundation.KLine{}, err
 	}
@@ -256,4 +256,24 @@ func parseKLine(raw string, symbol string, meta foundation.SourceMeta) (foundati
 		TurnoverRate:  turnover,
 		Meta:          meta,
 	}, nil
+}
+
+// parseKLineTime accepts both daily bars (YYYY-MM-DD) and intraday bars
+// returned by Eastmoney (YYYY-MM-DD HH:MM[:SS]). A few upstream responses
+// use slash-separated dates, so keep that format for resilient parsing too.
+func parseKLineTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+		"2006/01/02 15:04:05",
+		"2006/01/02 15:04",
+		"2006/01/02",
+	} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid kline time %q", value)
 }

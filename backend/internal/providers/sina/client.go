@@ -210,7 +210,7 @@ func parseKLineJSONP(body string, symbol string, meta foundation.SourceMeta) ([]
 	}
 	items := make([]foundation.KLine, 0, len(rawItems))
 	for _, raw := range rawItems {
-		day, err := time.ParseInLocation("2006-01-02", raw.Day, time.Local)
+		day, err := parseKLineTime(raw.Day)
 		if err != nil {
 			return nil, err
 		}
@@ -234,6 +234,23 @@ func parseKLineJSONP(body string, symbol string, meta foundation.SourceMeta) ([]
 		return nil, fmt.Errorf("sina returned no kline bars")
 	}
 	return items, nil
+}
+
+func parseKLineTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+		"2006/01/02 15:04:05",
+		"2006/01/02 15:04",
+		"2006/01/02",
+	} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid kline time %q", value)
 }
 
 func decodeSinaBody(body []byte) string {

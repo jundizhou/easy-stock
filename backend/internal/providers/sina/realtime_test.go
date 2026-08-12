@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"easy-stock/backend/internal/foundation"
 )
 
 func TestClientRealtimeParsesSinaResponse(t *testing.T) {
@@ -32,6 +34,17 @@ func TestClientRealtimeParsesSinaResponse(t *testing.T) {
 	}
 	if got[0].Meta.Source != "sina" || got[0].Meta.SourceURL == "" {
 		t.Fatalf("unexpected meta: %+v", got[0].Meta)
+	}
+}
+
+func TestParseKLineSupportsIntradayTime(t *testing.T) {
+	body := `callback([{"day":"2026-08-12 14:35","open":"11.000","high":"11.250","low":"10.880","close":"11.240","volume":"203235546"}]);`
+	got, err := parseKLineJSONP(body, "000001.SZ", foundation.SourceMeta{})
+	if err != nil {
+		t.Fatalf("parseKLineJSONP returned error: %v", err)
+	}
+	if got[0].Time.Hour() != 14 || got[0].Time.Minute() != 35 {
+		t.Fatalf("Time = %v, want 14:35", got[0].Time)
 	}
 }
 

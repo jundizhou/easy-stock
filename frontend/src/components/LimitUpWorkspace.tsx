@@ -12,9 +12,12 @@ import {
 	ShieldAlert,
 	TimerReset,
 	TrendingUp,
+	X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+	BackendConfig,
+	KLine,
 	LimitUpLadderData,
 	LimitUpLadderDay,
 	LimitUpLadderLevel,
@@ -22,11 +25,32 @@ import {
 	MarketEmotionHistory,
 	MarketEmotionIntraday,
 	MarketEmotionPoint,
+	requestJSON,
 } from '../lib/backend';
+import { KLineChart } from './KLineChart';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
+type KLinePeriodKey = 'intraday' | 'five-day' | 'day' | 'week' | 'month';
+
+type KLinePeriod = {
+	key: KLinePeriodKey;
+	label: string;
+	apiPeriod: string;
+	limit: number;
+	mode: 'intraday' | 'daily';
+};
+
+const KLINE_PERIODS: KLinePeriod[] = [
+	{ key: 'intraday', label: '分时', apiPeriod: '1', limit: 240, mode: 'intraday' },
+	{ key: 'five-day', label: '5日', apiPeriod: '5', limit: 240, mode: 'intraday' },
+	{ key: 'day', label: '日K', apiPeriod: 'day', limit: 120, mode: 'daily' },
+	{ key: 'week', label: '周K', apiPeriod: 'week', limit: 80, mode: 'daily' },
+	{ key: 'month', label: '月K', apiPeriod: 'month', limit: 60, mode: 'daily' },
+];
+
 type Props = {
+	config: BackendConfig | null;
 	data: LimitUpLadderData | null;
 	state: LoadState;
 	error?: string;
@@ -36,11 +60,53 @@ type Props = {
 	onRefresh: () => void;
 };
 
-export function LimitUpWorkspace({ data, state, error, emotionData, emotionState, emotionError, onRefresh }: Props) {
+export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, onRefresh }: Props) {
 	const [showST, setShowST] = useState(false);
 	const [previousExpanded, setPreviousExpanded] = useState(false);
+	const [selectedStock, setSelectedStock] = useState<LimitUpLadderStock | null>(null);
+	const [selectedKLines, setSelectedKLines] = useState<KLine[]>([]);
+	const [selectedKLineState, setSelectedKLineState] = useState<LoadState>('idle');
+	const [selectedKLineError, setSelectedKLineError] = useState('');
+	const [selectedKLinePeriod, setSelectedKLinePeriod] = useState<KLinePeriodKey>('day');
+	const selectedKLineCache = useRef(new Map<string, KLine[]>());
 	const current = useMemo(() => summarizeVisibleDay(data?.current, showST), [data?.current, showST]);
 	const previous = useMemo(() => summarizeVisibleDay(data?.previous, showST), [data?.previous, showST]);
+
+	useEffect(() => {
+		setSelectedKLinePeriod('day');
+		selectedKLineCache.current.clear();
+	}, [selectedStock?.symbol]);
+
+	useEffect(() => {
+		if (!selectedStock || !config) return;
+		const period = KLINE_PERIODS.find((item) => item.key === selectedKLinePeriod) || KLINE_PERIODS[2];
+		const cacheKey = `${selectedStock.symbol}:${period.key}`;
+		const cached = selectedKLineCache.current.get(cacheKey);
+		if (cached) {
+			setSelectedKLines(cached);
+			setSelectedKLineState('ready');
+			setSelectedKLineError('');
+			return;
+		}
+		let cancelled = false;
+		setSelectedKLines([]);
+		setSelectedKLineState('loading');
+		setSelectedKLineError('');
+		requestJSON<{ data: KLine[] }>(config, `/api/v1/quotes/kline?symbol=${encodeURIComponent(selectedStock.symbol)}&period=${encodeURIComponent(period.apiPeriod)}&limit=${period.limit}`)
+			.then((payload) => {
+				if (cancelled) return;
+				const lines = payload.data || [];
+				selectedKLineCache.current.set(cacheKey, lines);
+				setSelectedKLines(lines);
+				setSelectedKLineState('ready');
+			})
+			.catch((error) => {
+				if (cancelled) return;
+				setSelectedKLineState('error');
+				setSelectedKLineError(error instanceof Error ? error.message : `${period.label}数据加载失败`);
+			});
+		return () => { cancelled = true; };
+	}, [config, selectedStock, selectedKLinePeriod]);
 
 	if (!data && state === 'loading') {
 		return <div className="limit-up-loading"><RefreshCw className="spin" size={24} /><strong>载入短线连板结构</strong><span>正在读取开盘啦涨停池并补充东方财富历史梯队。</span></div>;
@@ -83,7 +149,7 @@ export function LimitUpWorkspace({ data, state, error, emotionData, emotionState
 						<div><span>今日结构</span><h3>连板梯队</h3></div>
 						<small>按高度降序；同层优先无开板、早封板</small>
 					</div>
-					<LadderRows levels={current.levels} emptyText="当前涨停池没有可展示股票" />
+					<LadderRows levels={current.levels} onSelectStock={setSelectedStock} emptyText="当前涨停池没有可展示股票" />
 				</section>
 
 				<aside className="limit-up-side-stack">
@@ -136,13 +202,14 @@ export function LimitUpWorkspace({ data, state, error, emotionData, emotionState
 						</button>
 					</div>
 				</div>
-				{previousExpanded && <div id="previous-ladder-content"><LadderRows levels={previous.levels} compact showCurrentChange emptyText="暂无昨日梯队数据" /></div>}
+				{previousExpanded && <div id="previous-ladder-content"><LadderRows levels={previous.levels} compact showCurrentChange onSelectStock={setSelectedStock} emptyText="暂无昨日梯队数据" /></div>}
 			</section>
 
 			<footer className="limit-up-note">
 				<ShieldAlert size={14} />
 				<span>当日及本地已留存交易日的涨停结构、连续板数和逐股炒作题材优先采用开盘啦，5 分钟内复用快照；东方财富只补充尚无开盘啦快照的历史交易日、缺失股票和行情字段。主炒题材仍会剔除本股后检验同题材梯队，并对宽泛标签降权。</span>
 			</footer>
+			{selectedStock && <KLineModal stock={selectedStock} lines={selectedKLines} state={selectedKLineState} error={selectedKLineError} periodKey={selectedKLinePeriod} onPeriodChange={setSelectedKLinePeriod} onClose={() => setSelectedStock(null)} />}
 		</section>
 	);
 }
@@ -318,7 +385,7 @@ function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNo
 	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function LadderRows({ levels, compact = false, showCurrentChange = false, emptyText }: { levels: LimitUpLadderLevel[]; compact?: boolean; showCurrentChange?: boolean; emptyText: string }) {
+function LadderRows({ levels, compact = false, showCurrentChange = false, onSelectStock, emptyText }: { levels: LimitUpLadderLevel[]; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; emptyText: string }) {
 	const [collapsedLevels, setCollapsedLevels] = useState<Set<number>>(() => new Set([1]));
 
 	if (!levels.length) {
@@ -350,8 +417,8 @@ function LadderRows({ levels, compact = false, showCurrentChange = false, emptyT
 						</div>
 						<ChevronDown size={17} aria-hidden="true" />
 					</summary>
-					<div className="limit-stock-grid">
-						{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} key={stock.symbol} />)}
+									<div className="limit-stock-grid">
+										{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} key={stock.symbol} />)}
 					</div>
 				</details>
 			))}
@@ -359,7 +426,7 @@ function LadderRows({ levels, compact = false, showCurrentChange = false, emptyT
 	);
 }
 
-function LadderStockChip({ stock, compact, showCurrentChange }: { stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean }) {
+function LadderStockChip({ stock, compact, showCurrentChange, onSelect }: { stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void }) {
 	const primaryTheme = stock.primary_theme || stock.industry || '待归因';
 	const secondary = stock.secondary_themes?.length ? stock.secondary_themes.join(' / ') : stock.industry || '暂无辅助题材';
 	const tooltip = [
@@ -370,7 +437,7 @@ function LadderStockChip({ stock, compact, showCurrentChange }: { stock: LimitUp
 		...(stock.theme_evidence || []),
 	].filter(Boolean).join('\n');
 	return (
-		<article className={`limit-stock-chip ${stock.open_count > 0 ? 'reopened' : ''} ${stock.is_st ? 'st' : ''}`} title={tooltip}>
+		<article className={`limit-stock-chip clickable ${stock.open_count > 0 ? 'reopened' : ''} ${stock.is_st ? 'st' : ''}`} title={`${tooltip}\n点击查看多周期行情`} role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(); } }}>
 			<div className="limit-stock-title">
 				<strong>{stock.name}</strong>
 				{showCurrentChange && stock.current_change_percent != null && (
@@ -384,6 +451,44 @@ function LadderStockChip({ stock, compact, showCurrentChange }: { stock: LimitUp
 			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{secondary}</em></div>
 			{!compact && <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><span>{stock.streak_label || formatMoney(stock.amount)}</span></div>}
 		</article>
+	);
+}
+
+function KLineModal({ stock, lines, state, error, periodKey, onPeriodChange, onClose }: { stock: LimitUpLadderStock; lines: KLine[]; state: LoadState; error: string; periodKey: KLinePeriodKey; onPeriodChange: (period: KLinePeriodKey) => void; onClose: () => void }) {
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	}, [onClose]);
+	const latest = lines.length ? [...lines].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()).at(-1) : null;
+	const activePeriod = KLINE_PERIODS.find((item) => item.key === periodKey) || KLINE_PERIODS[2];
+	const periodRangeLabel = activePeriod.mode === 'intraday' ? `${activePeriod.label} · ${lines.length} 个数据点` : `${lines.length} 根${activePeriod.label}`;
+	return (
+		<div className="kline-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+			<section className="kline-modal" role="dialog" aria-modal="true" aria-label={`${stock.name} K线`}>
+				<header className="kline-modal-header">
+					<div><span>连板梯队 · {activePeriod.label}</span><h2>{stock.name}<small>{stock.symbol}</small></h2><p>{stock.streak}板 · {stock.primary_theme || stock.industry || '题材待归因'}</p></div>
+					<button type="button" className="kline-modal-close" onClick={onClose} aria-label="关闭 K 线弹窗"><X size={19} /></button>
+				</header>
+				<div className="kline-period-tabs" role="tablist" aria-label="K线周期">
+					{KLINE_PERIODS.map((period) => <button key={period.key} type="button" role="tab" aria-selected={period.key === periodKey} className={period.key === periodKey ? 'active' : ''} onClick={() => onPeriodChange(period.key)}>{period.label}</button>)}
+				</div>
+				<div className="kline-modal-quote">
+					<div><span>最新</span><strong>{latest?.close?.toFixed(2) || stock.price?.toFixed(2) || '--'}</strong></div>
+					<div><span>涨跌幅</span><strong className={(latest?.change_percent ?? stock.change_percent) >= 0 ? 'up' : 'down'}>{formatSignedPercent(latest?.change_percent ?? stock.change_percent)}</strong></div>
+					<div><span>开盘</span><strong>{latest?.open?.toFixed(2) || '--'}</strong></div>
+					<div><span>最高</span><strong className="up">{latest?.high?.toFixed(2) || '--'}</strong></div>
+					<div><span>最低</span><strong className="down">{latest?.low?.toFixed(2) || '--'}</strong></div>
+					<div><span>成交量</span><strong>{latest ? formatMoney(latest.volume) : '--'}</strong></div>
+					<div><span>成交额</span><strong>{latest?.amount ? formatMoney(latest.amount) : '--'}</strong></div>
+					<div><span>换手率</span><strong>{latest?.turnover_rate != null ? `${latest.turnover_rate.toFixed(2)}%` : '--'}</strong></div>
+				</div>
+				<div className="kline-period-summary"><span>{periodRangeLabel}</span><span>前复权行情</span></div>
+				{state === 'error' && <div className="kline-modal-error"><ShieldAlert size={17} /><span>{error || `${activePeriod.label}数据加载失败`}</span></div>}
+				<KLineChart lines={lines} state={state} mode={activePeriod.mode} periodLabel={activePeriod.label} />
+				<footer className="kline-modal-footer">鼠标悬浮图表可查看行情细节；数据源：东方财富 / 新浪，结果仅供研究参考。</footer>
+			</section>
+		</div>
 	);
 }
 

@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"easy-stock/backend/internal/foundation"
 )
 
 func TestClientKLineParsesEastMoneyResponse(t *testing.T) {
@@ -76,5 +78,15 @@ func TestClientKLineRetriesTransientHTTPFailure(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestParseKLineSupportsIntradayTime(t *testing.T) {
+	got, err := parseKLine("2026-08-12 14:35,10.00,10.50,10.80,9.90,123,456,8.5,5,0.5,1.2", "000001.SZ", foundation.SourceMeta{})
+	if err != nil {
+		t.Fatalf("parseKLine returned error: %v", err)
+	}
+	if got.Time.Hour() != 14 || got.Time.Minute() != 35 {
+		t.Fatalf("Time = %v, want 14:35", got.Time)
 	}
 }
