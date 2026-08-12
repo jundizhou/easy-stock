@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageManifest = JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
+const updateFeedURL = process.env.A_STOCK_UPDATE_FEED_URL || 'https://easy-stock-fs.oss-cn-beijing.aliyuncs.com/updates/desktop';
 const platform = process.argv[2];
 const mode = process.argv[3] || 'release';
 const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
@@ -42,6 +43,7 @@ const config = {
     'data-protection.cjs',
     'hermes-runtime-root.cjs',
     'taoguba-browser-bridge.cjs',
+    'update-feed.cjs',
     'update-manager.cjs',
     'user-data.cjs',
     'wechat-service.cjs',
@@ -54,7 +56,7 @@ const config = {
   ],
   extraResources: [{ from: path.join(desktopRoot, 'resources'), to: 'resources' }],
   asar: true,
-  publish: [{ provider: 'github', owner: 'jundizhou', repo: 'easy-stock', releaseType: 'release' }],
+  publish: [{ provider: 'generic', url: updateFeedURL }],
   mac: {
     category: 'public.app-category.finance',
     icon: path.join(desktopRoot, 'assets', 'easy-stock.icns'),

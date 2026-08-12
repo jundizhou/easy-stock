@@ -60,3 +60,41 @@ test('merges macOS updater metadata without installed npm dependencies', () => {
   assert.equal((merged.match(/^\s*- url:/gm) || []).length, 2);
   assert.match(merged, /path: easy-stock-v0\.4\.0-macos-arm64\.zip/);
 });
+
+test('separates user downloads from internal updater assets', () => {
+  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-release-assets-'));
+  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-publish-assets-'));
+  const version = '0.4.0';
+  const names = [
+    `easy-stock-v${version}-macos-arm64.dmg`,
+    `easy-stock-v${version}-macos-x64.dmg`,
+    `easy-stock-v${version}-macos-arm64.zip`,
+    `easy-stock-v${version}-macos-arm64.zip.blockmap`,
+    `easy-stock-v${version}-macos-x64.zip`,
+    `easy-stock-v${version}-macos-x64.zip.blockmap`,
+    `easy-stock-v${version}-windows-x64-setup.exe`,
+    `easy-stock-v${version}-windows-x64-setup.exe.blockmap`,
+    'latest-mac.yml',
+    'latest.yml',
+  ];
+  for (const name of names) fs.writeFileSync(path.join(sourceRoot, name), name);
+
+  const scriptPath = path.resolve(__dirname, '..', 'scripts', 'prepare-publish-assets.mjs');
+  execFileSync(process.execPath, [scriptPath, sourceRoot, outputRoot, `v${version}`]);
+
+  assert.deepEqual(fs.readdirSync(path.join(outputRoot, 'github')).sort(), [
+    `easy-stock-v${version}-macos-arm64.dmg`,
+    `easy-stock-v${version}-macos-x64.dmg`,
+    `easy-stock-v${version}-windows-x64-setup.exe`,
+  ]);
+  assert.deepEqual(fs.readdirSync(path.join(outputRoot, 'updater')).sort(), [
+    `easy-stock-v${version}-macos-arm64.zip`,
+    `easy-stock-v${version}-macos-arm64.zip.blockmap`,
+    `easy-stock-v${version}-macos-x64.zip`,
+    `easy-stock-v${version}-macos-x64.zip.blockmap`,
+    `easy-stock-v${version}-windows-x64-setup.exe`,
+    `easy-stock-v${version}-windows-x64-setup.exe.blockmap`,
+    'latest-mac.yml',
+    'latest.yml',
+  ].sort());
+});

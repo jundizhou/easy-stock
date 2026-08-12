@@ -6,7 +6,7 @@ const developmentStatus: AppUpdateStatus = {
 	state: 'disabled',
 	supported: false,
 	currentVersion: '开发模式',
-	message: '安装版会自动检查 GitHub Releases',
+	message: '安装版会自动检查正式更新源',
 	progress: 0,
 };
 
@@ -54,7 +54,7 @@ export function AppUpdatePanel() {
 
 	return (
 		<section className="settings-section app-update-section">
-			<div className="settings-section-title"><HardDriveDownload size={18} /><div><h3>版本与自动更新</h3><p>通过 GitHub Releases 获取 macOS 与 Windows 正式版本，下载完成后由你决定何时重启安装。</p></div></div>
+			<div className="settings-section-title"><HardDriveDownload size={18} /><div><h3>版本与自动更新</h3><p>通过 easy-stock 更新服务获取 macOS 与 Windows 正式版本，下载完成后由你决定何时重启安装。</p></div></div>
 			<div className={`app-update-status ${status.state}`}>
 				<div className="app-update-version">
 					<span><strong>v{status.currentVersion}</strong><small>当前版本</small></span>

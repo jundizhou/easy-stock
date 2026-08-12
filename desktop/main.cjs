@@ -31,6 +31,7 @@ const { resolveUserDataPath } = require('./user-data.cjs');
 const { resolveHermesRuntimeRoot } = require('./hermes-runtime-root.cjs');
 const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs');
 const { UpdateManager } = require('./update-manager.cjs');
+const { resolveUpdateFeedURL } = require('./update-feed.cjs');
 
 app.setName('easy-stock');
 const defaultUserDataPath = app.getPath('userData');
@@ -238,8 +239,8 @@ async function stopRuntime() {
 
 function initializeUpdateManager() {
   const enabled = app.isPackaged && ['darwin', 'win32'].includes(process.platform);
-  if (enabled && process.env.A_STOCK_UPDATE_FEED_URL) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: process.env.A_STOCK_UPDATE_FEED_URL });
+  if (enabled) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: resolveUpdateFeedURL() });
   }
   updateManager = new UpdateManager({
     updater: autoUpdater,
@@ -551,7 +552,18 @@ function isReviewSourceHost(value, source) {
 app.whenReady().then(() => {
   const dockIcon = path.join(__dirname, 'assets', 'easy-stock.png');
   if (process.platform === 'darwin' && app.dock && fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
-  initializeUpdateManager();
+  try {
+    initializeUpdateManager();
+  } catch (error) {
+    console.error('[updater] initialization failed', error);
+    updateManager = new UpdateManager({
+      updater: autoUpdater,
+      enabled: false,
+      currentVersion: app.getVersion(),
+      platform: process.platform,
+      logger: console,
+    });
+  }
   createWindow().catch((error) => {
     console.error(error);
     app.quit();

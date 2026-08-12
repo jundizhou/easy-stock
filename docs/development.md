@@ -250,7 +250,7 @@ Windows 正式发布当前使用 `x64`。构建产物位于 `desktop/dist/`，�
 
 ### GitHub Release
 
-推送与 `desktop/package.json` 版本一致的 `v*` 标签后，[桌面发布工作流](../.github/workflows/release.yml) 会运行测试，并分别生成 macOS Intel、macOS Apple Silicon 和 Windows x64 产物，最后发布到 GitHub Releases。
+推送与 `desktop/package.json` 版本一致的 `v*` 标签后，[桌面发布工作流](../.github/workflows/release.yml) 会运行测试，并分别生成 macOS Intel、macOS Apple Silicon 和 Windows x64 产物。工作流会将自动更新所需的 ZIP/EXE、blockmap 和 `latest*.yml` 上传到 OSS，最后只把 DMG、Windows 安装器和 `SHA256SUMS.txt` 发布到 GitHub Releases，避免用户在下载页误选更新内部文件。完整流程和必需 secrets 见 [桌面自动更新文档](../desktop/AUTO_UPDATE.md)。
 
 ## 本地数据与日志
 

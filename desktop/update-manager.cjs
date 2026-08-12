@@ -20,7 +20,7 @@ class UpdateManager extends EventEmitter {
       state: this.enabled ? 'idle' : 'disabled',
       supported: this.enabled,
       currentVersion,
-      message: this.enabled ? '可检查 GitHub 新版本' : '开发模式不启用自动更新',
+      message: this.enabled ? '可检查正式更新源的新版本' : '开发模式不启用自动更新',
       progress: 0,
     };
     if (this.enabled) this.bindUpdater();
@@ -30,7 +30,7 @@ class UpdateManager extends EventEmitter {
     this.updater.autoDownload = false;
     this.updater.autoInstallOnAppQuit = false;
     this.updater.allowPrerelease = false;
-    this.updater.on('checking-for-update', () => this.setStatus({ state: 'checking', message: '正在检查 GitHub 新版本', progress: 0 }));
+    this.updater.on('checking-for-update', () => this.setStatus({ state: 'checking', message: '正在检查新版本', progress: 0 }));
     this.updater.on('update-available', (info) => {
       this.latestInfo = info;
       this.setStatus({
