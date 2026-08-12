@@ -485,7 +485,7 @@ function KLineModal({ stock, lines, state, error, periodKey, onPeriodChange, onC
 				</div>
 				<div className="kline-period-summary"><span>{periodRangeLabel}</span><span>前复权行情</span></div>
 				{state === 'error' && <div className="kline-modal-error"><ShieldAlert size={17} /><span>{error || `${activePeriod.label}数据加载失败`}</span></div>}
-				<KLineChart lines={lines} state={state} mode={activePeriod.mode} periodLabel={activePeriod.label} />
+				<KLineChart lines={lines} symbol={stock.symbol} state={state} mode={activePeriod.mode} periodLabel={activePeriod.label} />
 				<footer className="kline-modal-footer">鼠标悬浮图表可查看行情细节；数据源：东方财富 / 新浪，结果仅供研究参考。</footer>
 			</section>
 		</div>

@@ -2562,8 +2562,10 @@ a:focus-visible {
 .kline-chart-wrap { min-height: 330px; padding: 14px 24px 4px; overflow-x: auto; }
 .kline-chart { display: block; width: 100%; min-width: 720px; height: auto; }
 .kline-grid { stroke: #e8edf3; stroke-width: 1; }
+.kline-zero-grid { stroke: #aab9c9; stroke-width: 1.4; stroke-dasharray: 5 4; }
 .kline-divider { stroke: #dce5ee; stroke-width: 1; }
 .kline-axis-label, .kline-date-label { fill: #7d899a; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; }
+.kline-percent-axis-label { fill: #62748a; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 650; }
 .kline-wick { stroke-width: 1.4; }
 .kline-body, .kline-volume { opacity: .88; }
 .kline-up .kline-wick, .kline-up .kline-body { stroke: #e33b46; fill: #e33b46; }
@@ -2576,6 +2578,8 @@ a:focus-visible {
 .kline-chart-legend { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 72px 0 24px; color: var(--muted); font-size: 10px; }
 .kline-chart-legend .close-dot, .kline-chart-legend .average-dot { width: 16px; height: 2px; margin-left: 8px; border-radius: 999px; background: #2476d2; }
 .kline-chart-legend .average-dot { background: #e3a929; }
+.kline-chart-legend .zero-dot { width: 16px; height: 0; margin-right: 1px; border-top: 1.5px dashed #aab9c9; }
+.kline-chart-legend .limit-note { margin-left: 8px; color: #2476d2; font-weight: 650; }
 .kline-chart-legend .volume-note { margin-left: 8px; }
 .kline-chart-placeholder { display: grid; place-items: center; min-height: 330px; margin: 14px 24px; border: 1px dashed var(--line); border-radius: 10px; background: #f8fafc; color: var(--muted); font-size: 13px; }
 .kline-modal-footer { padding: 11px 24px 17px; color: var(--subtle); font-size: 10px; }
