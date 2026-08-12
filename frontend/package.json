@@ -10,11 +10,14 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.4",
-    "vite": "^7.1.12",
-    "typescript": "^5.9.3",
+    "lucide-react": "^0.545.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "lucide-react": "^0.545.0"
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
   },
   "devDependencies": {
     "@types/node": "^24.7.2",

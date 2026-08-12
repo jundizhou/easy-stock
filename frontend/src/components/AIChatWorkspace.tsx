@@ -26,6 +26,7 @@ import {
 	storeableConversations,
 } from '../lib/chat';
 import { streamHermesPrompt } from '../lib/hermes';
+import { MessageContent } from './MarkdownContent';
 
 type Props = {
 	config: BackendConfig | null;
@@ -433,7 +434,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 									<div className="ai-message-avatar">{message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}</div>
 									<div className="ai-message-body">
 										<header><strong>{message.role === 'user' ? '你' : 'AI 助手'}</strong><time>{formatMessageTime(message.created_at)}</time></header>
-										{message.content ? <MessageContent content={message.content} /> : message.id === pendingMessageID ? <div className="ai-thinking"><i /><i /><i /></div> : null}
+										{message.content ? <MessageContent content={message.content} markdown={message.role === 'assistant' && !message.error} /> : message.id === pendingMessageID ? <div className="ai-thinking"><i /><i /><i /></div> : null}
 										<button type="button" className="ai-copy-message" onClick={() => void copyMessage(message)}>{copiedID === message.id ? <Check size={13} /> : <Copy size={13} />}{copiedID === message.id ? '已复制' : '复制'}</button>
 									</div>
 								</article>
@@ -452,21 +453,6 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 				</form>
 			</div>
 		</section>
-	);
-}
-
-function MessageContent({ content }: { content: string }) {
-	const parts = content.split('```');
-	return (
-		<div className="ai-message-content">
-			{parts.map((part, index) => {
-				if (index % 2 === 0) return part ? <div className="ai-prose" key={index}>{part}</div> : null;
-				const newline = part.indexOf('\n');
-				const language = newline >= 0 ? part.slice(0, newline).trim() : '';
-				const code = newline >= 0 ? part.slice(newline + 1) : part;
-				return <div className="ai-code-block" key={index}>{language && <span>{language}</span>}<pre><code>{code.trim()}</code></pre></div>;
-			})}
-		</div>
 	);
 }
 
