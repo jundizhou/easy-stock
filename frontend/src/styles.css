@@ -2559,7 +2559,7 @@ a:focus-visible {
 .kline-modal-quote strong.down { color: var(--down); }
 .kline-period-summary { display: flex; justify-content: space-between; gap: 12px; padding: 9px 24px 0; color: var(--muted); font-size: 10px; }
 .kline-modal-error { display: flex; align-items: center; gap: 8px; margin: 14px 24px 0; padding: 10px 12px; border: 1px solid #efc4c7; border-radius: 8px; background: #fff6f6; color: #b23842; font-size: 12px; }
-.kline-chart-wrap { min-height: 330px; padding: 14px 24px 4px; overflow-x: auto; }
+.kline-chart-wrap { position: relative; min-height: 330px; padding: 14px 24px 4px; overflow-x: auto; }
 .kline-chart { display: block; width: 100%; min-width: 720px; height: auto; }
 .kline-grid { stroke: #e8edf3; stroke-width: 1; }
 .kline-zero-grid { stroke: #aab9c9; stroke-width: 1.4; stroke-dasharray: 5 4; }
@@ -2575,6 +2575,19 @@ a:focus-visible {
 .kline-close-line { fill: none; stroke: #2476d2; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
 .kline-average-line { fill: none; stroke: #e3a929; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
 .kline-close-point { fill: transparent; stroke: transparent; stroke-width: 8; }
+.kline-hover-layer { fill: transparent; cursor: crosshair; }
+.kline-crosshair { stroke: #1787e8; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+.kline-crosshair-horizontal { stroke: #8ba8c4; stroke-dasharray: 3 3; }
+.kline-crosshair-point { fill: #ffffff; stroke: #1787e8; stroke-width: 2; pointer-events: none; }
+.kline-hover-card { position: absolute; top: 29px; z-index: 3; display: grid; grid-template-columns: auto auto; gap: 4px 14px; min-width: 158px; padding: 9px 11px; border: 1px solid #bfcddd; border-radius: 5px; background: rgba(255, 255, 255, .96); box-shadow: 0 8px 24px rgba(30, 52, 78, .16); color: #24364d; font-size: 11px; pointer-events: none; }
+.kline-hover-card.left { left: 30px; }
+.kline-hover-card.right { right: 30px; }
+.kline-hover-card > strong { grid-column: 1 / -1; padding-bottom: 3px; border-bottom: 1px solid #e6edf4; color: #536a83; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; }
+.kline-hover-card > div { display: contents; }
+.kline-hover-card span { color: #7a899a; }
+.kline-hover-card b { color: #263950; font-family: "SFMono-Regular", Consolas, monospace; font-weight: 650; text-align: right; }
+.kline-hover-card b.up { color: #e33b46; }
+.kline-hover-card b.down { color: #14865f; }
 .kline-chart-legend { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 72px 0 24px; color: var(--muted); font-size: 10px; }
 .kline-chart-legend .close-dot, .kline-chart-legend .average-dot { width: 16px; height: 2px; margin-left: 8px; border-radius: 999px; background: #2476d2; }
 .kline-chart-legend .average-dot { background: #e3a929; }
