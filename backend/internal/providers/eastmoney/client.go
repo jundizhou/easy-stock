@@ -15,14 +15,18 @@ import (
 )
 
 type Client struct {
-	baseURL      string
-	quoteBaseURL string
-	dataBaseURL  string
-	topicBaseURL string
-	httpClient   *http.Client
-	catalogMu    sync.Mutex
-	catalog      []foundation.StockCatalogEntry
-	catalogUntil time.Time
+	baseURL             string
+	quoteBaseURL        string
+	dataBaseURL         string
+	topicBaseURL        string
+	datacenterBaseURL   string
+	f10BaseURL          string
+	announcementBaseURL string
+	reportBaseURL       string
+	httpClient          *http.Client
+	catalogMu           sync.Mutex
+	catalog             []foundation.StockCatalogEntry
+	catalogUntil        time.Time
 }
 
 type Option func(*Client)
@@ -51,6 +55,30 @@ func WithTopicBaseURL(baseURL string) Option {
 	}
 }
 
+func WithDatacenterBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.datacenterBaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
+func WithF10BaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.f10BaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
+func WithAnnouncementBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.announcementBaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
+func WithReportBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.reportBaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
 func WithHTTPClient(httpClient *http.Client) Option {
 	return func(c *Client) {
 		if httpClient != nil {
@@ -61,11 +89,15 @@ func WithHTTPClient(httpClient *http.Client) Option {
 
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		baseURL:      "https://push2his.eastmoney.com",
-		quoteBaseURL: "https://push2.eastmoney.com",
-		dataBaseURL:  "https://data.eastmoney.com",
-		topicBaseURL: "https://push2ex.eastmoney.com",
-		httpClient:   &http.Client{Timeout: 15 * time.Second},
+		baseURL:             "https://push2his.eastmoney.com",
+		quoteBaseURL:        "https://push2.eastmoney.com",
+		dataBaseURL:         "https://data.eastmoney.com",
+		topicBaseURL:        "https://push2ex.eastmoney.com",
+		datacenterBaseURL:   "https://datacenter-web.eastmoney.com",
+		f10BaseURL:          "https://datacenter.eastmoney.com/securities",
+		announcementBaseURL: "https://np-anotice-stock.eastmoney.com",
+		reportBaseURL:       "https://reportapi.eastmoney.com",
+		httpClient:          &http.Client{Timeout: 15 * time.Second},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -131,7 +163,7 @@ func (c *Client) KLine(ctx context.Context, symbol string, period string, limit 
 
 func (c *Client) getJSONWithRetry(ctx context.Context, requestURL string, target any) error {
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			time.Sleep(150 * time.Millisecond)
 		}

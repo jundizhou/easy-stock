@@ -18,7 +18,9 @@ import (
 	"easy-stock/backend/internal/providers/cls"
 	"easy-stock/backend/internal/providers/duanxianxia"
 	"easy-stock/backend/internal/providers/eastmoney"
+	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
 	"easy-stock/backend/internal/providers/sina"
+	"easy-stock/backend/internal/providers/tencent"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/sector"
 	"easy-stock/backend/internal/strategy/inflection"
@@ -37,10 +39,12 @@ type Server struct {
 	marketPools           MarketPoolProvider
 	stockConcepts         StockConceptProvider
 	stockDirectory        StockDirectoryProvider
+	marketOverview        MarketOverviewProvider
 	inflection            InflectionEvaluator
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
 	stockDirectories      *stockDirectoryCache
+	marketSnapshots       *marketOverviewCache
 	marketEmotion         *marketEmotionEngine
 	marketEmotionIntraday *marketEmotionIntradayCache
 	reviewStore           *review.Store
@@ -57,6 +61,7 @@ func NewServer(config any) *Server {
 	cfg := normalizeConfig(config)
 	sinaClient := sina.NewClient()
 	eastMoneyClient := eastmoney.NewClient()
+	tencentClient := tencent.NewClient()
 	clsClient := cls.NewClient()
 	if cfg.Realtime == nil {
 		cfg.Realtime = sinaClient
@@ -96,6 +101,9 @@ func NewServer(config any) *Server {
 	}
 	if cfg.StockDirectory == nil {
 		cfg.StockDirectory = eastMoneyClient
+	}
+	if cfg.MarketOverview == nil {
+		cfg.MarketOverview = marketoverviewprovider.New(eastMoneyClient, tencentClient, tencentClient, sinaClient)
 	}
 	if cfg.SectorMap == nil {
 		mapper := sector.NewMapper(
@@ -190,10 +198,12 @@ func NewServer(config any) *Server {
 		marketPools:           cfg.MarketPools,
 		stockConcepts:         cfg.StockConcept,
 		stockDirectory:        cfg.StockDirectory,
+		marketOverview:        cfg.MarketOverview,
 		inflection:            cfg.Inflection,
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
 		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
 		stockDirectories:      newStockDirectoryCache(6 * time.Hour),
+		marketSnapshots:       newMarketOverviewCache(45 * time.Second),
 		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
 		reviewStore:           cfg.ReviewStore,
 		reviewImporter:        cfg.ReviewImporter,
@@ -271,6 +281,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/quotes/kline", s.kline)
 	s.mux.HandleFunc("GET /api/v1/quotes/kline/batch", s.klineBatch)
 	s.mux.HandleFunc("GET /api/v1/market/news", s.news)
+	s.mux.HandleFunc("GET /api/v1/market/indexes", s.marketIndexesHandler)
+	s.mux.HandleFunc("GET /api/v1/market/index-series", s.marketIndexSeriesHandler)
+	s.mux.HandleFunc("GET /api/v1/market/industries", s.marketIndustriesHandler)
+	s.mux.HandleFunc("GET /api/v1/market/flows", s.marketFlowsHandler)
+	s.mux.HandleFunc("GET /api/v1/market/billboard", s.marketBillboardHandler)
+	s.mux.HandleFunc("GET /api/v1/market/billboard/detail", s.marketBillboardDetailHandler)
+	s.mux.HandleFunc("GET /api/v1/research/announcements", s.marketAnnouncementsHandler)
+	s.mux.HandleFunc("GET /api/v1/research/institution-reports", s.marketInstitutionReportsHandler)
+	s.mux.HandleFunc("GET /api/v1/research/industries", s.marketIndustryResearchHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/overview", s.themeOverviewHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/screen", s.themeScreenHandler)
 	s.mux.HandleFunc("GET /api/v1/sector-map", s.sectorMapHandler)

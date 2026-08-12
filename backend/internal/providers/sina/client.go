@@ -17,9 +17,11 @@ import (
 )
 
 type Client struct {
-	baseURL      string
-	kLineBaseURL string
-	httpClient   *http.Client
+	baseURL                string
+	kLineBaseURL           string
+	moneyFlowBaseURL       string
+	sectorMoneyFlowBaseURL string
+	httpClient             *http.Client
 }
 
 type Option func(*Client)
@@ -44,11 +46,25 @@ func WithKLineBaseURL(baseURL string) Option {
 	}
 }
 
+func WithMoneyFlowBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.moneyFlowBaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
+func WithSectorMoneyFlowBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.sectorMoneyFlowBaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		baseURL:      "https://hq.sinajs.cn",
-		kLineBaseURL: "https://quotes.sina.cn/cn/api/jsonp_v2.php/callback/CN_MarketDataService.getKLineData",
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		baseURL:                "https://hq.sinajs.cn",
+		kLineBaseURL:           "https://quotes.sina.cn/cn/api/jsonp_v2.php/callback/CN_MarketDataService.getKLineData",
+		moneyFlowBaseURL:       "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_ssggzj",
+		sectorMoneyFlowBaseURL: "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk",
+		httpClient:             &http.Client{Timeout: 10 * time.Second},
 	}
 	for _, opt := range opts {
 		opt(c)
