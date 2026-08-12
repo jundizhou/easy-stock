@@ -26,3 +26,37 @@ test('release metadata points to existing assets with matching sha512', () => {
     assert.equal(expectedHash, sha512Base64(assetPath));
   }
 });
+
+test('merges macOS updater metadata without installed npm dependencies', () => {
+  const releaseRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-mac-metadata-'));
+  const scriptPath = path.resolve(__dirname, '..', 'scripts', 'merge-mac-updater-metadata.mjs');
+  const fixtures = [
+    ['arm64', 'easy-stock-v0.4.0-macos-arm64.zip', 'arm-hash', 101],
+    ['x64', 'easy-stock-v0.4.0-macos-x64.zip', 'x64-hash', 202],
+  ];
+  for (const [arch, url, hash, size] of fixtures) {
+    fs.writeFileSync(path.join(releaseRoot, `latest-mac-${arch}.yml`), [
+      'version: 0.4.0',
+      'files:',
+      `  - url: ${url}`,
+      `    sha512: ${hash}`,
+      `    size: ${size}`,
+      `path: ${url}`,
+      `sha512: ${hash}`,
+      'releaseDate: 2026-08-12T00:00:00.000Z',
+      '',
+    ].join('\n'));
+  }
+
+  execFileSync(process.execPath, [scriptPath, releaseRoot], {
+    cwd: os.tmpdir(),
+    env: { PATH: process.env.PATH },
+  });
+
+  const merged = fs.readFileSync(path.join(releaseRoot, 'latest-mac.yml'), 'utf8');
+  assert.match(merged, /version: 0\.4\.0/);
+  assert.match(merged, /easy-stock-v0\.4\.0-macos-arm64\.zip/);
+  assert.match(merged, /easy-stock-v0\.4\.0-macos-x64\.zip/);
+  assert.equal((merged.match(/^\s*- url:/gm) || []).length, 2);
+  assert.match(merged, /path: easy-stock-v0\.4\.0-macos-arm64\.zip/);
+});
