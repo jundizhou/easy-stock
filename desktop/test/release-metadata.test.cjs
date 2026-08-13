@@ -41,6 +41,7 @@ test('macOS builds use a complete ad-hoc signature without release credentials',
 	assert.match(script, /identity: signingCertificate \? undefined : '-'/);
 	assert.match(script, /path\.resolve\(desktopRoot, '\.\.', certificate\)/);
 	assert.match(script, /candidates\.some\(\(candidate\) => fs\.existsSync\(candidate\) && fs\.statSync\(candidate\)\.isDirectory\(\)\)/);
+	assert.match(script, /process\.env\.CSC_LINK !== undefined && !signingCertificate/);
 	assert.match(script, /delete process\.env\.CSC_LINK/);
 });
 

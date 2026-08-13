@@ -12,14 +12,14 @@ if (!['mac', 'windows'].includes(platform) || !['release', 'dir'].includes(mode)
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported desktop architecture: ${arch}`);
 
 const signingCertificate = resolveSigningCertificate(process.env.CSC_LINK);
-if (process.env.CSC_LINK && !signingCertificate) {
+if (process.env.CSC_LINK !== undefined && !signingCertificate) {
   // GitHub Actions exposes an empty/misconfigured certificate secret as a
   // relative workspace path in some environments. electron-builder then
   // attempts to import the project directory as a certificate. Remove only
   // invalid directory values so unsigned releases safely use ad-hoc signing.
   delete process.env.CSC_LINK;
   delete process.env.CSC_KEY_PASSWORD;
-  console.warn('Ignoring CSC_LINK because it resolves to a directory; using platform fallback signing.');
+  console.warn('Ignoring empty or directory-valued CSC_LINK; using platform fallback signing.');
 }
 
 const outputDirectory = path.join(desktopRoot, 'dist', mode === 'dir' ? 'builder-dir' : 'builder-release');
