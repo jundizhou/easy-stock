@@ -112,9 +112,15 @@ await build({
 function resolveSigningCertificate(value) {
   const certificate = value?.trim();
   if (!certificate) return '';
-  const candidate = certificate.startsWith('file://')
-    ? fileURLToPath(certificate)
-    : path.resolve(process.cwd(), certificate);
-  if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return '';
+  const candidates = certificate.startsWith('file://')
+    ? [fileURLToPath(certificate)]
+    : path.isAbsolute(certificate)
+      ? [certificate]
+      : [
+          path.resolve(process.cwd(), certificate),
+          path.resolve(desktopRoot, certificate),
+          path.resolve(desktopRoot, '..', certificate),
+        ];
+  if (candidates.some((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isDirectory())) return '';
   return certificate;
 }
