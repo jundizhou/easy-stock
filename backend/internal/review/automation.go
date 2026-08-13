@@ -865,7 +865,11 @@ func (a *Automation) importWechat(ctx context.Context, base, token, link string)
 		return Post{}, errors.New("微信公众号响应没有可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
 	}
 	published := time.Unix(payload.Data.PublishTime, 0)
-	return newPost("wechat", link, payload.Data.Author, payload.Data.Title, payload.Data.PlainContent, "", published), nil
+	content, err := normalizeImportedContent(payload.Data.PlainContent)
+	if err != nil {
+		return Post{}, err
+	}
+	return newPost("wechat", link, payload.Data.Author, payload.Data.Title, content, "", published), nil
 }
 func lastPathPart(path string) string {
 	parts := strings.FieldsFunc(strings.Trim(path, "/"), func(r rune) bool { return r == '/' })

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	xhtml "golang.org/x/net/html"
 )
 
 const maxArticleBytes = 4 << 20
@@ -29,6 +31,10 @@ var (
 	publishedDatePattern = regexp.MustCompile(`(?is)["']datePublished["']\s*:\s*["']([^"']+)["']`)
 	spacePattern         = regexp.MustCompile(`[\t\r ]+`)
 	blankLinePattern     = regexp.MustCompile(`\n{3,}`)
+	wechatContentPattern = regexp.MustCompile(`(?is)<(?:div|section|article)[^>]+id=["']js_content["'][^>]*>(.*?)</(?:div|section|article)>`)
+	articlePattern       = regexp.MustCompile(`(?is)<article\b[^>]*>(.*?)</article>`)
+	scriptLeakPattern    = regexp.MustCompile(`(?i)(?:Object\.defineProperty|\.prototype|querySelectorAll|webpack|__webpack|Cannot call a class as a function)`)
+	cssColorTablePattern = regexp.MustCompile(`(?i)(?:aliceblue|antiquewhite|magenta|mediumaquamarine|mediumslateblue|navajowhite|palegoldenrod)\s*:\s*\[\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\]`)
 )
 
 type Importer struct {
@@ -101,7 +107,15 @@ func (i *Importer) importWeChat(ctx context.Context, articleURL string) (Post, e
 		return Post{}, errors.New("微信公众号响应没有可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
 	}
 	publishedAt := time.Unix(payload.Data.PublishTime, 0)
-	return newPost("wechat", articleURL, payload.Data.Author, payload.Data.Title, payload.Data.PlainContent, "", publishedAt), nil
+	content, err := normalizeImportedContent(payload.Data.PlainContent)
+	if err != nil {
+		// The bundled parser may occasionally flatten the whole WeChat page and
+		// return its JavaScript/CSS bundle as plain_content. The original page
+		// still contains a clean #js_content node, so recover from that source
+		// instead of persisting the polluted payload or failing the import.
+		return i.importPublicPage(ctx, articleURL, "wechat", nil)
+	}
+	return newPost("wechat", articleURL, payload.Data.Author, payload.Data.Title, content, "", publishedAt), nil
 }
 
 func (i *Importer) importPublicPage(ctx context.Context, articleURL, source string, headers http.Header) (Post, error) {
@@ -109,7 +123,7 @@ func (i *Importer) importPublicPage(ctx context.Context, articleURL, source stri
 	if err != nil {
 		return Post{}, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 	for key, values := range headers {
 		for _, value := range values {
@@ -131,7 +145,7 @@ func (i *Importer) importPublicPage(ctx context.Context, articleURL, source stri
 	if len(body) > maxArticleBytes {
 		return Post{}, errors.New("原文超过 4MB，暂不导入")
 	}
-	htmlText := string(body)
+	htmlText := decodeHTMLBody(body, resp.Header.Get("Content-Type"))
 	title := firstNonEmpty(metaValue(htmlText, "property", "og:title"), metaValue(htmlText, "name", "twitter:title"), matchText(titlePattern, htmlText))
 	title = cleanInline(title)
 	if title == "" {
@@ -140,7 +154,13 @@ func (i *Importer) importPublicPage(ctx context.Context, articleURL, source stri
 	author := cleanInline(firstNonEmpty(metaValue(htmlText, "name", "author"), metaValue(htmlText, "property", "article:author"), sourceName(source)))
 	description := cleanInline(firstNonEmpty(metaValue(htmlText, "property", "og:description"), metaValue(htmlText, "name", "description")))
 	cover := strings.TrimSpace(metaValue(htmlText, "property", "og:image"))
-	content := cleanDocument(htmlText)
+	content := cleanDocument(articleDocument(htmlText))
+	if content == "" {
+		content = cleanDocument(htmlText)
+	}
+	if err := validateImportedContent(content); err != nil {
+		return Post{}, err
+	}
 	if len([]rune(content)) > 120000 {
 		content = string([]rune(content)[:120000])
 	}
@@ -158,6 +178,13 @@ func (i *Importer) importPublicPage(ctx context.Context, articleURL, source stri
 	post := newPost(source, finalURL, author, title, content, cover, publishedAt)
 	post.Digest = description
 	return post, nil
+}
+
+func decodeHTMLBody(body []byte, contentType string) string {
+	// WeChat serves UTF-8 HTML. Honor an explicit UTF-8 declaration and strip
+	// the BOM when present; keeping this centralized avoids Windows locale from
+	// influencing byte-to-string conversion in future decoding changes.
+	return strings.TrimPrefix(string(body), "\ufeff")
 }
 
 func publicPagePublishedAt(document string) (time.Time, bool) {
@@ -271,6 +298,76 @@ func cleanDocument(document string) string {
 		}
 	}
 	return blankLinePattern.ReplaceAllString(strings.Join(cleaned, "\n"), "\n\n")
+}
+
+func articleDocument(document string) string {
+	if content := elementInnerHTMLByID(document, "js_content"); content != "" {
+		return content
+	}
+	for _, pattern := range []*regexp.Regexp{wechatContentPattern, articlePattern} {
+		if match := pattern.FindStringSubmatch(document); len(match) > 1 {
+			return match[1]
+		}
+	}
+	return document
+}
+
+func elementInnerHTMLByID(document, id string) string {
+	root, err := xhtml.Parse(strings.NewReader(document))
+	if err != nil {
+		return ""
+	}
+	var target *xhtml.Node
+	var visit func(*xhtml.Node)
+	visit = func(node *xhtml.Node) {
+		if target != nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode {
+			for _, attr := range node.Attr {
+				if attr.Key == "id" && attr.Val == id {
+					target = node
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			visit(child)
+		}
+	}
+	visit(root)
+	if target == nil {
+		return ""
+	}
+	var rendered strings.Builder
+	for child := target.FirstChild; child != nil; child = child.NextSibling {
+		if err := xhtml.Render(&rendered, child); err != nil {
+			return ""
+		}
+	}
+	return rendered.String()
+}
+
+func normalizeImportedContent(content string) (string, error) {
+	content = strings.TrimSpace(content)
+	if strings.Contains(content, "<") && strings.Contains(content, ">") {
+		content = cleanDocument(articleDocument(content))
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", errors.New("微信公众号响应没有可用的文章正文")
+	}
+	if err := validateImportedContent(content); err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
+func validateImportedContent(content string) error {
+	if scriptLeakPattern.MatchString(content) || cssColorTablePattern.MatchString(content) {
+		return errors.New("文章解析结果疑似网页脚本或样式数据，已停止导入；请更新内置解析服务后重试")
+	}
+	return nil
 }
 
 func cleanInline(value string) string {
