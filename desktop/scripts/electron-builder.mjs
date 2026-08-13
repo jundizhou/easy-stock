@@ -11,9 +11,20 @@ const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
 if (!['mac', 'windows'].includes(platform) || !['release', 'dir'].includes(mode)) throw new Error('Usage: node electron-builder.mjs <mac|windows> <release|dir>');
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported desktop architecture: ${arch}`);
 
+const signingCertificate = resolveSigningCertificate(process.env.CSC_LINK);
+if (process.env.CSC_LINK && !signingCertificate) {
+  // GitHub Actions exposes an empty/misconfigured certificate secret as a
+  // relative workspace path in some environments. electron-builder then
+  // attempts to import the project directory as a certificate. Remove only
+  // invalid directory values so unsigned releases safely use ad-hoc signing.
+  delete process.env.CSC_LINK;
+  delete process.env.CSC_KEY_PASSWORD;
+  console.warn('Ignoring CSC_LINK because it resolves to a directory; using platform fallback signing.');
+}
+
 const outputDirectory = path.join(desktopRoot, 'dist', mode === 'dir' ? 'builder-dir' : 'builder-release');
 const hasMacNotarizationCredentials = Boolean(
-  process.env.CSC_LINK && (
+  signingCertificate && (
     (process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID)
     || process.env.APPLE_API_KEY
     || process.env.APPLE_KEYCHAIN
@@ -67,7 +78,7 @@ const config = {
     // Keep unsigned local builds launchable: electron-builder's `-` identity
     // creates a complete ad-hoc signature, while `null` leaves only the
     // Electron binary signed and produces an invalid app bundle on macOS.
-    identity: process.env.CSC_LINK ? undefined : '-',
+    identity: signingCertificate ? undefined : '-',
     notarize: hasMacNotarizationCredentials,
   },
   dmg: { artifactName: `easy-stock-v${packageManifest.version}-macos-${arch}.dmg` },
@@ -75,7 +86,7 @@ const config = {
     icon: path.join(desktopRoot, 'assets', 'easy-stock.ico'),
     target: mode === 'dir' ? [{ target: 'dir', arch: [arch] }] : [{ target: 'nsis', arch: [arch] }],
     artifactName: `easy-stock-v${packageManifest.version}-windows-${arch}.\${ext}`,
-    ...(process.env.CSC_LINK ? {} : { signAndEditExecutable: false }),
+    ...(signingCertificate ? {} : { signAndEditExecutable: false }),
   },
   nsis: {
     oneClick: true,
@@ -97,3 +108,13 @@ await build({
   projectDir: desktopRoot,
   publish: 'never',
 });
+
+function resolveSigningCertificate(value) {
+  const certificate = value?.trim();
+  if (!certificate) return '';
+  const candidate = certificate.startsWith('file://')
+    ? fileURLToPath(certificate)
+    : path.resolve(process.cwd(), certificate);
+  if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return '';
+  return certificate;
+}
