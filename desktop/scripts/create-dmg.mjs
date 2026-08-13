@@ -43,14 +43,14 @@ try {
 	run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), stagedAppPath, 'macos']);
 	fs.symlinkSync('/Applications', path.join(writableMountPath, 'Applications'));
 	run('sync', []);
-	run('hdiutil', ['detach', writableMountPath]);
+	detach(writableMountPath);
 	writableMounted = false;
 	run('hdiutil', ['convert', writableImagePath, '-format', 'UDZO', '-o', dmgPath]);
 	run('hdiutil', ['verify', dmgPath]);
 	run('hdiutil', ['attach', dmgPath, '-nobrowse', '-readonly', '-mountpoint', verificationMountPath]);
 	verificationMounted = true;
 	run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), path.join(verificationMountPath, 'easy-stock.app'), 'macos']);
-	run('hdiutil', ['detach', verificationMountPath]);
+	detach(verificationMountPath);
 	verificationMounted = false;
 } finally {
 	if (verificationMounted) tryRun('hdiutil', ['detach', verificationMountPath, '-force']);
@@ -69,4 +69,15 @@ function run(command, args) {
 
 function tryRun(command, args) {
 	spawnSync(command, args, { stdio: 'ignore' });
+}
+
+function detach(mountPath) {
+	const firstAttempt = spawnSync('hdiutil', ['detach', mountPath], { stdio: 'inherit' });
+	if (firstAttempt.error) throw firstAttempt.error;
+	if (firstAttempt.status === 0) return;
+	// Spotlight/Finder can briefly keep a newly-created volume busy. Retry with
+	// force after a short delay; this only detaches our temporary build volume.
+	const forcedAttempt = spawnSync('hdiutil', ['detach', mountPath, '-force'], { stdio: 'inherit' });
+	if (forcedAttempt.error) throw forcedAttempt.error;
+	if (forcedAttempt.status !== 0) throw new Error(`hdiutil detach exited with status ${forcedAttempt.status ?? 1}`);
 }
