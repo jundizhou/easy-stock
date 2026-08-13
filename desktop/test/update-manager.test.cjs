@@ -21,7 +21,7 @@ test('updater transitions from available through downloaded and installs after b
     updater,
     enabled: true,
     currentVersion: '0.3.0',
-    platform: 'darwin',
+    platform: 'win32',
     stopRuntime: async () => calls.push('stop'),
     createBackup: async (versions) => {
       calls.push(`backup:${versions.fromVersion}:${versions.toVersion}`);
@@ -68,6 +68,42 @@ test('development updater is disabled', async () => {
   await assert.rejects(() => manager.checkForUpdates(), /不支持自动更新/);
 });
 
+test('unsigned macOS updater stays manual and never invokes native download or install', async () => {
+  const updater = new FakeUpdater();
+  let downloaded = false;
+  updater.downloadUpdate = async () => { downloaded = true; };
+  const manager = new UpdateManager({
+    updater,
+    enabled: true,
+    currentVersion: '0.4.0',
+    platform: 'darwin',
+    stopRuntime: async () => { throw new Error('should not stop runtime'); },
+    createBackup: async () => { throw new Error('should not backup'); },
+  });
+  assert.equal(manager.getStatus().installMode, 'manual');
+  updater.emit('update-available', { version: '0.5.0' });
+  assert.equal(manager.getStatus().message, '发现新版本 v0.5.0，请前往发布页下载安装');
+  await assert.rejects(() => manager.downloadUpdate(), /Apple Developer ID/);
+  assert.equal(downloaded, false);
+  updater.emit('update-downloaded', { version: '0.5.0' });
+  await assert.rejects(() => manager.installUpdate(), /Apple Developer ID/);
+  assert.equal(updater.installArgs, undefined);
+});
+
+test('signature validation errors are translated to a useful macOS message', () => {
+  const updater = new FakeUpdater();
+  const manager = new UpdateManager({
+    updater,
+    enabled: true,
+    currentVersion: '0.4.0',
+    platform: 'darwin',
+    logger: { error() {} },
+  });
+  updater.emit('error', new Error('Code signature at URL file:/tmp/EasyStock.zip did not pass validation: code requirement failed'));
+  assert.match(manager.getStatus().message, /Apple Developer ID/);
+  assert.doesNotMatch(manager.getStatus().message, /\/tmp/);
+});
+
 test('end-to-end updater backup preserves real user data before install', async () => {
   const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-update-e2e-'));
   const userData = path.join(appData, 'easy-stock');
@@ -82,7 +118,7 @@ test('end-to-end updater backup preserves real user data before install', async 
     updater,
     enabled: true,
     currentVersion: '0.3.0',
-    platform: 'darwin',
+    platform: 'win32',
     stopRuntime: async () => {},
     createBackup: ({ fromVersion, toVersion }) => createUpdateBackup({ userDataPath: userData, fromVersion, toVersion }),
   });

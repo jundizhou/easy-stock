@@ -247,6 +247,7 @@ function initializeUpdateManager() {
     enabled,
     currentVersion: app.getVersion(),
     platform: process.platform,
+    canInstallAutomatically: process.platform === 'win32',
     stopRuntime,
     createBackup: ({ fromVersion, toVersion }) => createUpdateBackup({
       userDataPath: app.getPath('userData'),
@@ -561,6 +562,7 @@ app.whenReady().then(() => {
       enabled: false,
       currentVersion: app.getVersion(),
       platform: process.platform,
+      canInstallAutomatically: process.platform === 'win32',
       logger: console,
     });
   }
