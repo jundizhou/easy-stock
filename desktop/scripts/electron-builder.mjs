@@ -64,7 +64,10 @@ const config = {
     artifactName: `easy-stock-v${packageManifest.version}-macos-${arch}.\${ext}`,
     hardenedRuntime: true,
     gatekeeperAssess: false,
-    identity: process.env.CSC_LINK ? undefined : null,
+    // Keep unsigned local builds launchable: electron-builder's `-` identity
+    // creates a complete ad-hoc signature, while `null` leaves only the
+    // Electron binary signed and produces an invalid app bundle on macOS.
+    identity: process.env.CSC_LINK ? undefined : '-',
     notarize: hasMacNotarizationCredentials,
   },
   dmg: { artifactName: `easy-stock-v${packageManifest.version}-macos-${arch}.dmg` },

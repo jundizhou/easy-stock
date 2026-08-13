@@ -27,6 +27,20 @@ test('release metadata points to existing assets with matching sha512', () => {
   }
 });
 
+test('DMG staging uses ditto so framework symlinks remain relative', () => {
+	const script = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'create-dmg.mjs'), 'utf8');
+	assert.match(script, /run\('ditto', \[appPath, stagedAppPath\]\)/);
+	assert.match(script, /'Journaled HFS\+'/);
+	assert.match(script, /run\('hdiutil', \['convert', writableImagePath/);
+	assert.doesNotMatch(script, /['"]-srcfolder['"]/);
+	assert.doesNotMatch(script, /fs\.cpSync\(appPath/);
+});
+
+test('macOS builds use a complete ad-hoc signature without release credentials', () => {
+	const script = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'electron-builder.mjs'), 'utf8');
+	assert.match(script, /identity: process\.env\.CSC_LINK \? undefined : '-'/);
+});
+
 test('merges macOS updater metadata without installed npm dependencies', () => {
   const releaseRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-mac-metadata-'));
   const scriptPath = path.resolve(__dirname, '..', 'scripts', 'merge-mac-updater-metadata.mjs');
