@@ -159,6 +159,25 @@ type StockBusinessProfile struct {
 	Meta         SourceMeta `json:"meta"`
 }
 
+// StockFundamentals contains the latest reported financial snapshot used by
+// the non-short-term stock route. Values follow EastMoney's published F10
+// units: amounts are CNY and percentage fields are percentage points.
+type StockFundamentals struct {
+	Symbol                    string     `json:"symbol"`
+	ReportDate                string     `json:"report_date"`
+	ReportName                string     `json:"report_name"`
+	Revenue                   float64    `json:"revenue"`
+	RevenueYearOverYear       float64    `json:"revenue_yoy"`
+	NetProfit                 float64    `json:"net_profit"`
+	NetProfitYearOverYear     float64    `json:"net_profit_yoy"`
+	EPS                       float64    `json:"eps"`
+	ROE                       float64    `json:"roe"`
+	GrossMargin               float64    `json:"gross_margin"`
+	DebtRatio                 float64    `json:"debt_ratio"`
+	OperatingCashFlowPerShare float64    `json:"operating_cash_flow_per_share"`
+	Meta                      SourceMeta `json:"meta"`
+}
+
 // MarketLimitEvent represents one stock in a daily limit-event pool that is
 // not necessarily still sealed at the close. It is used for final broken-board
 // and limit-down pools while LimitUpEvent remains the richer sealed-limit-up

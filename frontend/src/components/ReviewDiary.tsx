@@ -4,9 +4,11 @@ import {
 	CalendarDays,
 	ChevronDown,
 	ChevronRight,
+	Download,
 	ExternalLink,
 	FileInput,
 	GitCompareArrows,
+	Github,
 	ListChecks,
 	MessageCircleMore,
 	Plus,
@@ -21,7 +23,7 @@ import {
 	Users,
 	Zap,
 } from 'lucide-react';
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, ReviewAuthor, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 
 type Props = {
@@ -424,10 +426,51 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 	const playbook = summary.tomorrow_playbook || { pre_open: [], opening: [], intraday: [], close: [] };
 	const framework = summary.market_framework || { cycle: '', capital_pricing: '', direction_competition: '', trading_method: '' };
 	const authorViews = summary.author_views || [];
-	return <section className="daily-viewpoint-summary" id="daily-viewpoint-summary">
+	const exportRef = useRef<HTMLElement>(null);
+	const [exporting, setExporting] = useState(false);
+	const [exportNotice, setExportNotice] = useState('');
+	const exportSummaryImage = async () => {
+		if (!exportRef.current || exporting) return;
+		setExporting(true);
+		setExportNotice('');
+		try {
+			await document.fonts?.ready;
+			const { default: html2canvas } = await import('html2canvas');
+			const scale = Math.max(1, Math.min(1.5, 28000 / Math.max(exportRef.current.scrollHeight, 1)));
+			const canvas = await html2canvas(exportRef.current, {
+				backgroundColor: '#f4f5fb',
+				logging: false,
+				scale,
+				useCORS: true,
+				windowWidth: 1600,
+				onclone: (_document, element) => {
+					element.classList.add('is-exporting');
+					element.querySelectorAll('details').forEach((detail) => { detail.open = true; });
+				},
+			});
+			const blob = await reviewCanvasToPNGBlob(canvas);
+			const href = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = href;
+			link.download = buildReviewSummaryFilename(summary);
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+			setExportNotice('复盘长图已生成并保存');
+		} catch (exportError) {
+			console.error('Failed to export daily review summary image', exportError);
+			setExportNotice('长图生成失败，请稍后重试');
+		} finally {
+			setExporting(false);
+			window.setTimeout(() => setExportNotice(''), 2600);
+		}
+	};
+	return <section className="daily-viewpoint-summary" id="daily-viewpoint-summary" ref={exportRef}>
+		<ReviewSummaryExportBrand summary={summary} />
 		<header className="daily-summary-heading">
 			<div><span><BrainCircuit size={15} />AI DAILY REVIEW</span><h2>{summary.trade_date} 市场复盘与次日剧本</h2><small>{summary.author_count} 位作者 / {summary.article_count} 篇有效文章 · {formatDateTime(summary.generated_at)} 生成</small>{summary.window_start && <small className="daily-summary-window">有效窗口 {formatSummaryWindow(summary.window_start, summary.window_end)} · {summary.freshness_rule}</small>}</div>
-			<div><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
+			<div><button type="button" className="daily-summary-export-button" onClick={() => void exportSummaryImage()} disabled={exporting}>{exporting ? <RefreshCw className="spin" size={14} /> : <Download size={14} />}{exporting ? '正在生成…' : '导出长图'}</button><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
 		</header>
 		<section className="daily-summary-block daily-summary-lead"><span>{summary.market_regime || '样本不足'}</span><div><small>一句话市场结论 · 跨作者综合</small><p>{summary.executive_summary}</p></div></section>
 		<section className="daily-summary-block market-framework-block"><header><TrendingUp size={16} /><div><strong>市场四层框架</strong><small>综合所有有效观点，直接归纳周期、资金、方向与执行</small></div></header><div className="market-framework-grid"><FrameworkItem label="周期位置" content={framework.cycle} /><FrameworkItem label="资金定价" content={framework.capital_pricing} /><FrameworkItem label="方向竞争" content={framework.direction_competition} /><FrameworkItem label="交易方法" content={framework.trading_method} /></div></section>
@@ -455,7 +498,24 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 		<section className="daily-summary-block verification-block"><header><ListChecks size={16} /><div><strong>明日验证清单</strong><small>逐条核对，而不是把预期当成结论</small></div></header><ol>{(summary.verification_checklist || []).map((item) => <li key={item}>{item}</li>)}</ol></section>
 		{summary.sources?.length > 0 && <section className="daily-summary-block daily-sources-block"><header><BookOpen size={16} /><div><strong>来源与证据样本</strong><small>链接回到原作者文章，便于复核 AI 归纳是否准确</small></div></header><div>{summary.sources.slice(0, 12).map((source, index) => source.url ? <a href={source.url} target="_blank" rel="noreferrer" key={`${source.post_id || source.url}-${index}`}><strong>{source.author}</strong><span>{source.title}</span><ExternalLink size={13} /></a> : <span key={`${source.author}-${source.title}-${index}`}><strong>{source.author}</strong>{source.title}</span>)}</div></section>}
 		{summary.limitations?.length > 0 && <footer><strong>样本局限</strong><span>{summary.limitations.join('；')}</span></footer>}
+		<ReviewSummaryExportFooter summary={summary} />
+		{exportNotice && <div className={`review-summary-export-notice ${exportNotice.includes('失败') ? 'error' : ''}`} role="status">{exportNotice}</div>}
 	</section>;
+}
+
+function ReviewSummaryExportBrand({ summary }: { summary: ReviewDailySummary }) {
+	return <header className="review-summary-export-brand">
+		<div><span><BrainCircuit size={24} /></span><div><strong>easy-stock</strong><small>AI A股复盘工作台</small><em>开源 · 免费使用</em></div></div>
+		<div><span>大V复盘日记 · AI 总结</span><strong>{summary.trade_date} 市场综合复盘</strong><small>{summary.author_count} 位作者 · {summary.article_count} 篇有效文章</small></div>
+	</header>;
+}
+
+function ReviewSummaryExportFooter({ summary }: { summary: ReviewDailySummary }) {
+	return <footer className="review-summary-export-footer">
+		<div><strong>easy-stock</strong><span>AI 时代的 A 股行情分析软件</span></div>
+		<div className="review-summary-export-promo"><span><Github size={13} />开源免费使用 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
+		<div><span>{formatDateTime(summary.generated_at)} 生成</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
+	</footer>;
 }
 
 function FrameworkItem({ label, content }: { label: string; content: string }) {
@@ -546,6 +606,21 @@ function formatDateTime(value: string) {
 
 function formatSummaryWindow(start: string, end: string) {
 	return `${formatDateTime(start)} 至 ${formatDateTime(end)}`;
+}
+
+function reviewCanvasToPNGBlob(canvas: HTMLCanvasElement) {
+	return new Promise<Blob>((resolve, reject) => {
+		canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('浏览器未能生成 PNG 图片')), 'image/png');
+	});
+}
+
+function buildReviewSummaryFilename(summary: ReviewDailySummary) {
+	const tradeDate = sanitizeReviewFilename(summary.trade_date || '市场复盘');
+	return `easy-stock-${tradeDate}-AI复盘总结.png`;
+}
+
+function sanitizeReviewFilename(value: string) {
+	return value.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '').slice(0, 48);
 }
 
 function readableAPIError(message: string) {

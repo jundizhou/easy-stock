@@ -47,6 +47,8 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		themes         []foundation.ThemeOverview
 		news           []foundation.NewsItem
 		business       foundation.StockBusinessProfile
+		fundamentals   foundation.StockFundamentals
+		reports        []foundation.MarketResearchItem
 		quoteErr       error
 		lineErr        error
 		benchmarkErr   error
@@ -56,6 +58,8 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		themeErr       error
 		newsErr        error
 		businessErr    error
+		fundamentalErr error
+		reportErr      error
 		collectionWG   sync.WaitGroup
 	)
 
@@ -104,10 +108,21 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	if s.stockBusiness != nil {
-		collectionWG.Add(1)
+		collectionWG.Add(2)
 		go func() {
 			defer collectionWG.Done()
 			business, businessErr = s.stockBusiness.StockBusinessProfile(dataCtx, normalized.Canonical)
+		}()
+		go func() {
+			defer collectionWG.Done()
+			fundamentals, fundamentalErr = s.stockBusiness.StockFundamentals(dataCtx, normalized.Canonical)
+		}()
+	}
+	if s.marketOverview != nil {
+		collectionWG.Add(1)
+		go func() {
+			defer collectionWG.Done()
+			reports, _, reportErr = s.marketOverview.MarketReports(dataCtx, "stock", "", normalized.Canonical, "", 8)
 		}()
 	}
 	if s.themeOverview != nil {
@@ -177,6 +192,12 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	if businessErr != nil {
 		gaps = append(gaps, "主营业务资料不可用: "+businessErr.Error())
 	}
+	if fundamentalErr != nil {
+		gaps = append(gaps, "基本面资料不可用: "+fundamentalErr.Error())
+	}
+	if reportErr != nil {
+		gaps = append(gaps, "机构研报不可用: "+reportErr.Error())
+	}
 
 	analysis, err := stockanalysis.Analyze(stockanalysis.Input{
 		Symbol:          normalized.Canonical,
@@ -191,6 +212,8 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		Business:        business.MainBusiness,
 		BusinessDetail:  business.Description,
 		BusinessSource:  business.Meta.Source,
+		Fundamentals:    &fundamentals,
+		Reports:         reports,
 		CachedThemes:    cachedThemes,
 		Themes:          themes,
 		MarketEmotion:   emotion,

@@ -30,6 +30,8 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 		"trend":        analysis.Trend,
 		"short_term":   analysis.ShortTerm,
 		"theme":        analysis.Theme,
+		"fundamental":  analysis.Fundamental,
+		"research":     analysis.Research,
 		"market":       analysis.Market,
 		"scorecard":    analysis.Scorecard,
 		"timeframes":   analysis.Timeframes,
@@ -54,7 +56,8 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 3. 不模拟任何投资名人的口吻，不使用“大佬投票”或人格化结论。
 4. action 必须是条件化建议，不能承诺收益；隔日预期只能描述情景，不得表述为确定性预测。
 5. 必须尊重 scorecard、relative、next_day 与 risk_control 的结构化结论，不得擅自修改价格和分数。
-6. 严格输出单个JSON对象，不要Markdown，不要额外解释。
+6. 非情绪连板型必须结合 fundamental 与 research；机构评级仅代表第三方观点，不得当作确定性结论。
+7. 严格输出单个JSON对象，不要Markdown，不要额外解释。
 
 输出格式：
 {"headline":"不超过35字","summary":"80至180字","action":"当前动作","best_path":"最优验证路径","main_risk":"最主要风险"}

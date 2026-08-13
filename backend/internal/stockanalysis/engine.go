@@ -38,17 +38,25 @@ func Analyze(input Input) (Analysis, error) {
 	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
 	market := marketContext(input)
 	profile := classifyProfile(trend, shortTerm, theme, market)
+	var fundamental *FundamentalAnalysis
+	var research *ResearchAnalysis
+	if profile.PrimaryType != "emotion_leader" {
+		value := analyzeFundamentals(input.Fundamentals)
+		fundamental = &value
+		researchValue := analyzeResearch(input.Reports)
+		research = &researchValue
+	}
 	action := buildActionPlan(profile, trend, shortTerm, market)
 	risks := buildRisks(profile, trend, shortTerm, theme, market)
 	timeframes := analyzeTimeframes(lines)
 	relative := analyzeRelativeStrength(input, lines)
 	riskControl := buildRiskControl(profile, trend, shortTerm, market)
 	nextDay := buildNextDayPlan(lines, profile, trend, shortTerm, theme, market, relative, riskControl)
-	signals := buildSignals(trend, shortTerm, theme, market, relative, riskControl, timeframes)
+	signals := buildSignals(trend, shortTerm, theme, market, relative, riskControl, timeframes, fundamental, research)
 	scorecard := buildScorecard(profile, signals)
 	conclusion := buildConclusion(name, profile, trend, shortTerm, action, risks)
-	evidence := buildEvidence(input, trend, shortTerm, theme, market, relative, riskControl, lines)
-	quality := buildDataQuality(input, lines, shortTerm, theme, market, relative)
+	evidence := buildEvidence(input, profile, trend, shortTerm, theme, market, relative, riskControl, lines, fundamental, research)
+	quality := buildDataQuality(input, profile, lines, shortTerm, theme, market, relative, fundamental, research)
 
 	return Analysis{
 		Symbol:      input.Symbol,
@@ -60,6 +68,8 @@ func Analyze(input Input) (Analysis, error) {
 		Trend:       trend,
 		ShortTerm:   shortTerm,
 		Theme:       theme,
+		Fundamental: fundamental,
+		Research:    research,
 		Market:      market,
 		Scorecard:   scorecard,
 		Timeframes:  timeframes,
@@ -74,6 +84,108 @@ func Analyze(input Input) (Analysis, error) {
 		Chart:       chart,
 		AI:          AISynthesisStatus{Status: "rules", Message: "当前结论由本地结构化分析引擎生成"},
 	}, nil
+}
+
+func analyzeFundamentals(item *foundation.StockFundamentals) FundamentalAnalysis {
+	if item == nil || strings.TrimSpace(item.ReportDate) == "" {
+		return FundamentalAnalysis{Quality: "数据不足", Summary: "尚未取得最新F10财务数据"}
+	}
+	score := 50.0
+	score += clamp(item.RevenueYearOverYear/8, -15, 15)
+	score += clamp(item.NetProfitYearOverYear/6, -20, 20)
+	if item.ROE >= 15 {
+		score += 12
+	} else if item.ROE >= 8 {
+		score += 6
+	} else if item.ROE > 0 && item.ROE < 3 {
+		score -= 6
+	} else if item.ROE < 0 {
+		score -= 15
+	}
+	if item.GrossMargin >= 35 {
+		score += 8
+	} else if item.GrossMargin > 0 && item.GrossMargin < 12 {
+		score -= 8
+	}
+	if item.DebtRatio >= 75 {
+		score -= 12
+	} else if item.DebtRatio > 0 && item.DebtRatio <= 45 {
+		score += 5
+	}
+	if item.OperatingCashFlowPerShare > 0 {
+		score += 5
+	} else if item.OperatingCashFlowPerShare < 0 {
+		score -= 5
+	}
+	finalScore := int(math.Round(clamp(score, 0, 100)))
+	quality := "中性"
+	if finalScore >= 72 {
+		quality = "较好"
+	} else if finalScore >= 58 {
+		quality = "稳健"
+	} else if finalScore < 35 {
+		quality = "承压"
+	} else if finalScore < 48 {
+		quality = "偏弱"
+	}
+	summary := fmt.Sprintf("%s：营收同比%+.1f%%，归母净利同比%+.1f%%，ROE %.1f%%，毛利率%.1f%%，负债率%.1f%%", firstNonEmpty(item.ReportName, item.ReportDate), item.RevenueYearOverYear, item.NetProfitYearOverYear, item.ROE, item.GrossMargin, item.DebtRatio)
+	return FundamentalAnalysis{
+		Available: true, Score: finalScore, Quality: quality, ReportDate: item.ReportDate, ReportName: item.ReportName,
+		Revenue: item.Revenue, RevenueYearOverYear: item.RevenueYearOverYear, NetProfit: item.NetProfit,
+		NetProfitYearOverYear: item.NetProfitYearOverYear, EPS: item.EPS, ROE: item.ROE, GrossMargin: item.GrossMargin,
+		DebtRatio: item.DebtRatio, OperatingCashFlowPerShare: item.OperatingCashFlowPerShare,
+		Summary: summary, Source: item.Meta.Source,
+	}
+}
+
+func analyzeResearch(items []foundation.MarketResearchItem) ResearchAnalysis {
+	if len(items) == 0 {
+		return ResearchAnalysis{Coverage: "暂无覆盖", Summary: "近45日未取得该股机构研报", Reports: []foundation.MarketResearchItem{}}
+	}
+	organizations := map[string]bool{}
+	ratingChanges := []string{}
+	positiveRatings := 0
+	latestRating := ""
+	for index, item := range items {
+		if value := strings.TrimSpace(item.Organization); value != "" {
+			organizations[value] = true
+		}
+		if index == 0 {
+			latestRating = strings.TrimSpace(item.Rating)
+		}
+		if ratingIsPositive(item.Rating) {
+			positiveRatings++
+		}
+		if value := strings.TrimSpace(item.RatingChange); value != "" {
+			ratingChanges = append(ratingChanges, value)
+		}
+	}
+	score := 45 + min(len(items), 8)*3 + min(len(organizations), 5)*2
+	if len(items) > 0 {
+		score += int(math.Round(float64(positiveRatings) / float64(len(items)) * 20))
+	}
+	score = int(clamp(float64(score), 0, 100))
+	coverage := "有限"
+	if len(items) >= 5 || len(organizations) >= 3 {
+		coverage = "较充分"
+	} else if len(items) >= 2 {
+		coverage = "一般"
+	}
+	summary := fmt.Sprintf("近45日收录%d篇个股研报，覆盖%d家机构", len(items), len(organizations))
+	if latestRating != "" {
+		summary += "，最新评级" + latestRating
+	}
+	return ResearchAnalysis{Available: true, Score: score, Coverage: coverage, ReportCount: len(items), OrganizationCount: len(organizations), LatestRating: latestRating, RatingChanges: uniqueStrings(ratingChanges, 5), Summary: summary, Reports: items[:min(len(items), 6)]}
+}
+
+func ratingIsPositive(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, keyword := range []string{"买入", "增持", "强烈推荐", "推荐", "outperform", "buy"} {
+		if strings.Contains(value, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func analyzeTrend(lines []foundation.KLine) (TrendAnalysis, []TrendPoint) {
@@ -586,7 +698,7 @@ func buildConclusion(name string, profile Profile, trend TrendAnalysis, short Sh
 	}
 }
 
-func buildEvidence(input Input, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, lines []foundation.KLine) []Evidence {
+func buildEvidence(input Input, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, lines []foundation.KLine, fundamental *FundamentalAnalysis, research *ResearchAnalysis) []Evidence {
 	evidence := []Evidence{
 		{Category: "趋势", Title: fmt.Sprintf("%s · %d分", trend.Strength, trend.Score), Detail: strings.Join(trend.Reasons, "；"), Source: lines[len(lines)-1].Meta.Source, AsOf: lines[len(lines)-1].Time.Format("2006-01-02")},
 		{Category: "量价", Title: fmt.Sprintf("近20日%+.1f%% · 量比%.2f", trend.Return20, trend.VolumeRatio), Detail: fmt.Sprintf("60日区间位置%.0f%%，距120日高点%+.1f%%", trend.RangePosition60, trend.DrawdownFromHigh120), Source: lines[len(lines)-1].Meta.Source, AsOf: lines[len(lines)-1].Time.Format("2006-01-02")},
@@ -598,6 +710,13 @@ func buildEvidence(input Input, trend TrendAnalysis, short ShortTermAnalysis, th
 			detail = strings.Join(theme.Evidence, "；") + "。" + detail
 		}
 		evidence = append(evidence, Evidence{Category: "题材", Title: theme.Primary, Detail: detail, Source: firstNonEmpty(theme.Source, "题材归因"), AsOf: theme.AsOf})
+	}
+	if profile.PrimaryType != "emotion_leader" && fundamental != nil && fundamental.Available {
+		evidence = append(evidence, Evidence{Category: "基本面", Title: fundamental.ReportName + " · " + fundamental.Quality, Detail: fundamental.Summary, Source: fundamental.Source, AsOf: fundamental.ReportDate})
+	}
+	if profile.PrimaryType != "emotion_leader" && research != nil && research.Available {
+		detail := research.Summary + "；评级为机构观点，仅作预期参考"
+		evidence = append(evidence, Evidence{Category: "研报", Title: fmt.Sprintf("机构覆盖 · %d篇", research.ReportCount), Detail: detail, Source: "eastmoney:report"})
 	}
 	if market != nil {
 		evidence = append(evidence, Evidence{Category: "市场", Title: fmt.Sprintf("%s · %.0f分", market.Phase, market.Score), Detail: "市场情绪仅作为交易环境约束，不替代个股结构", Source: market.Source, AsOf: market.TradeDate})
@@ -612,7 +731,7 @@ func buildEvidence(input Input, trend TrendAnalysis, short ShortTermAnalysis, th
 	return evidence[:min(len(evidence), 10)]
 }
 
-func buildDataQuality(input Input, lines []foundation.KLine, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength) []DataQuality {
+func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, fundamental *FundamentalAnalysis, research *ResearchAnalysis) []DataQuality {
 	quality := []DataQuality{{Key: "kline", Status: "ready", Message: fmt.Sprintf("已读取%d个交易日K线", len(lines))}}
 	if input.Quote.Price > 0 {
 		quality = append(quality, DataQuality{Key: "quote", Status: "ready", Message: "实时行情已接入"})
@@ -647,6 +766,18 @@ func buildDataQuality(input Input, lines []foundation.KLine, short ShortTermAnal
 		quality = append(quality, DataQuality{Key: "benchmark", Status: "ready", Message: fmt.Sprintf("已接入%s作为相对强度基准", firstNonEmpty(relative.BenchmarkName, relative.BenchmarkSymbol))})
 	} else {
 		quality = append(quality, DataQuality{Key: "benchmark", Status: "limited", Message: "基准指数数据不可用，相对强度未参与结论"})
+	}
+	if profile.PrimaryType != "emotion_leader" {
+		if fundamental != nil && fundamental.Available {
+			quality = append(quality, DataQuality{Key: "fundamental", Status: "ready", Message: "已接入最新东方财富F10财务指标"})
+		} else {
+			quality = append(quality, DataQuality{Key: "fundamental", Status: "limited", Message: "最新F10财务指标暂不可用"})
+		}
+		if research != nil && research.Available {
+			quality = append(quality, DataQuality{Key: "research", Status: "ready", Message: fmt.Sprintf("已读取近45日%d篇机构研报", research.ReportCount)})
+		} else {
+			quality = append(quality, DataQuality{Key: "research", Status: "limited", Message: "近45日暂无可用机构研报"})
+		}
 	}
 	for _, gap := range input.CollectionGaps {
 		quality = append(quality, DataQuality{Key: "collection", Status: "limited", Message: gap})

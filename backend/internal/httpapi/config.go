@@ -62,6 +62,7 @@ type StockConceptProvider interface {
 
 type StockBusinessProfileProvider interface {
 	StockBusinessProfile(ctx context.Context, symbol string) (foundation.StockBusinessProfile, error)
+	StockFundamentals(ctx context.Context, symbol string) (foundation.StockFundamentals, error)
 }
 
 type StockDirectoryProvider interface {

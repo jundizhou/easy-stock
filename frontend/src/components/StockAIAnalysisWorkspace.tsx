@@ -5,16 +5,21 @@ import {
 	BarChart3,
 	Bot,
 	BrainCircuit,
+	Building2,
 	Calculator,
 	CheckCircle2,
 	CircleAlert,
 	Clipboard,
 	Clock3,
+	Download,
 	Flag,
 	Gauge,
+	Github,
 	History,
 	Layers3,
 	LineChart,
+	ExternalLink,
+	FileSearch,
 	ListChecks,
 	LoaderCircle,
 	RefreshCw,
@@ -30,7 +35,7 @@ import {
 	WalletCards,
 	Zap,
 } from 'lucide-react';
-import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
 	StockAIAnalysis,
@@ -88,8 +93,11 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
 	const [copied, setCopied] = useState(false);
+	const [exporting, setExporting] = useState(false);
+	const [exportNotice, setExportNotice] = useState('');
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedStockDirectory);
 	const [directoryState, setDirectoryState] = useState<DirectoryState>(() => directory.length > 0 ? 'cached' : 'idle');
+	const exportRef = useRef<HTMLDivElement>(null);
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
 		setHistory((current) => {
@@ -189,6 +197,40 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 		window.setTimeout(() => setCopied(false), 1600);
 	};
 
+	const exportLongImage = async () => {
+		if (!analysis || !exportRef.current || exporting) return;
+		setExporting(true);
+		setExportNotice('');
+		try {
+			await document.fonts?.ready;
+			const { default: html2canvas } = await import('html2canvas');
+			const canvas = await html2canvas(exportRef.current, {
+				backgroundColor: '#f4f7fb',
+				logging: false,
+				scale: Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2),
+				useCORS: true,
+				windowWidth: 1600,
+				onclone: (_document, element) => element.classList.add('is-exporting'),
+			});
+			const blob = await canvasToPNGBlob(canvas);
+			const href = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = href;
+			link.download = buildAnalysisImageFilename(analysis, mode);
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+			setExportNotice('长图已生成并保存');
+		} catch (exportError) {
+			console.error('Failed to export stock analysis image', exportError);
+			setExportNotice('长图生成失败，请稍后重试');
+		} finally {
+			setExporting(false);
+			window.setTimeout(() => setExportNotice(''), 2600);
+		}
+	};
+
 	return (
 		<section className="stock-ai-workspace">
 			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
@@ -211,15 +253,35 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 
 			{state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => void runAnalysis(symbol)} />}
 			{state !== 'loading' && analysis && (
-				<>
-					<AnalysisVerdict analysis={analysis} copied={copied} onRefresh={() => void runAnalysis(analysis.symbol)} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
+				<div className="stock-ai-result">
+					<div className="stock-ai-export-sheet" ref={exportRef}>
+						<AnalysisExportHeader analysis={analysis} mode={mode} />
+						<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => void runAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
 					{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
 					{mode === 'expectation' && <ExpectationView analysis={analysis} />}
 					{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
-				</>
+						<AnalysisExportFooter analysis={analysis} />
+					</div>
+					{exportNotice && <div className={`stock-ai-export-notice ${exportNotice.includes('失败') ? 'error' : ''}`} role="status">{exportNotice}</div>}
+				</div>
 			)}
 		</section>
 	);
+}
+
+function AnalysisExportHeader({ analysis, mode }: { analysis: StockAIAnalysis; mode: StockAIWorkspaceMode }) {
+	return <header className="stock-ai-export-header">
+		<div className="stock-ai-export-brand"><span><BrainCircuit size={24} /></span><div><strong>easy-stock</strong><small>AI STOCK DECISION SYSTEM</small><em>开源 · 免费使用</em></div></div>
+		<div><span>{workspaceModeLabel(mode)}</span><strong>{analysis.name} · {analysis.symbol}</strong><small>分析生成于 {formatExportDate(analysis.generated_at)}</small></div>
+	</header>;
+}
+
+function AnalysisExportFooter({ analysis }: { analysis: StockAIAnalysis }) {
+	return <footer className="stock-ai-export-footer">
+		<div><strong>easy-stock</strong><span>让数据、逻辑与 AI 一起服务于交易决策</span></div>
+		<div className="stock-ai-export-promo"><span><Github size={13} />开源免费使用 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
+		<div><span>数据截至 {formatExportDate(analysis.generated_at)}</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
+	</footer>;
 }
 
 function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSubmit, loading }: {
@@ -353,10 +415,12 @@ function StockAIEmpty({ onSelect }: { onSelect: (symbol: string) => void }) {
 	);
 }
 
-function AnalysisVerdict({ analysis, copied, onRefresh, onCopy, onAskAI, onOpenSettings }: {
+function AnalysisVerdict({ analysis, copied, exporting, onRefresh, onExport, onCopy, onAskAI, onOpenSettings }: {
 	analysis: StockAIAnalysis;
 	copied: boolean;
+	exporting: boolean;
 	onRefresh: () => void;
+	onExport: () => void;
 	onCopy: () => void;
 	onAskAI: () => void;
 	onOpenSettings: () => void;
@@ -381,6 +445,7 @@ function AnalysisVerdict({ analysis, copied, onRefresh, onCopy, onAskAI, onOpenS
 			</div>
 			<div className="stock-ai-verdict-actions">
 				<button type="button" onClick={onRefresh}><RefreshCw size={14} />刷新</button>
+				<button type="button" className="export" onClick={onExport} disabled={exporting}>{exporting ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}{exporting ? '正在生成…' : '导出长图'}</button>
 				<button type="button" onClick={onCopy}><Clipboard size={14} />{copied ? '已复制' : '复制预案'}</button>
 				<button type="button" className="primary" onClick={onAskAI}><Bot size={14} />继续推演</button>
 			</div>
@@ -409,6 +474,11 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<ScorecardPanel analysis={analysis} />
 				<SignalMatrix analysis={analysis} />
 			</div>
+
+			{analysis.profile.primary_type !== 'emotion_leader' && <div className="stock-ai-fundamental-grid">
+				<FundamentalPanel analysis={analysis} />
+				<ResearchPanel analysis={analysis} />
+			</div>}
 
 			<div className="stock-ai-main-grid">
 				<section className="stock-ai-panel stock-ai-chart-panel">
@@ -445,6 +515,37 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 			</div>
 		</>
 	);
+}
+
+function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {
+	const item = analysis.fundamental;
+	return <section className="stock-ai-panel stock-ai-fundamental-panel">
+		<header><div><span>公司质量</span><h3>基本面 · 最新财报</h3></div><Building2 size={19} /></header>
+		{item?.available ? <>
+			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date}</span><p>{item.summary}</p></div>
+			<div className="stock-ai-fundamental-metrics">
+				<FundamentalMetric label="营业收入" value={formatCompactAmount(item.revenue)} detail={`同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="ROE" value={`${item.roe.toFixed(1)}%`} detail={`EPS ${item.eps.toFixed(2)}`} />
+				<FundamentalMetric label="毛利率" value={`${item.gross_margin.toFixed(1)}%`} detail={`负债率 ${item.debt_ratio.toFixed(1)}%`} />
+			</div>
+		</> : <div className="stock-ai-panel-empty">最新F10财务数据暂不可用</div>}
+	</section>;
+}
+
+function FundamentalMetric({ label, value, detail, tone = '' }: { label: string; value: string; detail: string; tone?: string }) {
+	return <article><span>{label}</span><strong className={tone}>{value}</strong><small>{detail}</small></article>;
+}
+
+function ResearchPanel({ analysis }: { analysis: StockAIAnalysis }) {
+	const item = analysis.research;
+	return <section className="stock-ai-panel stock-ai-research-panel">
+		<header><div><span>第三方预期</span><h3>机构研报 · 近45日</h3></div><FileSearch size={19} /></header>
+		{item?.available ? <>
+			<div className="stock-ai-research-summary"><div><strong>{item.report_count} 篇</strong><span>{item.organization_count} 家机构 · 覆盖{item.coverage}{item.latest_rating ? ` · 最新评级${item.latest_rating}` : ''}</span></div><small>机构评级仅代表第三方观点，不作为系统买卖结论。</small></div>
+			<div className="stock-ai-research-list">{item.reports.map((report) => <article key={report.id}><div><header><span>{report.organization || '研究机构'}</span><time>{formatShortDate(report.published_at)}</time></header><strong>{report.title}</strong><small>{[report.rating ? `评级 ${report.rating}` : '', report.target_low || report.target_high ? `目标价 ${formatTargetPrice(report.target_low, report.target_high)}` : '', report.eps ? `EPS ${report.eps.toFixed(2)}` : ''].filter(Boolean).join(' · ')}</small></div>{report.url && <a href={report.url} target="_blank" rel="noreferrer" title="查看研报原文"><ExternalLink size={14} /></a>}</article>)}</div>
+		</> : <div className="stock-ai-panel-empty">近45日暂无可用机构研报</div>}
+	</section>;
 }
 
 function ScorecardPanel({ analysis }: { analysis: StockAIAnalysis }) {
@@ -742,8 +843,45 @@ function buildPlanText(analysis: StockAIAnalysis) {
 	].join('\n');
 }
 
+function canvasToPNGBlob(canvas: HTMLCanvasElement) {
+	return new Promise<Blob>((resolve, reject) => {
+		canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('浏览器未能生成 PNG 图片')), 'image/png');
+	});
+}
+
+function buildAnalysisImageFilename(analysis: StockAIAnalysis, mode: StockAIWorkspaceMode) {
+	const date = new Date();
+	const datePart = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+	const stockName = sanitizeFilename(analysis.name || '个股');
+	const symbol = sanitizeFilename(analysis.symbol || 'A股');
+	return `easy-stock-${stockName}-${symbol}-${sanitizeFilename(workspaceModeLabel(mode))}-${datePart}.png`;
+}
+
+function sanitizeFilename(value: string) {
+	return value.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '').slice(0, 48);
+}
+
+function workspaceModeLabel(mode: StockAIWorkspaceMode) {
+	if (mode === 'expectation') return '隔日预期';
+	if (mode === 'risk') return '风险与执行';
+	return '个股 AI 分析';
+}
+
+function formatExportDate(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value || '--';
+	return date.toLocaleString('zh-CN', {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false,
+	});
+}
+
 function qualityLabel(key: string) {
-	const labels: Record<string, string> = { kline: '趋势K线', quote: '实时行情', limit_up: '涨停结构', theme: '题材归因', market_emotion: '市场情绪', benchmark: '基准指数', collection: '数据采集' };
+	const labels: Record<string, string> = { kline: '趋势K线', quote: '实时行情', limit_up: '涨停结构', theme: '题材归因', fundamental: '基本面', research: '机构研报', market_emotion: '市场情绪', benchmark: '基准指数', collection: '数据采集' };
 	return labels[key] || key;
 }
 
@@ -769,4 +907,14 @@ function formatPrice(value: number) {
 
 function formatMoney(value: number) {
 	return Number.isFinite(value) && value > 0 ? `${value.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} 元` : '--';
+}
+
+function formatShortDate(value: string) {
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+}
+
+function formatTargetPrice(low?: number, high?: number) {
+	if (low && high) return `${low.toFixed(2)}—${high.toFixed(2)}`;
+	return (high || low || 0).toFixed(2);
 }

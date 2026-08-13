@@ -20,6 +20,8 @@ type Input struct {
 	Business        string
 	BusinessDetail  string
 	BusinessSource  string
+	Fundamentals    *foundation.StockFundamentals
+	Reports         []foundation.MarketResearchItem
 	CachedThemes    []foundation.StockThemeAttribution
 	Themes          []foundation.ThemeOverview
 	MarketEmotion   *marketemotion.Snapshot
@@ -28,28 +30,30 @@ type Input struct {
 }
 
 type Analysis struct {
-	Symbol      string              `json:"symbol"`
-	Name        string              `json:"name"`
-	GeneratedAt time.Time           `json:"generated_at"`
-	Quote       foundation.Quote    `json:"quote"`
-	Profile     Profile             `json:"profile"`
-	Conclusion  Conclusion          `json:"conclusion"`
-	Trend       TrendAnalysis       `json:"trend"`
-	ShortTerm   ShortTermAnalysis   `json:"short_term"`
-	Theme       ThemeAnalysis       `json:"theme"`
-	Market      *MarketContext      `json:"market,omitempty"`
-	Scorecard   Scorecard           `json:"scorecard"`
-	Timeframes  []TimeframeAnalysis `json:"timeframes"`
-	Relative    RelativeStrength    `json:"relative_strength"`
-	Signals     []Signal            `json:"signals"`
-	NextDay     NextDayPlan         `json:"next_day"`
-	RiskControl RiskControl         `json:"risk_control"`
-	ActionPlan  ActionPlan          `json:"action_plan"`
-	Risks       []string            `json:"risks"`
-	Evidence    []Evidence          `json:"evidence"`
-	DataQuality []DataQuality       `json:"data_quality"`
-	Chart       []TrendPoint        `json:"chart"`
-	AI          AISynthesisStatus   `json:"ai"`
+	Symbol      string               `json:"symbol"`
+	Name        string               `json:"name"`
+	GeneratedAt time.Time            `json:"generated_at"`
+	Quote       foundation.Quote     `json:"quote"`
+	Profile     Profile              `json:"profile"`
+	Conclusion  Conclusion           `json:"conclusion"`
+	Trend       TrendAnalysis        `json:"trend"`
+	ShortTerm   ShortTermAnalysis    `json:"short_term"`
+	Theme       ThemeAnalysis        `json:"theme"`
+	Fundamental *FundamentalAnalysis `json:"fundamental,omitempty"`
+	Research    *ResearchAnalysis    `json:"research,omitempty"`
+	Market      *MarketContext       `json:"market,omitempty"`
+	Scorecard   Scorecard            `json:"scorecard"`
+	Timeframes  []TimeframeAnalysis  `json:"timeframes"`
+	Relative    RelativeStrength     `json:"relative_strength"`
+	Signals     []Signal             `json:"signals"`
+	NextDay     NextDayPlan          `json:"next_day"`
+	RiskControl RiskControl          `json:"risk_control"`
+	ActionPlan  ActionPlan           `json:"action_plan"`
+	Risks       []string             `json:"risks"`
+	Evidence    []Evidence           `json:"evidence"`
+	DataQuality []DataQuality        `json:"data_quality"`
+	Chart       []TrendPoint         `json:"chart"`
+	AI          AISynthesisStatus    `json:"ai"`
 }
 
 type Profile struct {
@@ -225,6 +229,37 @@ type ThemeAnalysis struct {
 	MaxStreak   int      `json:"max_streak"`
 	Role        string   `json:"role"`
 	Description string   `json:"description"`
+}
+
+type FundamentalAnalysis struct {
+	Available                 bool    `json:"available"`
+	Score                     int     `json:"score"`
+	Quality                   string  `json:"quality"`
+	ReportDate                string  `json:"report_date"`
+	ReportName                string  `json:"report_name"`
+	Revenue                   float64 `json:"revenue"`
+	RevenueYearOverYear       float64 `json:"revenue_yoy"`
+	NetProfit                 float64 `json:"net_profit"`
+	NetProfitYearOverYear     float64 `json:"net_profit_yoy"`
+	EPS                       float64 `json:"eps"`
+	ROE                       float64 `json:"roe"`
+	GrossMargin               float64 `json:"gross_margin"`
+	DebtRatio                 float64 `json:"debt_ratio"`
+	OperatingCashFlowPerShare float64 `json:"operating_cash_flow_per_share"`
+	Summary                   string  `json:"summary"`
+	Source                    string  `json:"source"`
+}
+
+type ResearchAnalysis struct {
+	Available         bool                            `json:"available"`
+	Score             int                             `json:"score"`
+	Coverage          string                          `json:"coverage"`
+	ReportCount       int                             `json:"report_count"`
+	OrganizationCount int                             `json:"organization_count"`
+	LatestRating      string                          `json:"latest_rating,omitempty"`
+	RatingChanges     []string                        `json:"rating_changes,omitempty"`
+	Summary           string                          `json:"summary"`
+	Reports           []foundation.MarketResearchItem `json:"reports"`
 }
 
 type MarketContext struct {

@@ -163,6 +163,45 @@ func TestAnalyzeThemeDoesNotPromoteBroadConceptToHotTheme(t *testing.T) {
 	}
 }
 
+func TestAnalyzeNonShortStockIncludesFundamentalsAndResearch(t *testing.T) {
+	lines := syntheticTrendLines("600519.SH", 180, 10, 0.08, 1_500_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "600519.SH", KLines: lines,
+		Fundamentals: &foundation.StockFundamentals{ReportDate: "2026-03-31", ReportName: "2026一季报", RevenueYearOverYear: 18, NetProfitYearOverYear: 25, ROE: 16, GrossMargin: 55, DebtRatio: 25, OperatingCashFlowPerShare: 2, Meta: foundation.SourceMeta{Source: "eastmoney:f10-financials"}},
+		Reports:      []foundation.MarketResearchItem{{ID: "r1", Title: "业绩稳健增长", Organization: "测试证券", Rating: "买入", PublishedAt: time.Now()}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Profile.PrimaryType == "emotion_leader" || analysis.Fundamental == nil || !analysis.Fundamental.Available || analysis.Research == nil || !analysis.Research.Available {
+		t.Fatalf("non-short analysis missing fundamentals or research: %+v", analysis)
+	}
+	keys := map[string]bool{}
+	for _, item := range analysis.Scorecard.Dimensions {
+		keys[item.Key] = true
+	}
+	if !keys["fundamental"] || !keys["research"] {
+		t.Fatalf("scorecard missing non-short dimensions: %+v", analysis.Scorecard.Dimensions)
+	}
+}
+
+func TestAnalyzeEmotionLeaderSkipsFundamentalsAndResearch(t *testing.T) {
+	lines := syntheticTrendLines("003032.SZ", 60, 10, 0.1, 800_000_000)
+	now := time.Now()
+	analysis, err := Analyze(Input{
+		Symbol: "003032.SZ", KLines: lines,
+		LimitUps:     []foundation.LimitUpEvent{{Symbol: "003032.SZ", Date: now.AddDate(0, 0, -2), Streak: 2}, {Symbol: "003032.SZ", Date: now.AddDate(0, 0, -1), Streak: 3}},
+		Fundamentals: &foundation.StockFundamentals{ReportDate: "2026-03-31", ReportName: "2026一季报"},
+		Reports:      []foundation.MarketResearchItem{{ID: "r1", Title: "测试研报"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Profile.PrimaryType != "emotion_leader" || analysis.Fundamental != nil || analysis.Research != nil {
+		t.Fatalf("emotion leader should keep short-term route: %+v", analysis)
+	}
+}
+
 func TestBenchmarkForSymbolRoutesByBoard(t *testing.T) {
 	tests := map[string]string{
 		"600519.SH": "000001.SH",

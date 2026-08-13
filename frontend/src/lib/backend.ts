@@ -531,6 +531,37 @@ export type StockAITheme = {
 	description: string;
 };
 
+export type StockAIFundamental = {
+	available: boolean;
+	score: number;
+	quality: string;
+	report_date: string;
+	report_name: string;
+	revenue: number;
+	revenue_yoy: number;
+	net_profit: number;
+	net_profit_yoy: number;
+	eps: number;
+	roe: number;
+	gross_margin: number;
+	debt_ratio: number;
+	operating_cash_flow_per_share: number;
+	summary: string;
+	source: string;
+};
+
+export type StockAIResearch = {
+	available: boolean;
+	score: number;
+	coverage: string;
+	report_count: number;
+	organization_count: number;
+	latest_rating?: string;
+	rating_changes?: string[];
+	summary: string;
+	reports: MarketResearchItem[];
+};
+
 export type StockAIMarket = {
 	trade_date: string;
 	phase: string;
@@ -587,6 +618,8 @@ export type StockAIAnalysis = {
 	trend: StockAITrend;
 	short_term: StockAIShortTerm;
 	theme: StockAITheme;
+	fundamental?: StockAIFundamental;
+	research?: StockAIResearch;
 	market?: StockAIMarket;
 	scorecard: StockAIScorecard;
 	timeframes: StockAITimeframe[];

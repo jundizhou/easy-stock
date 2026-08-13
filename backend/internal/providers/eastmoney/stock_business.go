@@ -70,6 +70,65 @@ func (c *Client) StockBusinessProfile(ctx context.Context, symbol string) (found
 	}, nil
 }
 
+// StockFundamentals returns the most recent published main financial metrics.
+func (c *Client) StockFundamentals(ctx context.Context, symbol string) (foundation.StockFundamentals, error) {
+	normalized, err := foundation.NormalizeSymbol(symbol)
+	if err != nil {
+		return foundation.StockFundamentals{}, err
+	}
+	endpoint := c.f10BaseURL + "/api/data/v1/get"
+	params := url.Values{}
+	params.Set("reportName", "RPT_F10_FINANCE_MAINFINADATA")
+	params.Set("columns", "SECUCODE,REPORT_DATE,REPORT_DATE_NAME,TOTALOPERATEREVE,TOTALOPERATEREVETZ,PARENTNETPROFIT,PARENTNETPROFITTZ,EPSJB,ROEJQ,XSMLL,ZCFZL,MGJYXJJE")
+	params.Set("filter", fmt.Sprintf("(SECUCODE=\"%s\")", escapeEastMoneyFilter(normalized.Canonical)))
+	params.Set("pageNumber", "1")
+	params.Set("pageSize", "1")
+	params.Set("sortTypes", "-1")
+	params.Set("sortColumns", "REPORT_DATE")
+	params.Set("source", "HSF10")
+	params.Set("client", "PC")
+	requestURL := endpoint + "?" + params.Encode()
+	start := time.Now()
+	var payload struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Result  *struct {
+			Data []struct {
+				Symbol                    string        `json:"SECUCODE"`
+				ReportDate                string        `json:"REPORT_DATE"`
+				ReportName                string        `json:"REPORT_DATE_NAME"`
+				Revenue                   flexibleFloat `json:"TOTALOPERATEREVE"`
+				RevenueYearOverYear       flexibleFloat `json:"TOTALOPERATEREVETZ"`
+				NetProfit                 flexibleFloat `json:"PARENTNETPROFIT"`
+				NetProfitYearOverYear     flexibleFloat `json:"PARENTNETPROFITTZ"`
+				EPS                       flexibleFloat `json:"EPSJB"`
+				ROE                       flexibleFloat `json:"ROEJQ"`
+				GrossMargin               flexibleFloat `json:"XSMLL"`
+				DebtRatio                 flexibleFloat `json:"ZCFZL"`
+				OperatingCashFlowPerShare flexibleFloat `json:"MGJYXJJE"`
+			} `json:"data"`
+		} `json:"result"`
+	}
+	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
+		return foundation.StockFundamentals{}, fmt.Errorf("eastmoney stock fundamentals: %w", err)
+	}
+	if !payload.Success {
+		return foundation.StockFundamentals{}, fmt.Errorf("eastmoney stock fundamentals: %s", payload.Message)
+	}
+	if payload.Result == nil || len(payload.Result.Data) == 0 {
+		return foundation.StockFundamentals{}, fmt.Errorf("eastmoney stock fundamentals returned no data for %s", normalized.Canonical)
+	}
+	raw := payload.Result.Data[0]
+	return foundation.StockFundamentals{
+		Symbol: normalized.Canonical, ReportDate: strings.TrimSpace(raw.ReportDate), ReportName: strings.TrimSpace(raw.ReportName),
+		Revenue: float64(raw.Revenue), RevenueYearOverYear: float64(raw.RevenueYearOverYear),
+		NetProfit: float64(raw.NetProfit), NetProfitYearOverYear: float64(raw.NetProfitYearOverYear), EPS: float64(raw.EPS),
+		ROE: float64(raw.ROE), GrossMargin: float64(raw.GrossMargin), DebtRatio: float64(raw.DebtRatio),
+		OperatingCashFlowPerShare: float64(raw.OperatingCashFlowPerShare),
+		Meta:                      foundation.SourceMeta{Source: "eastmoney:f10-financials", SourceURL: requestURL, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds()},
+	}, nil
+}
+
 func normalizeBusinessText(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), "")
 }

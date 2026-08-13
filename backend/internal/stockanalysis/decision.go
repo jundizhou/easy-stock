@@ -314,8 +314,8 @@ func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnal
 	}
 }
 
-func buildSignals(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, timeframes []TimeframeAnalysis) []Signal {
-	signals := make([]Signal, 0, 8)
+func buildSignals(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, timeframes []TimeframeAnalysis, fundamental *FundamentalAnalysis, research *ResearchAnalysis) []Signal {
+	signals := make([]Signal, 0, 10)
 	trendTone := "neutral"
 	if trend.Score >= 65 {
 		trendTone = "positive"
@@ -345,16 +345,30 @@ func buildSignals(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnaly
 	signals = append(signals, Signal{Key: "market", Label: "市场环境", Tone: scoreTone(marketScore), Strength: marketScore, Detail: marketDetail})
 	consistent := timeframeConsistency(timeframes)
 	signals = append(signals, Signal{Key: "timeframe", Label: "周期一致性", Tone: scoreTone(consistent), Strength: consistent, Detail: timeframeSummary(timeframes)})
+	if fundamental != nil {
+		score := fundamental.Score
+		if !fundamental.Available {
+			score = 45
+		}
+		signals = append(signals, Signal{Key: "fundamental", Label: "基本面", Tone: scoreTone(score), Strength: score, Detail: fundamental.Summary})
+	}
+	if research != nil {
+		score := research.Score
+		if !research.Available {
+			score = 45
+		}
+		signals = append(signals, Signal{Key: "research", Label: "机构研报", Tone: scoreTone(score), Strength: score, Detail: research.Summary})
+	}
 	signals = append(signals, Signal{Key: "risk", Label: "风险约束", Tone: scoreTone(100 - risk.Score), Strength: 100 - risk.Score, Detail: fmt.Sprintf("%s风险 · 止损距离%.1f%%", risk.Level, risk.StopPercent)})
 	return signals
 }
 
 func buildScorecard(profile Profile, signals []Signal) Scorecard {
-	weights := map[string]float64{"trend": .25, "momentum": .18, "volume": .14, "relative": .10, "theme": .14, "market": .12, "timeframe": .07, "risk": .10}
+	weights := map[string]float64{"trend": .20, "momentum": .12, "volume": .10, "relative": .09, "theme": .08, "market": .09, "timeframe": .06, "fundamental": .15, "research": .05, "risk": .06}
 	if profile.PrimaryType == "emotion_leader" {
 		weights = map[string]float64{"trend": .14, "momentum": .22, "volume": .17, "relative": .06, "theme": .17, "market": .15, "timeframe": .04, "risk": .05}
 	} else if profile.PrimaryType == "weak_risk" {
-		weights = map[string]float64{"trend": .28, "momentum": .14, "volume": .10, "relative": .10, "theme": .08, "market": .12, "timeframe": .08, "risk": .10}
+		weights = map[string]float64{"trend": .24, "momentum": .10, "volume": .08, "relative": .09, "theme": .05, "market": .09, "timeframe": .07, "fundamental": .14, "research": .04, "risk": .10}
 	}
 	dimensions := make([]DimensionScore, 0, len(signals))
 	positive := make([]string, 0, 5)
