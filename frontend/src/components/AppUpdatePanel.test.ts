@@ -18,10 +18,12 @@ describe('app updater controls', () => {
 
 	it('downloads an available version', () => {
 		expect(updatePrimaryAction(status('available'))).toBe('download');
+		expect(updatePrimaryAction({ ...status('available'), installMode: 'manual' })).toBe('release');
 	});
 
 	it('installs only after the download completes', () => {
 		expect(updatePrimaryAction(status('downloading'))).toBe('check');
 		expect(updatePrimaryAction(status('downloaded'))).toBe('install');
+		expect(updatePrimaryAction({ ...status('downloaded'), installMode: 'manual' })).toBe('release');
 	});
 });

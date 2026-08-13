@@ -6,12 +6,17 @@ function readableError(error) {
 }
 
 class UpdateManager extends EventEmitter {
-  constructor({ updater, enabled, currentVersion, platform, stopRuntime, createBackup, logger = console }) {
+  constructor({ updater, enabled, currentVersion, platform, canInstallAutomatically, stopRuntime, createBackup, logger = console }) {
     super();
     this.updater = updater;
     this.enabled = Boolean(enabled && updater);
     this.currentVersion = currentVersion;
     this.platform = platform;
+    // Unsigned macOS builds cannot be replaced by Squirrel.Mac: the native
+    // updater validates the code signature before installation. Keep checking
+    // updates enabled, but route those builds to the release page instead.
+    this.canInstallAutomatically = canInstallAutomatically ?? platform === 'win32';
+    this.installMode = this.canInstallAutomatically ? 'automatic' : 'manual';
     this.stopRuntime = stopRuntime;
     this.createBackup = createBackup;
     this.logger = logger;
@@ -19,6 +24,7 @@ class UpdateManager extends EventEmitter {
     this.status = {
       state: this.enabled ? 'idle' : 'disabled',
       supported: this.enabled,
+      installMode: this.installMode,
       currentVersion,
       message: this.enabled ? '可检查正式更新源的新版本' : '开发模式不启用自动更新',
       progress: 0,
@@ -38,7 +44,7 @@ class UpdateManager extends EventEmitter {
         latestVersion: info.version,
         releaseName: info.releaseName || '',
         releaseNotes: normalizeReleaseNotes(info.releaseNotes),
-        message: `发现新版本 v${info.version}`,
+        message: this.canInstallAutomatically ? `发现新版本 v${info.version}` : `发现新版本 v${info.version}，请前往发布页下载安装`,
         progress: 0,
       });
     });
@@ -64,17 +70,17 @@ class UpdateManager extends EventEmitter {
         releaseName: info?.releaseName || this.status.releaseName || '',
         releaseNotes: normalizeReleaseNotes(info?.releaseNotes) || this.status.releaseNotes || '',
         progress: 100,
-        message: '更新已下载，可重启安装',
+        message: this.canInstallAutomatically ? '更新已下载，可重启安装' : '请前往发布页手动下载安装新版',
       });
     });
     this.updater.on('error', (error) => {
       this.logger.error?.('[updater]', error);
-      this.setStatus({ state: 'error', message: `更新失败：${readableError(error)}` });
+      this.setStatus({ state: 'error', message: `更新失败：${friendlyUpdateError(error)}` });
     });
   }
 
   setStatus(patch) {
-    this.status = { ...this.status, ...patch, supported: this.enabled, currentVersion: this.currentVersion };
+    this.status = { ...this.status, ...patch, supported: this.enabled, installMode: this.installMode, currentVersion: this.currentVersion };
     this.emit('status', this.getStatus());
     return this.getStatus();
   }
@@ -89,13 +95,16 @@ class UpdateManager extends EventEmitter {
       await this.updater.checkForUpdates();
       return this.getStatus();
     } catch (error) {
-      this.setStatus({ state: 'error', message: `检查更新失败：${readableError(error)}` });
+      this.setStatus({ state: 'error', message: `检查更新失败：${friendlyUpdateError(error)}` });
       throw new Error(this.status.message);
     }
   }
 
   async downloadUpdate() {
     this.ensureEnabled();
+    if (!this.canInstallAutomatically) {
+      throw new Error('当前 macOS 版本未使用 Apple Developer ID 签名，请前往发布页手动下载安装新版');
+    }
     if (!['available', 'error'].includes(this.status.state) || !this.latestInfo?.version) {
       throw new Error('当前没有可下载的新版本');
     }
@@ -104,13 +113,16 @@ class UpdateManager extends EventEmitter {
       await this.updater.downloadUpdate();
       return this.getStatus();
     } catch (error) {
-      this.setStatus({ state: 'error', message: `下载更新失败：${readableError(error)}` });
+      this.setStatus({ state: 'error', message: `下载更新失败：${friendlyUpdateError(error)}` });
       throw new Error(this.status.message);
     }
   }
 
   async installUpdate() {
     this.ensureEnabled();
+    if (!this.canInstallAutomatically) {
+      throw new Error('当前 macOS 版本未使用 Apple Developer ID 签名，暂不支持应用内安装，请前往发布页手动下载安装新版');
+    }
     if (this.status.state !== 'downloaded' || !this.latestInfo?.version) {
       throw new Error('更新尚未下载完成');
     }
@@ -122,7 +134,7 @@ class UpdateManager extends EventEmitter {
       this.updater.quitAndInstall(false, true);
       return this.getStatus();
     } catch (error) {
-      this.setStatus({ state: 'error', message: `安装已中止：${readableError(error)}。请重新启动应用后再试。` });
+      this.setStatus({ state: 'error', message: `安装已中止：${friendlyUpdateError(error)}。请重新启动应用后再试。` });
       throw new Error(this.status.message);
     }
   }
@@ -137,4 +149,12 @@ function normalizeReleaseNotes(value) {
   return typeof value === 'string' ? value : '';
 }
 
-module.exports = { UpdateManager, normalizeReleaseNotes, readableError };
+function friendlyUpdateError(error) {
+  const message = readableError(error);
+  if (/code signature|代码未能满足指定的代码要求|did not pass validation/i.test(message)) {
+    return 'macOS 校验到当前安装包未使用一致的 Apple Developer ID 签名，请前往发布页手动下载安装新版';
+  }
+  return message;
+}
+
+module.exports = { UpdateManager, normalizeReleaseNotes, readableError, friendlyUpdateError };

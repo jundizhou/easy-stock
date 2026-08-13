@@ -24,6 +24,7 @@ export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'd
 export type AppUpdateStatus = {
 	state: AppUpdateState;
 	supported: boolean;
+	installMode?: 'automatic' | 'manual';
 	currentVersion: string;
 	latestVersion?: string;
 	releaseName?: string;
