@@ -39,7 +39,8 @@ test('DMG staging uses ditto so framework symlinks remain relative', () => {
 test('macOS builds use a complete ad-hoc signature without release credentials', () => {
 	const script = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'electron-builder.mjs'), 'utf8');
 	assert.match(script, /identity: signingCertificate \? undefined : '-'/);
-	assert.match(script, /fs\.statSync\(candidate\)\.isDirectory\(\)/);
+	assert.match(script, /path\.resolve\(desktopRoot, '\.\.', certificate\)/);
+	assert.match(script, /candidates\.some\(\(candidate\) => fs\.existsSync\(candidate\) && fs\.statSync\(candidate\)\.isDirectory\(\)\)/);
 	assert.match(script, /delete process\.env\.CSC_LINK/);
 });
 
