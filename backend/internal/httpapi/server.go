@@ -364,6 +364,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts/{id}", s.reviewPost)
+	s.mux.HandleFunc("DELETE /api/v1/reviews/posts/{id}", s.reviewPostDelete)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary", s.reviewDailySummaryGet)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/window", s.reviewDailySummaryWindow)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/status", s.reviewDailySummaryStatus)

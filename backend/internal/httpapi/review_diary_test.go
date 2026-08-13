@@ -64,6 +64,20 @@ func TestReviewDiaryImportAndList(t *testing.T) {
 	if payload.Total != 1 || len(payload.Data) != 1 || payload.Data[0].Title != "今日复盘" {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/reviews/posts/review-1", nil)
+	deleteRecorder := httptest.NewRecorder()
+	server.ServeHTTP(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+
+	emptyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/reviews/posts", nil)
+	emptyRecorder := httptest.NewRecorder()
+	server.ServeHTTP(emptyRecorder, emptyRequest)
+	if emptyRecorder.Code != http.StatusOK || !strings.Contains(emptyRecorder.Body.String(), `"total":0`) {
+		t.Fatalf("empty list status=%d body=%s", emptyRecorder.Code, emptyRecorder.Body.String())
+	}
 }
 
 func TestReviewSourcesPutWechatLastAndMarkAutomaticSyncUnavailable(t *testing.T) {

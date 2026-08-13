@@ -65,6 +65,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	const [savingSubscription, setSavingSubscription] = useState(false);
 	const [syncing, setSyncing] = useState('');
 	const [analyzing, setAnalyzing] = useState('');
+	const [deletingPost, setDeletingPost] = useState('');
 	const [dailySummary, setDailySummary] = useState<ReviewDailySummary | null>(null);
 	const [dailySummaryJob, setDailySummaryJob] = useState<ReviewDailySummaryJob | null>(null);
 	const [reviewView, setReviewView] = useState<ReviewView>('library');
@@ -188,6 +189,21 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	const analyzePost = async (id: string) => {
 		if (!config) return; setAnalyzing(id); setError('');
 		try { const payload = await requestJSON<{ data: ReviewPost }>(config, `/api/v1/reviews/posts/${id}/analyze`, { method: 'POST' }); setPosts((current) => current.map((post) => post.id === id ? payload.data : post)); } catch (cause) { setError(cause instanceof Error ? readableAPIError(cause.message) : 'AI 提炼失败'); } finally { setAnalyzing(''); }
+	};
+
+	const deletePost = async (post: ReviewPost) => {
+		if (!config || deletingPost) return;
+		if (!window.confirm(`确定删除《${post.title}》吗？\n\n本机保存的文章正文和这篇文章自身的 AI 提炼缓存都会一并删除。此操作不可撤销。`)) return;
+		setDeletingPost(post.id); setError(''); setNotice('');
+		try {
+			await requestJSON(config, `/api/v1/reviews/posts/${post.id}`, { method: 'DELETE' });
+			await loadDiary();
+			setNotice('文章内容和本地缓存已删除');
+		} catch (cause) {
+			setError(cause instanceof Error ? readableAPIError(cause.message) : '删除文章失败');
+		} finally {
+			setDeletingPost('');
+		}
 	};
 
 	const fallbackSummaryWindow = (): SummaryWindowDraft => {
@@ -388,7 +404,8 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 						{posts.map((post, index) => {
 							const day = formatDay(post.published_at);
 							const previousDay = index > 0 ? formatDay(posts[index - 1].published_at) : '';
-							return <div className="review-feed-entry" key={post.id}>{day !== previousDay && <div className="review-date-divider"><CalendarDays size={14} /><span>{day}</span></div>}<button type="button" className={`review-post-card ${selectedPost?.id === post.id ? 'active' : ''}`} onClick={() => setSelectedID(post.id)}><div className="review-post-meta"><span className={`source-badge ${post.source}`}>{sourceLabel(post.source)}</span><strong>{post.author_name}</strong><time>{formatClock(post.published_at)}</time></div><h3>{post.title}</h3><p>{post.digest || '暂无摘要'}</p><div className="review-post-tags">{post.related_themes.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}{post.related_stocks.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}</div></button></div>;
+							const hasDateDivider = day !== previousDay;
+							return <div className={`review-feed-entry ${hasDateDivider ? 'has-date-divider' : ''}`} key={post.id}>{hasDateDivider && <div className="review-date-divider"><CalendarDays size={14} /><span>{day}</span></div>}<button type="button" className={`review-post-card ${selectedPost?.id === post.id ? 'active' : ''}`} onClick={() => setSelectedID(post.id)}><div className="review-post-meta"><span className={`source-badge ${post.source}`}>{sourceLabel(post.source)}</span><strong>{post.author_name}</strong><time>{formatClock(post.published_at)}</time></div><h3>{post.title}</h3><p>{post.digest || '暂无摘要'}</p><div className="review-post-tags">{post.related_themes.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}{post.related_stocks.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}</div></button><button type="button" className="review-post-delete" title="删除本地文章和缓存" aria-label={`删除《${post.title}》`} disabled={!!deletingPost} onClick={() => void deletePost(post)}>{deletingPost === post.id ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}</button></div>;
 						})}
 						{state === 'loading' && <div className="review-empty"><RefreshCw className="spin" size={22} /><strong>正在整理复盘内容</strong></div>}
 						{state === 'ready' && !posts.length && <div className="review-empty"><MessageCircleMore size={24} /><strong>还没有复盘文章</strong><span>从上方粘贴文章链接开始建立自己的复盘资料库。</span></div>}
@@ -397,7 +414,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 
 				<article className="review-reader">
 					{selectedPost ? <>
-						<div className="review-reader-heading"><div><span className={`source-badge ${selectedPost.source}`}>{sourceLabel(selectedPost.source)}</span><small>{selectedPost.author_name} · {formatDateTime(selectedPost.published_at)}</small></div><a href={selectedPost.original_url} target="_blank" rel="noreferrer">查看原文 <ExternalLink size={14} /></a></div>
+						<div className="review-reader-heading"><div><span className={`source-badge ${selectedPost.source}`}>{sourceLabel(selectedPost.source)}</span><small>{selectedPost.author_name} · {formatDateTime(selectedPost.published_at)}</small></div><div className="review-reader-actions"><a href={selectedPost.original_url} target="_blank" rel="noreferrer">查看原文 <ExternalLink size={14} /></a><button type="button" title="删除本地文章和缓存" disabled={!!deletingPost} onClick={() => void deletePost(selectedPost)}>{deletingPost === selectedPost.id ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}删除</button></div></div>
 						<h2>{selectedPost.title}</h2>
 						<div className={`review-ai-placeholder ${selectedPost.ai_summary ? 'ready' : ''}`}><Sparkles size={15} /><div><strong>Hermes AI 复盘提炼</strong>{selectedPost.ai_summary ? <><p>{selectedPost.ai_summary}</p>{selectedPost.ai_key_points?.length > 0 && <ul>{selectedPost.ai_key_points.map((point) => <li key={point}>{point}</li>)}</ul>}{selectedPost.ai_outlook && <span><b>后市预期：</b>{selectedPost.ai_outlook}</span>}</> : <span>{selectedPost.ai_error || '在系统设置中配置 Hermes 模型后，可自动提炼核心观点和后市预期。'}</span>}</div><button type="button" disabled={analyzing === selectedPost.id} onClick={() => void analyzePost(selectedPost.id)}>{analyzing === selectedPost.id ? <RefreshCw className="spin" size={14} /> : <Sparkles size={14} />}{selectedPost.ai_summary ? '重新提炼' : '立即提炼'}</button></div>
 						<div className="review-article-text">{selectedPost.content_text || selectedPost.digest || '正文暂未获取，请查看原文。'}</div>

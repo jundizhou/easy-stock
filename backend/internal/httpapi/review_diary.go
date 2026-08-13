@@ -117,6 +117,23 @@ func (s *Server) reviewPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": post})
 }
 
+func (s *Server) reviewPostDelete(w http.ResponseWriter, r *http.Request) {
+	if s.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "复盘日记存储不可用")
+		return
+	}
+	err := s.reviewStore.DeletePost(r.Context(), strings.TrimSpace(r.PathValue("id")))
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "复盘文章不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]bool{"deleted": true}})
+}
+
 func (s *Server) reviewImport(w http.ResponseWriter, r *http.Request) {
 	if s.reviewStore == nil || s.reviewImporter == nil {
 		writeError(w, http.StatusServiceUnavailable, "复盘文章导入服务不可用")

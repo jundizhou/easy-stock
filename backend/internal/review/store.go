@@ -183,6 +183,25 @@ func (s *Store) GetPostByURL(ctx context.Context, originalURL string) (Post, err
 	return scanPost(s.db.QueryRowContext(ctx, postSelect+` WHERE original_url = ?`, originalURL))
 }
 
+func (s *Store) DeletePost(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return sql.ErrNoRows
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM review_posts WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("delete review post: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read deleted review post count: %w", err)
+	}
+	if deleted == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) HasPostBySourceExternalID(ctx context.Context, source, externalID string) (bool, error) {
 	var exists int
 	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM review_posts WHERE source=? AND external_id=?)`, strings.TrimSpace(source), strings.TrimSpace(externalID)).Scan(&exists); err != nil {
