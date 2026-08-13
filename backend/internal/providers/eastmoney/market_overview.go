@@ -432,6 +432,7 @@ func (c *Client) MarketBillboardDetail(ctx context.Context, symbol string, trade
 	if err != nil {
 		return foundation.MarketBillboardDetail{}, foundation.SourceMeta{}, err
 	}
+	buySeats, sellSeats = c.enrichBillboardSeatLabels(ctx, normalized.Canonical, tradeDate, buySeats, sellSeats)
 	meta := foundation.SourceMeta{
 		Source:    "eastmoney:billboard-seats",
 		SourceURL: buyURL + " | " + sellURL,

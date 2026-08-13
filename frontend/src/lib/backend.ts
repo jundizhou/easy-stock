@@ -317,6 +317,10 @@ export type MarketBillboardSeat = {
 	sell_ratio: number;
 	net_amount: number;
 	institution: boolean;
+	source_label?: string;
+	source?: string;
+	label_confidence?: string;
+	label_note?: string;
 };
 
 export type MarketBillboardDetail = {

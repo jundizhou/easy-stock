@@ -142,8 +142,8 @@ export function buildMarketBillboardPrompt(evidence: MarketBillboardPromptEviden
 		const buyTopThreeConcentration = seatConcentration(buySeats.map((seat) => seat.buy_amount), item.buy_amount || buyAmount, 3);
 		const sellTopOneConcentration = seatConcentration(sellSeats.map((seat) => seat.sell_amount), item.sell_amount || sellAmount, 1);
 		const sellTopThreeConcentration = seatConcentration(sellSeats.map((seat) => seat.sell_amount), item.sell_amount || sellAmount, 3);
-		const activeSeatNames = [...buySeats, ...sellSeats].map((seat) => `${seat.name}${seat.institution ? '（机构席位）' : ''}`).filter((name, seatIndex, names) => names.indexOf(name) === seatIndex);
-		const namedTraders = detectSeatLabels(activeSeatNames);
+		const activeSeatNames = [...buySeats, ...sellSeats].map((seat) => `${seat.name}${seat.institution ? '（机构席位）' : ''}${seat.source_label ? `（${seat.source_label}）` : ''}`).filter((name, seatIndex, names) => names.indexOf(name) === seatIndex);
+		const namedTraders = detectSeatLabels([...buySeats, ...sellSeats]);
 		const reasons = records.map((record) => record.reason).filter(Boolean).filter((reason, reasonIndex, allReasons) => allReasons.indexOf(reason) === reasonIndex).join('；');
 		const topic = ladderStock
 			? [ladderStock.primary_theme, ...(ladderStock.secondary_themes || []), ...(ladderStock.raw_concepts || [])].filter(Boolean).filter((name, topicIndex, topics) => topics.indexOf(name) === topicIndex).slice(0, 6).join('、')
@@ -152,7 +152,7 @@ export function buildMarketBillboardPrompt(evidence: MarketBillboardPromptEviden
 			? `连板高度 ${ladderStock.streak}板，${ladderStock.streak_label || '涨停梯队'}，行业 ${ladderStock.industry || '未提供'}，题材 ${topic || '未提供'}，题材角色 ${ladderStock.theme_leader_role || '未提供'}，换手率 ${formatPercentValue(ladderStock.turnover_rate)}，成交额 ${formatMoney(ladderStock.amount)}`
 			: '未在同交易日连板梯队中命中，连板高度和题材关联暂无可验证数据';
 		const seats = detail
-			? `买方席位 ${buySeats.length} 个：${formatSeats(buySeats)}；卖方席位 ${sellSeats.length} 个：${formatSeats(sellSeats)}；机构席位净额 ${formatMoney(institutionNet)}；买方买一/前三集中度 ${formatPercentValue(buyTopOneConcentration)} / ${formatPercentValue(buyTopThreeConcentration)}，卖方卖一/前三集中度 ${formatPercentValue(sellTopOneConcentration)} / ${formatPercentValue(sellTopThreeConcentration)}；买卖席位结构（买入 ${formatMoney(buyAmount)} / 卖出 ${formatMoney(sellAmount)} / 席位净额 ${formatMoney(buyAmount - sellAmount)}）；活跃席位 ${activeSeatNames.length ? activeSeatNames.join('、') : '未提供'}；市场常用游资/活跃资金席位标签（非官方身份核验）${namedTraders.length ? namedTraders.join('、') : '未匹配到可靠标签，身份未确认'}`
+			? `买方席位 ${buySeats.length} 个：${formatSeats(buySeats)}；卖方席位 ${sellSeats.length} 个：${formatSeats(sellSeats)}；机构席位净额 ${formatMoney(institutionNet)}；买方买一/前三集中度 ${formatPercentValue(buyTopOneConcentration)} / ${formatPercentValue(buyTopThreeConcentration)}，卖方卖一/前三集中度 ${formatPercentValue(sellTopOneConcentration)} / ${formatPercentValue(sellTopThreeConcentration)}；买卖席位结构（买入 ${formatMoney(buyAmount)} / 卖出 ${formatMoney(sellAmount)} / 席位净额 ${formatMoney(buyAmount - sellAmount)}）；活跃席位 ${activeSeatNames.length ? activeSeatNames.join('、') : '未提供'}；第三方平台/市场常用席位标签（非官方身份核验）${namedTraders.length ? namedTraders.join('、') : '未匹配到可靠标签，身份未确认'}`
 			: '买卖五席明细获取失败，无法验证机构净买入、席位集中度和买卖双方结构';
 		return `${index + 1}. ${item.name}（${item.symbol}）：上榜日 ${item.trade_date}，收盘 ${formatNumber(item.close_price)}，涨跌 ${formatSigned(item.change_percent)}%，换手率 ${formatPercentValue(item.turnover_rate)}，龙虎榜买入 ${formatMoney(item.buy_amount)}，卖出 ${formatMoney(item.sell_amount)}，净买额 ${formatMoney(item.net_amount)}，机构买方数量 ${item.institution_buyers}，买卖原因 ${reasons || '未提供'}；${ladder}；${seats}`;
 	});
@@ -204,7 +204,7 @@ function groupBillboardItems(items: MarketBillboardItem[], limit: number) {
 }
 
 function formatSeats(seats: MarketBillboardDetail['buy_seats']) {
-	return seats.length ? seats.map((seat) => `${seat.rank}.${seat.name}${seat.institution ? '[机构]' : ''} 买${formatMoney(seat.buy_amount)} 卖${formatMoney(seat.sell_amount)} 净${formatMoney(seat.net_amount)}`).join('；') : '未提供';
+	return seats.length ? seats.map((seat) => `${seat.rank}.${seat.name}${seat.institution ? '[机构]' : ''}${seat.source_label ? `[${seat.source_label}]` : ''} 买${formatMoney(seat.buy_amount)} 卖${formatMoney(seat.sell_amount)} 净${formatMoney(seat.net_amount)}`).join('；') : '未提供';
 }
 
 function seatConcentration(amounts: number[], total: number, seatCount: number) {
@@ -216,8 +216,11 @@ function uniqueSeats(seats: MarketBillboardDetail['buy_seats']) {
 	return seats.filter((seat, index, allSeats) => allSeats.findIndex((candidate) => `${candidate.name}|${candidate.buy_amount}|${candidate.sell_amount}` === `${seat.name}|${seat.buy_amount}|${seat.sell_amount}`) === index);
 }
 
-function detectSeatLabels(names: string[]) {
-	const result = names.flatMap((name) => BILLBOARD_SEAT_MAPPINGS.filter((item) => item.keywords.some((keyword) => name.replace(/\s+/g, '').includes(keyword.replace(/\s+/g, '')))).map((item) => `${item.label}（${item.confidence}置信度，${item.note}）`));
+function detectSeatLabels(seats: MarketBillboardDetail['buy_seats']) {
+	const result = seats.flatMap((seat) => {
+		if (seat.source_label) return [`${seat.source_label}（${seat.source || '数据源'}，${seat.label_confidence || 'medium'}置信度）`];
+		return BILLBOARD_SEAT_MAPPINGS.filter((item) => item.keywords.some((keyword) => seat.name.replace(/\s+/g, '').includes(keyword.replace(/\s+/g, '')))).map((item) => `${item.label}（${item.confidence}置信度，${item.note}）`);
+	});
 	return result.filter((label, index) => result.indexOf(label) === index);
 }
 

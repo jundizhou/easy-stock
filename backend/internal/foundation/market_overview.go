@@ -103,6 +103,13 @@ type MarketBillboardSeat struct {
 	SellRatio   float64 `json:"sell_ratio"`
 	NetAmount   float64 `json:"net_amount"`
 	Institution bool    `json:"institution"`
+	// Source labels are optional enrichment from a third-party provider such as
+	// 同花顺. They describe that provider's classification, not an official
+	// identity confirmation.
+	SourceLabel     string `json:"source_label,omitempty"`
+	Source          string `json:"source,omitempty"`
+	LabelConfidence string `json:"label_confidence,omitempty"`
+	LabelNote       string `json:"label_note,omitempty"`
 }
 
 type MarketBillboardDetail struct {

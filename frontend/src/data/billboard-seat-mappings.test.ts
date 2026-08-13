@@ -25,4 +25,10 @@ describe('billboard seat mappings', () => {
 		expect(result.note).toContain('置信度');
 		expect(BILLBOARD_SEAT_MAPPINGS.length).toBeGreaterThan(5);
 	});
+
+	it('prefers a source-provided label over the local fallback table', () => {
+		const result = classifyBillboardSeat({ direction: 'buy', rank: 1, name: '开源证券股份有限公司西安太华路证券营业部', buy_amount: 1, buy_ratio: 0, sell_amount: 0, sell_ratio: 0, net_amount: 1, institution: false, source_label: '一线游资', source: 'ths', label_confidence: 'high' });
+		expect(result).toEqual(expect.objectContaining({ kind: 'trader', label: '一线游资' }));
+		expect(result?.note).toContain('同花顺');
+	});
 });
