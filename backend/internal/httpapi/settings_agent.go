@@ -17,8 +17,9 @@ var (
 )
 
 type agentSettingsView struct {
-	Skills     []hermes.SkillInfo `json:"skills"`
-	MCPServers []mcpServerView    `json:"mcp_servers"`
+	ReasoningEffort string             `json:"reasoning_effort"`
+	Skills          []hermes.SkillInfo `json:"skills"`
+	MCPServers      []mcpServerView    `json:"mcp_servers"`
 }
 
 type mcpServerView struct {
@@ -36,8 +37,9 @@ type mcpServerView struct {
 }
 
 type agentSettingsUpdateRequest struct {
-	Skills     []skillUpdate     `json:"skills"`
-	MCPServers []mcpServerUpdate `json:"mcp_servers"`
+	ReasoningEffort *string            `json:"reasoning_effort"`
+	Skills          *[]skillUpdate     `json:"skills"`
+	MCPServers      *[]mcpServerUpdate `json:"mcp_servers"`
 }
 
 type skillUpdate struct {
@@ -122,7 +124,7 @@ func (s *Server) settingsAgentUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildAgentSettingsView(settings hermes.AgentSettings) agentSettingsView {
-	view := agentSettingsView{Skills: settings.Skills, MCPServers: make([]mcpServerView, 0, len(settings.MCPServers))}
+	view := agentSettingsView{ReasoningEffort: settings.ReasoningEffort, Skills: settings.Skills, MCPServers: make([]mcpServerView, 0, len(settings.MCPServers))}
 	for _, server := range settings.MCPServers {
 		item := mcpServerView{
 			Name: server.Name, Enabled: server.Enabled, Transport: server.Transport,
@@ -148,21 +150,29 @@ func buildAgentSettingsView(settings hermes.AgentSettings) agentSettingsView {
 }
 
 func mergeAgentSettings(current hermes.AgentSettings, request agentSettingsUpdateRequest) hermes.AgentSettings {
-	requestedSkills := map[string]bool{}
-	for _, skill := range request.Skills {
-		requestedSkills[strings.TrimSpace(skill.Name)] = skill.Enabled
+	if request.ReasoningEffort != nil {
+		current.ReasoningEffort = strings.ToLower(strings.TrimSpace(*request.ReasoningEffort))
 	}
-	for index := range current.Skills {
-		if enabled, ok := requestedSkills[current.Skills[index].Name]; ok {
-			current.Skills[index].Enabled = enabled
+	if request.Skills != nil {
+		requestedSkills := map[string]bool{}
+		for _, skill := range *request.Skills {
+			requestedSkills[strings.TrimSpace(skill.Name)] = skill.Enabled
 		}
+		for index := range current.Skills {
+			if enabled, ok := requestedSkills[current.Skills[index].Name]; ok {
+				current.Skills[index].Enabled = enabled
+			}
+		}
+	}
+	if request.MCPServers == nil {
+		return current
 	}
 	existingServers := map[string]hermes.MCPServerInfo{}
 	for _, server := range current.MCPServers {
 		existingServers[server.Name] = server
 	}
-	current.MCPServers = make([]hermes.MCPServerInfo, 0, len(request.MCPServers))
-	for _, input := range request.MCPServers {
+	current.MCPServers = make([]hermes.MCPServerInfo, 0, len(*request.MCPServers))
+	for _, input := range *request.MCPServers {
 		name := strings.TrimSpace(input.Name)
 		originalName := strings.TrimSpace(input.OriginalName)
 		if originalName == "" {
@@ -205,19 +215,30 @@ func mergeProtectedMap(existing map[string]string, updates map[string]*string, c
 }
 
 func validateAgentSettingsUpdate(request agentSettingsUpdateRequest) error {
-	if len(request.Skills) > 500 || len(request.MCPServers) > 100 {
+	if request.ReasoningEffort != nil {
+		effort := strings.ToLower(strings.TrimSpace(*request.ReasoningEffort))
+		if !hermes.IsValidReasoningEffort(effort) {
+			return fmt.Errorf("无效的思考等级: %s", *request.ReasoningEffort)
+		}
+	}
+	if request.Skills != nil && len(*request.Skills) > 500 || request.MCPServers != nil && len(*request.MCPServers) > 100 {
 		return fmt.Errorf("Skill 或 MCP Server 数量过多")
 	}
 	seenSkills := map[string]bool{}
-	for _, skill := range request.Skills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" || len(name) > 160 || seenSkills[name] {
-			return fmt.Errorf("Skill 名称无效或重复")
+	if request.Skills != nil {
+		for _, skill := range *request.Skills {
+			name := strings.TrimSpace(skill.Name)
+			if name == "" || len(name) > 160 || seenSkills[name] {
+				return fmt.Errorf("Skill 名称无效或重复")
+			}
+			seenSkills[name] = true
 		}
-		seenSkills[name] = true
 	}
 	seenServers := map[string]bool{}
-	for _, server := range request.MCPServers {
+	if request.MCPServers == nil {
+		return nil
+	}
+	for _, server := range *request.MCPServers {
 		name := strings.TrimSpace(server.Name)
 		if !mcpNamePattern.MatchString(name) || seenServers[name] {
 			return fmt.Errorf("MCP Server 名称必须为 1-64 位字母、数字、点、下划线或短横线，且不能重复")

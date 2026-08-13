@@ -60,6 +60,10 @@ type StockConceptProvider interface {
 	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
 }
 
+type StockBusinessProfileProvider interface {
+	StockBusinessProfile(ctx context.Context, symbol string) (foundation.StockBusinessProfile, error)
+}
+
 type StockDirectoryProvider interface {
 	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
 }
@@ -95,6 +99,7 @@ type Config struct {
 	LimitUp              LimitUpProvider
 	MarketPools          MarketPoolProvider
 	StockConcept         StockConceptProvider
+	StockBusiness        StockBusinessProfileProvider
 	StockDirectory       StockDirectoryProvider
 	MarketOverview       MarketOverviewProvider
 	Inflection           InflectionEvaluator

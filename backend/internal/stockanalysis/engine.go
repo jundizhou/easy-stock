@@ -35,7 +35,7 @@ func Analyze(input Input) (Analysis, error) {
 
 	trend, chart := analyzeTrend(lines)
 	shortTerm := analyzeShortTerm(input.Symbol, lines, input.LimitUps)
-	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps)
+	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
 	market := marketContext(input)
 	profile := classifyProfile(trend, shortTerm, theme, market)
 	action := buildActionPlan(profile, trend, shortTerm, market)
@@ -313,9 +313,24 @@ type themeCandidate struct {
 	evidence string
 }
 
-func analyzeTheme(symbol string, short ShortTermAnalysis, cached []foundation.StockThemeAttribution, concepts []string, industry string, overviews []foundation.ThemeOverview, events []foundation.LimitUpEvent) ThemeAnalysis {
+func analyzeTheme(symbol string, short ShortTermAnalysis, cached []foundation.StockThemeAttribution, concepts []string, industry string, overviews []foundation.ThemeOverview, events []foundation.LimitUpEvent, businessValues ...string) ThemeAnalysis {
 	concepts = uniqueStrings(concepts, 8)
 	industry = strings.TrimSpace(industry)
+	business := ""
+	businessDetail := ""
+	businessSource := ""
+	if len(businessValues) > 0 {
+		business = strings.TrimSpace(businessValues[0])
+	}
+	if len(businessValues) > 1 {
+		businessDetail = strings.TrimSpace(businessValues[1])
+	}
+	if len(businessValues) > 2 {
+		businessSource = strings.TrimSpace(businessValues[2])
+	}
+	if business == "" {
+		business = industry
+	}
 	route := "trend"
 	if short.ExactLimitUpData || short.MaxLimitStreak20 >= 2 || short.LimitUpCount20 >= 1 {
 		route = "short_term"
@@ -335,14 +350,6 @@ func analyzeTheme(symbol string, short ShortTermAnalysis, cached []foundation.St
 		leaderEvent, hasLeaderEvent,
 	)
 
-	matchTerms := append([]string(nil), concepts...)
-	if hasPool {
-		matchTerms = append(matchTerms, poolCandidate.theme)
-		matchTerms = append(matchTerms, poolCandidate.concepts...)
-	}
-	bestMatched := bestThemeOverview(overviews, matchTerms)
-	trendCandidate, hasTrend := candidateFromOverview(bestMatched)
-
 	selected := themeCandidate{}
 	selectedOK := false
 	selectCandidate := func(candidate themeCandidate, ok bool) {
@@ -355,41 +362,52 @@ func analyzeTheme(symbol string, short ShortTermAnalysis, cached []foundation.St
 		selectCandidate(poolCandidate, hasPool)
 		selectCandidate(leaderCandidate, hasLeader)
 		selectCandidate(limitEvent, hasLimitEvent)
-		selectCandidate(trendCandidate, hasTrend)
 	} else {
 		selectCandidate(leaderCandidate, hasLeader)
-		selectCandidate(trendCandidate, hasTrend)
 		selectCandidate(poolCandidate, hasPool)
 	}
-	if len(concepts) > 0 {
-		selectCandidate(themeCandidate{
-			theme: concepts[0], concepts: concepts, source: "eastmoney-stock-concepts",
-			evidence: "东方财富个股概念：" + strings.Join(concepts, "、"),
-		}, true)
-	}
-	if industry != "" {
-		selectCandidate(themeCandidate{
-			theme: industry, concepts: []string{industry}, source: "eastmoney-stock-industry",
-			evidence: "仅匹配到东方财富行业：" + industry,
-		}, true)
-	}
 
-	primary := strings.TrimSpace(selected.theme)
-	best := bestThemeOverview(overviews, append([]string{primary}, selected.concepts...))
-	displayConcepts := uniqueStrings(append(append([]string{primary}, selected.concepts...), concepts...), 8)
-	evidence := uniqueStrings([]string{selected.evidence}, 4)
-	description := "尚未匹配到稳定题材，按个股独立结构分析"
-	if primary != "" {
-		description = themeDescription(primary, route, selected.source)
+	// A concept listed in a stock catalog is only a possible membership. It is
+	// not enough to call the stock a hot-theme play. Only explicit Kaipanla
+	// attribution/event evidence can promote a hot theme to the primary label.
+	hotTheme := strings.TrimSpace(selected.theme)
+	best := foundation.ThemeOverview{}
+	if hotTheme != "" {
+		best = bestThemeOverview(overviews, append([]string{hotTheme}, selected.concepts...))
 	}
-	if best.Name != "" {
+	primary := hotTheme
+	primarySource := selected.source
+	primaryEvidence := selected.evidence
+	if primary == "" {
+		primary = strings.TrimSpace(business)
+		primarySource = firstNonEmpty(businessSource, "eastmoney-f10-business")
+		if primary == "" {
+			primary = industry
+			primarySource = "eastmoney-stock-industry"
+		}
+		if primary != "" {
+			primaryEvidence = "公司主业/行业：" + primary
+		}
+	}
+	displayConcepts := uniqueStrings(append(append([]string{hotTheme}, selected.concepts...), concepts...), 8)
+	evidence := uniqueStrings([]string{primaryEvidence}, 4)
+	description := "尚未匹配到明确热点，按公司主业分析"
+	if hotTheme != "" {
+		description = themeDescription(hotTheme, route, primarySource)
+	} else if primary != "" {
+		description = fmt.Sprintf("未发现明确热点炒作证据，按公司主业%s分析", primary)
+		if businessDetail != "" {
+			evidence = uniqueStrings(append(evidence, "F10主营资料："+truncateText(businessDetail, 120)), 4)
+		}
+	}
+	if hotTheme != "" && best.Name != "" {
 		description += fmt.Sprintf("；题材趋势分%d，阶段%s，活跃%d日", best.TrendScore, firstNonEmpty(best.TrendStage, "待确认"), best.ActiveDays)
 		evidence = uniqueStrings(append(evidence, fmt.Sprintf("趋势题材雷达：%s %d分", best.Name, best.TrendScore)), 4)
 	}
 	return ThemeAnalysis{
-		Primary:     primary,
+		Primary: primary, Business: business, HotTheme: hotTheme, IsHot: hotTheme != "",
 		Concepts:    displayConcepts,
-		Source:      selected.source,
+		Source:      primarySource,
 		AsOf:        selected.asOf,
 		Evidence:    evidence,
 		Route:       route,
@@ -611,12 +629,12 @@ func buildDataQuality(input Input, lines []foundation.KLine, short ShortTermAnal
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已命中开盘啦短线连板缓存"})
 	case strings.Contains(theme.Source, "kaipanla-theme-leader"):
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已命中开盘啦趋势题材缓存"})
-	case theme.Source == "eastmoney-stock-concepts":
-		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: "开盘啦缓存未命中，已降级使用东方财富个股概念"})
+	case theme.Source == "eastmoney:f10-business" || theme.Source == "eastmoney-f10-business":
+		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "未发现明确热点炒作证据，当前按东方财富F10主营业务定位"})
 	case theme.Source == "eastmoney-stock-industry":
-		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: "仅匹配到东方财富宽泛行业，题材归属仍需确认"})
+		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: "F10主营业务不可用，当前按东方财富行业定位"})
 	case theme.Primary != "":
-		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已匹配趋势题材雷达"})
+		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已完成主业定位"})
 	default:
 		quality = append(quality, DataQuality{Key: "theme", Status: "missing", Message: "未匹配稳定题材"})
 	}

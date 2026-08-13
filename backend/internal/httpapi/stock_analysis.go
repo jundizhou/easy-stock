@@ -46,6 +46,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		catalog        []foundation.StockCatalogEntry
 		themes         []foundation.ThemeOverview
 		news           []foundation.NewsItem
+		business       foundation.StockBusinessProfile
 		quoteErr       error
 		lineErr        error
 		benchmarkErr   error
@@ -54,6 +55,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		catalogErr     error
 		themeErr       error
 		newsErr        error
+		businessErr    error
 		collectionWG   sync.WaitGroup
 	)
 
@@ -99,6 +101,13 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			defer collectionWG.Done()
 			catalog, catalogErr = s.stockConcepts.StockCatalog(dataCtx)
+		}()
+	}
+	if s.stockBusiness != nil {
+		collectionWG.Add(1)
+		go func() {
+			defer collectionWG.Done()
+			business, businessErr = s.stockBusiness.StockBusinessProfile(dataCtx, normalized.Canonical)
 		}()
 	}
 	if s.themeOverview != nil {
@@ -165,6 +174,9 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	if benchmarkErr != nil {
 		gaps = append(gaps, "基准指数数据不可用: "+benchmarkErr.Error())
 	}
+	if businessErr != nil {
+		gaps = append(gaps, "主营业务资料不可用: "+businessErr.Error())
+	}
 
 	analysis, err := stockanalysis.Analyze(stockanalysis.Input{
 		Symbol:          normalized.Canonical,
@@ -176,6 +188,9 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		LimitUps:        limitUps,
 		Concepts:        concepts,
 		Industry:        industry,
+		Business:        business.MainBusiness,
+		BusinessDetail:  business.Description,
+		BusinessSource:  business.Meta.Source,
 		CachedThemes:    cachedThemes,
 		Themes:          themes,
 		MarketEmotion:   emotion,

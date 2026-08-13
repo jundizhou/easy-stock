@@ -19,6 +19,19 @@ type LLM struct {
 	APIKey   string `json:"api_key"`
 }
 
+// LLMProfile is a named model connection. API keys are deliberately not
+// persisted in the general settings file; Hermes owns the encrypted-at-rest
+// (local .env) secret for each profile.
+type LLMProfile struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Provider         string `json:"provider"`
+	BaseURL          string `json:"base_url"`
+	Model            string `json:"model"`
+	APIMode          string `json:"api_mode"`
+	APIKeyConfigured bool   `json:"api_key_configured,omitempty"`
+}
+
 type Credentials struct {
 	TushareToken    string `json:"tushare_token"`
 	THSCookie       string `json:"ths_cookie"`
@@ -46,10 +59,12 @@ type ReviewSourceProfile struct {
 }
 
 type Values struct {
-	LLM              LLM              `json:"llm"`
-	Credentials      Credentials      `json:"credentials"`
-	ReviewAutomation ReviewAutomation `json:"review_automation"`
-	UpdatedAt        time.Time        `json:"updated_at,omitempty"`
+	LLM                LLM              `json:"llm"`
+	LLMProfiles        []LLMProfile     `json:"llm_profiles,omitempty"`
+	ActiveLLMProfileID string           `json:"active_llm_profile_id,omitempty"`
+	Credentials        Credentials      `json:"credentials"`
+	ReviewAutomation   ReviewAutomation `json:"review_automation"`
+	UpdatedAt          time.Time        `json:"updated_at,omitempty"`
 }
 
 type Store struct {
@@ -61,11 +76,13 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	store := &Store{path: path, values: defaultValues()}
 	if path == "" {
+		store.normalizeLLMProfiles()
 		return store, nil
 	}
 	if err := store.load(); err != nil {
 		return nil, err
 	}
+	store.normalizeLLMProfiles()
 	return store, nil
 }
 
@@ -111,10 +128,64 @@ func (s *Store) load() error {
 		}
 	}
 	s.normalizeReviewProfiles()
+	s.normalizeLLMProfiles()
 	if err := os.Chmod(s.path, 0o600); err != nil {
 		return fmt.Errorf("secure settings permissions: %w", err)
 	}
 	return nil
+}
+
+// normalizeLLMProfiles migrates the old single llm object to the profile
+// format without changing its connection details.
+func (s *Store) normalizeLLMProfiles() {
+	if len(s.values.LLMProfiles) == 0 {
+		current := s.values.LLM
+		active := LLMProfile{ID: "llm-default", Name: profileName(current), Provider: current.Provider, BaseURL: current.BaseURL, Model: current.Model, APIMode: current.APIMode}
+		s.values.LLMProfiles = []LLMProfile{active}
+	}
+	if s.values.ActiveLLMProfileID == "" {
+		s.values.ActiveLLMProfileID = profileIDForLLM(s.values.LLMProfiles, s.values.LLM)
+	}
+	if active, ok := findLLMProfile(s.values.LLMProfiles, s.values.ActiveLLMProfileID); ok {
+		apiKey := s.values.LLM.APIKey
+		s.values.LLM = llmFromProfile(active)
+		s.values.LLM.APIKey = apiKey
+	}
+}
+
+func profileName(cfg LLM) string {
+	if strings.TrimSpace(cfg.Model) != "" {
+		return strings.TrimSpace(cfg.Model)
+	}
+	if strings.TrimSpace(cfg.Provider) != "" {
+		return strings.TrimSpace(cfg.Provider)
+	}
+	return "默认模型"
+}
+
+func profileIDForLLM(profiles []LLMProfile, cfg LLM) string {
+	for _, profile := range profiles {
+		if profile.Provider == cfg.Provider && profile.BaseURL == cfg.BaseURL && profile.Model == cfg.Model && profile.APIMode == cfg.APIMode {
+			return profile.ID
+		}
+	}
+	if len(profiles) > 0 {
+		return profiles[len(profiles)-1].ID
+	}
+	return ""
+}
+
+func findLLMProfile(profiles []LLMProfile, id string) (LLMProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return LLMProfile{}, false
+}
+
+func llmFromProfile(profile LLMProfile) LLM {
+	return LLM{Provider: profile.Provider, BaseURL: profile.BaseURL, Model: profile.Model, APIMode: profile.APIMode}
 }
 
 func defaultValues() Values {

@@ -75,6 +75,8 @@ export type AppSettings = {
 		api_mode: 'chat_completions' | 'responses' | 'anthropic_messages' | string;
 		api_key: SecretSettingStatus;
 	};
+	llm_profiles: LLMProfile[];
+	active_llm_profile_id: string;
 	credentials: {
 		tushare_token: SecretSettingStatus;
 		ths_cookie: SecretSettingStatus;
@@ -86,6 +88,16 @@ export type AppSettings = {
 		profiles: ReviewAutomationProfile[];
 	};
 	updated_at?: string;
+};
+
+export type LLMProfile = {
+	id: string;
+	name: string;
+	provider: string;
+	base_url: string;
+	model: string;
+	api_mode: 'chat_completions' | 'responses' | 'codex_responses' | 'anthropic_messages' | string;
+	api_key: SecretSettingStatus;
 };
 
 export type HermesSkillSetting = {
@@ -110,8 +122,9 @@ export type HermesMCPServerSetting = {
 };
 
 export type HermesAgentSettings = {
-	skills: HermesSkillSetting[];
-	mcp_servers: HermesMCPServerSetting[];
+  reasoning_effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | string;
+  skills: HermesSkillSetting[];
+  mcp_servers: HermesMCPServerSetting[];
 };
 
 export type LLMConnectionTestResult = {
@@ -502,6 +515,9 @@ export type StockAIShortTerm = {
 
 export type StockAITheme = {
 	primary: string;
+	business: string;
+	hot_theme?: string;
+	is_hot: boolean;
 	concepts: string[];
 	source: string;
 	as_of?: string;

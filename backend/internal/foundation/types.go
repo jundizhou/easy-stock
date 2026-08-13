@@ -146,6 +146,19 @@ type StockThemeAttribution struct {
 	Role      string   `json:"role,omitempty"`
 }
 
+// StockBusinessProfile describes what the company primarily does. It is kept
+// separate from market concepts because a broad concept membership is not
+// evidence that the stock is currently being traded as that theme.
+type StockBusinessProfile struct {
+	Symbol       string     `json:"symbol"`
+	Name         string     `json:"name,omitempty"`
+	MainBusiness string     `json:"main_business"`
+	Industry     string     `json:"industry,omitempty"`
+	IndustryPath string     `json:"industry_path,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	Meta         SourceMeta `json:"meta"`
+}
+
 // MarketLimitEvent represents one stock in a daily limit-event pool that is
 // not necessarily still sealed at the close. It is used for final broken-board
 // and limit-down pools while LimitUpEvent remains the richer sealed-limit-up

@@ -19,7 +19,7 @@ import {
 	X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, ReviewAutomationProfile, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
 import { llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { HermesAgentSettingsPanel } from './HermesAgentSettingsPanel';
@@ -49,6 +49,11 @@ const emptySecrets = (): Record<SecretKey, string> => ({
 
 export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	const [settings, setSettings] = useState<AppSettings | null>(null);
+	const [llmProfiles, setLLMProfiles] = useState<LLMProfile[]>([]);
+	const [activeLLMProfileID, setActiveLLMProfileID] = useState('');
+	const [profileName, setProfileName] = useState('');
+	const [profileKeyValues, setProfileKeyValues] = useState<Record<string, string>>({});
+	const [clearProfileKeys, setClearProfileKeys] = useState<Set<string>>(new Set());
 	const [provider, setProvider] = useState('openai');
 	const [baseURL, setBaseURL] = useState(llmProviderDefinition('openai').baseURL);
 	const [model, setModel] = useState('');
@@ -97,10 +102,13 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 			.then((payload) => {
 				if (cancelled) return;
 				setSettings(payload.data);
-				setProvider(payload.data.llm.provider || 'openai');
-				setBaseURL(payload.data.llm.base_url || llmProviderDefinition(payload.data.llm.provider || 'openai').baseURL);
-				setModel(payload.data.llm.model || '');
-				setAPIMode(payload.data.llm.api_mode === 'responses' ? 'codex_responses' : payload.data.llm.api_mode || (payload.data.llm.provider === 'anthropic' ? 'anthropic_messages' : 'chat_completions'));
+				const modelProfiles = normalizeLLMProfiles(payload.data);
+				setLLMProfiles(modelProfiles);
+				const selected = modelProfiles.find((profile) => profile.id === payload.data.active_llm_profile_id) || modelProfiles[0];
+				setActiveLLMProfileID(selected.id);
+				loadProfileFields(selected);
+				setProfileKeyValues({});
+				setClearProfileKeys(new Set());
 				const profiles = toProfileDrafts(payload.data.review_automation?.profiles || []);
 				setReviewProfiles(profiles);
 				void refreshBrowserAuthStatuses(profiles);
@@ -146,8 +154,52 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		if (!settings) return 0;
 		const sharedCredentials = Object.entries(settings.credentials).filter(([key]) => key !== 'xueqiu_cookie' && key !== 'wechat_api_token').map(([, value]) => value);
 		const browserSessions = Object.values(browserAuthStatuses).filter((item) => item.configured).length;
-		return [settings.llm.api_key, ...sharedCredentials].filter((item) => item.configured).length + browserSessions + (wechatServiceStatus.authenticated ? 1 : 0);
+		return [...settings.llm_profiles.map((profile) => profile.api_key), ...sharedCredentials].filter((item) => item.configured).length + browserSessions + (wechatServiceStatus.authenticated ? 1 : 0);
 	}, [browserAuthStatuses, settings, wechatServiceStatus.authenticated]);
+
+	const selectedLLMProfile = useMemo(() => llmProfiles.find((profile) => profile.id === activeLLMProfileID), [activeLLMProfileID, llmProfiles]);
+
+	const patchSelectedLLMProfile = (patch: Partial<LLMProfile>) => setLLMProfiles((current) => current.map((profile) => profile.id === activeLLMProfileID ? { ...profile, ...patch } : profile));
+
+	const loadProfileFields = (profile: LLMProfile) => {
+		setProfileName(profile.name);
+		setProvider(profile.provider || 'openai');
+		setBaseURL(profile.base_url || llmProviderDefinition(profile.provider || 'openai').baseURL);
+		setModel(profile.model || '');
+		setAPIMode(profile.api_mode === 'responses' ? 'codex_responses' : profile.api_mode || (profile.provider === 'anthropic' ? 'anthropic_messages' : 'chat_completions'));
+	};
+
+	const selectLLMProfile = (id: string) => {
+		const profile = llmProfiles.find((item) => item.id === id);
+		if (!profile) return;
+		setActiveLLMProfileID(id);
+		loadProfileFields(profile);
+		resetModelList();
+		setTestState('idle');
+		setTestResult(null);
+	};
+
+	const addLLMProfile = () => {
+		const id = `llm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+		const definition = llmProviderDefinition('openai');
+		const profile: LLMProfile = { id, name: '新模型配置', provider: 'openai', base_url: definition.baseURL, model: definition.defaultModel, api_mode: definition.apiMode, api_key: { configured: false } };
+		setLLMProfiles((current) => [...current, profile]);
+		setActiveLLMProfileID(id);
+		loadProfileFields(profile);
+		resetModelList();
+	};
+
+	const removeLLMProfile = () => {
+		if (llmProfiles.length <= 1) return;
+		const remaining = llmProfiles.filter((profile) => profile.id !== activeLLMProfileID);
+		const next = remaining[0];
+		setLLMProfiles(remaining);
+		setActiveLLMProfileID(next.id);
+		loadProfileFields(next);
+		setProfileKeyValues((current) => { const copy = { ...current }; delete copy[activeLLMProfileID]; return copy; });
+		setClearProfileKeys((current) => { const copy = new Set(current); copy.delete(activeLLMProfileID); return copy; });
+		resetModelList();
+	};
 
 	const selectableModels = useMemo(() => {
 		const currentModel = model.trim();
@@ -169,6 +221,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		setBaseURL(nextDefinition.baseURL);
 		setModel(nextDefinition.defaultModel);
 		setAPIMode(nextDefinition.apiMode);
+		patchSelectedLLMProfile({ provider: nextProvider, base_url: nextDefinition.baseURL, model: nextDefinition.defaultModel, api_mode: nextDefinition.apiMode });
 		resetModelList();
 		setTestState('idle');
 		setTestResult(null);
@@ -178,12 +231,12 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	};
 
 	const updateSecret = (key: SecretKey, value: string) => {
-		setSecrets((current) => ({ ...current, [key]: value }));
 		if (key === 'llm_api_key') {
-			resetModelList();
-			setTestState('idle');
-			setTestResult(null);
+			setProfileKeyValues((current) => ({ ...current, [activeLLMProfileID]: value }));
+			setClearProfileKeys((current) => { const next = new Set(current); if (value) next.delete(activeLLMProfileID); return next; });
+			resetModelList(); setTestState('idle'); setTestResult(null); return;
 		}
+		setSecrets((current) => ({ ...current, [key]: value }));
 		if (value) {
 			setClearSecrets((current) => {
 				const next = new Set(current);
@@ -194,6 +247,11 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	};
 
 	const toggleClear = (key: SecretKey) => {
+		if (key === 'llm_api_key') {
+			setClearProfileKeys((current) => { const next = new Set(current); if (next.has(activeLLMProfileID)) next.delete(activeLLMProfileID); else next.add(activeLLMProfileID); return next; });
+			setProfileKeyValues((current) => ({ ...current, [activeLLMProfileID]: '' }));
+			resetModelList(); return;
+		}
 		setClearSecrets((current) => {
 			const next = new Set(current);
 			if (next.has(key)) next.delete(key);
@@ -201,17 +259,18 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 			return next;
 		});
 		setSecrets((current) => ({ ...current, [key]: '' }));
-		if (key === 'llm_api_key') resetModelList();
 	};
 
 	const updateModel = (nextModel: string) => {
 		setModel(nextModel);
+		patchSelectedLLMProfile({ model: nextModel });
 		setTestState('idle');
 		setTestResult(null);
 	};
 
 	const updateBaseURL = (nextBaseURL: string) => {
 		setBaseURL(nextBaseURL);
+		patchSelectedLLMProfile({ base_url: nextBaseURL });
 		resetModelList();
 		setTestState('idle');
 		setTestResult(null);
@@ -222,12 +281,13 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		const fetchID = ++modelFetchSequence.current;
 		const requestProvider = overrides.provider || provider;
 		const requestBaseURL = overrides.baseURL ?? baseURL.trim();
-		const requestAPIKey = overrides.apiKey ?? secrets.llm_api_key.trim();
+		const requestAPIKey = overrides.apiKey ?? (profileKeyValues[activeLLMProfileID] || '').trim();
 		setModelListState('loading');
 		setModelListMessage(overrides.automatic ? `正在自动读取 ${llmProviderDefinition(requestProvider).label} 的模型列表…` : '正在读取模型服务的模型列表…');
 		try {
 			const request: { provider: string; base_url: string; api_key?: string } = { provider: requestProvider, base_url: requestBaseURL };
-			if (requestAPIKey || clearSecrets.has('llm_api_key')) request.api_key = requestAPIKey;
+			if (requestAPIKey || clearProfileKeys.has(activeLLMProfileID)) request.api_key = requestAPIKey;
+			(request as { profile_id?: string }).profile_id = activeLLMProfileID;
 			const payload = await requestJSON<{ data: LLMModelsResult }>(config, '/api/v1/settings/llm/models', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -323,17 +383,26 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		for (const key of ['tushare_token', 'ths_cookie', 'xueqiu_cookie', 'eastmoney_cookie'] as SecretKey[]) {
 			if (secrets[key].trim()) credentials[key] = secrets[key].trim();
 		}
-		const llm: Record<string, string> = { provider, base_url: baseURL.trim(), model: model.trim(), api_mode: apiMode };
-		if (secrets.llm_api_key.trim()) llm.api_key = secrets.llm_api_key.trim();
+		const modelProfiles = llmProfiles.map((profile) => {
+			const current = profile.id === activeLLMProfileID ? { ...profile, name: profileName.trim(), provider, base_url: baseURL.trim(), model: model.trim(), api_mode: apiMode } : profile;
+			return { id: current.id, name: current.name.trim(), provider: current.provider, base_url: current.base_url.trim(), model: current.model.trim(), api_mode: current.api_mode, api_key: (profileKeyValues[current.id] || '').trim() || undefined, clear_api_key: clearProfileKeys.has(current.id) };
+		});
 		const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ llm, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets, 'wechat_api_token'] }),
+			body: JSON.stringify({ llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
 		});
 		setSettings(payload.data);
-		const profiles = toProfileDrafts(payload.data.review_automation?.profiles || []);
-		setReviewProfiles(profiles);
-		void refreshBrowserAuthStatuses(profiles);
+		const savedProfiles = normalizeLLMProfiles(payload.data);
+		setLLMProfiles(savedProfiles);
+		const savedActive = savedProfiles.find((profile) => profile.id === payload.data.active_llm_profile_id) || savedProfiles[0];
+		setActiveLLMProfileID(savedActive.id);
+		loadProfileFields(savedActive);
+		setProfileKeyValues({});
+		setClearProfileKeys(new Set());
+		const savedReviewProfiles = toProfileDrafts(payload.data.review_automation?.profiles || []);
+		setReviewProfiles(savedReviewProfiles);
+		void refreshBrowserAuthStatuses(savedReviewProfiles);
 		setSecrets(emptySecrets());
 		setClearSecrets(new Set());
 		return payload.data;
@@ -401,11 +470,17 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 							<div className={`llm-connection-test ${settings?.hermes.available ? settings.hermes.configured ? 'success' : '' : 'error'}`}>
 								<div><Bot size={17} /><span><strong>{settings?.hermes.available ? `Hermes ${settings.hermes.version || 'Runtime'} 已安装` : 'Hermes 运行时不可用'}</strong><small>{settings?.hermes.message || (settings?.hermes.configured ? '运行时和模型配置均已就绪。' : '运行时已就绪，请继续配置模型连接。')}</small></span></div>
 							</div>
+							<div className="llm-profile-toolbar">
+								<label><span>模型配置</span><select value={activeLLMProfileID} onChange={(event) => selectLLMProfile(event.target.value)}>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name} · {profile.model || llmProviderDefinition(profile.provider).label}</option>)}</select></label>
+								<button type="button" onClick={addLLMProfile}><Plus size={14} />新增配置</button>
+								<button type="button" className="danger" onClick={removeLLMProfile} disabled={llmProfiles.length <= 1}><Trash2 size={14} />删除</button>
+							</div>
+							<label><span>配置名称</span><input value={profileName} onChange={(event) => { setProfileName(event.target.value); patchSelectedLLMProfile({ name: event.target.value }); }} placeholder="例如 DeepSeek 日常 / GPT-5.6 Sol 深度分析" /></label>
 							<div className="settings-grid two-columns">
 								<label><span>服务商</span><select value={provider} onChange={(event) => updateProvider(event.target.value)}>{llmProviders.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-								<label><span>接口协议</span><select value={apiMode} onChange={(event) => { setAPIMode(event.target.value); setTestState('idle'); setTestResult(null); }}><option value="chat_completions">Chat Completions</option><option value="codex_responses">Responses API</option><option value="anthropic_messages">Anthropic Messages</option></select></label>
+								<label><span>接口协议</span><select value={apiMode} onChange={(event) => { setAPIMode(event.target.value); patchSelectedLLMProfile({ api_mode: event.target.value }); setTestState('idle'); setTestResult(null); }}><option value="chat_completions">Chat Completions</option><option value="codex_responses">Responses API</option><option value="anthropic_messages">Anthropic Messages</option></select></label>
 							</div>
-							<SecretField label="模型 API Key" secretKey="llm_api_key" status={settings?.llm.api_key} value={secrets.llm_api_key} clearing={clearSecrets.has('llm_api_key')} onChange={updateSecret} onBlur={(_key, value) => fetchModelsAfterAPIKeyInput(value)} onClear={toggleClear} hint="安全写入 Hermes .env；输入完成后自动获取模型" />
+							<SecretField label="模型 API Key" secretKey="llm_api_key" status={selectedLLMProfile?.api_key} value={profileKeyValues[activeLLMProfileID] || ''} clearing={clearProfileKeys.has(activeLLMProfileID)} onChange={updateSecret} onBlur={(_key, value) => fetchModelsAfterAPIKeyInput(value)} onClear={toggleClear} hint="每套配置独立安全保存；切换配置不会覆盖其他密钥" />
 							<div className="settings-grid two-columns">
 								<div className="model-field">
 									<span className="model-field-heading"><span>模型</span>{modelListState === 'success' && <button type="button" onClick={() => setManualModel((current) => !current)}>{manualModel ? '使用下拉' : '手动输入'}</button>}</span>
@@ -512,6 +587,11 @@ function toProfileDrafts(profiles: ReviewAutomationProfile[]): ReviewProfileDraf
 		drafts.unshift({ id: 'wechat-default', source: 'wechat', name: '微信公众号默认配置', base_url: '', credential: { configured: false }, credential_value: '', clear_credential: true, sync_hour: 7, auto_analyze: true, enabled: true });
 	}
 	return drafts;
+}
+
+function normalizeLLMProfiles(settings: AppSettings): LLMProfile[] {
+	if (settings.llm_profiles?.length) return settings.llm_profiles;
+	return [{ id: 'llm-default', name: settings.llm.model || llmProviderDefinition(settings.llm.provider).label, provider: settings.llm.provider, base_url: settings.llm.base_url, model: settings.llm.model, api_mode: settings.llm.api_mode, api_key: settings.llm.api_key }];
 }
 
 function newProfileDraft(source: ReviewSource): ReviewProfileDraft {

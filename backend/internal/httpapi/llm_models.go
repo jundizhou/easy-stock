@@ -11,14 +11,17 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"easy-stock/backend/internal/hermes"
 )
 
 const maxModelListResponseBytes = 2 << 20
 
 type llmModelsRequest struct {
-	Provider string  `json:"provider"`
-	BaseURL  string  `json:"base_url"`
-	APIKey   *string `json:"api_key"`
+	Provider  string  `json:"provider"`
+	BaseURL   string  `json:"base_url"`
+	APIKey    *string `json:"api_key"`
+	ProfileID string  `json:"profile_id"`
 }
 
 type llmModelOption struct {
@@ -63,7 +66,11 @@ func (s *Server) settingsLLMModels(w http.ResponseWriter, r *http.Request) {
 	if input.APIKey != nil {
 		apiKey = strings.TrimSpace(*input.APIKey)
 	} else if s.hermesGateway != nil {
-		apiKey, err = s.hermesGateway.ModelAPIKey()
+		if gateway, ok := s.hermesGateway.(hermes.ProfileGateway); ok && strings.TrimSpace(input.ProfileID) != "" {
+			apiKey, err = gateway.ModelAPIKeyForProfile(strings.TrimSpace(input.ProfileID))
+		} else {
+			apiKey, err = s.hermesGateway.ModelAPIKey()
+		}
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "读取已保存模型密钥失败")
 			return

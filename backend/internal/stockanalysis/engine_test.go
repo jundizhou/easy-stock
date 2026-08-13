@@ -136,7 +136,7 @@ func TestAnalyzeThemeTrendRoutePrefersKaipanlaLeaderAttribution(t *testing.T) {
 	}
 }
 
-func TestAnalyzeThemeSpecificConceptBeatsIndustryFallback(t *testing.T) {
+func TestAnalyzeThemeUsesBusinessWhenNoHotAttribution(t *testing.T) {
 	theme := analyzeTheme(
 		"003032.SZ",
 		ShortTermAnalysis{},
@@ -146,8 +146,20 @@ func TestAnalyzeThemeSpecificConceptBeatsIndustryFallback(t *testing.T) {
 		nil,
 		nil,
 	)
-	if theme.Primary != "职业教育" || theme.Source != "eastmoney-stock-concepts" {
-		t.Fatalf("specific concept did not beat broad industry: %+v", theme)
+	if theme.Primary != "教育" || theme.Business != "教育" || theme.IsHot || theme.Source != "eastmoney-f10-business" {
+		t.Fatalf("business should remain primary without hot attribution: %+v", theme)
+	}
+}
+
+func TestAnalyzeThemeDoesNotPromoteBroadConceptToHotTheme(t *testing.T) {
+	theme := analyzeTheme(
+		"688297.SH", ShortTermAnalysis{}, nil,
+		[]string{"军工", "西部大开发", "无人机"}, "航天装备",
+		[]foundation.ThemeOverview{{Name: "西部大开发", TrendScore: 95, TrendStage: "主升"}}, nil,
+		"无人机系统", "主要从事无人机系统研发、生产制造、销售和服务", "eastmoney:f10-business",
+	)
+	if theme.Primary != "无人机系统" || theme.IsHot || theme.HotTheme != "" || theme.TrendScore != 0 {
+		t.Fatalf("broad concept was incorrectly promoted to hot theme: %+v", theme)
 	}
 }
 

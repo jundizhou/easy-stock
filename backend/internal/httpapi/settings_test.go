@@ -212,3 +212,47 @@ func TestSettingsAPIAcceptsAdditionalLLMProviders(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsAPISupportsMultipleLLMProfilesAndSelection(t *testing.T) {
+	store, err := appsettings.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	python := filepath.Join(root, "python")
+	if err := os.WriteFile(python, []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtime := hermes.NewRuntime(hermes.Config{Home: filepath.Join(root, "hermes"), PythonPath: python})
+	server := NewServer(Config{SettingsStore: store, HermesGateway: runtime})
+	body := `{"llm_profiles":[
+		{"id":"deepseek","name":"DeepSeek","provider":"deepseek","base_url":"https://api.deepseek.com","model":"deepseek-chat","api_mode":"chat_completions","api_key":"ds-private"},
+		{"id":"sol","name":"GPT-5.6 Sol","provider":"custom","base_url":"https://model.example/v1","model":"gpt-5.6-sol","api_mode":"codex_responses","api_key":"sol-private"}
+	],"active_llm_profile_id":"sol"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "private") {
+		t.Fatalf("profile key leaked: %s", rec.Body.String())
+	}
+	values := store.Snapshot()
+	if len(values.LLMProfiles) != 2 || values.ActiveLLMProfileID != "sol" || values.LLM.Model != "gpt-5.6-sol" {
+		t.Fatalf("profiles not saved: %+v", values)
+	}
+
+	switchReq := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"active_llm_profile_id":"deepseek"}`))
+	switchRec := httptest.NewRecorder()
+	server.ServeHTTP(switchRec, switchReq)
+	if switchRec.Code != http.StatusOK || store.Snapshot().LLM.Model != "deepseek-chat" {
+		t.Fatalf("profile switch failed: status=%d body=%s", switchRec.Code, switchRec.Body.String())
+	}
+	if key, err := runtime.ModelAPIKey(); err != nil || key != "ds-private" {
+		t.Fatalf("active key=%q err=%v", key, err)
+	}
+	if key, err := runtime.ModelAPIKeyForProfile("sol"); err != nil || key != "sol-private" {
+		t.Fatalf("saved sol key=%q err=%v", key, err)
+	}
+}

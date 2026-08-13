@@ -17,6 +17,9 @@ type Input struct {
 	LimitUps        []foundation.LimitUpEvent
 	Concepts        []string
 	Industry        string
+	Business        string
+	BusinessDetail  string
+	BusinessSource  string
 	CachedThemes    []foundation.StockThemeAttribution
 	Themes          []foundation.ThemeOverview
 	MarketEmotion   *marketemotion.Snapshot
@@ -208,6 +211,9 @@ type ShortTermAnalysis struct {
 
 type ThemeAnalysis struct {
 	Primary     string   `json:"primary"`
+	Business    string   `json:"business"`
+	HotTheme    string   `json:"hot_theme,omitempty"`
+	IsHot       bool     `json:"is_hot"`
 	Concepts    []string `json:"concepts"`
 	Source      string   `json:"source"`
 	AsOf        string   `json:"as_of,omitempty"`

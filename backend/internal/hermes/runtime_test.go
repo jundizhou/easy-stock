@@ -88,9 +88,10 @@ func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Skills) != 1 || !view.Skills[0].Enabled || len(view.MCPServers) != 1 || view.MCPServers[0].Env["TOKEN"] != "mcp-secret" {
+	if view.ReasoningEffort != "medium" || len(view.Skills) != 1 || !view.Skills[0].Enabled || len(view.MCPServers) != 1 || view.MCPServers[0].Env["TOKEN"] != "mcp-secret" {
 		t.Fatalf("unexpected agent settings: %+v", view)
 	}
+	view.ReasoningEffort = "xhigh"
 	view.Skills[0].Enabled = false
 	view.MCPServers[0].SupportsParallelToolCall = true
 	if err := runtime.SyncAgentSettings(view); err != nil {
@@ -115,8 +116,16 @@ func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ := runtime.AgentSettings()
-	if len(after.MCPServers) != 1 || after.MCPServers[0].Env["TOKEN"] != "mcp-secret" || after.Skills[0].Enabled {
+	if after.ReasoningEffort != "xhigh" || len(after.MCPServers) != 1 || after.MCPServers[0].Env["TOKEN"] != "mcp-secret" || after.Skills[0].Enabled {
 		t.Fatalf("model save overwrote agent settings: %+v", after)
+	}
+}
+
+func TestRuntimeSyncAgentSettingsRejectsInvalidReasoningEffort(t *testing.T) {
+	runtime := NewRuntime(Config{Home: t.TempDir()})
+	err := runtime.SyncAgentSettings(AgentSettings{ReasoningEffort: "turbo"})
+	if err == nil || !strings.Contains(err.Error(), "思考等级") {
+		t.Fatalf("SyncAgentSettings() error = %v, want invalid reasoning effort", err)
 	}
 }
 

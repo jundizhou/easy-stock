@@ -13,7 +13,7 @@ import {
 	UserRound,
 } from 'lucide-react';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, LLMModelOption, LLMModelsResult, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, LLMModelOption, LLMModelsResult, LLMProfile, requestJSON } from '../lib/backend';
 import { llmProviderDefaultModel, llmProviderName } from '../lib/llm-providers';
 import {
 	ChatConversation,
@@ -40,6 +40,17 @@ type ModelState = 'loading' | 'ready' | 'missing' | 'error';
 type ModelListState = 'idle' | 'loading' | 'ready' | 'error';
 type ModelSwitchState = 'idle' | 'switching' | 'saved' | 'error';
 type ChatLLMConfig = Pick<AppSettings['llm'], 'provider' | 'base_url' | 'model' | 'api_mode'>;
+type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const reasoningOptions: Array<{ value: ReasoningEffort; label: string }> = [
+	{ value: 'none', label: '关闭' },
+	{ value: 'minimal', label: '极简' },
+	{ value: 'low', label: '低' },
+	{ value: 'medium', label: '中' },
+	{ value: 'high', label: '高' },
+	{ value: 'xhigh', label: '深度' },
+	{ value: 'max', label: '最大' },
+];
 
 const STORAGE_KEY = 'easy-stock.ai-conversations.v1';
 const LEGACY_STORAGE_KEY = 'a-stock-ai.ai-conversations.v1';
@@ -76,6 +87,8 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 	const [modelState, setModelState] = useState<ModelState>('loading');
 	const [modelLabel, setModelLabel] = useState('读取模型配置');
 	const [llmConfig, setLLMConfig] = useState<ChatLLMConfig | null>(null);
+	const [llmProfiles, setLLMProfiles] = useState<LLMProfile[]>([]);
+	const [activeLLMProfileID, setActiveLLMProfileID] = useState('');
 	const [modelOptions, setModelOptions] = useState<LLMModelOption[]>([]);
 	const [modelListState, setModelListState] = useState<ModelListState>('idle');
 	const [modelListMessage, setModelListMessage] = useState('');
@@ -83,6 +96,9 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 	const [modelSwitchMessage, setModelSwitchMessage] = useState('');
 	const [manualModelEditing, setManualModelEditing] = useState(false);
 	const [manualModelDraft, setManualModelDraft] = useState('');
+	const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
+	const [reasoningSwitching, setReasoningSwitching] = useState(false);
+	const [reasoningMessage, setReasoningMessage] = useState('');
 	const [copiedID, setCopiedID] = useState('');
 	const [pendingMessageID, setPendingMessageID] = useState('');
 	const abortRef = useRef<AbortController | null>(null);
@@ -146,6 +162,9 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 		try {
 			const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings');
 			const { hermes, llm } = payload.data;
+			const profiles = payload.data.llm_profiles || [];
+			setLLMProfiles(profiles);
+			setActiveLLMProfileID(payload.data.active_llm_profile_id || profiles[0]?.id || '');
 			const provider = llm.provider || 'openai';
 			const model = llm.model || llmProviderDefaultModel(provider);
 			const nextLLM = { provider, base_url: llm.base_url, model, api_mode: llm.api_mode };
@@ -156,7 +175,14 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 				? `Hermes · ${llmProviderName(provider)} · ${model}`
 				: hermes.message || (hermes.available ? '需要配置 Hermes 模型' : 'Hermes 运行时不可用'));
 			try {
-				const models = await requestChatModels(config, nextLLM);
+				const agent = await requestJSON<{ data: { reasoning_effort?: string } }>(config, '/api/v1/settings/agent');
+				const effort = agent.data.reasoning_effort as ReasoningEffort;
+				if (reasoningOptions.some((option) => option.value === effort)) setReasoningEffort(effort);
+			} catch {
+				// Older backends may not expose the agent settings endpoint.
+			}
+			try {
+				const models = await requestChatModels(config, nextLLM, payload.data.active_llm_profile_id || profiles[0]?.id || '');
 				setModelOptions(models.models);
 				setModelListState('ready');
 				setModelListMessage(`已从模型服务获取 ${models.models.length} 个模型`);
@@ -175,6 +201,32 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 		}
 	}, [config]);
 
+	const switchReasoningEffort = async (next: ReasoningEffort) => {
+		if (!config || next === reasoningEffort || sending || reasoningSwitching) return;
+		const previous = reasoningEffort;
+		setReasoningEffort(next);
+		setReasoningSwitching(true);
+		setReasoningMessage('正在切换思考等级…');
+		try {
+			const payload = await requestJSON<{ data: { reasoning_effort?: string } }>(config, '/api/v1/settings/agent', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ reasoning_effort: next }),
+			});
+			const saved = payload.data.reasoning_effort as ReasoningEffort;
+			const effective = reasoningOptions.some((option) => option.value === saved) ? saved : next;
+			setReasoningEffort(effective);
+			setConversations((current) => clearHermesSessionIDs(current));
+			setReasoningMessage(`已切换为${reasoningOptions.find((option) => option.value === effective)?.label || effective}思考，下一条消息生效`);
+			window.setTimeout(() => setReasoningMessage(''), 3500);
+		} catch (error) {
+			setReasoningEffort(previous);
+			setReasoningMessage(error instanceof Error ? error.message : '切换思考等级失败');
+		} finally {
+			setReasoningSwitching(false);
+		}
+	};
+
 	useEffect(() => {
 		void loadModel();
 	}, [loadModel, refreshKey]);
@@ -189,7 +241,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 		setModelListState('loading');
 		setModelListMessage('正在刷新模型列表…');
 		try {
-			const models = await requestChatModels(config, llmConfig);
+			const models = await requestChatModels(config, llmConfig, activeLLMProfileID);
 			setModelOptions(models.models);
 			setModelListState('ready');
 			setModelListMessage(`已从模型服务获取 ${models.models.length} 个模型`);
@@ -197,6 +249,32 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 			setModelListState('error');
 			setModelListMessage(error instanceof Error ? error.message : '获取模型列表失败');
 		}
+	};
+
+	const switchProfile = async (profileID: string) => {
+		if (!config || profileID === activeLLMProfileID || sending || modelSwitchState === 'switching') return;
+		const profile = llmProfiles.find((item) => item.id === profileID);
+		if (!profile) return;
+		setModelSwitchState('switching');
+		setModelSwitchMessage(`正在切换到 ${profile.name}…`);
+		try {
+			const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active_llm_profile_id: profileID }) });
+			const nextProfiles = payload.data.llm_profiles || [];
+			const active = nextProfiles.find((item) => item.id === profileID) || profile;
+			setLLMProfiles(nextProfiles);
+			setActiveLLMProfileID(profileID);
+			setLLMConfig({ provider: active.provider, base_url: active.base_url, model: active.model, api_mode: active.api_mode });
+			setModelOptions([]);
+			setModelListState('loading');
+			try { const models = await requestChatModels(config, active, profileID); setModelOptions(models.models); setModelListState('ready'); setModelListMessage(`已从模型服务获取 ${models.models.length} 个模型`); } catch { setModelListState('error'); }
+			setConversations((current) => clearHermesSessionIDs(current));
+			const usable = payload.data.hermes.available && payload.data.hermes.configured;
+			setModelState(usable ? 'ready' : payload.data.hermes.available ? 'missing' : 'error');
+			setModelLabel(usable ? `Hermes · ${llmProviderName(active.provider)} · ${active.model}` : payload.data.hermes.message || '需要配置 Hermes 模型');
+			setModelSwitchState('saved');
+			setModelSwitchMessage(`已切换为 ${profile.name}，下一条消息生效`);
+			window.setTimeout(() => { setModelSwitchState('idle'); setModelSwitchMessage(''); }, 3500);
+		} catch (error) { setModelSwitchState('error'); setModelSwitchMessage(error instanceof Error ? error.message : '切换模型配置失败'); }
 	};
 
 	const switchModel = async (nextModel: string) => {
@@ -395,8 +473,16 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 					<div className="ai-assistant-avatar"><Bot size={20} /></div>
 					<div><strong>{activeConversation?.title || 'AI 研究助手'}</strong><span className={modelSwitchState === 'error' ? 'error' : modelState}>{modelSwitchMessage || modelLabel}</span></div>
 					<div className="ai-conversation-tools">
+						<div className="ai-chat-reasoning-picker" title="选择 Hermes 下一条回复的思考深度">
+							<span>思考</span>
+							<select aria-label="选择思考等级" value={reasoningEffort} onChange={(event) => void switchReasoningEffort(event.target.value as ReasoningEffort)} disabled={!config || sending || reasoningSwitching}>
+								{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+							</select>
+							{reasoningSwitching && <LoaderCircle className="spin" size={14} />}
+						</div>
 						<div className={`ai-chat-model-picker ${modelListState} ${manualModelEditing ? 'manual' : ''}`} title={modelListMessage || '选择当前 AI 对话使用的模型'}>
 							<span>模型</span>
+							{llmProfiles.length > 1 && <select aria-label="选择模型配置" className="ai-chat-profile-select" value={activeLLMProfileID} onChange={(event) => void switchProfile(event.target.value)} disabled={!config || sending || modelSwitchState === 'switching'}>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select>}
 							{manualModelEditing ? (
 								<>
 									<input aria-label="手动输入对话模型" autoFocus value={manualModelDraft} onChange={(event) => setManualModelDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyManualModel(); } else if (event.key === 'Escape') setManualModelEditing(false); }} placeholder="输入模型 ID" />
@@ -417,6 +503,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 						<button type="button" className="ai-chat-settings-button" onClick={onOpenSettings}><Settings size={15} />Hermes 设置</button>
 					</div>
 				</header>
+				{reasoningMessage && <div className="ai-chat-reasoning-message" role="status">{reasoningMessage}</div>}
 
 				<div className={`ai-message-stage ${activeConversation?.messages.length ? 'has-messages' : ''}`}>
 					{!activeConversation?.messages.length ? (
@@ -460,11 +547,11 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 	);
 }
 
-async function requestChatModels(config: BackendConfig, llm: ChatLLMConfig) {
+async function requestChatModels(config: BackendConfig, llm: ChatLLMConfig, profileID = '') {
 	const payload = await requestJSON<{ data: LLMModelsResult }>(config, '/api/v1/settings/llm/models', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ provider: llm.provider, base_url: llm.base_url }),
+		body: JSON.stringify({ provider: llm.provider, base_url: llm.base_url, profile_id: profileID || undefined }),
 	});
 	return payload.data;
 }

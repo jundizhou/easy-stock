@@ -40,6 +40,7 @@ type Server struct {
 	limitUpProvider       LimitUpProvider
 	marketPools           MarketPoolProvider
 	stockConcepts         StockConceptProvider
+	stockBusiness         StockBusinessProfileProvider
 	stockDirectory        StockDirectoryProvider
 	marketOverview        MarketOverviewProvider
 	inflection            InflectionEvaluator
@@ -106,6 +107,9 @@ func NewServer(config any) *Server {
 	}
 	if cfg.StockConcept == nil && usingDefaultLimitUp {
 		cfg.StockConcept = eastMoneyClient
+	}
+	if cfg.StockBusiness == nil {
+		cfg.StockBusiness = eastMoneyClient
 	}
 	if cfg.StockDirectory == nil {
 		cfg.StockDirectory = eastMoneyClient
@@ -188,7 +192,16 @@ func NewServer(config any) *Server {
 				values = updated
 			}
 		}
-		_ = cfg.HermesGateway.SyncLLM(values.LLM, migratedKey)
+		if profileGateway, ok := cfg.HermesGateway.(hermes.ProfileGateway); ok {
+			if migratedKey == nil {
+				if key, err := cfg.HermesGateway.ModelAPIKey(); err == nil && strings.TrimSpace(key) != "" {
+					migratedKey = &key
+				}
+			}
+			_ = profileGateway.SyncLLMProfile(values.LLM, values.ActiveLLMProfileID, migratedKey)
+		} else {
+			_ = cfg.HermesGateway.SyncLLM(values.LLM, migratedKey)
+		}
 	}
 	if cfg.ReviewImporter == nil {
 		cfg.ReviewImporter = review.NewImporter(cfg.ReviewHTTP, cfg.WeChatAPIURL)
@@ -214,6 +227,7 @@ func NewServer(config any) *Server {
 		limitUpProvider:       cfg.LimitUp,
 		marketPools:           cfg.MarketPools,
 		stockConcepts:         cfg.StockConcept,
+		stockBusiness:         cfg.StockBusiness,
 		stockDirectory:        cfg.StockDirectory,
 		marketOverview:        cfg.MarketOverview,
 		inflection:            cfg.Inflection,

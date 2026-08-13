@@ -13,8 +13,9 @@ import (
 func TestAgentSettingsAPIUpdatesSkillsAndMCPWithoutLeakingSecrets(t *testing.T) {
 	store, _ := appsettings.Open("")
 	gateway := &fakeHermesGateway{agentSettings: hermes.AgentSettings{
-		Skills:     []hermes.SkillInfo{{Name: "test-skill", Description: "test", Category: "trading", Enabled: true}},
-		MCPServers: []hermes.MCPServerInfo{{Name: "github", Enabled: true, Transport: "stdio", Command: "npx", Env: map[string]string{"TOKEN": "old-secret"}}},
+		ReasoningEffort: "medium",
+		Skills:          []hermes.SkillInfo{{Name: "test-skill", Description: "test", Category: "trading", Enabled: true}},
+		MCPServers:      []hermes.MCPServerInfo{{Name: "github", Enabled: true, Transport: "stdio", Command: "npx", Env: map[string]string{"TOKEN": "old-secret"}}},
 	}}
 	server := NewServer(Config{SettingsStore: store, HermesGateway: gateway})
 	body := `{"skills":[{"name":"test-skill","enabled":false}],"mcp_servers":[{"name":"github-renamed","original_name":"github","enabled":true,"transport":"stdio","command":"npx","args":["-y","server"],"env":{},"clear_env":[],"headers":{},"clear_headers":[],"timeout":120,"connect_timeout":30,"supports_parallel_tool_calls":true}]}`
@@ -36,6 +37,36 @@ func TestAgentSettingsAPIUpdatesSkillsAndMCPWithoutLeakingSecrets(t *testing.T) 
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK || strings.Contains(getRec.Body.String(), "old-secret") {
 		t.Fatalf("GET leaked or failed: status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+}
+
+func TestAgentSettingsAPIUpdatesOnlyReasoningEffort(t *testing.T) {
+	store, _ := appsettings.Open("")
+	gateway := &fakeHermesGateway{agentSettings: hermes.AgentSettings{
+		ReasoningEffort: "medium",
+		Skills:          []hermes.SkillInfo{{Name: "test-skill", Enabled: true}},
+		MCPServers:      []hermes.MCPServerInfo{{Name: "github", Enabled: true, Transport: "stdio", Command: "npx"}},
+	}}
+	server := NewServer(Config{SettingsStore: store, HermesGateway: gateway})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/agent", strings.NewReader(`{"reasoning_effort":"xhigh"}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if gateway.agentSettings.ReasoningEffort != "xhigh" || len(gateway.agentSettings.Skills) != 1 || len(gateway.agentSettings.MCPServers) != 1 {
+		t.Fatalf("partial update cleared settings: %+v", gateway.agentSettings)
+	}
+}
+
+func TestAgentSettingsAPIRejectsInvalidReasoningEffort(t *testing.T) {
+	store, _ := appsettings.Open("")
+	server := NewServer(Config{SettingsStore: store, HermesGateway: &fakeHermesGateway{}})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/agent", strings.NewReader(`{"reasoning_effort":"turbo"}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
 	}
 }
 

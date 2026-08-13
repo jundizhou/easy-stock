@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	providerSlug        = "easy-stock"
-	modelAPIKeyEnvName  = "MODEL_API_KEY"
-	hermesErrorTailSize = 32 << 10
+	providerSlug          = "easy-stock"
+	modelAPIKeyEnvName    = "MODEL_API_KEY"
+	modelProfileKeyPrefix = "MODEL_API_KEY_PROFILE_"
+	hermesErrorTailSize   = 32 << 10
 )
 
 var diagnosticSecretPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[_ -]?key|token)\s*[:=]\s*)[^\s,;]+`)
@@ -76,9 +77,28 @@ type SettingsGateway interface {
 	SyncAgentSettings(AgentSettings) error
 }
 
+// ProfileGateway is implemented by runtimes that can keep one secret per
+// named model profile without exposing it to the application settings JSON.
+// It is optional so older test and embedded gateways remain compatible.
+type ProfileGateway interface {
+	SyncLLMProfile(cfg appsettings.LLM, profileID string, apiKeyUpdate *string) error
+	StoreLLMProfileKey(profileID string, apiKeyUpdate *string) error
+	ModelAPIKeyForProfile(profileID string) (string, error)
+}
+
 type AgentSettings struct {
-	Skills     []SkillInfo     `json:"skills" yaml:"-"`
-	MCPServers []MCPServerInfo `json:"mcp_servers" yaml:"-"`
+	ReasoningEffort string          `json:"reasoning_effort" yaml:"-"`
+	Skills          []SkillInfo     `json:"skills" yaml:"-"`
+	MCPServers      []MCPServerInfo `json:"mcp_servers" yaml:"-"`
+}
+
+// ValidReasoningEfforts mirrors the levels supported by Hermes. "none" turns
+// reasoning off; the remaining levels trade latency and token usage for depth.
+var ValidReasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+func IsValidReasoningEffort(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return slices.Contains(ValidReasoningEfforts, value)
 }
 
 type SkillInfo struct {
@@ -176,6 +196,18 @@ func (r *Runtime) ModelAPIKey() (string, error) {
 // writes secrets only into Hermes' .env. A nil apiKeyUpdate retains the
 // existing MODEL_API_KEY; a pointer to an empty string clears it.
 func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
+	return r.syncLLM(cfg, "active", apiKeyUpdate)
+}
+
+// SyncLLMProfile activates a profile and makes its key the Hermes runtime key.
+func (r *Runtime) SyncLLMProfile(cfg appsettings.LLM, profileID string, apiKeyUpdate *string) error {
+	if strings.TrimSpace(profileID) == "" {
+		profileID = "active"
+	}
+	return r.syncLLM(cfg, profileID, apiKeyUpdate)
+}
+
+func (r *Runtime) syncLLM(cfg appsettings.LLM, profileID string, apiKeyUpdate *string) error {
 	if strings.TrimSpace(r.home) == "" {
 		return errors.New("Hermes 用户目录未配置")
 	}
@@ -186,9 +218,20 @@ func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
 	defer r.configMu.Unlock()
 
 	envPath := filepath.Join(r.home, ".env")
-	existingKey, err := readEnvValue(envPath, modelAPIKeyEnvName)
+	profileKeyName := profileKeyEnvName(profileID)
+	existingKey, err := readEnvValue(envPath, profileKeyName)
 	if err != nil {
 		return err
+	}
+	if profileID == "active" {
+		// Legacy installations only have MODEL_API_KEY. Keep it as the
+		// active profile's key until the first profile-aware save.
+		if existingKey == "" {
+			existingKey, err = readEnvValue(envPath, modelAPIKeyEnvName)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	effectiveKey := existingKey
 	if apiKeyUpdate != nil {
@@ -196,13 +239,19 @@ func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
 		if strings.ContainsAny(effectiveKey, "\r\n") {
 			return errors.New("模型 API Key 不能包含换行")
 		}
-		if err := writeEnvValue(envPath, modelAPIKeyEnvName, effectiveKey); err != nil {
+		if err := writeEnvValue(envPath, profileKeyName, effectiveKey); err != nil {
 			return err
 		}
 	} else if _, statErr := os.Stat(envPath); errors.Is(statErr, os.ErrNotExist) {
-		if err := writeEnvValue(envPath, modelAPIKeyEnvName, ""); err != nil {
+		if err := writeEnvValue(envPath, profileKeyName, ""); err != nil {
 			return err
 		}
+	}
+	// MODEL_API_KEY is always the currently activated profile's key. This is
+	// what the Hermes child process reads, while profile-specific variables
+	// retain the other connections for later switching.
+	if err := writeEnvValue(envPath, modelAPIKeyEnvName, effectiveKey); err != nil {
+		return err
 	}
 
 	normalized := normalizeLLM(cfg)
@@ -223,6 +272,59 @@ func (r *Runtime) SyncLLM(cfg appsettings.LLM, apiKeyUpdate *string) error {
 	return nil
 }
 
+// StoreLLMProfileKey updates only a non-active profile's secret.
+func (r *Runtime) StoreLLMProfileKey(profileID string, apiKeyUpdate *string) error {
+	if strings.TrimSpace(r.home) == "" {
+		return errors.New("Hermes 用户目录未配置")
+	}
+	if strings.TrimSpace(profileID) == "" {
+		return errors.New("模型配置 ID 不能为空")
+	}
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+	if err := os.MkdirAll(r.home, 0o700); err != nil {
+		return fmt.Errorf("创建 Hermes 用户目录: %w", err)
+	}
+	if apiKeyUpdate == nil {
+		return nil
+	}
+	value := strings.TrimSpace(*apiKeyUpdate)
+	if strings.ContainsAny(value, "\r\n") {
+		return errors.New("模型 API Key 不能包含换行")
+	}
+	return writeEnvValue(filepath.Join(r.home, ".env"), profileKeyEnvName(profileID), value)
+}
+
+func (r *Runtime) ModelAPIKeyForProfile(profileID string) (string, error) {
+	if strings.TrimSpace(r.home) == "" {
+		return "", errors.New("Hermes 用户目录未配置")
+	}
+	if strings.TrimSpace(profileID) == "" || profileID == "active" {
+		return r.ModelAPIKey()
+	}
+	value, err := readEnvValue(filepath.Join(r.home, ".env"), profileKeyEnvName(profileID))
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func profileKeyEnvName(profileID string) string {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" || profileID == "active" {
+		return modelAPIKeyEnvName
+	}
+	var b strings.Builder
+	for _, r := range profileID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return modelProfileKeyPrefix + b.String()
+}
+
 func (r *Runtime) AgentSettings() (AgentSettings, error) {
 	if strings.TrimSpace(r.home) == "" {
 		return AgentSettings{}, errors.New("Hermes 用户目录未配置")
@@ -237,7 +339,13 @@ func (r *Runtime) AgentSettings() (AgentSettings, error) {
 			disabled[name] = true
 		}
 	}
-	settings := AgentSettings{Skills: discoverSkills(filepath.Join(r.home, "skills"))}
+	reasoningEffort := "medium"
+	if agent, ok := stringMap(config["agent"]); ok {
+		if value := strings.ToLower(strings.TrimSpace(stringValue(agent["reasoning_effort"]))); IsValidReasoningEffort(value) {
+			reasoningEffort = value
+		}
+	}
+	settings := AgentSettings{ReasoningEffort: reasoningEffort, Skills: discoverSkills(filepath.Join(r.home, "skills"))}
 	for index := range settings.Skills {
 		settings.Skills[index].Enabled = !disabled[settings.Skills[index].Name]
 	}
@@ -285,6 +393,19 @@ func (r *Runtime) SyncAgentSettings(settings AgentSettings) error {
 	if err != nil {
 		return err
 	}
+	reasoningEffort := strings.ToLower(strings.TrimSpace(settings.ReasoningEffort))
+	if reasoningEffort == "" {
+		reasoningEffort = "medium"
+	}
+	if !IsValidReasoningEffort(reasoningEffort) {
+		return fmt.Errorf("无效的 Hermes 思考等级: %s", settings.ReasoningEffort)
+	}
+	agent, _ := stringMap(config["agent"])
+	if agent == nil {
+		agent = map[string]any{}
+	}
+	agent["reasoning_effort"] = reasoningEffort
+	config["agent"] = agent
 	skills, _ := stringMap(config["skills"])
 	if skills == nil {
 		skills = map[string]any{}
@@ -738,6 +859,11 @@ func (r *Runtime) renderMergedConfig(cfg appsettings.LLM) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	previousAgent, _ := stringMap(config["agent"])
+	previousReasoningEffort := ""
+	if previousAgent != nil {
+		previousReasoningEffort = strings.ToLower(strings.TrimSpace(stringValue(previousAgent["reasoning_effort"])))
+	}
 	managed := map[string]any{}
 	if err := yaml.Unmarshal([]byte(renderConfig(cfg, r.workDir)), &managed); err != nil {
 		return "", fmt.Errorf("生成 Hermes 配置: %w", err)
@@ -748,6 +874,16 @@ func (r *Runtime) renderMergedConfig(cfg appsettings.LLM) (string, error) {
 		} else {
 			delete(config, key)
 		}
+	}
+	// Model/profile synchronization regenerates the managed agent section. Keep
+	// the user's selected reasoning level instead of resetting it to medium.
+	if IsValidReasoningEffort(previousReasoningEffort) {
+		generatedAgent, _ := stringMap(config["agent"])
+		if generatedAgent == nil {
+			generatedAgent = map[string]any{}
+		}
+		generatedAgent["reasoning_effort"] = previousReasoningEffort
+		config["agent"] = generatedAgent
 	}
 	existingSkills, _ := stringMap(config["skills"])
 	if existingSkills == nil {

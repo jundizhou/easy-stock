@@ -391,7 +391,9 @@ function AnalysisVerdict({ analysis, copied, onRefresh, onCopy, onAskAI, onOpenS
 function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 	const themeSource = stockThemeSourceLabel(analysis.theme.source);
 	const themeRole = analysis.theme.role && analysis.theme.role !== '待确认' ? analysis.theme.role : '';
-	const themeDetail = [themeRole, themeSource].filter(Boolean).join(' · ') || analysis.theme.description;
+	const themeDetail = analysis.theme.is_hot
+		? [themeRole, themeSource, analysis.theme.business ? `主业：${analysis.theme.business}` : ''].filter(Boolean).join(' · ')
+		: [themeSource, '未发现明确热点炒作'].filter(Boolean).join(' · ');
 	return (
 		<>
 			<section className="stock-ai-kpis stock-ai-kpis-complete">
@@ -400,7 +402,7 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<KPICard icon={<Scale size={17} />} label="相对强度" value={analysis.relative_strength.available ? `${analysis.relative_strength.score}` : '--'} detail={analysis.relative_strength.available ? `${analysis.relative_strength.state} · ${analysis.relative_strength.benchmark_name}` : analysis.relative_strength.detail} tone="purple" />
 				<KPICard icon={<ShieldCheck size={17} />} label="交易风险" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
 				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={`近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
-				<KPICard icon={<Target size={17} />} label="题材定位" value={analysis.theme.primary || '独立结构'} detail={themeDetail} tone="purple" />
+				<KPICard icon={<Target size={17} />} label={analysis.theme.is_hot ? '热点定位' : '主业定位'} value={analysis.theme.primary || '独立结构'} detail={themeDetail} tone="purple" />
 			</section>
 
 			<div className="stock-ai-analysis-grid">
@@ -749,7 +751,7 @@ function stockThemeSourceLabel(source?: string) {
 	if (!source) return '';
 	if (source.includes('kaipanla-limit-up')) return '开盘啦连板缓存';
 	if (source.includes('kaipanla-theme-leader')) return '开盘啦趋势题材';
-	if (source === 'eastmoney-stock-concepts') return '东方财富个股概念';
+	if (source === 'eastmoney:f10-business' || source === 'eastmoney-f10-business') return '东方财富 F10 主营';
 	if (source === 'eastmoney-stock-industry') return '东方财富行业（降级）';
 	if (source === 'theme-radar' || source.includes('kaipanla')) return '趋势题材雷达';
 	return '题材归因';
