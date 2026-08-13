@@ -472,38 +472,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 				<header className="ai-conversation-header">
 					<div className="ai-assistant-avatar"><Bot size={20} /></div>
 					<div><strong>{activeConversation?.title || 'AI 研究助手'}</strong><span className={modelSwitchState === 'error' ? 'error' : modelState}>{modelSwitchMessage || modelLabel}</span></div>
-					<div className="ai-conversation-tools">
-						<div className="ai-chat-reasoning-picker" title="选择 Hermes 下一条回复的思考深度">
-							<span>思考</span>
-							<select aria-label="选择思考等级" value={reasoningEffort} onChange={(event) => void switchReasoningEffort(event.target.value as ReasoningEffort)} disabled={!config || sending || reasoningSwitching}>
-								{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-							</select>
-							{reasoningSwitching && <LoaderCircle className="spin" size={14} />}
-						</div>
-						<div className={`ai-chat-model-picker ${modelListState} ${manualModelEditing ? 'manual' : ''}`} title={modelListMessage || '选择当前 AI 对话使用的模型'}>
-							<span>模型</span>
-							{llmProfiles.length > 1 && <select aria-label="选择模型配置" className="ai-chat-profile-select" value={activeLLMProfileID} onChange={(event) => void switchProfile(event.target.value)} disabled={!config || sending || modelSwitchState === 'switching'}>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select>}
-							{manualModelEditing ? (
-								<>
-									<input aria-label="手动输入对话模型" autoFocus value={manualModelDraft} onChange={(event) => setManualModelDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyManualModel(); } else if (event.key === 'Escape') setManualModelEditing(false); }} placeholder="输入模型 ID" />
-									<button type="button" onClick={applyManualModel} disabled={!manualModelDraft.trim()} title="应用模型"><Check size={14} /></button>
-								</>
-							) : (
-								<>
-									<select aria-label="选择对话模型" value={llmConfig?.model || ''} onChange={(event) => chooseModel(event.target.value)} disabled={!config || !llmConfig || sending || modelSwitchState === 'switching' || modelListState === 'loading'}>
-										{!selectableModels.length && <option value="">{modelListState === 'loading' ? '读取模型中…' : '暂无可选模型'}</option>}
-										{selectableModels.map((option) => <option value={option.id} key={option.id}>{modelOptionLabel(option)}</option>)}
-										{llmConfig && <option value={manualModelOption}>手动输入其他模型…</option>}
-									</select>
-									{modelSwitchState === 'switching' && <LoaderCircle className="spin" size={14} />}
-								</>
-							)}
-						</div>
-						<button type="button" className={`ai-chat-model-refresh ${modelListState}`} onClick={() => void refreshModels()} disabled={!config || !llmConfig || sending || modelSwitchState === 'switching' || modelListState === 'loading'} title={modelListState === 'error' ? `模型列表获取失败：${modelListMessage}` : '刷新模型列表'}>{modelListState === 'loading' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}</button>
-						<button type="button" className="ai-chat-settings-button" onClick={onOpenSettings}><Settings size={15} />Hermes 设置</button>
-					</div>
 				</header>
-				{reasoningMessage && <div className="ai-chat-reasoning-message" role="status">{reasoningMessage}</div>}
 
 				<div className={`ai-message-stage ${activeConversation?.messages.length ? 'has-messages' : ''}`}>
 					{!activeConversation?.messages.length ? (
@@ -540,6 +509,37 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 						<textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={modelState === 'missing' ? '请先配置 Hermes 模型后开始对话' : modelState === 'error' ? 'Hermes 运行时不可用，请检查安装或设置' : '向 Hermes AI 描述任务，Enter 发送，Shift + Enter 换行'} disabled={!config || modelState !== 'ready'} rows={1} />
 						<div className="ai-composer-actions"><span>AI 可能会犯错，请核对关键事实与交易数据。</span>{sending ? <button type="button" className="stop" onClick={stop} title="停止生成"><Square size={14} />停止</button> : <button type="submit" disabled={!draft.trim() || !config || modelState !== 'ready'} title="发送消息"><Send size={15} />发送</button>}</div>
 					</div>
+					<div className="ai-conversation-tools">
+						<div className="ai-chat-reasoning-picker" title="选择 Hermes 下一条回复的思考深度">
+							<span>思考</span>
+							<select aria-label="选择思考等级" value={reasoningEffort} onChange={(event) => void switchReasoningEffort(event.target.value as ReasoningEffort)} disabled={!config || sending || reasoningSwitching}>
+								{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+							</select>
+							{reasoningSwitching && <LoaderCircle className="spin" size={14} />}
+						</div>
+						<div className={`ai-chat-model-picker ${modelListState} ${manualModelEditing ? 'manual' : ''}`} title={modelListMessage || '选择当前 AI 对话使用的模型'}>
+							<span>模型</span>
+							{llmProfiles.length > 1 && <select aria-label="选择模型配置" className="ai-chat-profile-select" value={activeLLMProfileID} onChange={(event) => void switchProfile(event.target.value)} disabled={!config || sending || modelSwitchState === 'switching'}>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select>}
+							{manualModelEditing ? (
+								<>
+									<input aria-label="手动输入对话模型" autoFocus value={manualModelDraft} onChange={(event) => setManualModelDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyManualModel(); } else if (event.key === 'Escape') setManualModelEditing(false); }} placeholder="输入模型 ID" />
+									<button type="button" onClick={applyManualModel} disabled={!manualModelDraft.trim()} title="应用模型"><Check size={14} /></button>
+								</>
+							) : (
+								<>
+									<select aria-label="选择对话模型" value={llmConfig?.model || ''} onChange={(event) => chooseModel(event.target.value)} disabled={!config || !llmConfig || sending || modelSwitchState === 'switching' || modelListState === 'loading'}>
+										{!selectableModels.length && <option value="">{modelListState === 'loading' ? '读取模型中…' : '暂无可选模型'}</option>}
+										{selectableModels.map((option) => <option value={option.id} key={option.id}>{modelOptionLabel(option)}</option>)}
+										{llmConfig && <option value={manualModelOption}>手动输入其他模型…</option>}
+									</select>
+									{modelSwitchState === 'switching' && <LoaderCircle className="spin" size={14} />}
+								</>
+							)}
+						</div>
+						<button type="button" className={`ai-chat-model-refresh ${modelListState}`} onClick={() => void refreshModels()} disabled={!config || !llmConfig || sending || modelSwitchState === 'switching' || modelListState === 'loading'} title={modelListState === 'error' ? `模型列表获取失败：${modelListMessage}` : '刷新模型列表'}>{modelListState === 'loading' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}</button>
+						<button type="button" className="ai-chat-settings-button" onClick={onOpenSettings}><Settings size={15} />Hermes 设置</button>
+					</div>
+					{reasoningMessage && <div className="ai-chat-reasoning-message" role="status">{reasoningMessage}</div>}
 					{modelState !== 'ready' && <button type="button" className="ai-configure-hint" onClick={onOpenSettings}><Settings size={14} />{modelState === 'error' ? 'Hermes 运行时不可用，查看系统设置' : '尚未配置 Hermes 模型，打开系统设置'}</button>}
 				</form>
 			</div>
