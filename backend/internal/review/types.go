@@ -205,6 +205,9 @@ type DailySummary struct {
 
 type DailySummaryJob struct {
 	TradeDate        string    `json:"trade_date"`
+	WindowStart      time.Time `json:"window_start,omitempty"`
+	WindowEnd        time.Time `json:"window_end,omitempty"`
+	FreshnessRule    string    `json:"freshness_rule,omitempty"`
 	Status           string    `json:"status"`
 	Stage            string    `json:"stage"`
 	CompletedAuthors int       `json:"completed_authors"`
@@ -216,4 +219,11 @@ type DailySummaryJob struct {
 	UpdatedAt        time.Time `json:"updated_at,omitempty"`
 	CompletedAt      time.Time `json:"completed_at,omitempty"`
 	SummaryAvailable bool      `json:"summary_available"`
+}
+
+type DailySummaryWindow struct {
+	TradeDate     string    `json:"trade_date"`
+	WindowStart   time.Time `json:"window_start"`
+	WindowEnd     time.Time `json:"window_end"`
+	FreshnessRule string    `json:"freshness_rule"`
 }

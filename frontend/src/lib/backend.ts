@@ -1135,6 +1135,9 @@ export type ReviewDailySummary = {
 
 export type ReviewDailySummaryJob = {
 	trade_date: string;
+	window_start?: string;
+	window_end?: string;
+	freshness_rule?: string;
 	status: 'idle' | 'running' | 'succeeded' | 'failed';
 	stage: 'idle' | 'preparing' | 'authors' | 'finalizing' | 'completed' | 'failed' | 'interrupted';
 	completed_authors: number;
@@ -1146,6 +1149,13 @@ export type ReviewDailySummaryJob = {
 	updated_at?: string;
 	completed_at?: string;
 	summary_available: boolean;
+};
+
+export type ReviewDailySummaryWindow = {
+	trade_date: string;
+	window_start: string;
+	window_end: string;
+	freshness_rule: string;
 };
 
 export async function resolveBackendConfig(input: ResolveInput = {}): Promise<BackendConfig> {

@@ -255,18 +255,24 @@ func TestEffectiveReviewWindowExcludesSecondPreviousTradingDay(t *testing.T) {
 		name      string
 		now       time.Time
 		wantStart string
+		wantEnd   string
+		wantTrade string
 		wantRule  string
 	}{
-		{name: "friday after open", now: time.Date(2026, 8, 7, 10, 0, 0, 0, location), wantStart: "2026-08-06", wantRule: "开盘后"},
-		{name: "monday before open", now: time.Date(2026, 8, 10, 9, 0, 0, 0, location), wantStart: "2026-08-07", wantRule: "开盘前"},
-		{name: "monday after open", now: time.Date(2026, 8, 10, 10, 0, 0, 0, location), wantStart: "2026-08-07", wantRule: "开盘后"},
-		{name: "weekend", now: time.Date(2026, 8, 8, 12, 0, 0, 0, location), wantStart: "2026-08-07", wantRule: "非交易日"},
+		{name: "friday during session", now: time.Date(2026, 8, 7, 10, 0, 0, 0, location), wantStart: "2026-08-06T15:00", wantEnd: "2026-08-07T09:30", wantTrade: "2026-08-06", wantRule: "最近交易日"},
+		{name: "friday after close", now: time.Date(2026, 8, 7, 16, 0, 0, 0, location), wantStart: "2026-08-07T15:00", wantEnd: "2026-08-10T09:30", wantTrade: "2026-08-07", wantRule: "今日收盘后"},
+		{name: "monday before open", now: time.Date(2026, 8, 10, 9, 0, 0, 0, location), wantStart: "2026-08-07T15:00", wantEnd: "2026-08-10T09:30", wantTrade: "2026-08-07", wantRule: "最近交易日"},
+		{name: "monday after open", now: time.Date(2026, 8, 10, 10, 0, 0, 0, location), wantStart: "2026-08-07T15:00", wantEnd: "2026-08-10T09:30", wantTrade: "2026-08-07", wantRule: "最近交易日"},
+		{name: "weekend", now: time.Date(2026, 8, 8, 12, 0, 0, 0, location), wantStart: "2026-08-07T15:00", wantEnd: "2026-08-10T09:30", wantTrade: "2026-08-07", wantRule: "最近交易日"},
+		{name: "holiday", now: time.Date(2026, 10, 1, 12, 0, 0, 0, location), wantStart: "2026-09-30T15:00", wantEnd: "2026-10-08T09:30", wantTrade: "2026-09-30", wantRule: "最近交易日"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			window := effectiveReviewWindow(test.now)
-			if got := window.Start.In(location).Format("2006-01-02"); got != test.wantStart || !strings.Contains(window.Rule, test.wantRule) {
-				t.Fatalf("window=%+v start=%s", window, got)
+			gotStart := window.Start.In(location).Format("2006-01-02T15:04")
+			gotEnd := window.End.In(location).Format("2006-01-02T15:04")
+			if gotStart != test.wantStart || gotEnd != test.wantEnd || window.TradeDate != test.wantTrade || !strings.Contains(window.Rule, test.wantRule) {
+				t.Fatalf("window=%+v start=%s end=%s trade=%s", window, gotStart, gotEnd, window.TradeDate)
 			}
 		})
 	}

@@ -5,15 +5,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/review"
 )
 
 type fakeReviewImporter struct{}
+
+type fakeReviewSummaryPrompter struct{}
+
+func (fakeReviewSummaryPrompter) Prompt(context.Context, string) (hermes.PromptResult, error) {
+	return hermes.PromptResult{Content: `{}`}, nil
+}
 
 func (fakeReviewImporter) ImportURL(_ context.Context, rawURL string) (review.Post, error) {
 	now := time.Date(2026, 8, 4, 16, 0, 0, 0, time.UTC)
@@ -79,4 +87,86 @@ func TestReviewSourcesPutWechatLastAndMarkAutomaticSyncUnavailable(t *testing.T)
 	if wechat.Status != "limited" || !wechat.ImportReady || wechat.SyncReady || !strings.Contains(wechat.Message, "历史文章列表接口") {
 		t.Fatalf("wechat status = %+v", wechat)
 	}
+}
+
+func TestReviewDailySummaryWindowEndpoints(t *testing.T) {
+	store, err := review.OpenStore(filepath.Join(t.TempDir(), "reviews.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	automation := review.NewAutomation(store, fakeReviewImporter{}, nil, http.DefaultClient, "", fakeReviewSummaryPrompter{})
+	server := NewServer(Config{ReviewStore: store, ReviewImporter: fakeReviewImporter{}, ReviewAutomation: automation})
+
+	windowRequest := httptest.NewRequest(http.MethodGet, "/api/v1/reviews/daily-summary/window", nil)
+	windowRecorder := httptest.NewRecorder()
+	server.ServeHTTP(windowRecorder, windowRequest)
+	if windowRecorder.Code != http.StatusOK {
+		t.Fatalf("window status=%d body=%s", windowRecorder.Code, windowRecorder.Body.String())
+	}
+	var windowPayload struct {
+		Data review.DailySummaryWindow `json:"data"`
+	}
+	if err := json.NewDecoder(windowRecorder.Body).Decode(&windowPayload); err != nil {
+		t.Fatal(err)
+	}
+	if windowPayload.Data.WindowStart.IsZero() || windowPayload.Data.WindowEnd.IsZero() || !windowPayload.Data.WindowStart.Before(windowPayload.Data.WindowEnd) {
+		t.Fatalf("window = %+v", windowPayload.Data)
+	}
+
+	start := "2026-08-07T15:00:00+08:00"
+	end := "2026-08-10T09:30:00+08:00"
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/reviews/daily-summary", strings.NewReader(`{"force":true,"window_start":"`+start+`","window_end":"`+end+`"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRecorder := httptest.NewRecorder()
+	server.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusAccepted {
+		t.Fatalf("create status=%d body=%s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var createPayload struct {
+		Data review.DailySummaryJob `json:"data"`
+	}
+	if err := json.NewDecoder(createRecorder.Body).Decode(&createPayload); err != nil {
+		t.Fatal(err)
+	}
+	if createPayload.Data.Status != "running" || createPayload.Data.WindowStart.IsZero() || createPayload.Data.WindowEnd.IsZero() {
+		t.Fatalf("job = %+v", createPayload.Data)
+	}
+
+	query := url.Values{"window_start": {start}, "window_end": {end}}.Encode()
+	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/reviews/daily-summary/status?"+query, nil)
+	statusRecorder := httptest.NewRecorder()
+	server.ServeHTTP(statusRecorder, statusRequest)
+	if statusRecorder.Code != http.StatusOK || !strings.Contains(statusRecorder.Body.String(), `"window_start"`) {
+		t.Fatalf("status=%d body=%s", statusRecorder.Code, statusRecorder.Body.String())
+	}
+
+	summaryRequest := httptest.NewRequest(http.MethodGet, "/api/v1/reviews/daily-summary?"+query, nil)
+	summaryRecorder := httptest.NewRecorder()
+	server.ServeHTTP(summaryRecorder, summaryRequest)
+	if summaryRecorder.Code != http.StatusOK {
+		t.Fatalf("summary status=%d body=%s", summaryRecorder.Code, summaryRecorder.Body.String())
+	}
+
+	badRequest := httptest.NewRequest(http.MethodGet, "/api/v1/reviews/daily-summary/status?window_start="+url.QueryEscape(start), nil)
+	badRecorder := httptest.NewRecorder()
+	server.ServeHTTP(badRecorder, badRequest)
+	if badRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("bad status=%d body=%s", badRecorder.Code, badRecorder.Body.String())
+	}
+
+	parsedStart, _ := time.Parse(time.RFC3339, start)
+	parsedEnd, _ := time.Parse(time.RFC3339, end)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		job, getErr := automation.GetSummaryJobForWindow(context.Background(), parsedStart, parsedEnd)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if job.Status != "running" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("summary background job did not stop")
 }

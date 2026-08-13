@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v3"
+	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v5"
 	maxDailySummaryAuthors       = 30
 	maxDailySummaryPosts         = 1000
 	maxAuthorSummaryConcurrency  = 3
@@ -99,11 +99,32 @@ type dailySummaryModel struct {
 
 type dailySummaryProgress func(stage string, completedAuthors, totalAuthors, articleCount int, message string)
 
+func (a *Automation) DefaultSummaryWindow() DailySummaryWindow {
+	window := effectiveReviewWindow(time.Now())
+	return DailySummaryWindow{
+		TradeDate:     window.TradeDate,
+		WindowStart:   window.Start,
+		WindowEnd:     window.End,
+		FreshnessRule: window.Rule,
+	}
+}
+
 func (a *Automation) GetTodaySummary(ctx context.Context) (*DailySummary, error) {
+	return a.getSummaryForWindow(ctx, effectiveReviewWindow(time.Now()))
+}
+
+func (a *Automation) GetSummaryForWindow(ctx context.Context, start, end time.Time) (*DailySummary, error) {
+	window, err := selectedReviewWindow(start, end)
+	if err != nil {
+		return nil, err
+	}
+	return a.getSummaryForWindow(ctx, window)
+}
+
+func (a *Automation) getSummaryForWindow(ctx context.Context, window reviewFreshnessWindow) (*DailySummary, error) {
 	if a.store == nil {
 		return nil, errors.New("复盘日记存储不可用")
 	}
-	window := effectiveReviewWindow(time.Now())
 	summary, err := a.store.GetDailySummary(ctx, window.TradeDate)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -113,30 +134,48 @@ func (a *Automation) GetTodaySummary(ctx context.Context) (*DailySummary, error)
 	}
 	// A prompt-version change means the old cache does not satisfy the current
 	// author-first aggregation rules. Hide it so the next click regenerates it.
-	if summary.PromptVersion != dailySummaryPromptVersion || summary.FreshnessRule != window.Rule {
+	if summary.PromptVersion != dailySummaryPromptVersion || summary.FreshnessRule != window.Rule || !summary.WindowStart.Equal(window.Start) || !summary.WindowEnd.Equal(window.End) {
 		return nil, nil
 	}
 	return &summary, nil
 }
 
 func (a *Automation) GetTodaySummaryJob(ctx context.Context) (DailySummaryJob, error) {
+	return a.getSummaryJobForWindow(ctx, effectiveReviewWindow(time.Now()))
+}
+
+func (a *Automation) GetSummaryJobForWindow(ctx context.Context, start, end time.Time) (DailySummaryJob, error) {
+	window, err := selectedReviewWindow(start, end)
+	if err != nil {
+		return DailySummaryJob{}, err
+	}
+	return a.getSummaryJobForWindow(ctx, window)
+}
+
+func (a *Automation) getSummaryJobForWindow(ctx context.Context, window reviewFreshnessWindow) (DailySummaryJob, error) {
 	if a.store == nil {
 		return DailySummaryJob{}, errors.New("复盘日记存储不可用")
 	}
-	window := effectiveReviewWindow(time.Now())
 	job, err := a.store.GetDailySummaryJob(ctx, window.TradeDate)
 	if errors.Is(err, sql.ErrNoRows) {
-		if summary, summaryErr := a.GetTodaySummary(ctx); summaryErr != nil {
+		if summary, summaryErr := a.getSummaryForWindow(ctx, window); summaryErr != nil {
 			return DailySummaryJob{}, summaryErr
 		} else if summary != nil {
 			return cachedDailySummaryJob(*summary), nil
 		}
-		return DailySummaryJob{TradeDate: window.TradeDate, Status: "idle", Stage: "idle", Message: "尚未生成今日大V观点总结"}, nil
+		return idleDailySummaryJob(window), nil
 	}
 	if err != nil {
 		return DailySummaryJob{}, err
 	}
-	summary, err := a.GetTodaySummary(ctx)
+	if !job.WindowStart.IsZero() && (!job.WindowStart.Equal(window.Start) || !job.WindowEnd.Equal(window.End) || job.FreshnessRule != window.Rule) {
+		if job.Status == "running" {
+			window = reviewFreshnessWindow{TradeDate: job.TradeDate, Start: job.WindowStart, End: job.WindowEnd, Rule: job.FreshnessRule}
+		} else {
+			return idleDailySummaryJob(window), nil
+		}
+	}
+	summary, err := a.getSummaryForWindow(ctx, window)
 	if err != nil {
 		return DailySummaryJob{}, err
 	}
@@ -158,12 +197,24 @@ func (a *Automation) GetTodaySummaryJob(ctx context.Context) (DailySummaryJob, e
 	}
 	job.SummaryAvailable = summary != nil
 	if job.Status == "succeeded" && summary == nil {
-		return DailySummaryJob{TradeDate: window.TradeDate, Status: "idle", Stage: "idle", Message: "文章时效窗口已更新，请重新生成今日总结"}, nil
+		return idleDailySummaryJob(window), nil
 	}
 	return job, nil
 }
 
 func (a *Automation) StartTodaySummary(ctx context.Context, force bool) (DailySummaryJob, error) {
+	return a.startTodaySummary(ctx, force, effectiveReviewWindow(time.Now()))
+}
+
+func (a *Automation) StartTodaySummaryWithWindow(ctx context.Context, force bool, start, end time.Time) (DailySummaryJob, error) {
+	window, err := selectedReviewWindow(start, end)
+	if err != nil {
+		return DailySummaryJob{}, err
+	}
+	return a.startTodaySummary(ctx, force, window)
+}
+
+func (a *Automation) startTodaySummary(ctx context.Context, force bool, window reviewFreshnessWindow) (DailySummaryJob, error) {
 	if a.store == nil {
 		return DailySummaryJob{}, errors.New("复盘日记存储不可用")
 	}
@@ -173,16 +224,15 @@ func (a *Automation) StartTodaySummary(ctx context.Context, force bool) (DailySu
 	a.dailySummaryJobMu.Lock()
 	defer a.dailySummaryJobMu.Unlock()
 
-	window := effectiveReviewWindow(time.Now())
 	if a.dailySummaryRunning {
 		job, err := a.store.GetDailySummaryJob(ctx, window.TradeDate)
 		if err == nil {
 			return job, nil
 		}
-		return DailySummaryJob{TradeDate: window.TradeDate, Status: "running", Stage: "preparing", Message: "AI总结正在后台运行，可稍后回来查看"}, nil
+		return DailySummaryJob{TradeDate: window.TradeDate, WindowStart: window.Start, WindowEnd: window.End, FreshnessRule: window.Rule, Status: "running", Stage: "preparing", Message: "AI总结正在后台运行，可稍后回来查看"}, nil
 	}
 	if !force {
-		summary, err := a.GetTodaySummary(ctx)
+		summary, err := a.getSummaryForWindow(ctx, window)
 		if err != nil {
 			return DailySummaryJob{}, err
 		}
@@ -196,25 +246,31 @@ func (a *Automation) StartTodaySummary(ctx context.Context, force bool) (DailySu
 
 	now := time.Now().UTC()
 	job := DailySummaryJob{
-		TradeDate: window.TradeDate,
-		Status:    "running",
-		Stage:     "preparing",
-		Message:   "任务已提交，预计需要几分钟；可以先浏览其他页面，稍后回来查看结果",
-		StartedAt: now,
-		UpdatedAt: now,
+		TradeDate:     window.TradeDate,
+		WindowStart:   window.Start,
+		WindowEnd:     window.End,
+		FreshnessRule: window.Rule,
+		Status:        "running",
+		Stage:         "preparing",
+		Message:       "任务已提交，预计需要几分钟；可以先浏览其他页面，稍后回来查看结果",
+		StartedAt:     now,
+		UpdatedAt:     now,
 	}
 	job, err := a.store.SaveDailySummaryJob(ctx, job)
 	if err != nil {
 		return DailySummaryJob{}, err
 	}
 	a.dailySummaryRunning = true
-	go a.runDailySummaryJob(job)
+	go a.runDailySummaryJob(job, window)
 	return job, nil
 }
 
 func cachedDailySummaryJob(summary DailySummary) DailySummaryJob {
 	return DailySummaryJob{
 		TradeDate:        summary.TradeDate,
+		WindowStart:      summary.WindowStart,
+		WindowEnd:        summary.WindowEnd,
+		FreshnessRule:    summary.FreshnessRule,
 		Status:           "succeeded",
 		Stage:            "completed",
 		CompletedAuthors: summary.AuthorCount,
@@ -228,13 +284,17 @@ func cachedDailySummaryJob(summary DailySummary) DailySummaryJob {
 	}
 }
 
+func idleDailySummaryJob(window reviewFreshnessWindow) DailySummaryJob {
+	return DailySummaryJob{TradeDate: window.TradeDate, WindowStart: window.Start, WindowEnd: window.End, FreshnessRule: window.Rule, Status: "idle", Stage: "idle", Message: "尚未生成当前时间窗口的大V观点总结"}
+}
+
 func (a *Automation) dailySummaryJobIsRunning() bool {
 	a.dailySummaryJobMu.Lock()
 	defer a.dailySummaryJobMu.Unlock()
 	return a.dailySummaryRunning
 }
 
-func (a *Automation) runDailySummaryJob(job DailySummaryJob) {
+func (a *Automation) runDailySummaryJob(job DailySummaryJob, window reviewFreshnessWindow) {
 	defer func() {
 		a.dailySummaryJobMu.Lock()
 		a.dailySummaryRunning = false
@@ -260,7 +320,7 @@ func (a *Automation) runDailySummaryJob(job DailySummaryJob) {
 		_, _ = a.store.SaveDailySummaryJob(persistCtx, job)
 	}
 
-	summary, err := a.summarizeToday(ctx, update)
+	summary, err := a.summarizeWindow(ctx, window, update)
 	completedAt := time.Now().UTC()
 	job.UpdatedAt = completedAt
 	job.CompletedAt = completedAt
@@ -288,6 +348,18 @@ func (a *Automation) SummarizeToday(ctx context.Context) (DailySummary, error) {
 }
 
 func (a *Automation) summarizeToday(ctx context.Context, progress dailySummaryProgress) (DailySummary, error) {
+	return a.summarizeWindow(ctx, effectiveReviewWindow(time.Now()), progress)
+}
+
+func (a *Automation) SummarizeWindow(ctx context.Context, start, end time.Time) (DailySummary, error) {
+	window, err := selectedReviewWindow(start, end)
+	if err != nil {
+		return DailySummary{}, err
+	}
+	return a.summarizeWindow(ctx, window, nil)
+}
+
+func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshnessWindow, progress dailySummaryProgress) (DailySummary, error) {
 	if a.store == nil {
 		return DailySummary{}, errors.New("复盘日记存储不可用")
 	}
@@ -298,11 +370,10 @@ func (a *Automation) summarizeToday(ctx context.Context, progress dailySummaryPr
 	defer a.dailySummaryMu.Unlock()
 
 	now := time.Now()
-	window := effectiveReviewWindow(now)
 	if progress != nil {
 		progress("preparing", 0, 0, 0, "正在筛选具有时效性的文章并按作者分组")
 	}
-	posts, err := a.store.ListPostsBetween(ctx, window.Start, window.End.Add(time.Second), maxDailySummaryPosts)
+	posts, err := a.store.ListPostsBetween(ctx, window.Start, window.End, maxDailySummaryPosts)
 	if err != nil {
 		return DailySummary{}, err
 	}
@@ -411,32 +482,125 @@ func (a *Automation) summarizeToday(ctx context.Context, progress dailySummaryPr
 func effectiveReviewWindow(now time.Time) reviewFreshnessWindow {
 	location := shanghaiLocation()
 	local := now.In(location)
-	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
-	window := reviewFreshnessWindow{
-		TradeDate: dayStart.Format("2006-01-02"),
-		End:       local,
+	dayStart := dateOnly(local)
+	marketClose := dayStart.Add(15 * time.Hour)
+
+	// A summary is built from one completed overnight window: after the most
+	// recent close and until the next trading day's opening bell. During a
+	// session (or before its open), keep the latest completed window; after the
+	// close, start the new window immediately.
+	var sessionDate, nextDate time.Time
+	switch {
+	case isAStockTradingDay(dayStart) && !local.Before(marketClose):
+		sessionDate = dayStart
+		nextDate = nextTradingDay(dayStart)
+	case isAStockTradingDay(dayStart):
+		nextDate = dayStart
+		sessionDate = previousTradingDay(dayStart)
+	default:
+		nextDate = nextTradingDay(dayStart)
+		sessionDate = previousTradingDay(dayStart)
 	}
-	if local.Weekday() == time.Saturday || local.Weekday() == time.Sunday {
-		window.Start = previousWeekday(dayStart)
-		window.Rule = "非交易日仅保留最近一个交易日及其后发布的文章"
-		return window
+	start := sessionDate.Add(15 * time.Hour)
+	end := nextDate.Add(9*time.Hour + 30*time.Minute)
+	tradeDate := sessionDate.Format("2006-01-02")
+	rule := "最近交易日收盘后至下一交易日开盘前；周末和节假日自动延长"
+	if isAStockTradingDay(dayStart) && !local.Before(marketClose) {
+		rule = "今日收盘后至下一交易日开盘前；周末和节假日自动延长"
 	}
-	window.Start = previousWeekday(dayStart)
-	marketOpen := dayStart.Add(9*time.Hour + 30*time.Minute)
-	if local.Before(marketOpen) {
-		window.Rule = "开盘前仅保留上一交易日及今日盘前文章，排除上上个交易日及更早内容"
-	} else {
-		window.Rule = "开盘后仅保留上一交易日及今日文章，排除上上个交易日及更早内容"
+	return reviewFreshnessWindow{TradeDate: tradeDate, Start: start, End: end, Rule: rule}
+}
+
+func customReviewWindow(start, end time.Time) (reviewFreshnessWindow, error) {
+	if start.IsZero() || end.IsZero() {
+		return reviewFreshnessWindow{}, errors.New("时间窗口不能为空")
 	}
-	return window
+	start = start.In(shanghaiLocation())
+	end = end.In(shanghaiLocation())
+	if !start.Before(end) {
+		return reviewFreshnessWindow{}, errors.New("开始时间必须早于结束时间")
+	}
+	if end.Sub(start) > 90*24*time.Hour {
+		return reviewFreshnessWindow{}, errors.New("自定义时间窗口不能超过90天")
+	}
+	return reviewFreshnessWindow{
+		TradeDate: start.Format("2006-01-02"),
+		Start:     start,
+		End:       end,
+		Rule:      "自定义文章时间窗口",
+	}, nil
+}
+
+func selectedReviewWindow(start, end time.Time) (reviewFreshnessWindow, error) {
+	window, err := customReviewWindow(start, end)
+	if err != nil {
+		return reviewFreshnessWindow{}, err
+	}
+	defaultWindow := effectiveReviewWindow(time.Now())
+	if window.Start.Equal(defaultWindow.Start) && window.End.Equal(defaultWindow.End) {
+		return defaultWindow, nil
+	}
+	return window, nil
+}
+
+func dateOnly(value time.Time) time.Time {
+	location := shanghaiLocation()
+	local := value.In(location)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+}
+
+// A-share exchanges are closed on weekends and the statutory holiday ranges
+// below. The list is kept locally so summary generation remains deterministic
+// and does not depend on a third-party calendar endpoint. Add each year's
+// exchange holiday announcement here when it is published.
+var aStockHolidayRanges = [][2]string{
+	{"2025-01-01", "2025-01-01"},
+	{"2025-01-28", "2025-02-04"},
+	{"2025-04-04", "2025-04-06"},
+	{"2025-05-01", "2025-05-05"},
+	{"2025-05-31", "2025-06-02"},
+	{"2025-10-01", "2025-10-08"},
+	{"2026-01-01", "2026-01-03"},
+	{"2026-02-15", "2026-02-23"},
+	{"2026-04-04", "2026-04-06"},
+	{"2026-05-01", "2026-05-05"},
+	{"2026-06-19", "2026-06-21"},
+	{"2026-09-25", "2026-09-27"},
+	{"2026-10-01", "2026-10-07"},
+}
+
+func isAStockTradingDay(value time.Time) bool {
+	day := dateOnly(value)
+	date := day.Format("2006-01-02")
+	for _, holiday := range aStockHolidayRanges {
+		if date >= holiday[0] && date <= holiday[1] {
+			return false
+		}
+	}
+	// Mainland exchanges stay closed on weekends even when an adjusted public
+	// holiday designates that weekend as a working day.
+	if day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+		return false
+	}
+	return true
+}
+
+func previousTradingDay(value time.Time) time.Time {
+	day := dateOnly(value)
+	for day = day.AddDate(0, 0, -1); !isAStockTradingDay(day); day = day.AddDate(0, 0, -1) {
+	}
+	return day
+}
+
+func nextTradingDay(value time.Time) time.Time {
+	day := dateOnly(value)
+	for day = day.AddDate(0, 0, 1); !isAStockTradingDay(day); day = day.AddDate(0, 0, 1) {
+	}
+	return day
 }
 
 func previousWeekday(dayStart time.Time) time.Time {
-	day := dayStart.AddDate(0, 0, -1)
-	for day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
-		day = day.AddDate(0, 0, -1)
-	}
-	return day
+	return previousTradingDay(dayStart)
 }
 
 func shanghaiLocation() *time.Location {
@@ -711,13 +875,15 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
 13. verification_checklist 给出5至10条次日可以逐项核对的信号，优先关注主线强弱、核心股反馈、容量/高度/补涨关系、分歧修复、负反馈扩散和量价承接。
 14. evidence 使用“[作者] 观点摘要”的短句，不能杜撰原文引语。limitations 要主动说明样本数量、作者同质化、数据缺口和低置信度结论。
 15. 语言应简洁、专业、可复盘。避免空泛表述，避免“建议买入/卖出”，避免把大V共识当作事实真相。
+16. executive_summary、market_framework、market_analysis、tomorrow_outlook 是四个独立的跨作者综合结论板块。必须先消化全部有效作者观点，再直接输出统一、客观、简洁的归纳结果；不得按作者逐人解释，不得出现“作者甲认为”“某作者指出”“A和B都认为”等串联作者的表达，不得罗列作者姓名或票数。作者归属和证据只放在 consensus、disagreements、directions、个股观点及 evidence 字段中。
+17. 上述四个综合字段仍须区分盘面事实、作者共同解释与次日推演；“客观”指不按作者复述和不带个人口吻，不代表可以把作者共识写成未经验证的市场事实。内容以简明总结为主，避免重复同一结论。
 
 只返回严格JSON，不要Markdown，不要解释，字段必须完整：
 {
-  "executive_summary":"150至300字的今日核心结论，突出最强共识、最大分歧和明日核心变量",
+  "executive_summary":"一句话式的跨作者综合市场结论，直接总结市场状态和核心变量，不出现作者姓名或逐人观点",
   "market_regime":"用一个短语概括情绪/周期阶段，例如修复、分歧、加速、退潮或混沌；证据不足写样本不足",
-  "market_analysis":"今日盘面结构分析，说明主线、支线、情绪、核心与后排关系，以及文章共同认可的驱动",
-  "market_framework":{"cycle":"周期位置与依据","capital_pricing":"资金奖励与惩罚的交易特征","direction_competition":"主线、支线和潜在切换关系","trading_method":"与当前周期匹配的观察和执行方法"},
+  "market_analysis":"跨作者综合后的今日盘面结构结论，简洁说明主线、支线、情绪、核心与后排关系，不按作者解释",
+  "market_framework":{"cycle":"综合归纳的周期位置与依据","capital_pricing":"综合归纳的资金奖励与惩罚特征","direction_competition":"综合归纳的主线、支线和切换关系","trading_method":"综合归纳的观察与执行方法"},
   "consensus":[{"topic":"共识主题","conclusion":"跨作者共同结论","support_count":2,"authors":["作者"],"evidence":["[作者] 观点摘要"]}],
   "disagreements":[{"topic":"分歧主题","views":["观点A","观点B"],"authors":["作者"],"positions":[{"author":"作者","stance":"看强/中性/谨慎等作者真实立场","view":"该作者的具体判断","evidence":"[作者] 证据摘要"}]}],
   "scenarios":[
@@ -728,7 +894,7 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
   "directions":[{"name":"题材或风格方向","stance":"优先观察/等待证明/谨慎追高/事件博弈/回避","summary":"方向定位与竞争关系","supporting_authors":["作者"],"opposing_authors":["作者"],"stocks":["原观点卡明确提到的个股"],"trigger":"转强或延续确认条件","invalidation":"失效条件","risks":["风险"]}],
   "today_surprises":[{"name":"个股名","symbol":"仅在观点卡明确给出时填写","logic":"为何超预期","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"今日被确认的信号","invalidation":"后续什么现象会否定该判断","risk":"主要风险"}],
   "tomorrow_focus":[{"name":"个股名","symbol":"仅在观点卡明确给出时填写","logic":"为何进入明日预期","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"明日需要出现的确认信号","invalidation":"明日失效条件","risk":"主要风险"}],
-  "tomorrow_outlook":"按基础情景、偏强情景、偏弱情景描述明日预期和最关键变量",
+  "tomorrow_outlook":"跨作者综合后的明日预期，简洁概括基础路径和最关键验证变量，不按作者解释；详细三情景由 scenarios 承载",
   "tomorrow_playbook":{"pre_open":["竞价/盘前观察"],"opening":["开盘前30分钟观察"],"intraday":["盘中确认"],"close":["收盘验证"]},
   "catalysts":["观点卡共同提及或可直接归纳的催化；不确定则说明"],
   "risks":["共识交易与盘面的主要风险"],

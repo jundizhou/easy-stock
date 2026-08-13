@@ -102,6 +102,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		);
 		CREATE TABLE IF NOT EXISTS review_daily_summary_jobs (
 			trade_date TEXT PRIMARY KEY,
+			window_start TEXT NOT NULL DEFAULT '',
+			window_end TEXT NOT NULL DEFAULT '',
+			freshness_rule TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL,
 			stage TEXT NOT NULL,
 			completed_authors INTEGER NOT NULL DEFAULT 0,
@@ -124,6 +127,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		`ALTER TABLE review_posts ADD COLUMN ai_analyzed_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE review_posts ADD COLUMN ai_error TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE review_subscriptions ADD COLUMN config_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE review_daily_summary_jobs ADD COLUMN window_start TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE review_daily_summary_jobs ADD COLUMN window_end TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE review_daily_summary_jobs ADD COLUMN freshness_rule TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, alterErr := s.db.ExecContext(ctx, statement); alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
 			return fmt.Errorf("migrate review database columns: %w", alterErr)
@@ -280,12 +286,14 @@ func (s *Store) SaveDailySummaryJob(ctx context.Context, job DailySummaryJob) (D
 		job.UpdatedAt = now
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO review_daily_summary_jobs (
-		trade_date,status,stage,completed_authors,total_authors,article_count,message,error,started_at,updated_at,completed_at
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(trade_date) DO UPDATE SET
+		trade_date,window_start,window_end,freshness_rule,status,stage,completed_authors,total_authors,article_count,message,error,started_at,updated_at,completed_at
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(trade_date) DO UPDATE SET
+		window_start=excluded.window_start, window_end=excluded.window_end, freshness_rule=excluded.freshness_rule,
 		status=excluded.status, stage=excluded.stage, completed_authors=excluded.completed_authors,
 		total_authors=excluded.total_authors, article_count=excluded.article_count, message=excluded.message,
 		error=excluded.error, started_at=excluded.started_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at`,
-		job.TradeDate, job.Status, job.Stage, job.CompletedAuthors, job.TotalAuthors, job.ArticleCount,
+		job.TradeDate, formatOptionalTime(job.WindowStart), formatOptionalTime(job.WindowEnd), job.FreshnessRule,
+		job.Status, job.Stage, job.CompletedAuthors, job.TotalAuthors, job.ArticleCount,
 		job.Message, job.Error, formatOptionalTime(job.StartedAt), formatOptionalTime(job.UpdatedAt), formatOptionalTime(job.CompletedAt))
 	if err != nil {
 		return DailySummaryJob{}, fmt.Errorf("save daily summary job: %w", err)
@@ -295,14 +303,16 @@ func (s *Store) SaveDailySummaryJob(ctx context.Context, job DailySummaryJob) (D
 
 func (s *Store) GetDailySummaryJob(ctx context.Context, tradeDate string) (DailySummaryJob, error) {
 	var job DailySummaryJob
-	var startedAt, updatedAt, completedAt string
-	err := s.db.QueryRowContext(ctx, `SELECT trade_date,status,stage,completed_authors,total_authors,article_count,message,error,started_at,updated_at,completed_at
+	var windowStart, windowEnd, startedAt, updatedAt, completedAt string
+	err := s.db.QueryRowContext(ctx, `SELECT trade_date,window_start,window_end,freshness_rule,status,stage,completed_authors,total_authors,article_count,message,error,started_at,updated_at,completed_at
 		FROM review_daily_summary_jobs WHERE trade_date=?`, strings.TrimSpace(tradeDate)).Scan(
-		&job.TradeDate, &job.Status, &job.Stage, &job.CompletedAuthors, &job.TotalAuthors, &job.ArticleCount,
+		&job.TradeDate, &windowStart, &windowEnd, &job.FreshnessRule, &job.Status, &job.Stage, &job.CompletedAuthors, &job.TotalAuthors, &job.ArticleCount,
 		&job.Message, &job.Error, &startedAt, &updatedAt, &completedAt)
 	if err != nil {
 		return DailySummaryJob{}, err
 	}
+	job.WindowStart, _ = time.Parse(time.RFC3339, windowStart)
+	job.WindowEnd, _ = time.Parse(time.RFC3339, windowEnd)
 	job.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	job.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 	job.CompletedAt, _ = time.Parse(time.RFC3339, completedAt)

@@ -555,15 +555,18 @@ func postsFromBrowserCollection(sub Subscription, collection hermesXueqiuCollect
 		if len([]rune(body)) > 120000 {
 			body = string([]rune(body)[:120000])
 		}
-		publishedAt := time.Now()
+		publishedAt := time.Time{}
 		if value := strings.TrimSpace(article.PublishedAt); value != "" {
 			if parsedTime, timeErr := time.Parse(time.RFC3339, value); timeErr == nil {
 				publishedAt = parsedTime
-			} else if parsedTime, timeErr := time.ParseInLocation("2006-01-02 15:04", value, time.Local); timeErr == nil {
+			} else if parsedTime, timeErr := time.ParseInLocation("2006-01-02 15:04", value, shanghaiLocation()); timeErr == nil {
 				publishedAt = parsedTime
-			} else if parsedTime, timeErr := time.ParseInLocation("2006-01-02", value, time.Local); timeErr == nil {
+			} else if parsedTime, timeErr := time.ParseInLocation("2006-01-02", value, shanghaiLocation()); timeErr == nil {
 				publishedAt = parsedTime
 			}
+		}
+		if publishedAt.IsZero() {
+			continue
 		}
 		post := newPost(sub.Source, parsed.String(), firstNonEmpty(collection.AuthorName, sub.Name), title, body, "", publishedAt)
 		post.Digest = truncateRunes(body, 180)
@@ -858,10 +861,10 @@ func (a *Automation) importWechat(ctx context.Context, base, token, link string)
 	if !payload.Success {
 		return Post{}, errors.New(firstNonEmpty(payload.Error, "微信文章解析失败"))
 	}
-	published := time.Now()
-	if payload.Data.PublishTime > 0 {
-		published = time.Unix(payload.Data.PublishTime, 0)
+	if payload.Data.PublishTime <= 0 {
+		return Post{}, errors.New("微信公众号响应没有可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
 	}
+	published := time.Unix(payload.Data.PublishTime, 0)
 	return newPost("wechat", link, payload.Data.Author, payload.Data.Title, payload.Data.PlainContent, "", published), nil
 }
 func lastPathPart(path string) string {

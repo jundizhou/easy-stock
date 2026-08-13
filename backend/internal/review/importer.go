@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,12 +21,14 @@ import (
 const maxArticleBytes = 4 << 20
 
 var (
-	tagPattern       = regexp.MustCompile(`(?is)<[^>]+>`)
-	unsafePattern    = regexp.MustCompile(`(?is)<(?:script|style|noscript|svg)[^>]*>.*?</(?:script|style|noscript|svg)>`)
-	lineBreakPattern = regexp.MustCompile(`(?is)</?(p|div|article|section|h[1-6]|li|br)[^>]*>`)
-	titlePattern     = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	spacePattern     = regexp.MustCompile(`[\t\r ]+`)
-	blankLinePattern = regexp.MustCompile(`\n{3,}`)
+	tagPattern           = regexp.MustCompile(`(?is)<[^>]+>`)
+	unsafePattern        = regexp.MustCompile(`(?is)<(?:script|style|noscript|svg)[^>]*>.*?</(?:script|style|noscript|svg)>`)
+	lineBreakPattern     = regexp.MustCompile(`(?is)</?(p|div|article|section|h[1-6]|li|br)[^>]*>`)
+	titlePattern         = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	publishedPattern     = regexp.MustCompile(`(?is)(?:publish_time|create_time|\bct\b)\s*[:=]\s*["']?(\d{10,13})`)
+	publishedDatePattern = regexp.MustCompile(`(?is)["']datePublished["']\s*:\s*["']([^"']+)["']`)
+	spacePattern         = regexp.MustCompile(`[\t\r ]+`)
+	blankLinePattern     = regexp.MustCompile(`\n{3,}`)
 )
 
 type Importer struct {
@@ -94,10 +97,10 @@ func (i *Importer) importWeChat(ctx context.Context, articleURL string) (Post, e
 	if !payload.Success {
 		return Post{}, errors.New(firstNonEmpty(payload.Error, "微信公众号文章解析失败"))
 	}
-	publishedAt := time.Now()
-	if payload.Data.PublishTime > 0 {
-		publishedAt = time.Unix(payload.Data.PublishTime, 0)
+	if payload.Data.PublishTime <= 0 {
+		return Post{}, errors.New("微信公众号响应没有可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
 	}
+	publishedAt := time.Unix(payload.Data.PublishTime, 0)
 	return newPost("wechat", articleURL, payload.Data.Author, payload.Data.Title, payload.Data.PlainContent, "", publishedAt), nil
 }
 
@@ -148,9 +151,45 @@ func (i *Importer) importPublicPage(ctx context.Context, articleURL, source stri
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
 	}
-	post := newPost(source, finalURL, author, title, content, cover, time.Now())
+	publishedAt, ok := publicPagePublishedAt(htmlText)
+	if !ok {
+		return Post{}, errors.New("没有从原文识别到可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
+	}
+	post := newPost(source, finalURL, author, title, content, cover, publishedAt)
 	post.Digest = description
 	return post, nil
+}
+
+func publicPagePublishedAt(document string) (time.Time, bool) {
+	for _, attribute := range []string{"article:published_time", "og:published_time", "datePublished", "publishdate", "pubdate"} {
+		if value := strings.TrimSpace(firstNonEmpty(metaValue(document, "property", attribute), metaValue(document, "name", attribute), metaValue(document, "itemprop", attribute))); value != "" {
+			for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02 15:04"} {
+				if parsed, err := time.ParseInLocation(layout, value, shanghaiLocation()); err == nil {
+					return parsed, true
+				}
+			}
+		}
+	}
+	if match := publishedDatePattern.FindStringSubmatch(document); len(match) > 1 {
+		for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02 15:04"} {
+			if parsed, err := time.ParseInLocation(layout, strings.TrimSpace(match[1]), shanghaiLocation()); err == nil {
+				return parsed, true
+			}
+		}
+	}
+	match := publishedPattern.FindStringSubmatch(document)
+	if len(match) < 2 {
+		return time.Time{}, false
+	}
+	seconds := strings.TrimSpace(match[1])
+	if len(seconds) == 13 {
+		seconds = seconds[:10]
+	}
+	unixSeconds, err := strconv.ParseInt(seconds, 10, 64)
+	if err != nil || unixSeconds <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(unixSeconds, 0), true
 }
 
 func classifyURL(raw string) (*url.URL, string, error) {

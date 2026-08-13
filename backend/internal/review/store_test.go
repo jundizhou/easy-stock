@@ -41,3 +41,30 @@ func TestStorePersistsAndFiltersReviewPosts(t *testing.T) {
 		t.Fatalf("unexpected authors: err=%v authors=%+v", err, authors)
 	}
 }
+
+func TestStorePersistsDailySummaryJobWindow(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "reviews.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	start := time.Date(2026, 8, 7, 15, 0, 0, 0, location)
+	end := time.Date(2026, 8, 10, 9, 30, 0, 0, location)
+	saved, err := store.SaveDailySummaryJob(context.Background(), DailySummaryJob{
+		TradeDate:     "2026-08-07",
+		WindowStart:   start,
+		WindowEnd:     end,
+		FreshnessRule: "自定义文章时间窗口",
+		Status:        "running",
+		Stage:         "preparing",
+		Message:       "处理中",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !saved.WindowStart.Equal(start) || !saved.WindowEnd.Equal(end) || saved.FreshnessRule != "自定义文章时间窗口" {
+		t.Fatalf("saved job = %+v", saved)
+	}
+}

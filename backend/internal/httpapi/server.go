@@ -351,6 +351,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts/{id}", s.reviewPost)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary", s.reviewDailySummaryGet)
+	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/window", s.reviewDailySummaryWindow)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/status", s.reviewDailySummaryStatus)
 	s.mux.HandleFunc("POST /api/v1/reviews/daily-summary", s.reviewDailySummaryCreate)
 	s.mux.HandleFunc("POST /api/v1/reviews/import", s.reviewImport)

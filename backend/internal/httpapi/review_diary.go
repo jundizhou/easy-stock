@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -249,12 +250,30 @@ func (s *Server) reviewDailySummaryGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "AI总结服务不可用")
 		return
 	}
-	summary, err := s.reviewAutomation.GetTodaySummary(r.Context())
+	start, end, err := reviewSummaryWindowFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var summary *review.DailySummary
+	if start.IsZero() {
+		summary, err = s.reviewAutomation.GetTodaySummary(r.Context())
+	} else {
+		summary, err = s.reviewAutomation.GetSummaryForWindow(r.Context(), start, end)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": summary})
+}
+
+func (s *Server) reviewDailySummaryWindow(w http.ResponseWriter, _ *http.Request) {
+	if s.reviewAutomation == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI总结服务不可用")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.reviewAutomation.DefaultSummaryWindow()})
 }
 
 func (s *Server) reviewDailySummaryCreate(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +282,9 @@ func (s *Server) reviewDailySummaryCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var request struct {
-		Force bool `json:"force"`
+		Force       bool      `json:"force"`
+		WindowStart time.Time `json:"window_start"`
+		WindowEnd   time.Time `json:"window_end"`
 	}
 	if r.ContentLength != 0 {
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
@@ -279,10 +300,16 @@ func (s *Server) reviewDailySummaryCreate(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := contextWithTimeout(r, 10*time.Second)
 	defer cancel()
-	job, err := s.reviewAutomation.StartTodaySummary(ctx, request.Force)
+	var job review.DailySummaryJob
+	var err error
+	if request.WindowStart.IsZero() && request.WindowEnd.IsZero() {
+		job, err = s.reviewAutomation.StartTodaySummary(ctx, request.Force)
+	} else {
+		job, err = s.reviewAutomation.StartTodaySummaryWithWindow(ctx, request.Force, request.WindowStart, request.WindowEnd)
+	}
 	if err != nil {
 		status := http.StatusBadGateway
-		if strings.Contains(err.Error(), "请先在设置中配置模型") {
+		if strings.Contains(err.Error(), "请先在设置中配置模型") || isReviewWindowValidationError(err) {
 			status = http.StatusBadRequest
 		}
 		writeError(w, status, err.Error())
@@ -296,12 +323,60 @@ func (s *Server) reviewDailySummaryStatus(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusServiceUnavailable, "AI总结服务不可用")
 		return
 	}
-	job, err := s.reviewAutomation.GetTodaySummaryJob(r.Context())
+	start, end, err := reviewSummaryWindowFromQuery(r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var job review.DailySummaryJob
+	if start.IsZero() {
+		job, err = s.reviewAutomation.GetTodaySummaryJob(r.Context())
+	} else {
+		job, err = s.reviewAutomation.GetSummaryJobForWindow(r.Context(), start, end)
+	}
+	if err != nil {
+		status := http.StatusInternalServerError
+		if isReviewWindowValidationError(err) {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": job})
+}
+
+func reviewSummaryWindowFromQuery(r *http.Request) (time.Time, time.Time, error) {
+	startValue := strings.TrimSpace(r.URL.Query().Get("window_start"))
+	endValue := strings.TrimSpace(r.URL.Query().Get("window_end"))
+	if startValue == "" && endValue == "" {
+		return time.Time{}, time.Time{}, nil
+	}
+	if startValue == "" || endValue == "" {
+		return time.Time{}, time.Time{}, errors.New("window_start 和 window_end 必须同时提供")
+	}
+	start, err := time.Parse(time.RFC3339, startValue)
+	if err != nil {
+		return time.Time{}, time.Time{}, errors.New("window_start 必须是 RFC3339 时间")
+	}
+	end, err := time.Parse(time.RFC3339, endValue)
+	if err != nil {
+		return time.Time{}, time.Time{}, errors.New("window_end 必须是 RFC3339 时间")
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, errors.New("开始时间必须早于结束时间")
+	}
+	if end.Sub(start) > 90*24*time.Hour {
+		return time.Time{}, time.Time{}, errors.New("自定义时间窗口不能超过90天")
+	}
+	return start, end, nil
+}
+
+func isReviewWindowValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "时间窗口") || strings.Contains(message, "开始时间") || strings.Contains(message, "window_start") || strings.Contains(message, "window_end")
 }
 
 func positiveQueryInt(r *http.Request, name string, fallback, maximum int) (int, error) {

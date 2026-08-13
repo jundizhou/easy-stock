@@ -2,6 +2,8 @@ import {
 	BookOpen,
 	BrainCircuit,
 	CalendarDays,
+	ChevronDown,
+	ChevronRight,
 	ExternalLink,
 	FileInput,
 	GitCompareArrows,
@@ -20,7 +22,7 @@ import {
 	Zap,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { AppSettings, BackendConfig, ReviewAuthor, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, ReviewAuthor, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 
 type Props = {
 	config: BackendConfig | null;
@@ -29,6 +31,7 @@ type Props = {
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type ReviewView = 'summary' | 'authors' | 'library';
+type SummaryWindowDraft = { start: string; end: string };
 
 const sourceTabs: Array<{ id: string; name: string }> = [
 	{ id: 'all', name: '全部' },
@@ -64,8 +67,10 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	const [dailySummaryJob, setDailySummaryJob] = useState<ReviewDailySummaryJob | null>(null);
 	const [reviewView, setReviewView] = useState<ReviewView>('library');
 	const [summarizingDaily, setSummarizingDaily] = useState(false);
+	const [loadingSummaryWindow, setLoadingSummaryWindow] = useState(false);
 	const [notice, setNotice] = useState('');
 	const [error, setError] = useState('');
+	const [summaryWindow, setSummaryWindow] = useState<SummaryWindowDraft | null>(null);
 
 	const loadDiary = useCallback(async () => {
 		if (!config) return;
@@ -117,10 +122,12 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		let active = true;
 		const poll = async () => {
 			try {
-				const payload = await requestJSON<{ data: ReviewDailySummaryJob }>(config, '/api/v1/reviews/daily-summary/status');
+				const statusPath = summaryWindowQuery(dailySummaryJob?.window_start, dailySummaryJob?.window_end, '/api/v1/reviews/daily-summary/status');
+				const payload = await requestJSON<{ data: ReviewDailySummaryJob }>(config, statusPath);
 				if (!active) return;
 				if (payload.data.status === 'succeeded' && payload.data.summary_available) {
-					const summaryPayload = await requestJSON<{ data: ReviewDailySummary | null }>(config, '/api/v1/reviews/daily-summary');
+					const summaryPath = summaryWindowQuery(payload.data.window_start, payload.data.window_end, '/api/v1/reviews/daily-summary');
+					const summaryPayload = await requestJSON<{ data: ReviewDailySummary | null }>(config, summaryPath);
 					if (!active) return;
 					setDailySummary(summaryPayload.data || null);
 					setNotice('今日大V观点总结已完成并缓存，可随时查看结果');
@@ -133,7 +140,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		void poll();
 		const timer = window.setInterval(() => void poll(), 3000);
 		return () => { active = false; window.clearInterval(timer); };
-	}, [config, dailySummaryRunning]);
+	}, [config, dailySummaryJob?.window_end, dailySummaryJob?.window_start, dailySummaryRunning]);
 
 	const selectedPost = useMemo(
 		() => posts.find((post) => post.id === selectedID) || posts[0] || null,
@@ -181,7 +188,47 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		try { const payload = await requestJSON<{ data: ReviewPost }>(config, `/api/v1/reviews/posts/${id}/analyze`, { method: 'POST' }); setPosts((current) => current.map((post) => post.id === id ? payload.data : post)); } catch (cause) { setError(cause instanceof Error ? readableAPIError(cause.message) : 'AI 提炼失败'); } finally { setAnalyzing(''); }
 	};
 
-	const summarizeToday = async (regenerate = false) => {
+	const fallbackSummaryWindow = (): SummaryWindowDraft => {
+		const now = new Date();
+		const shanghai = shanghaiDateTimeParts(now);
+		const today = new Date(Date.UTC(shanghai.year, shanghai.month - 1, shanghai.day));
+		const afterClose = shanghai.hour >= 15;
+		const isWeekday = today.getUTCDay() !== 0 && today.getUTCDay() !== 6;
+		let sessionDate = isWeekday && afterClose ? today : previousWeekday(today);
+		let nextDate = isWeekday && !afterClose ? today : nextWeekday(sessionDate);
+		if (!isWeekday) {
+			sessionDate = previousWeekday(today);
+			nextDate = nextWeekday(today);
+		}
+		return {
+			start: formatCalendarDateTime(sessionDate, 15, 0),
+			end: formatCalendarDateTime(nextDate, 9, 30),
+		};
+	};
+
+	const openSummaryWindow = async () => {
+		if (dailySummaryRunning) {
+			window.setTimeout(() => document.getElementById('daily-summary-job')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 30);
+			return;
+		}
+		if (!config) return;
+		setLoadingSummaryWindow(true);
+		setError('');
+		try {
+			const payload = await requestJSON<{ data: ReviewDailySummaryWindow }>(config, '/api/v1/reviews/daily-summary/window');
+			setSummaryWindow({
+				start: toDateTimeLocal(new Date(payload.data.window_start)),
+				end: toDateTimeLocal(new Date(payload.data.window_end)),
+			});
+		} catch (cause) {
+			setSummaryWindow(fallbackSummaryWindow());
+			setError(cause instanceof Error ? readableAPIError(cause.message) : '默认复盘时间加载失败，请检查后手动调整');
+		} finally {
+			setLoadingSummaryWindow(false);
+		}
+	};
+
+	const summarizeToday = async (regenerate = false, selectedWindow?: SummaryWindowDraft) => {
 		if (!config) return;
 		if (dailySummaryRunning) {
 			window.setTimeout(() => document.getElementById('daily-summary-job')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 30);
@@ -192,9 +239,10 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 			window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
 			return;
 		}
+		const chosenWindow = selectedWindow || fallbackSummaryWindow();
 		setSummarizingDaily(true); setError(''); setNotice('');
 		try {
-			const payload = await requestJSON<{ data: ReviewDailySummaryJob }>(config, '/api/v1/reviews/daily-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: regenerate }) });
+			const payload = await requestJSON<{ data: ReviewDailySummaryJob }>(config, '/api/v1/reviews/daily-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: regenerate, window_start: toRFC3339(chosenWindow.start), window_end: toRFC3339(chosenWindow.end) }) });
 			setDailySummaryJob(payload.data);
 			if (payload.data.status === 'succeeded' && payload.data.summary_available) {
 				setReviewView('summary');
@@ -209,6 +257,21 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		} finally {
 			setSummarizingDaily(false);
 		}
+	};
+
+	const confirmSummaryWindow = () => {
+		if (!summaryWindow) return;
+		if (!summaryWindow.start || !summaryWindow.end) {
+			setError('请选择完整的开始和结束时间');
+			return;
+		}
+		if (new Date(`${summaryWindow.start}:00+08:00`) >= new Date(`${summaryWindow.end}:00+08:00`)) {
+			setError('开始时间必须早于结束时间');
+			return;
+		}
+		const chosenWindow = summaryWindow;
+		setSummaryWindow(null);
+		void summarizeToday(true, chosenWindow);
 	};
 
 	const submitImport = async (event: FormEvent) => {
@@ -238,6 +301,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 
 	return (
 		<section className="review-diary">
+			{summaryWindow && <SummaryWindowDialog value={summaryWindow} onChange={setSummaryWindow} onClose={() => setSummaryWindow(null)} onConfirm={confirmSummaryWindow} submitting={summarizingDaily} />}
 			<header className="review-hero">
 				<div>
 					<div className="eyebrow"><BookOpen size={15} aria-hidden="true" />TRADER REVIEW JOURNAL</div>
@@ -245,9 +309,9 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 					<p>先看跨作者结论，再下钻到单个作者与原文证据。</p>
 				</div>
 				<div className="review-hero-actions">
-					<button type="button" className="daily-summary-cta" disabled={summarizingDaily} onClick={() => void summarizeToday()}>
-						<span className="daily-summary-cta-icon">{summarizingDaily || dailySummaryRunning ? <RefreshCw className="spin" size={21} /> : <BrainCircuit size={21} />}</span>
-						<span><strong>{summarizingDaily ? '正在提交后台任务…' : dailySummaryRunning ? `AI复盘生成中 ${dailySummaryJob?.completed_authors || 0}/${dailySummaryJob?.total_authors || '—'}` : dailySummary ? '查看今日综合复盘' : '生成今日综合复盘'}</strong><small>{dailySummaryRunning ? dailySummaryJob?.message || '预计需要几分钟，可稍后回来查看' : '作者观点、共识分歧、三情景与盘中验证一次生成'}</small></span>
+					<button type="button" className="daily-summary-cta" disabled={summarizingDaily || loadingSummaryWindow} onClick={() => void openSummaryWindow()}>
+						<span className="daily-summary-cta-icon">{summarizingDaily || loadingSummaryWindow || dailySummaryRunning ? <RefreshCw className="spin" size={21} /> : <BrainCircuit size={21} />}</span>
+						<span><strong>{summarizingDaily ? '正在提交后台任务…' : loadingSummaryWindow ? '正在计算默认交易时段…' : dailySummaryRunning ? `AI复盘生成中 ${dailySummaryJob?.completed_authors || 0}/${dailySummaryJob?.total_authors || '—'}` : dailySummary ? '重新生成综合复盘' : '生成今日综合复盘'}</strong><small>{dailySummaryRunning ? dailySummaryJob?.message || '预计需要几分钟，可稍后回来查看' : '先选择文章时间窗口，再开始 AI 总结'}</small></span>
 						<Sparkles size={17} />
 					</button>
 					{reviewView === 'library' && <form className="review-import" onSubmit={submitImport}>
@@ -264,18 +328,18 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 				<button type="button" className={reviewView === 'authors' ? 'active' : ''} onClick={() => setReviewView('authors')}><Users size={16} /><span><strong>作者观点</strong><small>{dailySummary?.author_views?.length || 0} 位作者观点卡</small></span></button>
 			</nav>
 
-			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { setReviewView('summary'); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => void summarizeToday(true)} />}
+			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { setReviewView('summary'); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => { const fallback = fallbackSummaryWindow(); setSummaryWindow({ start: dailySummaryJob.window_start ? toDateTimeLocal(new Date(dailySummaryJob.window_start)) : fallback.start, end: dailySummaryJob.window_end ? toDateTimeLocal(new Date(dailySummaryJob.window_end)) : fallback.end }); }} />}
 
 			{error && <div className="review-error"><ShieldAlert size={16} /><span>{error}</span>{!isWechatListUnavailableMessage(error) && <button type="button" onClick={() => void loadDiary()}>刷新页面</button>}</div>}
 			{notice && <div className="review-notice"><Sparkles size={15} /><span>{notice}</span></div>}
 
 			{reviewView === 'summary' && (dailySummary
-				? <DailyViewpointSummary summary={dailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => void summarizeToday(true)} onShowAuthors={() => setReviewView('authors')} />
-				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={() => void summarizeToday()} onOpenLibrary={() => setReviewView('library')} />)}
+				? <DailyViewpointSummary summary={dailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => setSummaryWindow({ start: toDateTimeLocal(new Date(dailySummary.window_start)), end: toDateTimeLocal(new Date(dailySummary.window_end)) })} onShowAuthors={() => setReviewView('authors')} />
+				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} />)}
 
 			{reviewView === 'authors' && (dailySummary?.author_views?.length
 				? <AuthorViewpointLibrary views={dailySummary.author_views} tradeDate={dailySummary.trade_date} />
-				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={() => void summarizeToday()} onOpenLibrary={() => setReviewView('library')} authors />)}
+				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} authors />)}
 
 			{reviewView === 'library' && <>
 				<nav className="review-source-tabs" aria-label="复盘内容平台">
@@ -365,16 +429,16 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 			<div><span><BrainCircuit size={15} />AI DAILY REVIEW</span><h2>{summary.trade_date} 市场复盘与次日剧本</h2><small>{summary.author_count} 位作者 / {summary.article_count} 篇有效文章 · {formatDateTime(summary.generated_at)} 生成</small>{summary.window_start && <small className="daily-summary-window">有效窗口 {formatSummaryWindow(summary.window_start, summary.window_end)} · {summary.freshness_rule}</small>}</div>
 			<div><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
 		</header>
-		<div className="daily-summary-lead"><span>{summary.market_regime || '样本不足'}</span><div><small>一句话市场结论</small><p>{summary.executive_summary}</p></div></div>
-		<section className="daily-summary-block market-framework-block"><header><TrendingUp size={16} /><div><strong>市场四层框架</strong><small>周期位置、资金定价、方向竞争与执行方法分别判断</small></div></header><div className="market-framework-grid"><FrameworkItem label="周期位置" content={framework.cycle} /><FrameworkItem label="资金定价" content={framework.capital_pricing} /><FrameworkItem label="方向竞争" content={framework.direction_competition} /><FrameworkItem label="交易方法" content={framework.trading_method} /></div></section>
+		<section className="daily-summary-block daily-summary-lead"><span>{summary.market_regime || '样本不足'}</span><div><small>一句话市场结论 · 跨作者综合</small><p>{summary.executive_summary}</p></div></section>
+		<section className="daily-summary-block market-framework-block"><header><TrendingUp size={16} /><div><strong>市场四层框架</strong><small>综合所有有效观点，直接归纳周期、资金、方向与执行</small></div></header><div className="market-framework-grid"><FrameworkItem label="周期位置" content={framework.cycle} /><FrameworkItem label="资金定价" content={framework.capital_pricing} /><FrameworkItem label="方向竞争" content={framework.direction_competition} /><FrameworkItem label="交易方法" content={framework.trading_method} /></div></section>
 		<div className="daily-summary-two-column">
-			<SummaryTextCard icon={<TrendingUp size={16} />} title="今日盘面分析" content={summary.market_analysis} />
-			<SummaryTextCard icon={<Target size={16} />} title="明日预期" content={summary.tomorrow_outlook} />
+			<SummaryTextCard icon={<TrendingUp size={16} />} title="今日盘面分析" subtitle="跨作者综合盘面结论" content={summary.market_analysis} />
+			<SummaryTextCard icon={<Target size={16} />} title="明日预期" subtitle="跨作者综合次日推演" content={summary.tomorrow_outlook} />
 		</div>
 		{authorViews.length > 0 && <section className="daily-summary-block author-preview-block"><header><Users size={16} /><div><strong>主要作者观点</strong><small>先看各自最终判断，避免用跨作者结论抹平差异</small></div><button type="button" onClick={onShowAuthors}>查看全部 {authorViews.length} 位</button></header><div className="author-preview-grid">{authorViews.slice(0, 6).map((view) => <article key={`${view.source}-${view.author}`}><div><span className={`author-avatar ${sourceClass(view.source)}`}>{view.author.slice(0, 1)}</span><div><strong>{view.author}</strong><small>{view.source} · {view.confidence || '未评级'}置信度</small></div></div><p>{view.core_view}</p><div>{(view.themes || []).slice(0, 3).map((theme) => <span key={theme}>{theme}</span>)}</div></article>)}</div></section>}
 		<section className="daily-summary-block consensus-block">
-			<header><Zap size={16} /><div><strong>跨作者高频共识</strong><small>至少两位独立作者共同支持，按作者数而非文章数计票</small></div></header>
-			<div className="daily-consensus-grid">{summary.consensus?.length ? summary.consensus.map((item) => <article key={`${item.topic}-${item.conclusion}`}><div><strong>{item.topic}</strong><em>{item.support_count} 位作者</em></div><p>{item.conclusion}</p><small>{item.authors.join(' · ')}</small>{item.evidence?.length > 0 && <ul>{item.evidence.slice(0, 3).map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>}</article>) : <SummaryEmpty text="今日文章尚未形成两位以上作者共同支持的明确共识。" />}</div>
+			<header><Zap size={16} /><div><strong>跨作者高频共识</strong><small>默认只看共识标题，点击后展开结论和依据</small></div></header>
+			<div className="daily-consensus-grid">{summary.consensus?.length ? summary.consensus.map((item) => <details className="daily-consensus-item" key={`${item.topic}-${item.conclusion}`}><summary><strong>{item.topic}</strong><ChevronDown size={16} /></summary><div className="daily-consensus-detail"><p>{item.conclusion}</p><div><em>{item.support_count} 位作者共同支持</em>{item.authors.length > 0 && <small>{item.authors.join(' · ')}</small>}</div>{item.evidence?.length > 0 && <ul>{item.evidence.slice(0, 3).map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>}</div></details>) : <SummaryEmpty text="今日文章尚未形成两位以上作者共同支持的明确共识。" />}</div>
 		</section>
 		<section className="daily-summary-block disagreement-table-block"><header><GitCompareArrows size={16} /><div><strong>共识之外的关键分歧</strong><small>按作者保留原立场，不把分歧平均成一句空泛结论</small></div></header><div className="daily-disagreement-table">{summary.disagreements?.length ? summary.disagreements.map((item) => <article key={item.topic}><h3>{item.topic}</h3>{item.positions?.length ? item.positions.map((position) => <div key={`${position.author}-${position.view}`}><strong>{position.author}</strong><em>{position.stance || '观点'}</em><p>{position.view}</p>{position.evidence && <small>{position.evidence}</small>}</div>) : item.views.map((view, index) => <div key={view}><strong>{item.authors[index] || '作者观点'}</strong><p>{view}</p></div>)}</article>) : <SummaryEmpty text="今日样本未发现清晰的跨作者分歧。" />}</div></section>
 		<section className="daily-summary-block scenario-block"><header><Target size={16} /><div><strong>次日三情景推演</strong><small>预期不是一个点位，而是三条可以被盘面证伪的路径</small></div></header><div className="daily-scenario-grid">{summary.scenarios?.length ? summary.scenarios.map((scenario) => <article className={scenario.key} key={scenario.key}><span>{scenario.name}</span><p>{scenario.summary}</p><dl><div><dt>触发</dt><dd>{scenario.trigger || '未明确'}</dd></div><div><dt>确认</dt><dd>{scenario.confirmation || '未明确'}</dd></div><div><dt>失效</dt><dd>{scenario.invalidation || '未明确'}</dd></div></dl>{scenario.focus?.length > 0 && <footer>{scenario.focus.map((item) => <em key={item}>{item}</em>)}</footer>}</article>) : <SummaryEmpty text="当前样本未形成完整的基础、偏强、偏弱三情景。" />}</div></section>
@@ -418,8 +482,19 @@ function AuthorViewpointCard({ view }: { view: ReviewDailyAuthorView }) {
 	</article>;
 }
 
-function SummaryTextCard({ icon, title, content }: { icon: ReactNode; title: string; content: string }) {
-	return <section className="daily-summary-block summary-text-card"><header>{icon}<strong>{title}</strong></header><p>{content || '文章未形成明确结论。'}</p></section>;
+function SummaryTextCard({ icon, title, subtitle, content }: { icon: ReactNode; title: string; subtitle: string; content: string }) {
+	return <section className="daily-summary-block summary-text-card"><header>{icon}<div><strong>{title}</strong><small>{subtitle}</small></div></header><p>{content || '文章未形成明确结论。'}</p></section>;
+}
+
+function SummaryWindowDialog({ value, onChange, onClose, onConfirm, submitting }: { value: SummaryWindowDraft; onChange: (value: SummaryWindowDraft) => void; onClose: () => void; onConfirm: () => void; submitting: boolean }) {
+	return <div className="summary-window-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+		<section className="summary-window-dialog" role="dialog" aria-modal="true" aria-label="选择 AI 复盘时间窗口">
+			<header><div><span><CalendarDays size={16} />SUMMARY WINDOW</span><h2>选择复盘文章时间</h2><p>默认按最近交易日收盘后至下一交易日开盘前统计，也可以自定义。</p></div><button type="button" onClick={onClose} aria-label="关闭"><ChevronDown size={18} /></button></header>
+			<div className="summary-window-fields"><label><span>开始时间</span><input type="datetime-local" value={value.start} onChange={(event) => onChange({ ...value, start: event.target.value })} /></label><ChevronRight size={18} /><label><span>结束时间</span><input type="datetime-local" value={value.end} onChange={(event) => onChange({ ...value, end: event.target.value })} /></label></div>
+			<div className="summary-window-hint">仅使用该时间窗口内已确认发布时间的文章；默认范围已按周末和 A 股节假日自动延长。</div>
+			<footer><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" onClick={onConfirm} disabled={submitting}><Sparkles size={14} />确认并开始总结</button></footer>
+		</section>
+	</div>;
 }
 
 function StockViewSection({ title, subtitle, items, tone }: { title: string; subtitle: string; items: ReviewDailyStockView[]; tone: string }) {
@@ -485,4 +560,43 @@ function readableAPIError(message: string) {
 function isWechatListUnavailableMessage(message: string) {
 	const normalized = message.toLowerCase();
 	return normalized.includes('微信已停用公众号历史文章列表接口') || normalized.includes('ret=200013') || normalized.includes('freq control');
+}
+
+function toDateTimeLocal(value: Date) {
+	const parts = shanghaiDateTimeParts(value);
+	const pad = (item: number) => String(item).padStart(2, '0');
+	return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
+function toRFC3339(value: string) {
+	return `${value}:00+08:00`;
+}
+
+function summaryWindowQuery(start: string | undefined, end: string | undefined, path: string) {
+	if (!start || !end) return path;
+	const query = new URLSearchParams({ window_start: start, window_end: end });
+	return `${path}?${query.toString()}`;
+}
+
+function shanghaiDateTimeParts(value: Date) {
+	const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(value);
+	const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value || 0);
+	return { year: part('year'), month: part('month'), day: part('day'), hour: part('hour'), minute: part('minute') };
+}
+
+function formatCalendarDateTime(value: Date, hour: number, minute: number) {
+	const pad = (item: number) => String(item).padStart(2, '0');
+	return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}T${pad(hour)}:${pad(minute)}`;
+}
+
+function previousWeekday(value: Date) {
+	const day = new Date(value);
+	do day.setUTCDate(day.getUTCDate() - 1); while (day.getUTCDay() === 0 || day.getUTCDay() === 6);
+	return day;
+}
+
+function nextWeekday(value: Date) {
+	const day = new Date(value);
+	do day.setUTCDate(day.getUTCDate() + 1); while (day.getUTCDay() === 0 || day.getUTCDay() === 6);
+	return day;
 }
