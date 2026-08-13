@@ -23,11 +23,38 @@ fs.mkdirSync(releaseRoot, { recursive: true });
 fs.rmSync(dmgPath, { force: true });
 
 const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-dmg-'));
+const writableImagePath = path.join(stagingRoot, 'easy-stock-writable.dmg');
+const writableMountPath = path.join(stagingRoot, 'writable-volume');
+const verificationMountPath = path.join(stagingRoot, 'verification-volume');
+let writableMounted = false;
+let verificationMounted = false;
 try {
-	fs.cpSync(appPath, path.join(stagingRoot, 'easy-stock.app'), { recursive: true });
-	fs.symlinkSync('/Applications', path.join(stagingRoot, 'Applications'));
-	run('hdiutil', ['create', '-volname', 'easy-stock', '-srcfolder', stagingRoot, '-ov', '-format', 'UDZO', dmgPath]);
+	fs.mkdirSync(writableMountPath);
+	fs.mkdirSync(verificationMountPath);
+	// Both Node's fs.cpSync() and direct folder-image creation resolve macOS
+	// framework symlinks to absolute paths. Create a writable volume first and
+	// copy into the mounted filesystem with `ditto`, which preserves the
+	// relative links required by Electron frameworks.
+	run('hdiutil', ['create', '-size', '1200m', '-fs', 'Journaled HFS+', '-volname', 'easy-stock', '-ov', '-type', 'UDIF', writableImagePath]);
+	run('hdiutil', ['attach', writableImagePath, '-nobrowse', '-mountpoint', writableMountPath]);
+	writableMounted = true;
+	const stagedAppPath = path.join(writableMountPath, 'easy-stock.app');
+	run('ditto', [appPath, stagedAppPath]);
+	run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), stagedAppPath, 'macos']);
+	fs.symlinkSync('/Applications', path.join(writableMountPath, 'Applications'));
+	run('sync', []);
+	run('hdiutil', ['detach', writableMountPath]);
+	writableMounted = false;
+	run('hdiutil', ['convert', writableImagePath, '-format', 'UDZO', '-o', dmgPath]);
+	run('hdiutil', ['verify', dmgPath]);
+	run('hdiutil', ['attach', dmgPath, '-nobrowse', '-readonly', '-mountpoint', verificationMountPath]);
+	verificationMounted = true;
+	run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), path.join(verificationMountPath, 'easy-stock.app'), 'macos']);
+	run('hdiutil', ['detach', verificationMountPath]);
+	verificationMounted = false;
 } finally {
+	if (verificationMounted) tryRun('hdiutil', ['detach', verificationMountPath, '-force']);
+	if (writableMounted) tryRun('hdiutil', ['detach', writableMountPath, '-force']);
 	fs.rmSync(stagingRoot, { recursive: true, force: true });
 }
 if (!fs.existsSync(zipPath)) run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath]);
@@ -37,5 +64,9 @@ console.log(`macOS release assets created:\n- ${dmgPath}\n- ${zipPath}`);
 function run(command, args) {
 	const result = spawnSync(command, args, { stdio: 'inherit' });
 	if (result.error) throw result.error;
-	if (result.status !== 0) process.exit(result.status ?? 1);
+	if (result.status !== 0) throw new Error(`${command} exited with status ${result.status ?? 1}`);
+}
+
+function tryRun(command, args) {
+	spawnSync(command, args, { stdio: 'ignore' });
 }

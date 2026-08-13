@@ -31,6 +31,7 @@ const requiredPaths = [
 for (const requiredPath of requiredPaths) {
 	if (!fs.existsSync(requiredPath)) throw new Error(`Release package is incomplete: ${requiredPath}`);
 }
+if (platform === 'macos') verifyMacBundle(packageRoot);
 if (platform === 'windows' && fs.existsSync(path.join(resourcesRoot, 'hermes-runtime', 'venv'))) {
 	throw new Error('Windows release still contains the build-only Hermes venv');
 }
@@ -62,6 +63,25 @@ if (violations.length) {
 }
 verifyBundledPython(runtimePython, path.join(resourcesRoot, 'wechat-download-api'));
 console.log(`Release package verified: ${packageRoot}`);
+
+function verifyMacBundle(appPath) {
+	const invalidLinks = [];
+	walk(appPath, (entryPath, entry) => {
+		if (!entry.isSymbolicLink()) return;
+		const target = fs.readlinkSync(entryPath);
+		if (path.isAbsolute(target) || !fs.existsSync(entryPath)) {
+			invalidLinks.push(`${path.relative(appPath, entryPath)} -> ${target}`);
+		}
+	});
+	if (invalidLinks.length) {
+		throw new Error(`macOS release contains invalid framework symlinks:\n${invalidLinks.map((item) => `- ${item}`).join('\n')}`);
+	}
+	const result = spawnSync('codesign', ['--verify', '--deep', '--strict', appPath], { encoding: 'utf8' });
+	if (result.error) throw result.error;
+	if (result.status !== 0) {
+		throw new Error(`macOS release failed code-signature validation: ${(result.stderr || result.stdout || '').trim()}`);
+	}
+}
 
 function verifyBundledPython(python, wechatRoot) {
 	const script = 'import sys; sys.path.insert(0, sys.argv[1]); import hermes_cli, tui_gateway, app';
