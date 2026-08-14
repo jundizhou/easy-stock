@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"easy-stock/backend/internal/appsettings"
 )
 
 const llmProbeMarker = "A_STOCK_HERMES_OK"
@@ -34,7 +36,7 @@ func (s *Server) settingsLLMTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 	defer cancel()
 	startedAt := time.Now()
 	result, err := s.hermesGateway.Prompt(ctx, "这是模型连接探针。请仅回复 "+llmProbeMarker+"，不要添加任何其他文字。")
@@ -69,6 +71,17 @@ func (s *Server) settingsLLMTest(w http.ResponseWriter, r *http.Request) {
 		LatencyMS: time.Since(startedAt).Milliseconds(),
 		Response:  truncateRunes(content, 200),
 	}})
+}
+
+// modelResponseTimeout keeps synchronous AI endpoints from cancelling a
+// request before Hermes' configured stale timeout has elapsed. The small
+// grace period covers the final retry/error frame and process cleanup.
+func (s *Server) modelResponseTimeout() time.Duration {
+	seconds := appsettings.DefaultLLMResponseTimeoutSeconds
+	if s.settingsStore != nil {
+		seconds = appsettings.NormalizeLLMResponseTimeoutSeconds(s.settingsStore.Snapshot().LLM.ResponseTimeoutSeconds)
+	}
+	return time.Duration(seconds)*time.Second + 15*time.Second
 }
 
 func truncateRunes(value string, limit int) string {

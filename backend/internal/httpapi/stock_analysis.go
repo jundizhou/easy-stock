@@ -234,7 +234,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	if s.hermesGateway != nil {
 		status := s.hermesGateway.Status()
 		if status.Available && status.Configured && (len(announcements) > 0 || len(news) > 0) {
-			themeCtx, cancelTheme := context.WithTimeout(r.Context(), 24*time.Second)
+			themeCtx, cancelTheme := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 			modelEvidence, modelErr := stockanalysis.ExtractThemeEvidence(themeCtx, s.hermesGateway, analysisInput)
 			cancelTheme()
 			if modelErr == nil {
@@ -269,7 +269,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 				)
 				cancelKnowledge()
 			}
-			aiCtx, cancelAI := context.WithTimeout(r.Context(), 60*time.Second)
+			aiCtx, cancelAI := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 			if aiErr := stockanalysis.EnrichWithAI(aiCtx, s.hermesGateway, &analysis, methodologyContext); aiErr != nil {
 				analysis.AI.Status = "error"
 				analysis.AI.Message = aiErr.Error() + "；已保留本地结构化研判"

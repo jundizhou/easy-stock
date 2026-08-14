@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,14 +37,36 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	model, _ := stringMap(config["model"])
 	providers, _ := stringMap(config["providers"])
 	provider, _ := stringMap(providers[providerSlug])
-	if stringValue(model["provider"]) != providerSlug || stringValue(model["default"]) != "deepseek-chat" || stringValue(provider["transport"]) != "chat_completions" {
+	if stringValue(model["provider"]) != providerSlug || stringValue(model["default"]) != "deepseek-chat" || stringValue(provider["transport"]) != "chat_completions" || intValue(provider["stale_timeout_seconds"]) != appsettings.DefaultLLMResponseTimeoutSeconds {
 		t.Fatalf("unexpected Hermes config:\n%s", configText)
+	}
+	if timeout, err := readEnvValue(filepath.Join(home, ".env"), staleTimeoutEnvName); err != nil || timeout != strconv.Itoa(appsettings.DefaultLLMResponseTimeoutSeconds) {
+		t.Fatalf("initial stale timeout env = %q, %v; want %d", timeout, err, appsettings.DefaultLLMResponseTimeoutSeconds)
+	}
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIMode: "chat_completions", ResponseTimeoutSeconds: 600}, nil); err != nil {
+		t.Fatal(err)
+	}
+	configData, err = os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config = map[string]any{}
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		t.Fatalf("invalid Hermes config after timeout update: %v", err)
+	}
+	providers, _ = stringMap(config["providers"])
+	provider, _ = stringMap(providers[providerSlug])
+	if intValue(provider["stale_timeout_seconds"]) != 600 {
+		t.Fatalf("updated stale timeout=%v, want 600", provider["stale_timeout_seconds"])
 	}
 	if strings.Contains(configText, key) {
 		t.Fatal("Hermes config.yaml leaked model API key")
 	}
 	if storedKey, err := runtime.ModelAPIKey(); err != nil || storedKey != key {
 		t.Fatalf("ModelAPIKey() = %q, %v; want saved key", storedKey, err)
+	}
+	if timeout, err := readEnvValue(filepath.Join(home, ".env"), staleTimeoutEnvName); err != nil || timeout != "600" {
+		t.Fatalf("updated stale timeout env = %q, %v; want 600", timeout, err)
 	}
 	envData, err := os.ReadFile(filepath.Join(home, ".env"))
 	if err != nil || !strings.Contains(string(envData), key) {

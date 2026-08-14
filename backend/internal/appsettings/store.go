@@ -12,11 +12,25 @@ import (
 )
 
 type LLM struct {
-	Provider string `json:"provider"`
-	BaseURL  string `json:"base_url"`
-	Model    string `json:"model"`
-	APIMode  string `json:"api_mode"`
-	APIKey   string `json:"api_key"`
+	Provider               string `json:"provider"`
+	BaseURL                string `json:"base_url"`
+	Model                  string `json:"model"`
+	APIMode                string `json:"api_mode"`
+	APIKey                 string `json:"api_key"`
+	ResponseTimeoutSeconds int    `json:"response_timeout_seconds,omitempty"`
+}
+
+const (
+	DefaultLLMResponseTimeoutSeconds = 300
+	MinLLMResponseTimeoutSeconds     = 30
+	MaxLLMResponseTimeoutSeconds     = 3600
+)
+
+func NormalizeLLMResponseTimeoutSeconds(value int) int {
+	if value < MinLLMResponseTimeoutSeconds || value > MaxLLMResponseTimeoutSeconds {
+		return DefaultLLMResponseTimeoutSeconds
+	}
+	return value
 }
 
 // LLMProfile is a named model connection. API keys are deliberately not
@@ -148,7 +162,8 @@ func (s *Store) normalizeLLMProfiles() {
 	}
 	if active, ok := findLLMProfile(s.values.LLMProfiles, s.values.ActiveLLMProfileID); ok {
 		apiKey := s.values.LLM.APIKey
-		s.values.LLM = llmFromProfile(active)
+		timeout := NormalizeLLMResponseTimeoutSeconds(s.values.LLM.ResponseTimeoutSeconds)
+		s.values.LLM = llmFromProfile(active, timeout)
 		s.values.LLM.APIKey = apiKey
 	}
 }
@@ -184,8 +199,8 @@ func findLLMProfile(profiles []LLMProfile, id string) (LLMProfile, bool) {
 	return LLMProfile{}, false
 }
 
-func llmFromProfile(profile LLMProfile) LLM {
-	return LLM{Provider: profile.Provider, BaseURL: profile.BaseURL, Model: profile.Model, APIMode: profile.APIMode}
+func llmFromProfile(profile LLMProfile, responseTimeoutSeconds int) LLM {
+	return LLM{Provider: profile.Provider, BaseURL: profile.BaseURL, Model: profile.Model, APIMode: profile.APIMode, ResponseTimeoutSeconds: NormalizeLLMResponseTimeoutSeconds(responseTimeoutSeconds)}
 }
 
 func defaultValues() Values {

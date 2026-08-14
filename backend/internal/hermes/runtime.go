@@ -25,6 +25,7 @@ import (
 const (
 	providerSlug          = "easy-stock"
 	modelAPIKeyEnvName    = "MODEL_API_KEY"
+	staleTimeoutEnvName   = "HERMES_API_CALL_STALE_TIMEOUT"
 	modelProfileKeyPrefix = "MODEL_API_KEY_PROFILE_"
 	hermesErrorTailSize   = 32 << 10
 )
@@ -255,6 +256,12 @@ func (r *Runtime) syncLLM(cfg appsettings.LLM, profileID string, apiKeyUpdate *s
 	}
 
 	normalized := normalizeLLM(cfg)
+	// Hermes resolves stale timeouts by provider ID. The app uses a custom
+	// provider profile whose runtime ID can differ from the managed YAML key,
+	// so also write the documented environment fallback to cover that path.
+	if err := writeEnvValue(envPath, staleTimeoutEnvName, strconv.Itoa(normalized.ResponseTimeoutSeconds)); err != nil {
+		return err
+	}
 	configText, err := r.renderMergedConfig(normalized)
 	if err != nil {
 		return err
@@ -832,7 +839,7 @@ func normalizeLLM(cfg appsettings.LLM) appsettings.LLM {
 	if apiMode == "responses" {
 		apiMode = "codex_responses"
 	}
-	return appsettings.LLM{Provider: provider, BaseURL: baseURL, Model: model, APIMode: apiMode}
+	return appsettings.LLM{Provider: provider, BaseURL: baseURL, Model: model, APIMode: apiMode, ResponseTimeoutSeconds: appsettings.NormalizeLLMResponseTimeoutSeconds(cfg.ResponseTimeoutSeconds)}
 }
 
 func renderConfig(cfg appsettings.LLM, workDir string) string {
@@ -842,7 +849,7 @@ func renderConfig(cfg appsettings.LLM, workDir string) string {
 	}
 	var text strings.Builder
 	fmt.Fprintf(&text, "model:\n  default: %s\n  provider: %s\n  base_url: %s\n  api_mode: %s\n\n", yamlString(cfg.Model), providerSlug, yamlString(cfg.BaseURL), yamlString(cfg.APIMode))
-	fmt.Fprintf(&text, "providers:\n  %s:\n    name: %s\n    api: %s\n    key_env: %s\n    default_model: %s\n    transport: %s\n\n", providerSlug, yamlString(providerName), yamlString(cfg.BaseURL), modelAPIKeyEnvName, yamlString(cfg.Model), yamlString(transportForAPIMode(cfg.APIMode)))
+	fmt.Fprintf(&text, "providers:\n  %s:\n    name: %s\n    api: %s\n    key_env: %s\n    default_model: %s\n    transport: %s\n    stale_timeout_seconds: %d\n\n", providerSlug, yamlString(providerName), yamlString(cfg.BaseURL), modelAPIKeyEnvName, yamlString(cfg.Model), yamlString(transportForAPIMode(cfg.APIMode)), appsettings.NormalizeLLMResponseTimeoutSeconds(cfg.ResponseTimeoutSeconds))
 	text.WriteString("agent:\n  reasoning_effort: medium\n  system_prompt: |-\n")
 	for _, line := range strings.Split(systemPrompt, "\n") {
 		fmt.Fprintf(&text, "    %s\n", line)

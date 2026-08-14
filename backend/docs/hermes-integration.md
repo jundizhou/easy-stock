@@ -41,6 +41,7 @@ React AI 对话
 保存模型设置时：
 
 - 服务商、模型、Base URL、协议写入 `hermes-home/config.yaml`；
+- “模型响应等待时间”写入当前 Hermes Provider 的 `stale_timeout_seconds`，并同步写入 `HERMES_API_CALL_STALE_TIMEOUT` 兼容自定义 Provider，默认 300 秒，可在设置中调整为 30–3600 秒；
 - 模型 API Key 只写入 `hermes-home/.env` 的 `MODEL_API_KEY`；
 - 应用通用 `settings.json` 不保存模型 API Key；
 - Hermes 文件权限设置为仅当前用户可读写。

@@ -74,6 +74,7 @@ export type AppSettings = {
 		base_url: string;
 		model: string;
 		api_mode: 'chat_completions' | 'responses' | 'anthropic_messages' | string;
+		response_timeout_seconds: number;
 		api_key: SecretSettingStatus;
 	};
 	llm_profiles: LLMProfile[];
@@ -1254,6 +1255,96 @@ export type ReviewDailySummaryWindow = {
 	window_start: string;
 	window_end: string;
 	freshness_rule: string;
+};
+
+export type ReviewDailyValidationSnapshot = {
+	captured_at: string;
+	trade_date: string;
+	indexes: Array<{ id: string; name: string; change_percent: number; trade_date?: string; source?: string }>;
+	emotion?: {
+		phase: string;
+		emotion_score: number;
+		heat: number;
+		profit: number;
+		structure: number;
+		limit_up_count: number;
+		limit_down_count: number;
+		broken_count: number;
+		first_board_count: number;
+		board_count: number;
+		max_streak: number;
+		previous_limit_up_return: number;
+		final_break_rate: number;
+		advance_rate: number;
+		high_average_return: number;
+		high_advance_rate: number;
+		height_collapse: number;
+		high_risk_score: number;
+		quote_coverage: number;
+		confidence?: string;
+	};
+	intraday?: {
+		trade_date?: string;
+		status: string;
+		breadth: string;
+		risk_score: number;
+		current_max_streak: number;
+		height_collapse: number;
+		high_average_return: number;
+		high_down_rate: number;
+		high_advance_rate: number;
+		limit_up_count: number;
+		board_count: number;
+		first_board_count: number;
+		confidence?: string;
+	};
+	themes: Array<{ name: string; change_percent: number; net_inflow: number; rising_count: number; falling_count: number; limit_up_count: number; max_streak: number; trend_score: number; stage?: string; leaders?: string[]; source?: string }>;
+	industries: Array<{ name: string; change_percent: number; net_inflow: number; rising_count: number; falling_count: number; score: number; leader_name?: string }>;
+	flows: Array<{ dimension: string; name: string; change_percent: number; net_inflow: number; main_net_inflow: number; leader_name?: string }>;
+	limit_up: { current_trade_date: string; previous_trade_date: string; current_count: number; previous_count: number; current_board_count: number; previous_board_count: number; current_max_streak: number; previous_max_streak: number; concepts?: Array<{ name: string; limit_up_count: number; max_streak: number; trend_score: number; leaders?: string[] }> };
+	stocks: Array<{ name: string; symbol: string; open: number; high: number; low: number; price: number; previous_close: number; change_percent: number; trade_date?: string; limit_up_streak?: number; source?: string; matched: boolean; match_note?: string }>;
+	data_quality: string[];
+};
+
+export type ReviewDailyValidation = {
+	summary_date: string;
+	verification_date: string;
+	generated_at: string;
+	prompt_version: string;
+	summary_hash: string;
+	status: string;
+	ai_status: string;
+	ai_message?: string;
+	score: number;
+	coverage: number;
+	correct_count: number;
+	partial_count: number;
+	wrong_count: number;
+	unverified_count: number;
+	headline: string;
+	actual_scenario: string;
+	market: { expected_regime: string; actual_phase: string; verdict: string; summary: string; evidence: string[] };
+	scenario: { expected_key: string; expected_name: string; actual_key: string; actual_name: string; verdict: string; summary: string };
+	directions: Array<{ name: string; verdict: string; score: number; rank?: number; actual_change?: number; evidence: string[] }>;
+	stocks: Array<{ name: string; symbol?: string; verdict: string; actual_change?: number; open_change?: number; intraday_high?: number; intraday_low?: number; trigger_hit?: string; invalidation_hit?: string; summary: string; evidence: string[] }>;
+	checklist: Array<{ text: string; verdict: string; evidence: string[] }>;
+	realized_risks: string[];
+	lessons: string[];
+	data_quality: string[];
+	snapshot: ReviewDailyValidationSnapshot;
+};
+
+export type ReviewDailyValidationJob = {
+	summary_date: string;
+	verification_date?: string;
+	status: 'idle' | 'running' | 'succeeded' | 'failed' | string;
+	stage: 'idle' | 'collecting' | 'evaluating' | 'explaining' | 'completed' | 'failed' | string;
+	message: string;
+	error?: string;
+	started_at?: string;
+	updated_at?: string;
+	completed_at?: string;
+	result_available: boolean;
 };
 
 export async function resolveBackendConfig(input: ResolveInput = {}): Promise<BackendConfig> {

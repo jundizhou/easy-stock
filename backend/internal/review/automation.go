@@ -29,22 +29,24 @@ type URLImporter interface {
 const WechatArticleListUnavailableMessage = "微信已停用公众号历史文章列表接口，自动订阅暂不可用；请粘贴具体文章链接导入"
 
 type Automation struct {
-	store               *Store
-	importer            URLImporter
-	settings            *appsettings.Store
-	httpClient          *http.Client
-	prompter            hermes.Prompter
-	fallbackWechat      string
-	browserStateDir     string
-	browserBridgeURL    string
-	browserBridgeToken  string
-	taogubaBridgeURL    string
-	taogubaBridgeToken  string
-	browserBridgeClient *http.Client
-	mu                  sync.Mutex
-	dailySummaryMu      sync.Mutex
-	dailySummaryJobMu   sync.Mutex
-	dailySummaryRunning bool
+	store                  *Store
+	importer               URLImporter
+	settings               *appsettings.Store
+	httpClient             *http.Client
+	prompter               hermes.Prompter
+	fallbackWechat         string
+	browserStateDir        string
+	browserBridgeURL       string
+	browserBridgeToken     string
+	taogubaBridgeURL       string
+	taogubaBridgeToken     string
+	browserBridgeClient    *http.Client
+	mu                     sync.Mutex
+	dailySummaryMu         sync.Mutex
+	dailySummaryJobMu      sync.Mutex
+	dailySummaryRunning    bool
+	dailyValidationMu      sync.Mutex
+	dailyValidationRunning map[string]bool
 }
 
 func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Store, httpClient *http.Client, fallbackWechat string, prompters ...hermes.Prompter) *Automation {
@@ -60,18 +62,19 @@ func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Sto
 		bridgeClient.Timeout = 90 * time.Second
 	}
 	return &Automation{
-		store:               store,
-		importer:            importer,
-		settings:            settings,
-		httpClient:          httpClient,
-		prompter:            prompter,
-		fallbackWechat:      strings.TrimRight(strings.TrimSpace(fallbackWechat), "/"),
-		browserStateDir:     strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_STATE_DIR")),
-		browserBridgeURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_BRIDGE_URL")), "/"),
-		browserBridgeToken:  strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_BRIDGE_TOKEN")),
-		taogubaBridgeURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("A_STOCK_TAOGUBA_BROWSER_BRIDGE_URL")), "/"),
-		taogubaBridgeToken:  strings.TrimSpace(os.Getenv("A_STOCK_TAOGUBA_BROWSER_BRIDGE_TOKEN")),
-		browserBridgeClient: &bridgeClient,
+		store:                  store,
+		importer:               importer,
+		settings:               settings,
+		httpClient:             httpClient,
+		prompter:               prompter,
+		fallbackWechat:         strings.TrimRight(strings.TrimSpace(fallbackWechat), "/"),
+		browserStateDir:        strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_STATE_DIR")),
+		browserBridgeURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_BRIDGE_URL")), "/"),
+		browserBridgeToken:     strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_BRIDGE_TOKEN")),
+		taogubaBridgeURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("A_STOCK_TAOGUBA_BROWSER_BRIDGE_URL")), "/"),
+		taogubaBridgeToken:     strings.TrimSpace(os.Getenv("A_STOCK_TAOGUBA_BROWSER_BRIDGE_TOKEN")),
+		browserBridgeClient:    &bridgeClient,
+		dailyValidationRunning: map[string]bool{},
 	}
 }
 

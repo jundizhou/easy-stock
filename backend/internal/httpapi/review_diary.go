@@ -252,7 +252,7 @@ func (s *Server) reviewAnalyzePost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "AI分析服务不可用")
 		return
 	}
-	ctx, cancel := contextWithTimeout(r, 90*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 	defer cancel()
 	post, err := s.reviewAutomation.AnalyzePost(ctx, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {

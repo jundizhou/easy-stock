@@ -37,6 +37,7 @@ type ReviewProfileDraft = Omit<ReviewAutomationProfile, 'credential'> & { creden
 type ModelListState = 'idle' | 'loading' | 'success' | 'error';
 
 const manualModelOption = '__manual_model_input__';
+const defaultResponseTimeoutSeconds = 300;
 
 const emptySecrets = (): Record<SecretKey, string> => ({
 	llm_api_key: '',
@@ -58,6 +59,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	const [baseURL, setBaseURL] = useState(llmProviderDefinition('openai').baseURL);
 	const [model, setModel] = useState('');
 	const [apiMode, setAPIMode] = useState('chat_completions');
+	const [responseTimeoutSeconds, setResponseTimeoutSeconds] = useState(defaultResponseTimeoutSeconds);
 	const [reviewSource, setReviewSource] = useState<ReviewSource>('xueqiu');
 	const [reviewProfiles, setReviewProfiles] = useState<ReviewProfileDraft[]>([]);
 	const [secrets, setSecrets] = useState<Record<SecretKey, string>>(emptySecrets);
@@ -107,6 +109,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 				const selected = modelProfiles.find((profile) => profile.id === payload.data.active_llm_profile_id) || modelProfiles[0];
 				setActiveLLMProfileID(selected.id);
 				loadProfileFields(selected);
+				setResponseTimeoutSeconds(payload.data.llm.response_timeout_seconds || defaultResponseTimeoutSeconds);
 				setProfileKeyValues({});
 				setClearProfileKeys(new Set());
 				const profiles = toProfileDrafts(payload.data.review_automation?.profiles || []);
@@ -390,7 +393,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
+			body: JSON.stringify({ llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
 		});
 		setSettings(payload.data);
 		const savedProfiles = normalizeLLMProfiles(payload.data);
@@ -492,6 +495,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 								</div>
 								<label><span>API Base URL</span><input value={baseURL} onChange={(event) => updateBaseURL(event.target.value)} placeholder="https://api.example.com/v1" /></label>
 							</div>
+							<label className="settings-timeout-field"><span>模型响应等待时间（秒）</span><input type="number" min={30} max={3600} step={30} value={responseTimeoutSeconds} onChange={(event) => setResponseTimeoutSeconds(Number(event.target.value) || defaultResponseTimeoutSeconds)} /><small>默认 300 秒，范围 30–3600 秒；模型长时间无响应时将等待更久再重试。</small></label>
 							<div className={`llm-connection-test ${testState}`}>
 								<div><PlugZap size={17} /><span><strong>{testState === 'success' ? 'Hermes 模型连接可用' : testState === 'error' ? '连接测试未通过' : testState === 'testing' ? 'Hermes 正在请求模型' : 'Hermes 真实模型探针'}</strong><small>{testResult ? `Hermes · ${testResult.model} · ${testResult.api_mode} · ${testResult.latency_ms}ms · ${testResult.response}` : '保存当前配置后由 Hermes 发送最小提示词，并验证模型确实返回内容。'}</small></span></div>
 								<button type="button" onClick={testConnection} disabled={!config || state === 'saving' || testState === 'testing'}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>

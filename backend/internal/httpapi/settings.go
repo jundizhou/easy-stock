@@ -22,11 +22,12 @@ type settingsView struct {
 	ActiveLLMProfileID string           `json:"active_llm_profile_id"`
 	LLMProfiles        []llmProfileView `json:"llm_profiles"`
 	LLM                struct {
-		Provider string              `json:"provider"`
-		BaseURL  string              `json:"base_url"`
-		Model    string              `json:"model"`
-		APIMode  string              `json:"api_mode"`
-		APIKey   secretSettingStatus `json:"api_key"`
+		Provider               string              `json:"provider"`
+		BaseURL                string              `json:"base_url"`
+		Model                  string              `json:"model"`
+		APIMode                string              `json:"api_mode"`
+		ResponseTimeoutSeconds int                 `json:"response_timeout_seconds"`
+		APIKey                 secretSettingStatus `json:"api_key"`
 	} `json:"llm"`
 	Credentials struct {
 		TushareToken    secretSettingStatus `json:"tushare_token"`
@@ -89,11 +90,12 @@ type settingsUpdateRequest struct {
 	LLMProfiles        *[]llmProfileUpdate `json:"llm_profiles"`
 	ActiveLLMProfileID *string             `json:"active_llm_profile_id"`
 	LLM                struct {
-		Provider *string `json:"provider"`
-		BaseURL  *string `json:"base_url"`
-		Model    *string `json:"model"`
-		APIMode  *string `json:"api_mode"`
-		APIKey   *string `json:"api_key"`
+		Provider               *string `json:"provider"`
+		BaseURL                *string `json:"base_url"`
+		Model                  *string `json:"model"`
+		APIMode                *string `json:"api_mode"`
+		ResponseTimeoutSeconds *int    `json:"response_timeout_seconds"`
+		APIKey                 *string `json:"api_key"`
 	} `json:"llm"`
 	Credentials struct {
 		TushareToken    *string `json:"tushare_token"`
@@ -179,12 +181,16 @@ func (s *Server) settingsUpdate(w http.ResponseWriter, r *http.Request) {
 			values.ActiveLLMProfileID = strings.TrimSpace(*request.ActiveLLMProfileID)
 		}
 		if active, ok := findLLMProfile(values.LLMProfiles, values.ActiveLLMProfileID); ok {
-			values.LLM = appsettings.LLM{Provider: active.Provider, BaseURL: active.BaseURL, Model: active.Model, APIMode: active.APIMode}
+			values.LLM = appsettings.LLM{Provider: active.Provider, BaseURL: active.BaseURL, Model: active.Model, APIMode: active.APIMode, ResponseTimeoutSeconds: appsettings.NormalizeLLMResponseTimeoutSeconds(values.LLM.ResponseTimeoutSeconds)}
 		}
 		applyOptionalString(&values.LLM.Provider, request.LLM.Provider)
 		applyOptionalString(&values.LLM.BaseURL, request.LLM.BaseURL)
 		applyOptionalString(&values.LLM.Model, request.LLM.Model)
 		applyOptionalString(&values.LLM.APIMode, request.LLM.APIMode)
+		if request.LLM.ResponseTimeoutSeconds != nil {
+			values.LLM.ResponseTimeoutSeconds = *request.LLM.ResponseTimeoutSeconds
+		}
+		values.LLM.ResponseTimeoutSeconds = appsettings.NormalizeLLMResponseTimeoutSeconds(values.LLM.ResponseTimeoutSeconds)
 		// LLM secrets are owned by Hermes' .env and must never be persisted in
 		// the application's general settings file.
 		values.LLM.APIKey = ""
@@ -338,6 +344,11 @@ func validateSingleLLM(request settingsUpdateRequest) error {
 			return fmt.Errorf("unsupported llm api_mode: %s", apiMode)
 		}
 	}
+	if request.LLM.ResponseTimeoutSeconds != nil {
+		if *request.LLM.ResponseTimeoutSeconds < appsettings.MinLLMResponseTimeoutSeconds || *request.LLM.ResponseTimeoutSeconds > appsettings.MaxLLMResponseTimeoutSeconds {
+			return fmt.Errorf("模型响应等待时间必须在 %d 到 %d 秒之间", appsettings.MinLLMResponseTimeoutSeconds, appsettings.MaxLLMResponseTimeoutSeconds)
+		}
+	}
 	if request.ReviewAutomation.Profiles != nil {
 		if len(*request.ReviewAutomation.Profiles) > 100 {
 			return fmt.Errorf("too many review automation profiles")
@@ -416,6 +427,7 @@ func (s *Server) buildSettingsView(values appsettings.Values) settingsView {
 			view.LLM.APIMode = "chat_completions"
 		}
 	}
+	view.LLM.ResponseTimeoutSeconds = appsettings.NormalizeLLMResponseTimeoutSeconds(values.LLM.ResponseTimeoutSeconds)
 	view.LLM.APIKey.Configured = view.Hermes.APIKeyConfigured
 	view.ActiveLLMProfileID = values.ActiveLLMProfileID
 	view.LLMProfiles = make([]llmProfileView, 0, len(values.LLMProfiles))

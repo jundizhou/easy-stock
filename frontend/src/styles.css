@@ -2944,6 +2944,8 @@ a:focus-visible {
 .model-list-message { min-height: 15px; color: var(--subtle); font-size: 9px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
 .model-list-message.success { color: #167653; }
 .model-list-message.error { color: #bc303a; }
+.settings-timeout-field { max-width: calc(50% - 6px); }
+.settings-timeout-field > small { color: var(--subtle); font-size: 9px; font-weight: 400; line-height: 1.45; }
 
 .public-source-status {
 	display: flex;
@@ -3109,6 +3111,7 @@ a:focus-visible {
 @media (max-width: 720px) {
 	.settings-drawer { width: 100vw; }
 	.settings-grid.two-columns { grid-template-columns: 1fr; }
+	.settings-timeout-field { max-width: none; }
 	.llm-profile-toolbar { grid-template-columns: 1fr 1fr; }
 	.llm-profile-toolbar label { grid-column: 1 / -1; }
 	.settings-form { padding-inline: 12px; }
@@ -3694,7 +3697,7 @@ a:focus-visible {
 
 .review-view-tabs {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-columns: repeat(4, minmax(0, 1fr));
 	gap: 8px;
 	padding: 7px;
 	border: 1px solid var(--line);
@@ -3709,6 +3712,103 @@ a:focus-visible {
 .review-view-tabs button > span { display: grid; gap: 2px; }
 .review-view-tabs strong { color: #263650; font-size: 13px; }
 .review-view-tabs small { color: #8290a2; font-size: 9px; }
+
+.daily-validation-job {
+	display: grid;
+	grid-template-columns: 44px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border: 1px solid #b8d8d0;
+	border-radius: 10px;
+	background: linear-gradient(120deg, #f2faf7, #ffffff);
+}
+.daily-validation-job.running { border-color: #82bfb1; box-shadow: 0 8px 22px rgba(30, 124, 104, .1); }
+.daily-validation-job.failed { border-color: #e4b9bd; background: linear-gradient(120deg, #fff6f6, #ffffff); }
+.daily-validation-job-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 11px; background: #ddf1eb; color: #208267; }
+.daily-validation-job.failed .daily-validation-job-icon { background: #fde6e8; color: #bd4b57; }
+.daily-validation-job-copy { display: grid; gap: 4px; min-width: 0; }
+.daily-validation-job-copy > span { color: #237b67; font-size: 9px; font-weight: 750; letter-spacing: .04em; }
+.daily-validation-job-copy > strong { color: #24443c; font-size: 13px; }
+.daily-validation-job-copy > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.daily-validation-job-progress { position: relative; height: 16px; margin-top: 2px; overflow: hidden; border-radius: 999px; background: #e0eee9; }
+.daily-validation-job-progress > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #279174, #63af9b); transition: width 300ms ease; }
+.daily-validation-job-progress > small { position: absolute; inset: 0; display: grid; place-items: center; color: #ffffff; font-size: 8px; font-weight: 700; text-shadow: 0 1px 2px rgba(18, 71, 59, .45); }
+.daily-validation-job-actions { display: grid; justify-items: end; gap: 6px; }
+.daily-validation-job-actions button { min-height: 32px; padding: 0 12px; border: 1px solid #9bcbbf; border-radius: 7px; background: #ffffff; color: #207762; font-size: 10px; cursor: pointer; }
+.daily-validation-job-actions small { color: var(--muted); font-size: 9px; white-space: nowrap; }
+
+.daily-validation-empty { display: grid; place-items: center; min-height: 430px; padding: 45px 20px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(140deg, #ffffff 45%, #eef9f6); }
+.daily-validation-empty > div { display: grid; place-items: center; max-width: 590px; text-align: center; }
+.daily-validation-empty svg { color: #26866d; }
+.daily-validation-empty span { margin-top: 14px; color: #29816b; font-size: 10px; font-weight: 750; letter-spacing: .06em; }
+.daily-validation-empty strong { margin-top: 6px; color: #223c36; font-size: 19px; }
+.daily-validation-empty p { margin: 10px 0 18px; color: #657a75; font-size: 11px; line-height: 1.7; }
+.daily-validation-empty > div > div { display: flex; gap: 8px; }
+.daily-validation-empty button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 1px solid #27866d; border-radius: 8px; background: #27866d; color: #ffffff; font-size: 10px; cursor: pointer; }
+.daily-validation-empty button.secondary { border-color: #c9d8d4; background: #ffffff; color: #536c66; }
+
+.daily-validation-view { display: grid; gap: 10px; }
+.daily-validation-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 19px; border: 1px solid #bcd9d1; border-radius: 11px; background: linear-gradient(120deg, #ffffff, #eff9f6); box-shadow: 0 7px 22px rgba(31, 96, 80, .05); }
+.daily-validation-heading > div { display: grid; gap: 4px; min-width: 0; }
+.daily-validation-heading > div > span { display: flex; align-items: center; gap: 6px; color: #258169; font-size: 9px; font-weight: 750; letter-spacing: .08em; }
+.daily-validation-heading h2 { margin: 0; color: #233b35; font-size: 21px; }
+.daily-validation-heading p { margin: 1px 0; color: #3f5d55; font-size: 12px; line-height: 1.6; }
+.daily-validation-heading small { color: #7a8d88; font-size: 9px; }
+.daily-validation-heading > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 0 auto; min-height: 34px; padding: 0 11px; border: 1px solid #93c4b7; border-radius: 8px; background: #ffffff; color: #207762; font-size: 10px; cursor: pointer; }
+.daily-validation-heading > button:disabled { opacity: .6; cursor: wait; }
+.daily-validation-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.daily-validation-metrics > div { display: grid; gap: 3px; min-height: 86px; padding: 12px 13px; border: 1px solid #d9e4e1; border-radius: 9px; background: #ffffff; }
+.daily-validation-metrics > div.score { border-color: #9ecfc2; background: linear-gradient(140deg, #edf9f5, #ffffff); }
+.daily-validation-metrics span { color: #71837f; font-size: 9px; font-weight: 700; }
+.daily-validation-metrics strong { color: #29483f; font: 750 22px "SFMono-Regular", Consolas, monospace; }
+.daily-validation-metrics small { color: #8a9995; font-size: 8px; }
+.daily-validation-two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.daily-validation-card { min-width: 0; padding: 13px; border: 1px solid #dce5e2; border-radius: 10px; background: #ffffff; box-shadow: 0 6px 18px rgba(33, 70, 60, .04); }
+.daily-validation-card > header { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 10px; color: #27816b; }
+.daily-validation-card > header > div { display: grid; gap: 2px; }
+.daily-validation-card > header strong { color: #293e39; font-size: 12px; }
+.daily-validation-card > header small { color: #81908c; font-size: 8px; line-height: 1.4; }
+.daily-validation-card > p { margin: 9px 0 0; color: #4c5f5a; font-size: 10px; line-height: 1.65; }
+.validation-compare { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 7px; }
+.validation-compare span { padding: 8px 9px; border-radius: 7px; background: #f3f7f6; color: #40554f; font-size: 10px; line-height: 1.5; }
+.validation-compare b { color: #91a29d; font-size: 12px; }
+.validation-verdict { display: inline-flex; align-items: center; justify-content: center; min-height: 22px; padding: 0 7px; border-radius: 999px; background: #eef1f3; color: #6f7a82; font-size: 8px; font-style: normal; font-weight: 750; white-space: nowrap; }
+.validation-verdict.correct { background: #e2f5eb; color: #247b55; }
+.validation-verdict.partial { background: #fff2d8; color: #9c6814; }
+.validation-verdict.wrong { background: #fde7e9; color: #b23e48; }
+.validation-verdict.unverified { background: #edf0f4; color: #717d8a; }
+.validation-list-card > header { grid-template-columns: 18px minmax(0, 1fr); }
+.daily-validation-list,
+.daily-validation-stock-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.daily-validation-list article,
+.daily-validation-stock-list article { min-width: 0; padding: 10px; border: 1px solid #e1e7e5; border-radius: 8px; background: #fbfcfc; }
+.daily-validation-list article > div:first-child,
+.daily-validation-stock-list article > div:first-child { display: flex; align-items: center; gap: 7px; }
+.daily-validation-list article strong,
+.daily-validation-stock-list article strong { color: #2b403a; font-size: 11px; }
+.daily-validation-list article small,
+.daily-validation-stock-list article small { color: #87958f; font-size: 8px; }
+.daily-validation-list article em,
+.daily-validation-stock-list article em { margin-left: auto; }
+.daily-validation-list article > p,
+.daily-validation-stock-list article > p { margin: 7px 0 0; color: #53635f; font-size: 9px; line-height: 1.55; }
+.validation-evidence { display: grid; gap: 3px; margin: 7px 0 0; padding-left: 17px; color: #76847f; font-size: 8px; line-height: 1.5; }
+.validation-hit-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.validation-hit-list span { padding: 3px 6px; border-radius: 5px; background: #edf5f2; color: #4b7066; font-size: 8px; }
+.daily-validation-checklist { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.daily-validation-checklist > li { padding: 9px 10px; border: 1px solid #e1e7e5; border-radius: 8px; background: #fbfcfc; }
+.daily-validation-checklist > li > div { display: flex; align-items: flex-start; gap: 8px; }
+.daily-validation-checklist > li span { flex: 1; color: #40534e; font-size: 10px; line-height: 1.55; }
+.validation-bullets { display: grid; gap: 5px; padding: 9px 10px; border-radius: 8px; background: #f6f8f7; }
+.validation-bullets + .validation-bullets { margin-top: 8px; }
+.validation-bullets > strong { color: #3e514c; font-size: 9px; }
+.validation-bullets > span { color: #8a9793; font-size: 9px; }
+.validation-bullets ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; color: #5e6d69; font-size: 9px; line-height: 1.55; }
+.daily-validation-quality { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 8px; padding: 10px 12px; border: 1px solid #e5d5b3; border-radius: 9px; background: #fffaf1; color: #a06b18; }
+.daily-validation-quality div { display: grid; gap: 3px; }
+.daily-validation-quality strong { font-size: 10px; }
+.daily-validation-quality span { color: #806a47; font-size: 9px; line-height: 1.55; }
 
 .review-summary-empty { display: grid; place-items: center; min-height: 430px; padding: 45px 20px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(140deg, #ffffff 45%, #f3f6ff); }
 .review-summary-empty > div { display: grid; place-items: center; max-width: 570px; text-align: center; }
@@ -4233,6 +4333,9 @@ a:focus-visible {
 	.review-import { width: 100%; min-width: 0; }
 	.market-framework-grid,
 	.author-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.daily-validation-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.daily-validation-list,
+	.daily-validation-stock-list { grid-template-columns: 1fr; }
 	.author-viewpoint-library > div { grid-template-columns: 1fr; }
 	.review-layout { grid-template-columns: 190px minmax(0, 1fr); }
 	.review-reader { grid-column: 1 / -1; height: 620px; }
@@ -4255,6 +4358,17 @@ a:focus-visible {
 	.daily-summary-job { grid-template-columns: 42px minmax(0, 1fr); align-items: start; }
 	.daily-summary-job-icon { width: 40px; height: 40px; }
 	.daily-summary-job-actions { grid-column: 2; grid-row: 2; justify-items: start; }
+	.daily-validation-job { grid-template-columns: 40px minmax(0, 1fr); align-items: start; }
+	.daily-validation-job-icon { width: 38px; height: 38px; }
+	.daily-validation-job-actions { grid-column: 2; grid-row: 2; justify-items: start; }
+	.daily-validation-heading { align-items: flex-start; flex-direction: column; }
+	.daily-validation-heading > button { width: 100%; }
+	.daily-validation-metrics,
+	.daily-validation-two-column,
+	.daily-validation-list,
+	.daily-validation-stock-list { grid-template-columns: 1fr; }
+	.validation-compare { grid-template-columns: 1fr; }
+	.validation-compare b { justify-self: center; transform: rotate(90deg); }
 	.daily-summary-heading { align-items: flex-start; }
 	.daily-summary-heading > div:last-child { flex-direction: column; }
 	.daily-summary-two-column,

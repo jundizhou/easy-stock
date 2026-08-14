@@ -24,7 +24,7 @@ import {
 	Zap,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, ReviewAuthor, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, ReviewAuthor, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 
 type Props = {
 	config: BackendConfig | null;
@@ -32,7 +32,7 @@ type Props = {
 };
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-type ReviewView = 'summary' | 'authors' | 'library';
+type ReviewView = 'summary' | 'validation' | 'authors' | 'library';
 type SummaryWindowDraft = { start: string; end: string };
 
 const sourceTabs: Array<{ id: string; name: string }> = [
@@ -68,8 +68,11 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	const [deletingPost, setDeletingPost] = useState('');
 	const [dailySummary, setDailySummary] = useState<ReviewDailySummary | null>(null);
 	const [dailySummaryJob, setDailySummaryJob] = useState<ReviewDailySummaryJob | null>(null);
+	const [dailyValidation, setDailyValidation] = useState<ReviewDailyValidation | null>(null);
+	const [dailyValidationJob, setDailyValidationJob] = useState<ReviewDailyValidationJob | null>(null);
 	const [reviewView, setReviewView] = useState<ReviewView>('library');
 	const [summarizingDaily, setSummarizingDaily] = useState(false);
+	const [validatingDaily, setValidatingDaily] = useState(false);
 	const [loadingSummaryWindow, setLoadingSummaryWindow] = useState(false);
 	const [notice, setNotice] = useState('');
 	const [error, setError] = useState('');
@@ -84,7 +87,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		if (activeAuthor !== 'all') params.set('author_id', activeAuthor);
 		if (appliedQuery) params.set('q', appliedQuery);
 		try {
-			const [sourcePayload, authorPayload, postPayload, subscriptionPayload, settingsPayload, dailySummaryPayload, dailySummaryJobPayload] = await Promise.all([
+			const [sourcePayload, authorPayload, postPayload, subscriptionPayload, settingsPayload, dailySummaryPayload, dailySummaryJobPayload, dailyValidationPayload] = await Promise.all([
 				requestJSON<{ data: ReviewSource[] }>(config, '/api/v1/reviews/sources'),
 				requestJSON<{ data: ReviewAuthor[] }>(config, `/api/v1/reviews/authors?source=${encodeURIComponent(activeSource)}`),
 				requestJSON<{ data: ReviewPost[]; total: number }>(config, `/api/v1/reviews/posts?${params.toString()}`),
@@ -92,6 +95,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 				requestJSON<{ data: AppSettings }>(config, '/api/v1/settings'),
 				requestJSON<{ data: ReviewDailySummary | null }>(config, '/api/v1/reviews/daily-summary'),
 				requestJSON<{ data: ReviewDailySummaryJob }>(config, '/api/v1/reviews/daily-summary/status'),
+				requestJSON<{ data: ReviewDailyValidation | null; summary_date: string; job: ReviewDailyValidationJob }>(config, '/api/v1/reviews/daily-validation'),
 			]);
 			setSources(sourcePayload.data || []);
 			setAuthors(authorPayload.data || []);
@@ -101,6 +105,21 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 			setReviewProfiles((settingsPayload.data.review_automation?.profiles || []).filter((profile) => profile.enabled));
 			setDailySummary(dailySummaryPayload.data || null);
 			setDailySummaryJob(dailySummaryJobPayload.data || null);
+			let loadedDailyValidation = dailyValidationPayload.data || null;
+			let loadedDailyValidationJob = dailyValidationPayload.job || null;
+			if (!loadedDailyValidation && loadedDailyValidationJob?.result_available) {
+				const summaryDate = loadedDailyValidationJob.summary_date || dailyValidationPayload.summary_date || '';
+				const query = summaryDate ? `?summary_date=${encodeURIComponent(summaryDate)}` : '';
+				try {
+					const cached = await requestJSON<{ data: ReviewDailyValidation | null; job: ReviewDailyValidationJob }>(config, `/api/v1/reviews/daily-validation${query}`);
+					loadedDailyValidation = cached.data || null;
+					loadedDailyValidationJob = cached.job || loadedDailyValidationJob;
+				} catch {
+					// The explicit “查看验证结果” action can retry this cached read.
+				}
+			}
+			setDailyValidation(loadedDailyValidation);
+			setDailyValidationJob(loadedDailyValidationJob);
 			setSelectedID((current) => postPayload.data.some((post) => post.id === current) ? current : postPayload.data[0]?.id || '');
 			setState('ready');
 		} catch (loadError) {
@@ -119,6 +138,15 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	}, [reviewProfiles, subscriptionConfigID, subscriptionSource]);
 
 	const dailySummaryRunning = dailySummaryJob?.status === 'running';
+	const dailyValidationRunning = dailyValidationJob?.status === 'running';
+	const loadDailyValidationResult = useCallback(async (summaryDate = '') => {
+		if (!config) return null;
+		const query = summaryDate ? `?summary_date=${encodeURIComponent(summaryDate)}` : '';
+		const payload = await requestJSON<{ data: ReviewDailyValidation | null; job: ReviewDailyValidationJob }>(config, `/api/v1/reviews/daily-validation${query}`);
+		setDailyValidation(payload.data || null);
+		setDailyValidationJob(payload.job || null);
+		return payload.data || null;
+	}, [config]);
 
 	useEffect(() => {
 		if (!config || !dailySummaryRunning) return;
@@ -144,6 +172,45 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		const timer = window.setInterval(() => void poll(), 3000);
 		return () => { active = false; window.clearInterval(timer); };
 	}, [config, dailySummaryJob?.window_end, dailySummaryJob?.window_start, dailySummaryRunning]);
+
+	useEffect(() => {
+		if (!config || !dailyValidationRunning) return;
+		let active = true;
+		const poll = async () => {
+			try {
+				const query = dailyValidationJob?.summary_date ? `?summary_date=${encodeURIComponent(dailyValidationJob.summary_date)}` : '';
+				const payload = await requestJSON<{ data: ReviewDailyValidationJob }>(config, `/api/v1/reviews/daily-validation/status${query}`);
+				if (!active) return;
+				setDailyValidationJob(payload.data);
+				if (payload.data.status === 'succeeded' && payload.data.result_available) {
+					const result = await loadDailyValidationResult(payload.data.summary_date || '');
+					if (!active) return;
+					if (result) setNotice('昨日观点验证已完成并保存，可随时回来复核');
+				}
+				if (payload.data.status === 'failed') setError(payload.data.error || payload.data.message || '昨日观点验证失败');
+			} catch {
+				// Persisted jobs are reloaded when the page is reopened; transient polling failures are safe to ignore.
+			}
+		};
+		void poll();
+		const timer = window.setInterval(() => void poll(), 3000);
+		return () => { active = false; window.clearInterval(timer); };
+	}, [config, dailyValidationJob?.summary_date, dailyValidationRunning, loadDailyValidationResult]);
+
+	const openDailyValidation = useCallback(async () => {
+		setReviewView('validation');
+		if (dailyValidation || !config) return;
+		setValidatingDaily(true);
+		setError('');
+		try {
+			const validation = await loadDailyValidationResult(dailyValidationJob?.summary_date || '');
+			if (!validation) setError('验证任务已完成，但没有读取到本机缓存结果，请重新验证');
+		} catch (cause) {
+			setError(cause instanceof Error ? readableAPIError(cause.message) : '读取昨日观点验证失败');
+		} finally {
+			setValidatingDaily(false);
+		}
+	}, [config, dailyValidation, dailyValidationJob?.summary_date, loadDailyValidationResult]);
 
 	const selectedPost = useMemo(
 		() => posts.find((post) => post.id === selectedID) || posts[0] || null,
@@ -292,6 +359,32 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 		void summarizeToday(true, chosenWindow);
 	};
 
+	const startDailyValidation = async (force = false) => {
+		if (!config || validatingDaily || dailyValidationRunning) return;
+		setValidatingDaily(true);
+		setReviewView('validation');
+		setError('');
+		setNotice('');
+		try {
+			const payload = await requestJSON<{ data: ReviewDailyValidationJob }>(config, '/api/v1/reviews/daily-validation', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ force }),
+			});
+			setDailyValidationJob(payload.data);
+			if (payload.data.status === 'succeeded' && payload.data.result_available) {
+				const result = await loadDailyValidationResult(payload.data.summary_date || '');
+				if (result) setNotice('已加载本机保存的昨日观点验证');
+			} else {
+				setNotice('验证任务已在后台开始，将依次采集盘面、规则核验并生成偏差解释');
+			}
+		} catch (cause) {
+			setError(cause instanceof Error ? readableAPIError(cause.message) : '昨日观点验证启动失败');
+		} finally {
+			setValidatingDaily(false);
+		}
+	};
+
 	const submitImport = async (event: FormEvent) => {
 		event.preventDefault();
 		if (!config || !importURL.trim()) return;
@@ -343,10 +436,12 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 			<nav className="review-view-tabs" aria-label="复盘日记视图">
 				<button type="button" className={reviewView === 'library' ? 'active' : ''} onClick={() => setReviewView('library')}><BookOpen size={16} /><span><strong>原文资料</strong><small>{total} 篇本地文章</small></span></button>
 				<button type="button" className={reviewView === 'summary' ? 'active' : ''} onClick={() => setReviewView('summary')}><BrainCircuit size={16} /><span><strong>AI总结</strong><small>结论、情景与验证</small></span></button>
+				<button type="button" className={reviewView === 'validation' ? 'active' : ''} onClick={() => void openDailyValidation()}><ListChecks size={16} /><span><strong>昨日验证</strong><small>{dailyValidationRunning ? '正在核验盘面' : dailyValidation ? `${Number.isFinite(Number(dailyValidation.score)) ? Number(dailyValidation.score).toFixed(1) : '—'} 分 · ${dailyValidation.verification_date || '—'}` : '用今日盘面核对观点'}</small></span></button>
 				<button type="button" className={reviewView === 'authors' ? 'active' : ''} onClick={() => setReviewView('authors')}><Users size={16} /><span><strong>作者观点</strong><small>{dailySummary?.author_views?.length || 0} 位作者观点卡</small></span></button>
 			</nav>
 
 			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { setReviewView('summary'); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => { const fallback = fallbackSummaryWindow(); setSummaryWindow({ start: dailySummaryJob.window_start ? toDateTimeLocal(new Date(dailySummaryJob.window_start)) : fallback.start, end: dailySummaryJob.window_end ? toDateTimeLocal(new Date(dailySummaryJob.window_end)) : fallback.end }); }} />}
+			{dailyValidationJob && dailyValidationJob.status !== 'idle' && <DailyValidationJobPanel job={dailyValidationJob} onView={() => void openDailyValidation()} onRetry={() => void startDailyValidation(true)} />}
 
 			{error && <div className="review-error"><ShieldAlert size={16} /><span>{error}</span>{!isWechatListUnavailableMessage(error) && <button type="button" onClick={() => void loadDiary()}>刷新页面</button>}</div>}
 			{notice && <div className="review-notice"><Sparkles size={15} /><span>{notice}</span></div>}
@@ -354,6 +449,10 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 			{reviewView === 'summary' && (dailySummary
 				? <DailyViewpointSummary summary={dailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => setSummaryWindow({ start: toDateTimeLocal(new Date(dailySummary.window_start)), end: toDateTimeLocal(new Date(dailySummary.window_end)) })} onShowAuthors={() => setReviewView('authors')} />
 				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} />)}
+
+			{reviewView === 'validation' && (dailyValidation
+				? <DailyValidationView validation={dailyValidation} refreshing={validatingDaily || dailyValidationRunning} onRefresh={() => void startDailyValidation(true)} />
+				: <DailyValidationEmpty running={validatingDaily || dailyValidationRunning} hasSummary={!!dailySummary} onValidate={() => void startDailyValidation(false)} onOpenSummary={() => setReviewView('summary')} />)}
 
 			{reviewView === 'authors' && (dailySummary?.author_views?.length
 				? <AuthorViewpointLibrary views={dailySummary.author_views} tradeDate={dailySummary.trade_date} />
@@ -437,6 +536,68 @@ function DailySummaryJobPanel({ job, onView, onRetry }: { job: ReviewDailySummar
 		<div className="daily-summary-job-copy"><span>AI 总结任务 · {stageLabel}</span><strong>{running ? '总结耗时较长，可以先去浏览其他内容' : succeeded ? '结果已生成并缓存在本机' : '本次总结已停止'}</strong><p>{job.error || job.message}</p>{running && <div className="daily-summary-job-progress"><i style={{ width: `${progress}%` }} /><small>{job.total_authors > 0 ? `${job.completed_authors}/${job.total_authors} 位作者` : '正在准备文章'} · {progress}%</small></div>}</div>
 		<div className="daily-summary-job-actions">{job.summary_available && <button type="button" onClick={onView}>查看缓存结果</button>}{!running && !succeeded && <button type="button" onClick={onRetry}>重新生成</button>}{running && <small>离开此页面不会中断</small>}</div>
 	</section>;
+}
+
+function DailyValidationJobPanel({ job, onView, onRetry }: { job: ReviewDailyValidationJob; onView: () => void; onRetry: () => void }) {
+	const running = job.status === 'running';
+	const succeeded = job.status === 'succeeded';
+	const progress = succeeded ? 100 : job.stage === 'explaining' ? 82 : job.stage === 'evaluating' ? 58 : job.stage === 'collecting' ? 25 : 0;
+	const stageLabel = job.stage === 'collecting' ? '采集今日盘面' : job.stage === 'evaluating' ? '规则核对观点' : job.stage === 'explaining' ? '生成偏差解释' : succeeded ? '验证已完成' : '任务未完成';
+	return <section className={`daily-validation-job ${job.status}`} id="daily-validation-job">
+		<div className="daily-validation-job-icon">{running ? <RefreshCw className="spin" size={20} /> : succeeded ? <Sparkles size={20} /> : <ShieldAlert size={20} />}</div>
+		<div className="daily-validation-job-copy"><span>昨日复盘验证 · {stageLabel}</span><strong>{running ? '正在用今日收盘数据核验昨日判断' : succeeded ? '验证结果已保存到本机' : '本次验证已停止'}</strong><p>{job.error || job.message}</p>{running && <div className="daily-validation-job-progress"><i style={{ width: `${progress}%` }} /><small>{progress}% · 不会修改原始 AI 总结</small></div>}</div>
+		<div className="daily-validation-job-actions">{job.result_available && <button type="button" onClick={onView}>查看验证结果</button>}{!running && <button type="button" onClick={onRetry}>{succeeded ? '重新验证' : '重试验证'}</button>}{running && <small>可离开页面，后台任务会继续</small>}</div>
+	</section>;
+}
+
+function DailyValidationEmpty({ running, hasSummary, onValidate, onOpenSummary }: { running: boolean; hasSummary: boolean; onValidate: () => void; onOpenSummary: () => void }) {
+	return <section className="daily-validation-empty"><div><ListChecks size={35} /><span>YESTERDAY VIEWPOINT VALIDATION</span><strong>{running ? '正在等待今日盘面验证结果' : hasSummary ? '把昨日 AI 总结交给今日数据检验' : '先生成一份昨日 AI 总结'}</strong><p>{running ? '后台会先固定今日行情快照，再按市场情绪、三情景、题材方向、个股和验证清单逐项评分。' : hasSummary ? '验证不会改写原始总结，会保留观点哈希、行情快照、正确/部分正确/错误和无法验证四种状态。' : '昨日验证依赖已经保存的 AI 综合复盘；完成总结后即可回到这里启动。'}</p><div>{!running && hasSummary && <button type="button" onClick={onValidate}><ListChecks size={15} />开始昨日验证</button>}{!running && !hasSummary && <button type="button" onClick={onOpenSummary}><BrainCircuit size={15} />先生成 AI 总结</button>}<button type="button" className="secondary" onClick={onOpenSummary}><BrainCircuit size={15} />查看 AI 总结</button></div></div></section>;
+}
+
+function DailyValidationView({ validation, refreshing, onRefresh }: { validation: ReviewDailyValidation; refreshing: boolean; onRefresh: () => void }) {
+	const verdictClass = (verdict: string) => `validation-verdict ${verdict}`;
+	const scoreText = Number.isFinite(validation.score) ? validation.score.toFixed(1) : '—';
+	// Older cached results may contain null for optional JSON arrays/objects.
+	// Normalize them at the view boundary so one incomplete field cannot blank
+	// the entire validation page.
+	const market = validation.market || { expected_regime: '', actual_phase: '', verdict: 'unverified', summary: '', evidence: [] };
+	const scenario = validation.scenario || { expected_key: '', expected_name: '', actual_key: '', actual_name: '', verdict: 'unverified', summary: '' };
+	const directions = validation.directions || [];
+	const stocks = validation.stocks || [];
+	const checklist = validation.checklist || [];
+	const dataQuality = validation.data_quality || [];
+	return <section className="daily-validation-view">
+		<header className="daily-validation-heading">
+			<div><span><ListChecks size={15} />YESTERDAY VIEWPOINT VALIDATION</span><h2>{validation.summary_date} 复盘观点验证</h2><p>{validation.headline || '用今日收盘数据回看昨日观点。'}</p><small>验证日 {validation.verification_date || '—'} · {formatDateTime(validation.generated_at)} 生成 · {validation.ai_status === 'ready' ? 'Hermes 已解释' : '规则核验保留'}</small></div>
+			<button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新验证</button>
+		</header>
+		<div className="daily-validation-metrics">
+			<div className="score"><span>验证分</span><strong>{scoreText}</strong><small>只对已覆盖观点计分</small></div>
+			<div><span>覆盖率</span><strong>{formatPercent(validation.coverage)}</strong><small>无法验证不计入分母</small></div>
+			<div><span>正确 / 部分</span><strong>{validation.correct_count} / {validation.partial_count}</strong><small>部分正确按 50% 计</small></div>
+			<div><span>错误 / 未验证</span><strong>{validation.wrong_count} / {validation.unverified_count}</strong><small>数据不足会明确标记</small></div>
+		</div>
+		<div className="daily-validation-two-column">
+			<section className="daily-validation-card"><header><TrendingUp size={16} /><div><strong>市场判断</strong><small>昨日预期 vs 今日情绪</small></div><em className={verdictClass(market.verdict)}>{verdictLabel(market.verdict)}</em></header><div className="validation-compare"><span>昨日：{market.expected_regime || '未明确'}</span><b>→</b><span>今日：{market.actual_phase || '未知'}</span></div><p>{market.summary}</p><EvidenceList items={market.evidence} /></section>
+			<section className="daily-validation-card"><header><Target size={16} /><div><strong>三情景路径</strong><small>昨日剧本 vs 今日实际归类</small></div><em className={verdictClass(scenario.verdict)}>{verdictLabel(scenario.verdict)}</em></header><div className="validation-compare"><span>昨日：{scenario.expected_name || '未明确'}</span><b>→</b><span>今日：{scenario.actual_name || validation.actual_scenario || '未知'}</span></div><p>{scenario.summary}</p></section>
+		</div>
+		<section className="daily-validation-card validation-list-card"><header><GitCompareArrows size={16} /><div><strong>题材与方向验证</strong><small>按今日强度、涨跌幅和资金证据核对昨日优先级</small></div></header>{directions.length ? <div className="daily-validation-list">{directions.map((item) => <article key={item.name}><div><strong>{item.name}</strong>{item.rank ? <small>今日强度 #{item.rank}</small> : null}<em className={verdictClass(item.verdict)}>{verdictLabel(item.verdict)}</em></div><p>{item.actual_change !== undefined ? `今日方向涨跌 ${formatPercent(item.actual_change)}` : '今日方向缺少可比涨跌数据'}</p><EvidenceList items={item.evidence} /></article>)}</div> : <SummaryEmpty text="昨日总结没有提取出可验证的题材方向。" />}</section>
+		<section className="daily-validation-card validation-list-card"><header><Target size={16} /><div><strong>个股验证</strong><small>收盘涨跌、开盘表现、日内高低点和触发条件</small></div></header>{stocks.length ? <div className="daily-validation-stock-list">{stocks.map((item) => <article key={`${item.symbol}-${item.name}`}><div><strong>{item.name}</strong>{item.symbol && <small>{item.symbol}</small>}<em className={verdictClass(item.verdict)}>{verdictLabel(item.verdict)}</em></div><p>{item.summary}</p>{(item.trigger_hit || item.invalidation_hit) && <div className="validation-hit-list">{item.trigger_hit && <span>触发：{item.trigger_hit}</span>}{item.invalidation_hit && <span>失效：{item.invalidation_hit}</span>}</div>}<EvidenceList items={item.evidence} /></article>)}</div> : <SummaryEmpty text="昨日总结没有明确股票代码，无法进行个股映射。" />}</section>
+		<div className="daily-validation-two-column">
+			<section className="daily-validation-card"><header><ListChecks size={16} /><div><strong>验证清单</strong><small>逐条核对昨日写下的可观察条件</small></div></header>{checklist.length ? <ol className="daily-validation-checklist">{checklist.map((item) => <li key={item.text}><div><span>{item.text}</span><em className={verdictClass(item.verdict)}>{verdictLabel(item.verdict)}</em></div><EvidenceList items={item.evidence} /></li>)}</ol> : <SummaryEmpty text="昨日总结没有留下结构化验证清单。" />}</section>
+			<section className="daily-validation-card"><header><ShieldAlert size={16} /><div><strong>风险与经验</strong><small>把偏差沉淀为下一次复盘的规则</small></div></header><ValidationBullets title="今日兑现的风险" items={validation.realized_risks} /><ValidationBullets title="下次复盘经验" items={validation.lessons} /></section>
+		</div>
+		{dataQuality.length > 0 && <section className="daily-validation-quality"><ShieldAlert size={15} /><div><strong>数据质量说明</strong><span>{dataQuality.join('；')}</span></div></section>}
+	</section>;
+}
+
+function EvidenceList({ items }: { items?: string[] }) {
+	if (!items?.length) return null;
+	return <ul className="validation-evidence">{items.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>;
+}
+
+function ValidationBullets({ title, items }: { title: string; items?: string[] }) {
+	return <div className="validation-bullets"><strong>{title}</strong>{items?.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <span>暂无记录</span>}</div>;
 }
 
 function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuthors }: { summary: ReviewDailySummary; regenerating: boolean; onRegenerate: () => void; onShowAuthors: () => void }) {
@@ -588,6 +749,17 @@ function SummaryBulletList({ title, items }: { title: string; items: string[] })
 
 function SummaryEmpty({ text }: { text: string }) {
 	return <div className="daily-summary-empty">{text}</div>;
+}
+
+function verdictLabel(value: string) {
+	if (value === 'correct') return '正确';
+	if (value === 'partial') return '部分正确';
+	if (value === 'wrong') return '错误';
+	return '无法验证';
+}
+
+function formatPercent(value: number) {
+	return Number.isFinite(value) ? `${value.toFixed(1)}%` : '—';
 }
 
 function sourceLabel(source: string) {

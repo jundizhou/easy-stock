@@ -53,4 +53,7 @@ func TestStoreMigratesSingleLLMToSelectableProfiles(t *testing.T) {
 	if len(values.LLMProfiles) != 1 || values.LLMProfiles[0].Model != "gpt-5.6-sol" || values.ActiveLLMProfileID != values.LLMProfiles[0].ID {
 		t.Fatalf("migration=%+v", values)
 	}
+	if values.LLM.ResponseTimeoutSeconds != DefaultLLMResponseTimeoutSeconds {
+		t.Fatalf("response timeout = %d, want default %d", values.LLM.ResponseTimeoutSeconds, DefaultLLMResponseTimeoutSeconds)
+	}
 }

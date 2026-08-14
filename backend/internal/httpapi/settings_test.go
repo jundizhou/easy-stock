@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/hermes"
@@ -254,5 +255,59 @@ func TestSettingsAPISupportsMultipleLLMProfilesAndSelection(t *testing.T) {
 	}
 	if key, err := runtime.ModelAPIKeyForProfile("sol"); err != nil || key != "sol-private" {
 		t.Fatalf("saved sol key=%q err=%v", key, err)
+	}
+}
+
+func TestSettingsAPIStoresResponseTimeoutAndPreservesItWhenSwitchingProfiles(t *testing.T) {
+	store, err := appsettings.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{SettingsStore: store, HermesGateway: &fakeHermesGateway{status: hermes.Status{Available: true}}})
+	body := `{"llm":{"response_timeout_seconds":600},"llm_profiles":[
+		{"id":"one","name":"模型一","provider":"custom","base_url":"https://model.example/v1","model":"model-one","api_mode":"chat_completions"},
+		{"id":"two","name":"模型二","provider":"custom","base_url":"https://model.example/v1","model":"model-two","api_mode":"chat_completions"}
+	],"active_llm_profile_id":"one"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := store.Snapshot().LLM.ResponseTimeoutSeconds; got != 600 {
+		t.Fatalf("saved timeout=%d, want 600", got)
+	}
+	switchReq := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"active_llm_profile_id":"two"}`))
+	switchRec := httptest.NewRecorder()
+	server.ServeHTTP(switchRec, switchReq)
+	if switchRec.Code != http.StatusOK || store.Snapshot().LLM.ResponseTimeoutSeconds != 600 {
+		t.Fatalf("switch changed timeout: status=%d values=%+v", switchRec.Code, store.Snapshot().LLM)
+	}
+	badReq := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"llm":{"response_timeout_seconds":29}}`))
+	badRec := httptest.NewRecorder()
+	server.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid timeout status=%d, want 400", badRec.Code)
+	}
+}
+
+func TestModelResponseTimeoutFollowsSettings(t *testing.T) {
+	store, err := appsettings.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{SettingsStore: store})
+	if got := server.modelResponseTimeout(); got != 315*time.Second {
+		t.Fatalf("default model response timeout=%s, want 5m15s", got)
+	}
+	_, err = store.Update(func(values *appsettings.Values) error {
+		values.LLM.ResponseTimeoutSeconds = 600
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := server.modelResponseTimeout(); got != 615*time.Second {
+		t.Fatalf("configured model response timeout=%s, want 10m15s", got)
 	}
 }

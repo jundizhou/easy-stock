@@ -116,6 +116,25 @@ func (s *Store) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL DEFAULT '',
 			completed_at TEXT NOT NULL DEFAULT ''
 		);
+		CREATE TABLE IF NOT EXISTS review_daily_validations (
+			summary_date TEXT PRIMARY KEY,
+			verification_date TEXT NOT NULL DEFAULT '',
+			content_json TEXT NOT NULL,
+			score REAL NOT NULL DEFAULT 0,
+			coverage REAL NOT NULL DEFAULT 0,
+			generated_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS review_daily_validation_jobs (
+			summary_date TEXT PRIMARY KEY,
+			verification_date TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			stage TEXT NOT NULL,
+			message TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT '',
+			completed_at TEXT NOT NULL DEFAULT ''
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate review database: %w", err)
@@ -297,6 +316,88 @@ func (s *Store) GetDailySummary(ctx context.Context, tradeDate string) (DailySum
 		return DailySummary{}, fmt.Errorf("decode daily review summary: %w", err)
 	}
 	return summary, nil
+}
+
+func (s *Store) LatestDailySummaryBefore(ctx context.Context, beforeDate string) (DailySummary, error) {
+	var content string
+	query := `SELECT content_json FROM review_daily_summaries`
+	args := []any{}
+	if strings.TrimSpace(beforeDate) != "" {
+		query += ` WHERE trade_date < ?`
+		args = append(args, strings.TrimSpace(beforeDate))
+	}
+	query += ` ORDER BY trade_date DESC LIMIT 1`
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&content); err != nil {
+		return DailySummary{}, err
+	}
+	var summary DailySummary
+	if err := json.Unmarshal([]byte(content), &summary); err != nil {
+		return DailySummary{}, fmt.Errorf("decode latest daily review summary: %w", err)
+	}
+	return summary, nil
+}
+
+func (s *Store) SaveDailyValidation(ctx context.Context, validation DailyValidation) (DailyValidation, error) {
+	content, err := json.Marshal(validation)
+	if err != nil {
+		return DailyValidation{}, fmt.Errorf("encode daily review validation: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO review_daily_validations (summary_date,verification_date,content_json,score,coverage,generated_at)
+		VALUES(?,?,?,?,?,?) ON CONFLICT(summary_date) DO UPDATE SET verification_date=excluded.verification_date, content_json=excluded.content_json, score=excluded.score, coverage=excluded.coverage, generated_at=excluded.generated_at`,
+		validation.SummaryDate, validation.VerificationDate, string(content), validation.Score, validation.Coverage, validation.GeneratedAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		return DailyValidation{}, fmt.Errorf("save daily review validation: %w", err)
+	}
+	return s.GetDailyValidation(ctx, validation.SummaryDate)
+}
+
+func (s *Store) GetDailyValidation(ctx context.Context, summaryDate string) (DailyValidation, error) {
+	var content string
+	if err := s.db.QueryRowContext(ctx, `SELECT content_json FROM review_daily_validations WHERE summary_date=?`, strings.TrimSpace(summaryDate)).Scan(&content); err != nil {
+		return DailyValidation{}, err
+	}
+	var validation DailyValidation
+	if err := json.Unmarshal([]byte(content), &validation); err != nil {
+		return DailyValidation{}, fmt.Errorf("decode daily review validation: %w", err)
+	}
+	return validation, nil
+}
+
+func (s *Store) SaveDailyValidationJob(ctx context.Context, job DailyValidationJob) (DailyValidationJob, error) {
+	now := time.Now().UTC()
+	if job.UpdatedAt.IsZero() {
+		job.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO review_daily_validation_jobs (
+		summary_date,verification_date,status,stage,message,error,started_at,updated_at,completed_at
+	) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(summary_date) DO UPDATE SET
+		verification_date=excluded.verification_date, status=excluded.status, stage=excluded.stage,
+		message=excluded.message, error=excluded.error, started_at=excluded.started_at,
+		updated_at=excluded.updated_at, completed_at=excluded.completed_at`,
+		job.SummaryDate, job.VerificationDate, job.Status, job.Stage, job.Message, job.Error,
+		formatOptionalTime(job.StartedAt), formatOptionalTime(job.UpdatedAt), formatOptionalTime(job.CompletedAt))
+	if err != nil {
+		return DailyValidationJob{}, fmt.Errorf("save daily validation job: %w", err)
+	}
+	return s.GetDailyValidationJob(ctx, job.SummaryDate)
+}
+
+func (s *Store) GetDailyValidationJob(ctx context.Context, summaryDate string) (DailyValidationJob, error) {
+	var job DailyValidationJob
+	var startedAt, updatedAt, completedAt string
+	err := s.db.QueryRowContext(ctx, `SELECT summary_date,verification_date,status,stage,message,error,started_at,updated_at,completed_at
+		FROM review_daily_validation_jobs WHERE summary_date=?`, strings.TrimSpace(summaryDate)).Scan(
+		&job.SummaryDate, &job.VerificationDate, &job.Status, &job.Stage, &job.Message, &job.Error, &startedAt, &updatedAt, &completedAt)
+	if err != nil {
+		return DailyValidationJob{}, err
+	}
+	job.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
+	job.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	job.CompletedAt, _ = time.Parse(time.RFC3339, completedAt)
+	if _, resultErr := s.GetDailyValidation(ctx, job.SummaryDate); resultErr == nil {
+		job.ResultAvailable = true
+	}
+	return job, nil
 }
 
 func (s *Store) SaveDailySummaryJob(ctx context.Context, job DailySummaryJob) (DailySummaryJob, error) {
