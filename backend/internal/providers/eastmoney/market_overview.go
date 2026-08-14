@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"easy-stock/backend/internal/foundation"
@@ -575,7 +576,51 @@ func (c *Client) MarketAnnouncements(ctx context.Context, query string, symbol s
 			break
 		}
 	}
+	// The list endpoint only exposes titles. Load the announcement body as
+	// well, otherwise event-driven theme attribution cannot see the target
+	// company, ownership ratio or product terms hidden in the notice.
+	var bodyWG sync.WaitGroup
+	for index := range items {
+		bodyWG.Add(1)
+		go func(index int) {
+			defer bodyWG.Done()
+			content, contentErr := c.announcementContent(ctx, items[index].ID)
+			if contentErr == nil {
+				items[index].Content = truncateAnnouncementContent(content, 8_000)
+			}
+		}(index)
+	}
+	bodyWG.Wait()
 	return items, meta, nil
+}
+
+func (c *Client) announcementContent(ctx context.Context, artCode string) (string, error) {
+	base := c.announcementBaseURL
+	if strings.Contains(base, "np-anotice-stock") {
+		base = strings.Replace(base, "np-anotice-stock", "np-cnotice-stock", 1)
+	}
+	params := url.Values{}
+	params.Set("art_code", strings.TrimSpace(artCode))
+	params.Set("client_source", "web")
+	params.Set("page_index", "1")
+	requestURL := strings.TrimRight(base, "/") + "/api/content/ann?" + params.Encode()
+	var payload struct {
+		Data struct {
+			NoticeContent string `json:"notice_content"`
+		} `json:"data"`
+	}
+	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(payload.Data.NoticeContent), nil
+}
+
+func truncateAnnouncementContent(value string, limit int) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if limit <= 0 || len([]rune(value)) <= limit {
+		return value
+	}
+	return string([]rune(value)[:limit]) + "…"
 }
 
 func (c *Client) MarketReports(ctx context.Context, kind string, query string, symbol string, industry string, limit int) ([]foundation.MarketResearchItem, foundation.SourceMeta, error) {

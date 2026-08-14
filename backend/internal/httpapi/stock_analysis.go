@@ -38,29 +38,31 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	benchmarkSymbol, benchmarkName := stockanalysis.BenchmarkForSymbol(normalized.Canonical)
 
 	var (
-		quote          foundation.Quote
-		lines          []foundation.KLine
-		benchmarkLines []foundation.KLine
-		limitUps       []foundation.LimitUpEvent
-		cachedThemes   []foundation.StockThemeAttribution
-		catalog        []foundation.StockCatalogEntry
-		themes         []foundation.ThemeOverview
-		news           []foundation.NewsItem
-		business       foundation.StockBusinessProfile
-		fundamentals   foundation.StockFundamentals
-		reports        []foundation.MarketResearchItem
-		quoteErr       error
-		lineErr        error
-		benchmarkErr   error
-		limitUpErr     error
-		cachedThemeErr error
-		catalogErr     error
-		themeErr       error
-		newsErr        error
-		businessErr    error
-		fundamentalErr error
-		reportErr      error
-		collectionWG   sync.WaitGroup
+		quote           foundation.Quote
+		lines           []foundation.KLine
+		benchmarkLines  []foundation.KLine
+		limitUps        []foundation.LimitUpEvent
+		cachedThemes    []foundation.StockThemeAttribution
+		catalog         []foundation.StockCatalogEntry
+		themes          []foundation.ThemeOverview
+		news            []foundation.NewsItem
+		business        foundation.StockBusinessProfile
+		fundamentals    foundation.StockFundamentals
+		reports         []foundation.MarketResearchItem
+		announcements   []foundation.MarketResearchItem
+		quoteErr        error
+		lineErr         error
+		benchmarkErr    error
+		limitUpErr      error
+		cachedThemeErr  error
+		catalogErr      error
+		themeErr        error
+		newsErr         error
+		businessErr     error
+		fundamentalErr  error
+		reportErr       error
+		announcementErr error
+		collectionWG    sync.WaitGroup
 	)
 
 	collectionWG.Add(3)
@@ -119,10 +121,14 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	if s.marketOverview != nil {
-		collectionWG.Add(1)
+		collectionWG.Add(2)
 		go func() {
 			defer collectionWG.Done()
 			reports, _, reportErr = s.marketOverview.MarketReports(dataCtx, "stock", "", normalized.Canonical, "", 8)
+		}()
+		go func() {
+			defer collectionWG.Done()
+			announcements, _, announcementErr = s.marketOverview.MarketAnnouncements(dataCtx, "", normalized.Canonical, "all", 24)
 		}()
 	}
 	if s.themeOverview != nil {
@@ -198,8 +204,11 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	if reportErr != nil {
 		gaps = append(gaps, "机构研报不可用: "+reportErr.Error())
 	}
+	if announcementErr != nil {
+		gaps = append(gaps, "公司公告不可用: "+announcementErr.Error())
+	}
 
-	analysis, err := stockanalysis.Analyze(stockanalysis.Input{
+	analysisInput := stockanalysis.Input{
 		Symbol:          normalized.Canonical,
 		Quote:           quote,
 		KLines:          lines,
@@ -207,6 +216,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		BenchmarkName:   benchmarkName,
 		BenchmarkKLines: benchmarkLines,
 		LimitUps:        limitUps,
+		Catalog:         catalog,
 		Concepts:        concepts,
 		Industry:        industry,
 		Business:        business.MainBusiness,
@@ -214,12 +224,27 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		BusinessSource:  business.Meta.Source,
 		Fundamentals:    &fundamentals,
 		Reports:         reports,
+		Announcements:   announcements,
 		CachedThemes:    cachedThemes,
 		Themes:          themes,
 		MarketEmotion:   emotion,
 		News:            news,
 		CollectionGaps:  gaps,
-	})
+	}
+	if s.hermesGateway != nil {
+		status := s.hermesGateway.Status()
+		if status.Available && status.Configured && (len(announcements) > 0 || len(news) > 0) {
+			themeCtx, cancelTheme := context.WithTimeout(r.Context(), 24*time.Second)
+			modelEvidence, modelErr := stockanalysis.ExtractThemeEvidence(themeCtx, s.hermesGateway, analysisInput)
+			cancelTheme()
+			if modelErr == nil {
+				analysisInput.ModelThemeEvidence = modelEvidence
+			} else {
+				analysisInput.CollectionGaps = append(analysisInput.CollectionGaps, "大模型题材抽取不可用，已使用本地证据规则: "+modelErr.Error())
+			}
+		}
+	}
+	analysis, err := stockanalysis.Analyze(analysisInput)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return

@@ -238,10 +238,17 @@ func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnal
 		relativeScore = float64(relative.Score)
 	}
 	themeScore := 50.0
-	if theme.TrendScore > 0 {
-		themeScore = float64(theme.TrendScore)
+	if theme.Resonance.Available {
+		themeScore = float64(theme.Resonance.Score)
 	}
-	score := float64(trend.Score)*0.45 + relativeScore*0.2 + themeScore*0.15 + marketScore*0.2
+	score := float64(trend.Score)*0.45 + relativeScore*0.2 + marketScore*0.2
+	if theme.Resonance.Available {
+		score += themeScore * .15
+	} else {
+		// Redistribute the missing theme weight instead of injecting a fake
+		// neutral resonance score.
+		score = float64(trend.Score)*.52 + relativeScore*.24 + marketScore*.24
+	}
 	switch short.State {
 	case "修复", "启动", "发酵":
 		score += 5
@@ -331,11 +338,9 @@ func buildSignals(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnaly
 	if relative.Available {
 		signals = append(signals, Signal{Key: "relative", Label: "相对强度", Tone: scoreTone(relative.Score), Strength: relative.Score, Detail: relative.Detail})
 	}
-	themeScore := theme.TrendScore
-	if themeScore == 0 {
-		themeScore = 45
+	if theme.Resonance.Available {
+		signals = append(signals, Signal{Key: "theme", Label: "题材共振", Tone: scoreTone(theme.Resonance.Score), Strength: theme.Resonance.Score, Detail: theme.Resonance.Detail})
 	}
-	signals = append(signals, Signal{Key: "theme", Label: "题材共振", Tone: scoreTone(themeScore), Strength: themeScore, Detail: firstNonEmpty(theme.Description, "暂按独立结构处理")})
 	marketScore := 50
 	marketDetail := "市场情绪数据不足"
 	if market != nil {

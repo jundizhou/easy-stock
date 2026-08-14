@@ -36,6 +36,7 @@ func Analyze(input Input) (Analysis, error) {
 	trend, chart := analyzeTrend(lines)
 	shortTerm := analyzeShortTerm(input.Symbol, lines, input.LimitUps)
 	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
+	theme = enrichTheme(input, shortTerm, theme)
 	market := marketContext(input)
 	profile := classifyProfile(trend, shortTerm, theme, market)
 	var fundamental *FundamentalAnalysis
@@ -744,6 +745,10 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "limited", Message: "涨停次数主要由日K涨幅近似识别"})
 	}
 	switch {
+	case theme.IsHot && theme.Resonance.Available:
+		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("已完成事件驱动题材归因：%s；共振%d分", theme.Primary, theme.Resonance.Score)})
+	case theme.IsHot:
+		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: fmt.Sprintf("已识别事实题材%s，等待题材成分股盘面验证", theme.Primary)})
 	case strings.Contains(theme.Source, "kaipanla-limit-up"):
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已命中开盘啦短线连板缓存"})
 	case strings.Contains(theme.Source, "kaipanla-theme-leader"):

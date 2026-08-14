@@ -454,10 +454,11 @@ function AnalysisVerdict({ analysis, copied, exporting, onRefresh, onExport, onC
 }
 
 function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
-	const themeSource = stockThemeSourceLabel(analysis.theme.source);
-	const themeRole = analysis.theme.role && analysis.theme.role !== '待确认' ? analysis.theme.role : '';
-	const themeDetail = analysis.theme.is_hot
-		? [themeRole, themeSource, analysis.theme.business ? `主业：${analysis.theme.business}` : ''].filter(Boolean).join(' · ')
+	const theme = normalizeStockAITheme(analysis.theme);
+	const themeSource = stockThemeSourceLabel(theme.source);
+	const themeRole = theme.role && theme.role !== '待确认' ? theme.role : '';
+	const themeDetail = theme.is_hot
+		? [themeRole, themeSource, theme.business ? `主业：${theme.business}` : ''].filter(Boolean).join(' · ')
 		: [themeSource, '未发现明确热点炒作'].filter(Boolean).join(' · ');
 	return (
 		<>
@@ -467,13 +468,15 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<KPICard icon={<Scale size={17} />} label="相对强度" value={analysis.relative_strength.available ? `${analysis.relative_strength.score}` : '--'} detail={analysis.relative_strength.available ? `${analysis.relative_strength.state} · ${analysis.relative_strength.benchmark_name}` : analysis.relative_strength.detail} tone="purple" />
 				<KPICard icon={<ShieldCheck size={17} />} label="交易风险" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
 				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={`近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
-				<KPICard icon={<Target size={17} />} label={analysis.theme.is_hot ? '热点定位' : '主业定位'} value={analysis.theme.primary || '独立结构'} detail={themeDetail} tone="purple" />
+				<KPICard icon={<Target size={17} />} label={theme.is_hot ? '热点定位' : '主业定位'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />
 			</section>
 
 			<div className="stock-ai-analysis-grid">
 				<ScorecardPanel analysis={analysis} />
 				<SignalMatrix analysis={analysis} />
 			</div>
+
+			<ThemeAttributionPanel analysis={analysis} />
 
 			{analysis.profile.primary_type !== 'emotion_leader' && <div className="stock-ai-fundamental-grid">
 				<FundamentalPanel analysis={analysis} />
@@ -515,6 +518,29 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 			</div>
 		</>
 	);
+}
+
+function ThemeAttributionPanel({ analysis }: { analysis: StockAIAnalysis }) {
+	const theme = normalizeStockAITheme(analysis.theme);
+	const resonance = theme.resonance;
+	return <section className="stock-ai-panel stock-ai-theme-attribution-panel">
+		<header><div><span>事件驱动归因</span><h3>主业 · 事实题材 · 当前炒作 · 市场延伸</h3></div><Target size={19} /></header>
+		<div className="stock-ai-theme-attribution-body">
+			<div className="stock-ai-theme-primary"><span>当前主炒作</span><strong>{theme.is_hot ? theme.hot_theme || theme.primary : theme.business_theme || theme.primary || '暂无有效题材'}</strong><em>{theme.is_hot ? `置信度${theme.confidence} · 炒作相关性${theme.hot_score}` : '未发现事件与盘面共振'}</em><small>{theme.description}</small></div>
+			<div className="stock-ai-theme-columns">
+				<div><span>事实支撑</span>{(theme.confirmed_themes || []).length ? theme.confirmed_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>{item.confidence} · {item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无结构化事实题材</small>}</div>
+				<div><span>市场延伸 / 映射</span>{(theme.speculative_themes || []).length ? theme.speculative_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>{item.confidence} · {item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无有效延伸题材</small>}</div>
+			</div>
+			<div className="stock-ai-theme-resonance"><div><span>题材共振</span><strong>{resonance.available ? `${resonance.score} · ${resonance.state}` : '暂无有效题材'}</strong><small>{resonance.detail}</small></div>{resonance.available && <div className="stock-ai-theme-resonance-metrics">{[['个股动能', resonance.stock_momentum], ['相对强度', resonance.relative_strength], ['上涨广度', resonance.breadth], ['涨停能量', resonance.limit_up_energy], ['持续性', resonance.persistence], ['证据质量', resonance.evidence_quality], ['资金扩散', resonance.capital_diffusion]].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong><i><b style={{ width: `${value}%` }} /></i></article>)}</div>}</div>
+		</div>
+	</section>;
+}
+
+function normalizeStockAITheme(theme?: StockAIAnalysis['theme']): NonNullable<StockAIAnalysis['theme']> {
+	const fallback = {
+		primary: '', business: '', is_hot: false, concepts: [], source: '', route: 'trend', trend_score: 0, trend_stage: '', active_days: 0, max_streak: 0, role: '待确认', description: '当前结果由旧版本缓存生成，请重新分析以获得题材共振明细', hot_score: 0, confidence: '低', resonance: { available: false, score: 0, state: '暂无题材', detail: '当前结果由旧版本缓存生成，请重新分析以获得题材共振明细', stock_momentum: 0, relative_strength: 0, breadth: 0, limit_up_energy: 0, persistence: 0, leader_position: 0, evidence_quality: 0, capital_diffusion: 0 },
+	};
+	return { ...fallback, ...(theme || {}), resonance: { ...fallback.resonance, ...(theme?.resonance || {}) } };
 }
 
 function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {

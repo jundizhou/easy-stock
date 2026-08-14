@@ -8,25 +8,28 @@ import (
 )
 
 type Input struct {
-	Symbol          string
-	Quote           foundation.Quote
-	KLines          []foundation.KLine
-	BenchmarkSymbol string
-	BenchmarkName   string
-	BenchmarkKLines []foundation.KLine
-	LimitUps        []foundation.LimitUpEvent
-	Concepts        []string
-	Industry        string
-	Business        string
-	BusinessDetail  string
-	BusinessSource  string
-	Fundamentals    *foundation.StockFundamentals
-	Reports         []foundation.MarketResearchItem
-	CachedThemes    []foundation.StockThemeAttribution
-	Themes          []foundation.ThemeOverview
-	MarketEmotion   *marketemotion.Snapshot
-	News            []foundation.NewsItem
-	CollectionGaps  []string
+	Symbol             string
+	Quote              foundation.Quote
+	KLines             []foundation.KLine
+	BenchmarkSymbol    string
+	BenchmarkName      string
+	BenchmarkKLines    []foundation.KLine
+	LimitUps           []foundation.LimitUpEvent
+	Catalog            []foundation.StockCatalogEntry
+	Concepts           []string
+	Industry           string
+	Business           string
+	BusinessDetail     string
+	BusinessSource     string
+	Fundamentals       *foundation.StockFundamentals
+	Reports            []foundation.MarketResearchItem
+	Announcements      []foundation.MarketResearchItem
+	ModelThemeEvidence []ThemeEvidence
+	CachedThemes       []foundation.StockThemeAttribution
+	Themes             []foundation.ThemeOverview
+	MarketEmotion      *marketemotion.Snapshot
+	News               []foundation.NewsItem
+	CollectionGaps     []string
 }
 
 type Analysis struct {
@@ -214,21 +217,67 @@ type ShortTermAnalysis struct {
 }
 
 type ThemeAnalysis struct {
-	Primary     string   `json:"primary"`
-	Business    string   `json:"business"`
-	HotTheme    string   `json:"hot_theme,omitempty"`
-	IsHot       bool     `json:"is_hot"`
-	Concepts    []string `json:"concepts"`
-	Source      string   `json:"source"`
-	AsOf        string   `json:"as_of,omitempty"`
-	Evidence    []string `json:"evidence,omitempty"`
-	Route       string   `json:"route"`
-	TrendScore  int      `json:"trend_score"`
-	TrendStage  string   `json:"trend_stage"`
-	ActiveDays  int      `json:"active_days"`
-	MaxStreak   int      `json:"max_streak"`
-	Role        string   `json:"role"`
-	Description string   `json:"description"`
+	Primary           string          `json:"primary"`
+	Business          string          `json:"business"`
+	HotTheme          string          `json:"hot_theme,omitempty"`
+	IsHot             bool            `json:"is_hot"`
+	Concepts          []string        `json:"concepts"`
+	Source            string          `json:"source"`
+	AsOf              string          `json:"as_of,omitempty"`
+	Evidence          []string        `json:"evidence,omitempty"`
+	Route             string          `json:"route"`
+	TrendScore        int             `json:"trend_score"`
+	TrendStage        string          `json:"trend_stage"`
+	ActiveDays        int             `json:"active_days"`
+	MaxStreak         int             `json:"max_streak"`
+	Role              string          `json:"role"`
+	Description       string          `json:"description"`
+	HotScore          int             `json:"hot_score"`
+	Confidence        string          `json:"confidence"`
+	BusinessTheme     string          `json:"business_theme,omitempty"`
+	ConfirmedThemes   []ThemeTag      `json:"confirmed_themes,omitempty"`
+	SpeculativeThemes []ThemeTag      `json:"speculative_themes,omitempty"`
+	EvidenceItems     []ThemeEvidence `json:"evidence_items,omitempty"`
+	Resonance         ThemeResonance  `json:"resonance"`
+}
+
+// ThemeEvidence is a traceable fact used to attribute a stock to a theme.
+// Evidence is deliberately separated from the final label so a user can
+// distinguish company facts, market attribution and model inference.
+type ThemeEvidence struct {
+	Theme       string    `json:"theme"`
+	Type        string    `json:"type"`
+	Source      string    `json:"source"`
+	Title       string    `json:"title"`
+	URL         string    `json:"url,omitempty"`
+	PublishedAt time.Time `json:"published_at,omitempty"`
+	Snippet     string    `json:"snippet,omitempty"`
+	Strength    float64   `json:"strength"`
+	Freshness   float64   `json:"freshness"`
+}
+
+type ThemeTag struct {
+	Name          string `json:"name"`
+	Layer         string `json:"layer"`
+	Confidence    string `json:"confidence"`
+	Score         int    `json:"score"`
+	EvidenceCount int    `json:"evidence_count"`
+	Detail        string `json:"detail"`
+}
+
+type ThemeResonance struct {
+	Available        bool   `json:"available"`
+	Score            int    `json:"score"`
+	State            string `json:"state"`
+	Detail           string `json:"detail"`
+	StockMomentum    int    `json:"stock_momentum"`
+	RelativeStrength int    `json:"relative_strength"`
+	Breadth          int    `json:"breadth"`
+	LimitUpEnergy    int    `json:"limit_up_energy"`
+	Persistence      int    `json:"persistence"`
+	LeaderPosition   int    `json:"leader_position"`
+	EvidenceQuality  int    `json:"evidence_quality"`
+	CapitalDiffusion int    `json:"capital_diffusion"`
 }
 
 type FundamentalAnalysis struct {

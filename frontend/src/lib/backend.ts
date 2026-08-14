@@ -340,6 +340,7 @@ export type MarketResearchItem = {
 	industry_code?: string;
 	industry_name?: string;
 	title: string;
+	content?: string;
 	organization?: string;
 	researchers?: string;
 	rating?: string;
@@ -534,6 +535,49 @@ export type StockAITheme = {
 	max_streak: number;
 	role: string;
 	description: string;
+	hot_score: number;
+	confidence: string;
+	business_theme?: string;
+	confirmed_themes?: StockAIThemeTag[];
+	speculative_themes?: StockAIThemeTag[];
+	evidence_items?: StockAIThemeEvidence[];
+	resonance: StockAIThemeResonance;
+};
+
+export type StockAIThemeTag = {
+	name: string;
+	layer: string;
+	confidence: string;
+	score: number;
+	evidence_count: number;
+	detail: string;
+};
+
+export type StockAIThemeEvidence = {
+	theme: string;
+	type: string;
+	source: string;
+	title: string;
+	url?: string;
+	published_at?: string;
+	snippet?: string;
+	strength: number;
+	freshness: number;
+};
+
+export type StockAIThemeResonance = {
+	available: boolean;
+	score: number;
+	state: string;
+	detail: string;
+	stock_momentum: number;
+	relative_strength: number;
+	breadth: number;
+	limit_up_energy: number;
+	persistence: number;
+	leader_position: number;
+	evidence_quality: number;
+	capital_diffusion: number;
 };
 
 export type StockAIFundamental = {

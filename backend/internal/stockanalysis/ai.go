@@ -18,6 +18,70 @@ type aiConclusion struct {
 	MainRisk string `json:"main_risk"`
 }
 
+type aiThemeEvidenceResponse struct {
+	Items []ThemeEvidence `json:"items"`
+}
+
+// ExtractThemeEvidence asks Hermes to normalize facts that are difficult to
+// recover from short announcement titles (for example an investment in a
+// compound-semiconductor subsidiary). The response is only a candidate-evidence
+// layer; enrichTheme still requires deterministic market confirmation before it
+// promotes a theme to the primary hot label.
+func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input Input) ([]ThemeEvidence, error) {
+	if prompter == nil {
+		return nil, errors.New("AI分析底座不可用")
+	}
+	if len(input.Announcements) == 0 && len(input.News) == 0 {
+		return nil, nil
+	}
+	var source strings.Builder
+	source.WriteString("股票：" + input.Quote.Name + "（" + input.Symbol + "）\n")
+	source.WriteString("主营：" + firstNonEmpty(input.Business, input.Industry) + "\n")
+	source.WriteString("概念目录：" + strings.Join(input.Concepts, "、") + "\n")
+	source.WriteString("公告：\n")
+	for _, item := range input.Announcements {
+		source.WriteString("- " + item.PublishedAt.Format("2006-01-02") + " | " + item.Title + " | " + item.Category + " | " + truncateText(item.Content, 900) + "\n")
+	}
+	source.WriteString("资讯：\n")
+	for _, item := range input.News {
+		if containsAnyFold(item.Title+" "+item.Content, input.Quote.Name, strings.Split(input.Symbol, ".")[0]) {
+			source.WriteString("- " + item.PublishedAt.Format("2006-01-02 15:04") + " | " + item.Title + " | " + truncateText(item.Content, 240) + "\n")
+		}
+	}
+	prompt := `你是A股题材归因器。请仅基于输入事实，提取可能影响当前炒作的具体题材。
+规则：
+1. 区分 fact（公告或公司明确事实）、market_mapping（产业链/市场映射）、inference（弱推断）。
+2. 不要把主营行业、宽泛概念目录直接当成热点；不要编造公告未出现的公司事实。
+3. 题材名称使用短而具体的中文，例如“化合物半导体”“砷化镓”“光电子器件”“CPO”。
+4. 每项必须给出原文标题或摘要作为snippet，strength为0到1。
+5. 只输出JSON：{"items":[{"theme":"...","type":"fact|market_mapping|inference","source":"...","title":"...","snippet":"...","strength":0.0}]}
+
+[输入]
+` + source.String()
+	result, err := prompter.Prompt(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+	var decoded aiThemeEvidenceResponse
+	if err := decodeJSONObject(result.Content, &decoded); err != nil {
+		return nil, err
+	}
+	out := make([]ThemeEvidence, 0, min(len(decoded.Items), 12))
+	for _, item := range decoded.Items {
+		item.Theme = strings.TrimSpace(item.Theme)
+		if item.Theme == "" {
+			continue
+		}
+		item.Strength = clamp(item.Strength, .15, .98)
+		item.Freshness = freshnessForTime(item.PublishedAt)
+		out = append(out, item)
+		if len(out) >= 12 {
+			break
+		}
+	}
+	return out, nil
+}
+
 func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analysis, methodologyContext string) error {
 	if prompter == nil || analysis == nil {
 		return errors.New("AI分析底座不可用")

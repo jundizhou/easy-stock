@@ -129,6 +129,7 @@ type MarketResearchItem struct {
 	IndustryCode   string     `json:"industry_code,omitempty"`
 	IndustryName   string     `json:"industry_name,omitempty"`
 	Title          string     `json:"title"`
+	Content        string     `json:"content,omitempty"`
 	Organization   string     `json:"organization,omitempty"`
 	Researchers    string     `json:"researchers,omitempty"`
 	Rating         string     `json:"rating,omitempty"`

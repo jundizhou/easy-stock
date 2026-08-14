@@ -163,6 +163,36 @@ func TestAnalyzeThemeDoesNotPromoteBroadConceptToHotTheme(t *testing.T) {
 	}
 }
 
+func TestAnalyzeThemePromotesAnnouncementBackedCompoundSemiconductor(t *testing.T) {
+	lines := syntheticTrendLines("300720.SZ", 80, 10, 0.18, 900_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "300720.SZ", Quote: foundation.Quote{Symbol: "300720.SZ", Name: "海川智能", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business: "智能衡器", BusinessDetail: "智能衡器、物联网设备", Concepts: []string{"物联网"},
+		Announcements: []foundation.MarketResearchItem{{Title: "关于参股砷化镓半导体企业的公告", Category: "重大事项", PublishedAt: time.Now(), Meta: foundation.SourceMeta{Source: "eastmoney:announcement"}}},
+		Themes:        []foundation.ThemeOverview{{Name: "半导体芯片", TrendScore: 82, RisingNodes: 18, MatchedNodes: 24, LimitUpCount: 3, ActiveDays: 5, FiveDayStrengthScore: 78}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(analysis.Theme.Primary, "化合物半导体") || !strings.Contains(analysis.Theme.Primary, "砷化镓") || !analysis.Theme.IsHot || analysis.Theme.HotScore < 55 {
+		t.Fatalf("unexpected announcement attribution: %+v", analysis.Theme)
+	}
+	if !analysis.Theme.Resonance.Available || analysis.Theme.Resonance.Score <= 0 {
+		t.Fatalf("theme resonance missing: %+v", analysis.Theme.Resonance)
+	}
+}
+
+func TestThemeCatalogOnlyDoesNotCreateHotTheme(t *testing.T) {
+	lines := syntheticTrendLines("688297.SH", 80, 10, 0.02, 900_000_000)
+	analysis, err := Analyze(Input{Symbol: "688297.SH", Quote: foundation.Quote{Symbol: "688297.SH", Name: "样本股", Price: lines[len(lines)-1].Close}, KLines: lines, Business: "无人机系统", Concepts: []string{"西部大开发", "无人机"}, Themes: []foundation.ThemeOverview{{Name: "西部大开发", TrendScore: 95, RisingNodes: 30, MatchedNodes: 30}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.Primary != "无人机系统" {
+		t.Fatalf("catalog-only concept was promoted: %+v", analysis.Theme)
+	}
+}
+
 func TestAnalyzeNonShortStockIncludesFundamentalsAndResearch(t *testing.T) {
 	lines := syntheticTrendLines("600519.SH", 180, 10, 0.08, 1_500_000_000)
 	analysis, err := Analyze(Input{
