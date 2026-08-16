@@ -39,25 +39,27 @@ func Analyze(input Input) (Analysis, error) {
 	theme = enrichTheme(input, shortTerm, theme)
 	market := marketContext(input)
 	profile := classifyProfile(trend, shortTerm, theme, market)
-	var fundamental *FundamentalAnalysis
-	var research *ResearchAnalysis
-	if profile.PrimaryType != "emotion_leader" {
-		value := analyzeFundamentals(input.Fundamentals)
-		fundamental = &value
-		researchValue := analyzeResearch(input.Reports)
-		research = &researchValue
-	}
-	action := buildActionPlan(profile, trend, shortTerm, market)
+	fundamentalValue := analyzeFundamentals(input.Fundamentals)
+	fundamental := &fundamentalValue
+	researchValue := analyzeResearch(input.Reports)
+	research := &researchValue
+	stockNewsValue, themeNewsValue := analyzeRecentNews(input, theme)
+	stockNews := &stockNewsValue
+	themeNews := &themeNewsValue
 	risks := buildRisks(profile, trend, shortTerm, theme, market)
 	timeframes := analyzeTimeframes(lines)
 	relative := analyzeRelativeStrength(input, lines)
 	riskControl := buildRiskControl(profile, trend, shortTerm, market)
+	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl)
+	if action.DecisionMode != "short_term" {
+		riskControl = alignRiskControlWithActionPlan(riskControl, action)
+	}
 	nextDay := buildNextDayPlan(lines, profile, trend, shortTerm, theme, market, relative, riskControl)
 	signals := buildSignals(trend, shortTerm, theme, market, relative, riskControl, timeframes, fundamental, research)
 	scorecard := buildScorecard(profile, signals)
 	conclusion := buildConclusion(name, profile, trend, shortTerm, action, risks)
-	evidence := buildEvidence(input, profile, trend, shortTerm, theme, market, relative, riskControl, lines, fundamental, research)
-	quality := buildDataQuality(input, profile, lines, shortTerm, theme, market, relative, fundamental, research)
+	evidence := buildEvidence(input, profile, trend, shortTerm, theme, market, relative, riskControl, lines, fundamental, research, stockNews, themeNews)
+	quality := buildDataQuality(input, profile, lines, shortTerm, theme, market, relative, fundamental, research, stockNews, themeNews)
 
 	return Analysis{
 		Symbol:      input.Symbol,
@@ -71,6 +73,8 @@ func Analyze(input Input) (Analysis, error) {
 		Theme:       theme,
 		Fundamental: fundamental,
 		Research:    research,
+		StockNews:   stockNews,
+		ThemeNews:   themeNews,
 		Market:      market,
 		Scorecard:   scorecard,
 		Timeframes:  timeframes,
@@ -597,9 +601,15 @@ func classifyProfile(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAn
 	}
 }
 
-func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, market *MarketContext) ActionPlan {
+func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl) ActionPlan {
 	plan := ActionPlan{
-		CurrentAction: "等待结构确认",
+		DecisionMode:       "non_short",
+		DecisionLabel:      "趋势与价值定价",
+		DecisionConfidence: profile.Confidence,
+		Horizon:            "波段 / 中期趋势",
+		Rationale:          "当前先按趋势结构、题材强度、基本面与机构预期的交集生成价格计划，最终由AI全局研判修正。",
+		PricingSource:      "local-rules",
+		CurrentAction:      "等待结构确认",
 		EntryConditions: []string{
 			fmt.Sprintf("价格重新站稳%.2f附近的关键趋势位", firstPositive(trend.MA20, trend.Support)),
 			"成交量放大但日内波动不过度扩张",
@@ -649,8 +659,258 @@ func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalys
 	plan.EntryConditions = uniqueStrings(plan.EntryConditions, 4)
 	plan.HoldConditions = uniqueStrings(plan.HoldConditions, 4)
 	plan.AvoidConditions = uniqueStrings(plan.AvoidConditions, 4)
-	_ = short
+	if shouldUseShortTermDecision(profile, short, theme) {
+		plan.DecisionMode = "short_term"
+		plan.DecisionLabel = "超短次日作战"
+		plan.Horizon = "隔日 / 1—3个交易日"
+		plan.Rationale = "该股的收益来源更依赖题材合力、辨识度、次日竞价与开盘承接，盘后静态价格不能替代次日确认。"
+		plan.PricingSource = "not-applicable"
+		plan.ShortTerm = buildShortTermPlaybook(profile, trend, short, theme, market, relative)
+	} else {
+		plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss = buildActionPriceZones(profile, trend, short, market, risk)
+	}
 	return plan
+}
+
+func shouldUseShortTermDecision(profile Profile, short ShortTermAnalysis, theme ThemeAnalysis) bool {
+	if profile.PrimaryType == "emotion_leader" || short.LatestStreak >= 1 {
+		return true
+	}
+	return theme.IsHot && short.LimitUpCount20 >= 2 && short.RecentReturn10 >= 12
+}
+
+func buildShortTermPlaybook(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength) *ShortTermPlaybook {
+	marketPhase := "市场情绪待确认"
+	if market != nil && strings.TrimSpace(market.Phase) != "" {
+		marketPhase = market.Phase
+	}
+	positioning := firstNonEmpty(nonDefaultRole(profile.MarketRole), theme.Role, "题材内地位待竞价确认")
+	if theme.Primary != "" {
+		positioning += " · " + theme.Primary
+	}
+	pattern := "等待竞价和开盘确认市场是否继续给予流动性溢价"
+	switch short.State {
+	case "启动", "发酵":
+		pattern = "观察题材能否继续扩散，优先识别主动弱转强或分歧转一致"
+	case "加速":
+		pattern = "进入加速后的分歧检验，不接受无量一致高开作为独立买入理由"
+	case "修复":
+		pattern = "观察修复是否由板块合力推动，避免把个股脉冲误判为弱转强"
+	case "退潮":
+		pattern = "以风险收缩为主，只有板块和高位反馈同步修复才重新评估"
+	}
+	overnight := fmt.Sprintf("盘后只能确认%s、近20日%d次涨停及当前%s状态；明日是否参与必须等9:25竞价和开盘承接验证。", marketPhase, short.LimitUpCount20, short.State)
+	if relative.Available {
+		overnight += fmt.Sprintf(" 当前相对强度为%s（%d分），但不能替代次日资金选择。", relative.State, relative.Score)
+	}
+	auctionStatus := "待9:25竞价确认"
+	openingStatus := "待9:30—9:35开盘确认"
+	vetoes := []string{
+		"板块核心与同梯队个股竞价集体低于预期",
+		"个股爆量高开后竞价持续回落，且跟风强于核心",
+		"开盘后放量跌破竞价低点，首次反抽不能快速收回",
+		"高位股批量负反馈、题材进入退潮或出现公告与监管风险",
+	}
+	if market != nil && (market.Phase == "退潮" || market.Phase == "冰点") {
+		vetoes = append([]string{"市场仍处于" + market.Phase + "，没有板块级修复前不因个股高开参与"}, vetoes...)
+	}
+	return &ShortTermPlaybook{
+		Positioning:         positioning,
+		SentimentCycle:      marketPhase + " · 个股" + short.State,
+		ExpectedPattern:     pattern,
+		OvernightConclusion: overnight,
+		DataStatus:          "当前是盘后预案，尚无次日9:25竞价和9:30后分时数据，因此只给条件，不给确定买点。",
+		Auction: ShortTermDecisionStage{
+			Label:   "9:25竞价确认",
+			Status:  auctionStatus,
+			Summary: "重点判断预期差、板块同步性和真实资金强度，不用单一高开幅度下结论。",
+			Required: []string{
+				"9:20后竞价方向稳定，最后阶段不是持续撤单式回落",
+				"竞价成交额与近期成交活跃度匹配，不是无量虚强或异常爆量兑现",
+				"题材龙头、同身位和容量核心至少形成两处以上正反馈",
+				"个股开盘预期与自身地位匹配，跟风股不能反客为主",
+			},
+			Avoid: uniqueStrings(vetoes, 4),
+		},
+		Opening: ShortTermDecisionStage{
+			Label:   "9:30—9:35开盘确认",
+			Status:  openingStatus,
+			Summary: "竞价符合预期后仍需检查承接；A股T+1下，当日无法纠错卖出，开盘确认优先于抢第一笔。",
+			Required: []string{
+				"首次分歧有承接，分时低点不连续下移",
+				"回踩开盘价或竞价关键位后能够主动收回",
+				"上涨放量、回落缩量，且强度不弱于题材核心",
+				"板块扩散和赚钱效应没有在开盘后快速坍塌",
+			},
+			Avoid: []string{"高开直线下杀且放量", "冲高时板块不跟随", "炸板或破位后反抽无力", "盘口只剩个股脉冲而没有题材合力"},
+		},
+		ParticipationConditions: []string{"竞价结果达到预期", "开盘承接确认", "题材与个股形成共振", "不存在一票否决风险"},
+		HoldConditions:          []string{"仍保持板块辨识度", "关键分时低点不破", "题材梯队与容量核心没有明显转弱"},
+		ExitConditions:          []string{"表现低于盘后预期且不能快速修复", "板块核心转弱或高位负反馈扩散", "炸板、破位或放量冲高回落后承接消失"},
+		VetoConditions:          uniqueStrings(vetoes, 5),
+		Scenarios: []ShortTermDecisionScenario{
+			{Name: "超预期", Tone: "positive", Condition: "竞价强度、板块反馈与开盘承接同时超出盘后预期", Action: "等待首次可验证分歧，确认后再参与，不追无量直线加速"},
+			{Name: "符合预期", Tone: "neutral", Condition: "竞价表现匹配地位，开盘后量价与板块保持同步", Action: "按计划观察回踩承接或放量转强，只做模式内动作"},
+			{Name: "低于预期", Tone: "negative", Condition: "竞价走弱、板块核心负反馈或开盘承接失败", Action: "取消参与；已有仓位优先执行退出条件，不把短线被套改成中线"},
+		},
+	}
+}
+
+func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, market *MarketContext, risk RiskControl) (ActionPriceZone, ActionPriceZone, ActionPriceZone, ActionPriceZone) {
+	latest := firstPositive(trend.LatestClose, risk.EntryReference)
+	if latest <= 0 {
+		latest = 1
+	}
+	atrPercent := clamp(trend.ATR14Percent, 1.5, 10)
+	zonePercent := clamp(atrPercent*0.14, 0.3, 1.2)
+	stop := risk.StopPrice
+	if stop <= 0 || stop >= latest {
+		stop = latest * (1 - clamp(atrPercent*0.8, 2, 8)/100)
+	}
+	stop = round2(math.Max(stop, 0.01))
+
+	anchor, anchorLabel := actionSupportAnchor(trend, latest)
+	entryLow := math.Max(stop*1.005, anchor*(1-zonePercent/100))
+	entryHigh := anchor * (1 + zonePercent/100)
+	entryReason := fmt.Sprintf("围绕%s %.2f，并按ATR %.1f%%预留正常波动；价格止跌且量能确认后再介入。", anchorLabel, anchor, trend.ATR14Percent)
+	entryAction := "进入该区间后先观察承接，企稳或重新转强时分批验证，不在下跌途中直接挂单抄底。"
+
+	if profile.PrimaryType == "weak_risk" {
+		confirmation, confirmationLabel := actionRecoveryAnchor(trend, latest)
+		entryLow = math.Max(confirmation, stop*1.01)
+		entryHigh = entryLow * (1 + zonePercent/100)
+		entryReason = fmt.Sprintf("中期结构仍弱，只有重新站回%s %.2f并稳定在其上方，才视为出现右侧修复。", confirmationLabel, confirmation)
+		entryAction = "这不是当前抄底价；未站回确认区前不新增仓位，站回后仍需量能和更高低点配合。"
+	} else if profile.PrimaryType == "emotion_leader" {
+		entryReason = fmt.Sprintf("以分歧承接位%s %.2f为中心，并按ATR %.1f%%留出波动；只做回踩承接或弱转强确认。", anchorLabel, anchor, trend.ATR14Percent)
+		entryAction = "先看板块梯队与回封质量，再用小仓分批介入；一致性加速时不追第一笔。"
+	}
+
+	entryLow = round2(math.Max(entryLow, stop+0.01))
+	entryHigh = round2(math.Max(entryHigh, entryLow))
+	pressure := actionPressureAnchor(trend, latest, entryHigh, atrPercent)
+	if pressure > entryLow*1.003 && entryHigh >= pressure {
+		entryHigh = round2(math.Max(entryLow, pressure*0.995))
+	}
+
+	holdLow := round2(math.Max(stop+0.01, math.Min(entryLow, anchor)))
+	holdHigh := round2(math.Max(pressure, holdLow))
+	holdReason := fmt.Sprintf("价格守在%.2f计划失效位上方，至%.2f阶段压力前，原有趋势与盈亏比仍可跟踪。", stop, holdHigh)
+	holdAction := "已有仓位可继续持有；靠近上沿观察放量突破还是冲高回落，跌向下沿则主动收紧风险。"
+	if profile.PrimaryType == "weak_risk" {
+		holdHigh = round2(math.Max(entryLow, holdLow))
+		holdReason = fmt.Sprintf("仅针对已有仓位：%.2f失效位上方至%.2f修复确认位之间，仍属于纪律性观察区。", stop, holdHigh)
+		holdAction = "不把反弹等同反转；反抽无量或无法站回确认区时优先减仓，不新增交易仓位。"
+	} else if profile.PrimaryType == "emotion_leader" {
+		holdReason = fmt.Sprintf("只要未跌破%.2f失效位且辨识度仍在，可跟踪至%.2f压力区；高波动下不机械死扛。", stop, holdHigh)
+		holdAction = "持有期间同步检查板块高度、开板次数和赚钱效应，任一明显恶化都应降低仓位。"
+	}
+
+	if market != nil && (market.Phase == "退潮" || market.Phase == "冰点") {
+		entryReason += " 当前市场处于" + market.Phase + "阶段，价格到位也必须提高确认标准。"
+	}
+	if short.State == "退潮" {
+		holdAction += " 个股短线状态处于退潮，持有标准应更严格。"
+	}
+
+	entry := ActionPriceZone{
+		Label: "允许介入价格", PriceLow: entryLow, PriceHigh: entryHigh,
+		PriceText: formatActionPriceRange(entryLow, entryHigh), Reason: entryReason, Action: entryAction,
+	}
+	hold := ActionPriceZone{
+		Label: "持有价格", PriceLow: holdLow, PriceHigh: holdHigh,
+		PriceText: formatActionPriceRange(holdLow, holdHigh), Reason: holdReason, Action: holdAction,
+	}
+	plannedEntry := round2((entryLow + entryHigh) / 2)
+	riskDistance := math.Max(plannedEntry-stop, plannedEntry*0.01)
+	minimumTarget := entryHigh + math.Max(plannedEntry*0.005, 0.01)
+	takeProfitLow := math.Max(plannedEntry+riskDistance, minimumTarget)
+	takeProfitHigh := math.Max(plannedEntry+riskDistance*2, takeProfitLow+riskDistance)
+	if trend.Resistance > takeProfitLow && trend.Resistance <= plannedEntry+riskDistance*1.6 {
+		takeProfitLow = trend.Resistance
+	}
+	if trend.Resistance > takeProfitLow && trend.Resistance <= plannedEntry+riskDistance*3 {
+		takeProfitHigh = trend.Resistance
+	}
+	takeProfitLow = round2(takeProfitLow)
+	takeProfitHigh = round2(math.Max(takeProfitHigh, takeProfitLow+0.01))
+	takeProfitReason := fmt.Sprintf("以允许介入区间中枢%.2f为计划成本，止损%.2f，每股风险约%.2f；第一目标%.2f参考约1R或阶段压力，第二目标%.2f参考约2R。", plannedEntry, stop, riskDistance, takeProfitLow, takeProfitHigh)
+	takeProfitAction := "到达第一目标后分批兑现并降低本金风险；放量突破可保留部分仓位，接近第二目标不再盲目加仓。"
+	if profile.PrimaryType == "emotion_leader" {
+		takeProfitReason = fmt.Sprintf("以允许介入区间中枢%.2f为计划成本、%.2f为止损，按风险收益计算%.2f—%.2f止盈区；情绪股还需同步观察回封质量和板块梯队。", plannedEntry, stop, takeProfitLow, takeProfitHigh)
+		takeProfitAction = "进入止盈区后按强弱分批兑现；炸板、板块退潮或辨识度下降时优先落袋，不等待固定最高价。"
+	} else if profile.PrimaryType == "weak_risk" {
+		takeProfitReason = fmt.Sprintf("只有在%.2f—%.2f允许介入区完成右侧确认后，才以区间中枢%.2f为成本测算%.2f—%.2f止盈区；未触发介入前不使用该目标。", entryLow, entryHigh, plannedEntry, takeProfitLow, takeProfitHigh)
+		takeProfitAction = "反弹进入止盈区时优先减仓回收风险，除非中期结构完成修复，否则不因达到目标价反向加仓。"
+	}
+	takeProfit := ActionPriceZone{
+		Label: "止盈价格", PriceLow: takeProfitLow, PriceHigh: takeProfitHigh,
+		PriceText: formatActionPriceRange(takeProfitLow, takeProfitHigh), Reason: takeProfitReason, Action: takeProfitAction,
+	}
+	stopLoss := ActionPriceZone{
+		Label: "止损价格", PriceLow: 0, PriceHigh: stop,
+		PriceText: fmt.Sprintf("≤ %.2f 元", stop),
+		Reason:    fmt.Sprintf("%.2f来自结构支撑下方的ATR缓冲止损；跌破说明承接和原交易假设已经失效。", stop),
+		Action:    "触发后停止介入，已有仓位执行减仓或止损；不在止损位下方补仓摊薄成本。",
+	}
+	return entry, hold, takeProfit, stopLoss
+}
+
+func alignRiskControlWithActionPlan(risk RiskControl, action ActionPlan) RiskControl {
+	entry := round2((action.Entry.PriceLow + action.Entry.PriceHigh) / 2)
+	stop := action.StopLoss.PriceHigh
+	firstTarget := action.TakeProfit.PriceLow
+	secondTarget := action.TakeProfit.PriceHigh
+	if entry <= 0 || stop <= 0 || stop >= entry || firstTarget <= entry || secondTarget < firstTarget {
+		return risk
+	}
+	riskDistance := entry - stop
+	risk.EntryReference = entry
+	risk.StopPrice = round2(stop)
+	risk.StopPercent = round2(math.Abs(percentChange(entry, stop)))
+	risk.TakeProfitFirst = round2(firstTarget)
+	risk.TakeProfitSecond = round2(secondTarget)
+	risk.RiskReward = round2(divide(secondTarget-entry, riskDistance))
+	return risk
+}
+
+func actionSupportAnchor(trend TrendAnalysis, latest float64) (float64, string) {
+	for _, item := range []struct {
+		price float64
+		label string
+	}{{trend.Support, "结构支撑"}, {trend.MA20, "MA20"}, {trend.MA60, "MA60"}} {
+		if item.price > 0 {
+			return item.price, item.label
+		}
+	}
+	return latest, "最新收盘价"
+}
+
+func actionRecoveryAnchor(trend TrendAnalysis, latest float64) (float64, string) {
+	if trend.MA60 > 0 && trend.MA60 >= latest {
+		return trend.MA60, "MA60"
+	}
+	if trend.MA20 > 0 && trend.MA20 >= latest {
+		return trend.MA20, "MA20"
+	}
+	if trend.Resistance > latest {
+		return trend.Resistance, "阶段压力"
+	}
+	return latest * 1.01, "右侧确认位"
+}
+
+func actionPressureAnchor(trend TrendAnalysis, latest, minimum, atrPercent float64) float64 {
+	if trend.Resistance > minimum {
+		return trend.Resistance
+	}
+	return math.Max(latest*(1+clamp(atrPercent, 1.5, 10)/100), minimum)
+}
+
+func formatActionPriceRange(low, high float64) string {
+	if math.Abs(high-low) < 0.005 {
+		return fmt.Sprintf("%.2f 元", low)
+	}
+	return fmt.Sprintf("%.2f—%.2f 元", low, high)
 }
 
 func buildRisks(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext) []string {
@@ -687,7 +947,7 @@ func buildRisks(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, t
 func buildConclusion(name string, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, action ActionPlan, risks []string) Conclusion {
 	headline := fmt.Sprintf("%s · %s · %s", profile.TypeLabel, trend.Phase, action.CurrentAction)
 	summary := fmt.Sprintf("%s当前趋势得分%d，短线状态为%s。分析优先级由%s路径主导，判断以可验证的趋势、量价和题材证据为准。", name, trend.Score, short.State, profile.TypeLabel)
-	bestPath := firstNonEmpty(firstString(action.EntryConditions), "等待价格和量能共同确认")
+	bestPath := firstNonEmpty(action.Entry.Action, firstString(action.EntryConditions), "等待价格和量能共同确认")
 	mainRisk := firstNonEmpty(firstString(risks), "关键趋势位失守")
 	return Conclusion{
 		Headline: headline,
@@ -699,7 +959,7 @@ func buildConclusion(name string, profile Profile, trend TrendAnalysis, short Sh
 	}
 }
 
-func buildEvidence(input Input, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, lines []foundation.KLine, fundamental *FundamentalAnalysis, research *ResearchAnalysis) []Evidence {
+func buildEvidence(input Input, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, lines []foundation.KLine, fundamental *FundamentalAnalysis, research *ResearchAnalysis, stockNews *NewsAnalysis, themeNews *NewsAnalysis) []Evidence {
 	evidence := []Evidence{
 		{Category: "趋势", Title: fmt.Sprintf("%s · %d分", trend.Strength, trend.Score), Detail: strings.Join(trend.Reasons, "；"), Source: lines[len(lines)-1].Meta.Source, AsOf: lines[len(lines)-1].Time.Format("2006-01-02")},
 		{Category: "量价", Title: fmt.Sprintf("近20日%+.1f%% · 量比%.2f", trend.Return20, trend.VolumeRatio), Detail: fmt.Sprintf("60日区间位置%.0f%%，距120日高点%+.1f%%", trend.RangePosition60, trend.DrawdownFromHigh120), Source: lines[len(lines)-1].Meta.Source, AsOf: lines[len(lines)-1].Time.Format("2006-01-02")},
@@ -719,6 +979,12 @@ func buildEvidence(input Input, profile Profile, trend TrendAnalysis, short Shor
 		detail := research.Summary + "；评级为机构观点，仅作预期参考"
 		evidence = append(evidence, Evidence{Category: "研报", Title: fmt.Sprintf("机构覆盖 · %d篇", research.ReportCount), Detail: detail, Source: "eastmoney:report"})
 	}
+	if stockNews != nil && stockNews.Available {
+		evidence = append(evidence, Evidence{Category: "个股新闻", Title: fmt.Sprintf("近%d日 · %d条", stockNews.WindowDays, stockNews.ArticleCount), Detail: stockNews.Summary, Source: firstNewsSource(stockNews.Articles), AsOf: newsAnalysisDate(stockNews)})
+	}
+	if themeNews != nil && themeNews.Available {
+		evidence = append(evidence, Evidence{Category: "题材新闻", Title: fmt.Sprintf("近%d日 · %d条", themeNews.WindowDays, themeNews.ArticleCount), Detail: themeNews.Summary, Source: firstNewsSource(themeNews.Articles), AsOf: newsAnalysisDate(themeNews)})
+	}
 	if market != nil {
 		evidence = append(evidence, Evidence{Category: "市场", Title: fmt.Sprintf("%s · %.0f分", market.Phase, market.Score), Detail: "市场情绪仅作为交易环境约束，不替代个股结构", Source: market.Source, AsOf: market.TradeDate})
 	}
@@ -726,13 +992,10 @@ func buildEvidence(input Input, profile Profile, trend TrendAnalysis, short Shor
 		evidence = append(evidence, Evidence{Category: "相对强度", Title: relative.State, Detail: relative.Detail, Source: firstNonEmpty(relative.BenchmarkName, relative.BenchmarkSymbol) + "对照"})
 	}
 	evidence = append(evidence, Evidence{Category: "风控", Title: fmt.Sprintf("%s风险 · %d分", risk.Level, risk.Score), Detail: fmt.Sprintf("计划失效位%.2f，建议仓位%d%%—%d%%", risk.StopPrice, risk.SuggestedPositionMin, risk.SuggestedPositionMax), Source: "结构化风险模型"})
-	for _, news := range relatedNews(input, theme) {
-		evidence = append(evidence, Evidence{Category: "催化", Title: news.Title, Detail: truncateText(news.Content, 120), Source: news.Meta.Source, AsOf: news.PublishedAt.Format("2006-01-02 15:04")})
-	}
-	return evidence[:min(len(evidence), 10)]
+	return evidence[:min(len(evidence), 12)]
 }
 
-func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, fundamental *FundamentalAnalysis, research *ResearchAnalysis) []DataQuality {
+func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, fundamental *FundamentalAnalysis, research *ResearchAnalysis, stockNews *NewsAnalysis, themeNews *NewsAnalysis) []DataQuality {
 	quality := []DataQuality{{Key: "kline", Status: "ready", Message: fmt.Sprintf("已读取%d个交易日K线", len(lines))}}
 	if input.Quote.Price > 0 {
 		quality = append(quality, DataQuality{Key: "quote", Status: "ready", Message: "实时行情已接入"})
@@ -771,6 +1034,16 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 		quality = append(quality, DataQuality{Key: "benchmark", Status: "ready", Message: fmt.Sprintf("已接入%s作为相对强度基准", firstNonEmpty(relative.BenchmarkName, relative.BenchmarkSymbol))})
 	} else {
 		quality = append(quality, DataQuality{Key: "benchmark", Status: "limited", Message: "基准指数数据不可用，相对强度未参与结论"})
+	}
+	if stockNews != nil && stockNews.Available {
+		quality = append(quality, DataQuality{Key: "stock_news", Status: "ready", Message: fmt.Sprintf("已匹配近%d日%d条个股新闻/公告", stockNews.WindowDays, stockNews.ArticleCount)})
+	} else {
+		quality = append(quality, DataQuality{Key: "stock_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的个股新闻/公告", recentNewsWindowDays)})
+	}
+	if themeNews != nil && themeNews.Available {
+		quality = append(quality, DataQuality{Key: "theme_news", Status: "ready", Message: fmt.Sprintf("已匹配近%d日%d条题材新闻", themeNews.WindowDays, themeNews.ArticleCount)})
+	} else {
+		quality = append(quality, DataQuality{Key: "theme_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的题材新闻", recentNewsWindowDays)})
 	}
 	if profile.PrimaryType != "emotion_leader" {
 		if fundamental != nil && fundamental.Available {

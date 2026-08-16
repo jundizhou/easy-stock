@@ -612,6 +612,21 @@ export type StockAIResearch = {
 	reports: MarketResearchItem[];
 };
 
+export type StockAINewsAnalysis = {
+	available: boolean;
+	window_days: number;
+	article_count: number;
+	source_count: number;
+	latest_at?: string;
+	tone: '偏多' | '中性' | '偏空' | '信息不足' | string;
+	summary: string;
+	catalysts: string[];
+	risks: string[];
+	keywords: string[];
+	articles: NewsItem[];
+	analysis_source: 'hermes-ai' | 'local-rules' | string;
+};
+
 export type StockAIMarket = {
 	trade_date: string;
 	phase: string;
@@ -620,8 +635,60 @@ export type StockAIMarket = {
 	source: string;
 };
 
+export type StockAIActionPriceZone = {
+	label: string;
+	price_low: number;
+	price_high: number;
+	price_text: string;
+	reason: string;
+	action: string;
+};
+
+export type StockAIShortTermDecisionStage = {
+	label: string;
+	status: string;
+	summary: string;
+	required: string[];
+	avoid: string[];
+};
+
+export type StockAIShortTermDecisionScenario = {
+	name: string;
+	tone: 'positive' | 'neutral' | 'negative' | string;
+	condition: string;
+	action: string;
+};
+
+export type StockAIShortTermPlaybook = {
+	positioning: string;
+	sentiment_cycle: string;
+	expected_pattern: string;
+	overnight_conclusion: string;
+	data_status: string;
+	auction: StockAIShortTermDecisionStage;
+	opening: StockAIShortTermDecisionStage;
+	participation_conditions: string[];
+	hold_conditions: string[];
+	exit_conditions: string[];
+	veto_conditions: string[];
+	scenarios: StockAIShortTermDecisionScenario[];
+};
+
 export type StockAIActionPlan = {
+	decision_mode?: 'short_term' | 'non_short' | string;
+	decision_label?: string;
+	decision_confidence?: number;
+	horizon?: string;
+	rationale?: string;
+	pricing_source?: 'hermes-ai' | 'local-rules' | 'not-applicable' | string;
 	current_action: string;
+	entry?: StockAIActionPriceZone;
+	hold?: StockAIActionPriceZone;
+	take_profit?: StockAIActionPriceZone;
+	stop_loss?: StockAIActionPriceZone;
+	short_term_playbook?: StockAIShortTermPlaybook;
+	/** 兼容价格决策升级前的本地分析缓存。 */
+	forbidden?: StockAIActionPriceZone;
 	entry_conditions: string[];
 	hold_conditions: string[];
 	avoid_conditions: string[];
@@ -670,6 +737,8 @@ export type StockAIAnalysis = {
 	theme: StockAITheme;
 	fundamental?: StockAIFundamental;
 	research?: StockAIResearch;
+	stock_news?: StockAINewsAnalysis;
+	theme_news?: StockAINewsAnalysis;
 	market?: StockAIMarket;
 	scorecard: StockAIScorecard;
 	timeframes: StockAITimeframe[];

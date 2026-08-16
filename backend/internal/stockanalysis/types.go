@@ -44,6 +44,8 @@ type Analysis struct {
 	Theme       ThemeAnalysis        `json:"theme"`
 	Fundamental *FundamentalAnalysis `json:"fundamental,omitempty"`
 	Research    *ResearchAnalysis    `json:"research,omitempty"`
+	StockNews   *NewsAnalysis        `json:"stock_news,omitempty"`
+	ThemeNews   *NewsAnalysis        `json:"theme_news,omitempty"`
 	Market      *MarketContext       `json:"market,omitempty"`
 	Scorecard   Scorecard            `json:"scorecard"`
 	Timeframes  []TimeframeAnalysis  `json:"timeframes"`
@@ -311,6 +313,21 @@ type ResearchAnalysis struct {
 	Reports           []foundation.MarketResearchItem `json:"reports"`
 }
 
+type NewsAnalysis struct {
+	Available      bool                  `json:"available"`
+	WindowDays     int                   `json:"window_days"`
+	ArticleCount   int                   `json:"article_count"`
+	SourceCount    int                   `json:"source_count"`
+	LatestAt       string                `json:"latest_at,omitempty"`
+	Tone           string                `json:"tone"`
+	Summary        string                `json:"summary"`
+	Catalysts      []string              `json:"catalysts"`
+	Risks          []string              `json:"risks"`
+	Keywords       []string              `json:"keywords"`
+	Articles       []foundation.NewsItem `json:"articles"`
+	AnalysisSource string                `json:"analysis_source"`
+}
+
 type MarketContext struct {
 	TradeDate  string  `json:"trade_date"`
 	Phase      string  `json:"phase"`
@@ -319,13 +336,67 @@ type MarketContext struct {
 	Source     string  `json:"source"`
 }
 
+type ActionPriceZone struct {
+	Label     string  `json:"label"`
+	PriceLow  float64 `json:"price_low"`
+	PriceHigh float64 `json:"price_high"`
+	PriceText string  `json:"price_text"`
+	Reason    string  `json:"reason"`
+	Action    string  `json:"action"`
+}
+
+type ShortTermDecisionStage struct {
+	Label    string   `json:"label"`
+	Status   string   `json:"status"`
+	Summary  string   `json:"summary"`
+	Required []string `json:"required"`
+	Avoid    []string `json:"avoid"`
+}
+
+type ShortTermDecisionScenario struct {
+	Name      string `json:"name"`
+	Tone      string `json:"tone"`
+	Condition string `json:"condition"`
+	Action    string `json:"action"`
+}
+
+// ShortTermPlaybook deliberately models an execution state machine instead of
+// pretending that an after-hours static price is a reliable entry instruction.
+// Auction and opening data are not available in an after-hours analysis, so the
+// generated result describes the evidence that must be observed before acting.
+type ShortTermPlaybook struct {
+	Positioning             string                      `json:"positioning"`
+	SentimentCycle          string                      `json:"sentiment_cycle"`
+	ExpectedPattern         string                      `json:"expected_pattern"`
+	OvernightConclusion     string                      `json:"overnight_conclusion"`
+	DataStatus              string                      `json:"data_status"`
+	Auction                 ShortTermDecisionStage      `json:"auction"`
+	Opening                 ShortTermDecisionStage      `json:"opening"`
+	ParticipationConditions []string                    `json:"participation_conditions"`
+	HoldConditions          []string                    `json:"hold_conditions"`
+	ExitConditions          []string                    `json:"exit_conditions"`
+	VetoConditions          []string                    `json:"veto_conditions"`
+	Scenarios               []ShortTermDecisionScenario `json:"scenarios"`
+}
+
 type ActionPlan struct {
-	CurrentAction   string   `json:"current_action"`
-	EntryConditions []string `json:"entry_conditions"`
-	HoldConditions  []string `json:"hold_conditions"`
-	AvoidConditions []string `json:"avoid_conditions"`
-	Invalidation    string   `json:"invalidation"`
-	PositionHint    string   `json:"position_hint"`
+	DecisionMode       string             `json:"decision_mode"`
+	DecisionLabel      string             `json:"decision_label"`
+	DecisionConfidence float64            `json:"decision_confidence"`
+	Horizon            string             `json:"horizon"`
+	Rationale          string             `json:"rationale"`
+	PricingSource      string             `json:"pricing_source"`
+	CurrentAction      string             `json:"current_action"`
+	Entry              ActionPriceZone    `json:"entry"`
+	Hold               ActionPriceZone    `json:"hold"`
+	TakeProfit         ActionPriceZone    `json:"take_profit"`
+	StopLoss           ActionPriceZone    `json:"stop_loss"`
+	ShortTerm          *ShortTermPlaybook `json:"short_term_playbook,omitempty"`
+	EntryConditions    []string           `json:"entry_conditions"`
+	HoldConditions     []string           `json:"hold_conditions"`
+	AvoidConditions    []string           `json:"avoid_conditions"`
+	Invalidation       string             `json:"invalidation"`
+	PositionHint       string             `json:"position_hint"`
 }
 
 type Evidence struct {

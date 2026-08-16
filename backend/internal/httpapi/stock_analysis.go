@@ -142,7 +142,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		collectionWG.Add(1)
 		go func() {
 			defer collectionWG.Done()
-			news, newsErr = s.newsProvider.LatestNews(dataCtx, 40)
+			news, newsErr = s.newsProvider.LatestNews(dataCtx, 120)
 		}()
 	}
 	collectionWG.Wait()
@@ -190,7 +190,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		gaps = append(gaps, "题材趋势数据不可用: "+themeErr.Error())
 	}
 	if newsErr != nil {
-		gaps = append(gaps, "市场新闻不可用: "+newsErr.Error())
+		gaps = append(gaps, "近期新闻不可用: "+newsErr.Error())
 	}
 	if benchmarkErr != nil {
 		gaps = append(gaps, "基准指数数据不可用: "+benchmarkErr.Error())

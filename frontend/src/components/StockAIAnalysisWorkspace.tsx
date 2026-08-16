@@ -22,6 +22,7 @@ import {
 	FileSearch,
 	ListChecks,
 	LoaderCircle,
+	Newspaper,
 	RefreshCw,
 	Scale,
 	Search,
@@ -38,9 +39,12 @@ import {
 import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
+	StockAIActionPriceZone,
 	StockAIAnalysis,
 	StockAIDataQuality,
+	StockAINewsAnalysis,
 	StockAINextDayScenario,
+	StockAIShortTermDecisionStage,
 	StockAITrendPoint,
 	StockDirectoryData,
 	StockDirectoryEntry,
@@ -434,7 +438,7 @@ function AnalysisVerdict({ analysis, copied, exporting, onRefresh, onExport, onC
 				<div className="stock-ai-quote"><strong>{formatPrice(analysis.quote.price)}</strong><em className={analysis.quote.change_percent >= 0 ? 'up' : 'down'}>{signedPercent(analysis.quote.change_percent)}</em></div>
 			</div>
 			<div className="stock-ai-conclusion">
-				<div className="stock-ai-tags"><span>{analysis.profile.type_label}</span><span>{analysis.profile.price_phase}</span><span>{analysis.profile.market_role}</span><span>{analysis.scorecard.direction} · {analysis.scorecard.grade}</span></div>
+				<div className="stock-ai-tags"><span>{analysis.action_plan.decision_label || analysis.profile.type_label}</span><span>{analysis.profile.price_phase}</span><span>{analysis.profile.market_role}</span><span>{analysis.scorecard.direction} · {analysis.scorecard.grade}</span></div>
 				<h3>{analysis.conclusion.headline}</h3>
 				<p>{analysis.conclusion.summary}</p>
 				<div className="stock-ai-ai-status">
@@ -478,10 +482,15 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 
 			<ThemeAttributionPanel analysis={analysis} />
 
-			{analysis.profile.primary_type !== 'emotion_leader' && <div className="stock-ai-fundamental-grid">
+			{!isShortTermDecision(analysis) && <div className="stock-ai-fundamental-grid">
 				<FundamentalPanel analysis={analysis} />
 				<ResearchPanel analysis={analysis} />
 			</div>}
+
+			<div className="stock-ai-news-grid">
+				<NewsAnalysisPanel eyebrow="个股资讯" title="近期个股新闻分析" item={analysis.stock_news} icon={<Newspaper size={19} />} />
+				<NewsAnalysisPanel eyebrow="题材催化" title="近期题材新闻分析" item={analysis.theme_news} icon={<Zap size={19} />} />
+			</div>
 
 			<div className="stock-ai-main-grid">
 				<section className="stock-ai-panel stock-ai-chart-panel">
@@ -574,6 +583,28 @@ function ResearchPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	</section>;
 }
 
+function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; title: string; item?: StockAINewsAnalysis; icon: ReactNode }) {
+	return <section className="stock-ai-panel stock-ai-news-panel">
+		<header><div><span>{eyebrow}</span><h3>{title}</h3></div>{icon}</header>
+		{item ? <>
+			<div className="stock-ai-news-summary">
+				<div><strong>{item.article_count} 条</strong><span>{item.source_count} 个来源 · 近{item.window_days || 30}日</span><em className={newsToneClass(item.tone)}>{item.tone || '信息不足'}</em><small>{item.analysis_source === 'hermes-ai' ? 'Hermes AI 归纳' : '本地规则归纳'}</small></div>
+				{item.keywords?.length > 0 && <div className="stock-ai-news-keywords">{item.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div>}
+				<p>{item.summary}</p>
+			</div>
+			<div className="stock-ai-news-signals">
+				<div className="positive"><strong><Sparkles size={13} />潜在催化</strong>{item.catalysts?.length ? <ul>{item.catalysts.map((value) => <li key={value}>{value}</li>)}</ul> : <small>暂无可验证的明确催化</small>}</div>
+				<div className="negative"><strong><ShieldAlert size={13} />风险信号</strong>{item.risks?.length ? <ul>{item.risks.map((value) => <li key={value}>{value}</li>)}</ul> : <small>暂无突出风险关键词</small>}</div>
+			</div>
+			{item.articles?.length ? <div className="stock-ai-news-list">{item.articles.map((article, index) => <article key={article.id || article.url || `${article.title}-${index}`}>
+				<div><header><span>{formatNewsSource(article.meta?.source)}</span><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time></header><strong>{article.title}</strong>{article.content && article.content !== article.title && <small>{article.content}</small>}</div>
+				{article.url && <a href={article.url} target="_blank" rel="noreferrer" title="查看新闻原文"><ExternalLink size={14} /></a>}
+			</article>)}</div> : <div className="stock-ai-news-empty">暂无匹配新闻，当前不对新闻催化作额外加分。</div>}
+			<footer>新闻与公告仅作信息参考，需结合事件落地和价格反应验证，不构成买卖建议。</footer>
+		</> : <div className="stock-ai-panel-empty">旧版分析记录未包含新闻数据，请重新分析后查看</div>}
+	</section>;
+}
+
 function ScorecardPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	return (
 		<section className="stock-ai-panel stock-ai-scorecard-panel">
@@ -610,6 +641,7 @@ function RelativeStrengthCard({ analysis }: { analysis: StockAIAnalysis }) {
 }
 
 function ExpectationView({ analysis }: { analysis: StockAIAnalysis }) {
+	if (isShortTermDecision(analysis)) return <ShortTermExpectationView analysis={analysis} />;
 	const plan = analysis.next_day;
 	return (
 		<>
@@ -642,6 +674,17 @@ function ExpectationView({ analysis }: { analysis: StockAIAnalysis }) {
 	);
 }
 
+function ShortTermExpectationView({ analysis }: { analysis: StockAIAnalysis }) {
+	return <>
+		<ActionPlanPanel analysis={analysis} />
+		<div className="stock-ai-detail-grid">
+			<RiskBoundaryPanel analysis={analysis} />
+			<EvidencePanel analysis={analysis} />
+			<DataQualityPanel analysis={analysis} />
+		</div>
+	</>;
+}
+
 function ScenarioCard({ scenario }: { scenario: StockAINextDayScenario }) {
 	return (
 		<article className={`stock-ai-scenario ${scenario.key}`}>
@@ -656,6 +699,7 @@ function ChecklistStage({ icon, title, items }: { icon: ReactNode; title: string
 }
 
 function RiskExecutionView({ analysis }: { analysis: StockAIAnalysis }) {
+	if (isShortTermDecision(analysis)) return <ShortTermRiskExecutionView analysis={analysis} />;
 	const risk = analysis.risk_control;
 	return (
 		<>
@@ -695,6 +739,24 @@ function RiskExecutionView({ analysis }: { analysis: StockAIAnalysis }) {
 			</div>
 		</>
 	);
+}
+
+function ShortTermRiskExecutionView({ analysis }: { analysis: StockAIAnalysis }) {
+	const risk = analysis.risk_control;
+	return <>
+		<section className={`stock-ai-risk-hero ${risk.level === '高' ? 'high' : risk.level === '较低' ? 'low' : 'medium'}`}>
+			<div><ShieldCheck size={26} /><span><small>超短执行风险</small><strong>{risk.level} · {risk.score}分</strong></span></div>
+			<div><small>建议仓位区间</small><strong>{risk.suggested_position_min_percent}% — {risk.suggested_position_max_percent}%</strong></div>
+			<div><small>交易周期</small><strong>{analysis.action_plan.horizon || '隔日 / 1—3日'}</strong></div>
+			<div><small>核心约束</small><strong>竞价确认 + T+1</strong></div>
+		</section>
+		<ActionPlanPanel analysis={analysis} />
+		<div className="stock-ai-detail-grid">
+			<RiskBoundaryPanel analysis={analysis} />
+			<EvidencePanel analysis={analysis} />
+			<DataQualityPanel analysis={analysis} />
+		</div>
+	</>;
 }
 
 function PositionCalculator({ analysis }: { analysis: StockAIAnalysis }) {
@@ -755,15 +817,122 @@ function PriceLadderRow({ label, value, tone, detail }: { label: string; value: 
 }
 
 function ActionPlanPanel({ analysis }: { analysis: StockAIAnalysis }) {
+	const plan = analysis.action_plan;
+	if (isShortTermDecision(analysis)) return <ShortTermActionPlanPanel analysis={analysis} />;
+	const pricePlan = resolveActionPricePlan(analysis);
 	return (
 		<section className="stock-ai-panel stock-ai-plan-panel">
-			<header><div><span>条件化决策</span><h3>{analysis.action_plan.current_action}</h3></div><Target size={19} /></header>
-			<PlanGroup tone="entry" title="允许介入" items={analysis.action_plan.entry_conditions} />
-			<PlanGroup tone="hold" title="持有条件" items={analysis.action_plan.hold_conditions} />
-			<PlanGroup tone="avoid" title="禁止条件" items={analysis.action_plan.avoid_conditions} />
-			<div className="stock-ai-position"><Activity size={15} /><div><span>仓位约束</span><strong>{analysis.action_plan.position_hint}</strong></div></div>
+			<header><div><span>{plan.pricing_source === 'hermes-ai' ? 'AI全局综合定价' : '价格决策'}</span><h3>{plan.current_action}</h3></div><Target size={19} /></header>
+			{(plan.rationale || plan.horizon) && <div className="stock-ai-decision-route"><div><span>{plan.decision_label || '趋势与价值定价'}</span><em>{plan.horizon || '波段 / 中期趋势'}</em>{typeof plan.decision_confidence === 'number' && <small>置信度 {Math.round(plan.decision_confidence * 100)}%</small>}</div><p>{plan.rationale}</p></div>}
+			{pricePlan ? <div className="stock-ai-price-decisions">
+				<ActionPriceCard tone="entry" zone={pricePlan.entry} />
+				<ActionPriceCard tone="hold" zone={pricePlan.hold} />
+				<ActionPriceCard tone="take-profit" zone={pricePlan.takeProfit} />
+				<ActionPriceCard tone="stop-loss" zone={pricePlan.stopLoss} />
+			</div> : <div className="stock-ai-plan-legacy">
+				<PlanGroup tone="entry" title="允许介入" items={plan.entry_conditions || []} />
+				<PlanGroup tone="hold" title="持有条件" items={plan.hold_conditions || []} />
+				<PlanGroup tone="avoid" title="禁止条件" items={plan.avoid_conditions || []} />
+				<p>该记录生成于价格决策升级前，重新分析后可查看允许介入、持有、止盈和止损价格。</p>
+			</div>}
+			<div className="stock-ai-position"><Activity size={15} /><div><span>仓位约束</span><strong>{plan.position_hint}</strong></div></div>
 		</section>
 	);
+}
+
+function ShortTermActionPlanPanel({ analysis }: { analysis: StockAIAnalysis }) {
+	const plan = analysis.action_plan;
+	const playbook = plan.short_term_playbook;
+	return <section className="stock-ai-panel stock-ai-short-plan-panel">
+		<header><div><span>短线动态决策</span><h3>{plan.current_action}</h3></div><Zap size={19} /></header>
+		<div className="stock-ai-decision-route short"><div><span>{plan.decision_label || '超短次日作战'}</span><em>{plan.horizon || '隔日 / 1—3个交易日'}</em>{typeof plan.decision_confidence === 'number' && <small>置信度 {Math.round(plan.decision_confidence * 100)}%</small>}</div><p>{plan.rationale || '短线结果依赖次日竞价、题材反馈和开盘承接，不使用盘后静态价格替代执行确认。'}</p></div>
+		{playbook ? <>
+			<div className="stock-ai-short-overview">
+				<article><span>个股定位</span><strong>{playbook.positioning}</strong></article>
+				<article><span>情绪阶段</span><strong>{playbook.sentiment_cycle}</strong></article>
+				<article><span>预期模式</span><strong>{playbook.expected_pattern}</strong></article>
+			</div>
+			<div className="stock-ai-short-conclusion"><Sparkles size={16} /><div><span>盘后结论</span><strong>{playbook.overnight_conclusion}</strong><small>{playbook.data_status}</small></div></div>
+			<div className="stock-ai-short-stages">
+				<ShortTermStageCard stage={playbook.auction} icon={<Clock3 size={16} />} />
+				<ShortTermStageCard stage={playbook.opening} icon={<Activity size={16} />} />
+			</div>
+			<div className="stock-ai-short-condition-grid">
+				<PlanGroup tone="entry" title="全部满足才参与" items={playbook.participation_conditions || []} />
+				<PlanGroup tone="hold" title="持有条件" items={playbook.hold_conditions || []} />
+				<PlanGroup tone="avoid" title="退出条件" items={playbook.exit_conditions || []} />
+				<PlanGroup tone="avoid" title="一票否决" items={playbook.veto_conditions || []} />
+			</div>
+			<div className="stock-ai-short-scenarios">{(playbook.scenarios || []).map((scenario) => <article className={scenario.tone} key={`${scenario.name}-${scenario.condition}`}><span>{scenario.name}</span><strong>{scenario.condition}</strong><p>{scenario.action}</p></article>)}</div>
+		</> : <div className="stock-ai-plan-legacy">
+			<PlanGroup tone="entry" title="允许参与" items={plan.entry_conditions || []} />
+			<PlanGroup tone="hold" title="持有条件" items={plan.hold_conditions || []} />
+			<PlanGroup tone="avoid" title="禁止条件" items={plan.avoid_conditions || []} />
+			<p>该记录来自旧版缓存，重新分析后可查看竞价与开盘动态作战计划。</p>
+		</div>}
+		<div className="stock-ai-position"><ShieldCheck size={15} /><div><span>仓位约束</span><strong>{plan.position_hint}</strong></div></div>
+	</section>;
+}
+
+function ShortTermStageCard({ stage, icon }: { stage: StockAIShortTermDecisionStage; icon: ReactNode }) {
+	return <article className="stock-ai-short-stage">
+		<header>{icon}<div><span>{stage.label}</span><strong>{stage.status}</strong></div></header>
+		<p>{stage.summary}</p>
+		<div><section><strong>必须观察</strong><ul>{(stage.required || []).map((item) => <li key={item}>{item}</li>)}</ul></section><section className="avoid"><strong>否决信号</strong><ul>{(stage.avoid || []).map((item) => <li key={item}>{item}</li>)}</ul></section></div>
+	</article>;
+}
+
+function ActionPriceCard({ tone, zone }: { tone: 'entry' | 'hold' | 'take-profit' | 'stop-loss'; zone: StockAIActionPriceZone }) {
+	return <article className={`stock-ai-price-decision ${tone}`}>
+		<div className="stock-ai-price-decision-head"><span>{zone.label}</span><strong>{zone.price_text}</strong></div>
+		<div className="stock-ai-price-decision-reason"><em>{zone.label.replace(/价格$/, '')}原因</em><p>{zone.reason}</p></div>
+		<div className="stock-ai-price-decision-action"><Flag size={13} /><p>{zone.action}</p></div>
+	</article>;
+}
+
+function resolveActionPricePlan(analysis: StockAIAnalysis) {
+	const plan = analysis.action_plan;
+	if (isShortTermDecision(analysis)) return null;
+	if (!plan.entry?.price_text || !plan.hold?.price_text) return null;
+	const stopPrice = analysis.risk_control.stop_price;
+	const plannedEntry = (plan.entry.price_low + plan.entry.price_high) / 2;
+	const riskDistance = Math.max(plannedEntry - stopPrice, plannedEntry * 0.01);
+	const firstTarget = Math.max(plannedEntry + riskDistance, plan.entry.price_high + Math.max(plannedEntry * 0.005, 0.01));
+	const secondTarget = Math.max(plannedEntry + riskDistance * 2, firstTarget + riskDistance);
+	const takeProfit = plan.take_profit?.price_text && plan.take_profit.price_low > plan.entry.price_high ? plan.take_profit : firstTarget > 0 ? {
+		label: '止盈价格',
+		price_low: firstTarget,
+		price_high: secondTarget,
+		price_text: formatDecisionPriceRange(firstTarget, secondTarget),
+		reason: `以允许介入区间中枢${plannedEntry.toFixed(2)}为计划成本、${stopPrice.toFixed(2)}为止损，第一目标${firstTarget.toFixed(2)}参考约1R，第二目标${secondTarget.toFixed(2)}参考约2R。`,
+		action: '到达第一目标后分批兑现；若量价保持强势可保留部分仓位，接近第二目标不再盲目加仓。',
+	} : undefined;
+	const stopSource = plan.stop_loss?.price_text ? plan.stop_loss : plan.forbidden;
+	const stopLoss = stopSource?.price_text ? stopSource : stopPrice > 0 ? {
+		label: '止损价格',
+		price_low: 0,
+		price_high: stopPrice,
+		price_text: `≤ ${stopPrice.toFixed(2)} 元`,
+		reason: `${stopPrice.toFixed(2)}为计划失效位，跌破说明原有承接和趋势假设已经失效。`,
+		action: '触发后停止介入，已有仓位执行减仓或止损，不在止损位下方补仓。',
+	} : undefined;
+	if (!takeProfit || !stopLoss) return null;
+	return {
+		entry: { ...plan.entry, label: '允许介入价格' },
+		hold: { ...plan.hold, label: '持有价格' },
+		takeProfit: { ...takeProfit, label: '止盈价格' },
+		stopLoss: { ...stopLoss, label: '止损价格' },
+	};
+}
+
+function isShortTermDecision(analysis: StockAIAnalysis) {
+	const mode = analysis.action_plan?.decision_mode;
+	if (mode) return mode === 'short_term';
+	return analysis.profile.primary_type === 'emotion_leader';
+}
+
+function formatDecisionPriceRange(low: number, high: number) {
+	return Math.abs(high - low) < 0.005 ? `${low.toFixed(2)} 元` : `${low.toFixed(2)}—${high.toFixed(2)} 元`;
 }
 
 function EvidencePanel({ analysis }: { analysis: StockAIAnalysis }) {
@@ -855,14 +1024,44 @@ function loadAnalysisHistory(): AnalysisHistoryItem[] {
 }
 
 function buildPlanText(analysis: StockAIAnalysis) {
+	if (isShortTermDecision(analysis)) {
+		const playbook = analysis.action_plan.short_term_playbook;
+		return [
+			`${analysis.name}（${analysis.symbol}）短线次日作战计划`,
+			`决策模型：${analysis.action_plan.decision_label || '超短次日作战'}；周期：${analysis.action_plan.horizon || '隔日 / 1—3个交易日'}`,
+			`当前动作：${analysis.action_plan.current_action}`,
+			`盘后结论：${playbook?.overnight_conclusion || analysis.conclusion.summary}`,
+			`竞价确认：${playbook?.auction?.status || '待9:25竞价确认'}；${playbook?.auction?.summary || '观察竞价强度、题材同步性和预期差'}`,
+			`竞价必要条件：${(playbook?.auction?.required || analysis.action_plan.entry_conditions || []).join('；')}`,
+			`开盘确认：${playbook?.opening?.status || '待9:30—9:35确认'}；${playbook?.opening?.summary || '观察开盘承接与板块反馈'}`,
+			`允许参与：${(playbook?.participation_conditions || analysis.action_plan.entry_conditions || []).join('；')}`,
+			`持有条件：${(playbook?.hold_conditions || analysis.action_plan.hold_conditions || []).join('；')}`,
+			`退出条件：${(playbook?.exit_conditions || []).join('；')}`,
+			`一票否决：${(playbook?.veto_conditions || analysis.action_plan.avoid_conditions || []).join('；')}`,
+			`仓位：${analysis.action_plan.position_hint}`,
+			`主要风险：${analysis.conclusion.main_risk}`,
+			`生成时间：${analysis.generated_at}`,
+		].join('\n');
+	}
+	const resolvedPricePlan = resolveActionPricePlan(analysis);
+	const pricePlan = resolvedPricePlan
+		? [
+			`允许介入价格：${resolvedPricePlan.entry.price_text}；允许介入原因：${resolvedPricePlan.entry.reason}`,
+			`持有价格：${resolvedPricePlan.hold.price_text}；持有原因：${resolvedPricePlan.hold.reason}`,
+			`止盈价格：${resolvedPricePlan.takeProfit.price_text}；止盈原因：${resolvedPricePlan.takeProfit.reason}`,
+			`止损价格：${resolvedPricePlan.stopLoss.price_text}；止损原因：${resolvedPricePlan.stopLoss.reason}`,
+		]
+		: [
+			`允许介入：${(analysis.action_plan.entry_conditions || []).join('；')}`,
+			`禁止条件：${(analysis.action_plan.avoid_conditions || []).join('；')}`,
+		];
 	return [
 		`${analysis.name}（${analysis.symbol}）个股AI分析`,
 		`综合评分：${analysis.scorecard.overall} / ${analysis.scorecard.grade} / ${analysis.scorecard.direction}`,
 		`画像：${analysis.profile.type_label} / ${analysis.profile.price_phase} / ${analysis.profile.market_role}`,
 		`结论：${analysis.conclusion.headline}`,
 		`隔日预期：${analysis.next_day.bias}；${analysis.next_day.expectation}`,
-		`允许介入：${analysis.action_plan.entry_conditions.join('；')}`,
-		`禁止条件：${analysis.action_plan.avoid_conditions.join('；')}`,
+		...pricePlan,
 		`风控：参考价${analysis.risk_control.entry_reference}，止损${analysis.risk_control.stop_price}，目标${analysis.risk_control.take_profit_first}/${analysis.risk_control.take_profit_second}，仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`,
 		`主要风险：${analysis.conclusion.main_risk}`,
 		`生成时间：${analysis.generated_at}`,
@@ -907,7 +1106,7 @@ function formatExportDate(value: string) {
 }
 
 function qualityLabel(key: string) {
-	const labels: Record<string, string> = { kline: '趋势K线', quote: '实时行情', limit_up: '涨停结构', theme: '题材归因', fundamental: '基本面', research: '机构研报', market_emotion: '市场情绪', benchmark: '基准指数', collection: '数据采集' };
+	const labels: Record<string, string> = { kline: '趋势K线', quote: '实时行情', limit_up: '涨停结构', theme: '题材归因', fundamental: '基本面', research: '机构研报', stock_news: '个股新闻', theme_news: '题材新闻', market_emotion: '市场情绪', benchmark: '基准指数', collection: '数据采集' };
 	return labels[key] || key;
 }
 
@@ -925,6 +1124,20 @@ function scoreClass(score: number) {
 	if (score >= 65) return 'strong';
 	if (score < 40) return 'weak';
 	return 'neutral';
+}
+
+function newsToneClass(tone?: string) {
+	if (tone === '偏多') return 'positive';
+	if (tone === '偏空') return 'negative';
+	return 'neutral';
+}
+
+function formatNewsSource(source?: string) {
+	if (!source) return '新闻资讯';
+	if (source.includes('announcement')) return '公司公告';
+	if (source.includes('cls')) return '财联社';
+	if (source.includes('eastmoney')) return '东方财富';
+	return source;
 }
 
 function formatPrice(value: number) {

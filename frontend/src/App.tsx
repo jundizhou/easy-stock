@@ -595,7 +595,10 @@ export function App() {
 	};
 
 	const askStockAnalysisAI = (analysis: StockAIAnalysis) => {
-		setAIPrefill(`请继续推演 ${analysis.name}（${analysis.symbol}）的个股AI分析。当前画像：${analysis.profile.type_label} / ${analysis.profile.price_phase} / ${analysis.profile.market_role}；综合评分 ${analysis.scorecard.overall}（${analysis.scorecard.direction}）；趋势得分 ${analysis.trend.score}；短线状态 ${analysis.short_term.state}；隔日预期 ${analysis.next_day.bias}；计划止损 ${analysis.risk_control.stop_price}；当前动作：${analysis.action_plan.current_action}。请重点挑战现有结论，分别给出支持证据、反对证据、隔日四种情景、最优验证路径和失效条件，不要编造实时数据。`);
+		const shortTermContext = analysis.action_plan.decision_mode === 'short_term'
+			? `短线决策：${analysis.action_plan.decision_label || '超短次日作战'}；盘后结论：${analysis.action_plan.short_term_playbook?.overnight_conclusion || analysis.conclusion.summary}；竞价状态：${analysis.action_plan.short_term_playbook?.auction?.status || '待9:25确认'}；一票否决：${(analysis.action_plan.short_term_playbook?.veto_conditions || analysis.action_plan.avoid_conditions || []).join('、')}`
+			: `非短线决策：${analysis.action_plan.decision_label || '趋势与价值定价'}；允许介入：${analysis.action_plan.entry?.price_text || '--'}；止盈：${analysis.action_plan.take_profit?.price_text || '--'}；止损：${analysis.action_plan.stop_loss?.price_text || '--'}`;
+		setAIPrefill(`请继续推演 ${analysis.name}（${analysis.symbol}）的个股AI分析。当前画像：${analysis.profile.type_label} / ${analysis.profile.price_phase} / ${analysis.profile.market_role}；综合评分 ${analysis.scorecard.overall}（${analysis.scorecard.direction}）；趋势得分 ${analysis.trend.score}；短线状态 ${analysis.short_term.state}；${shortTermContext}；当前动作：${analysis.action_plan.current_action}。请重点挑战现有结论，给出支持证据、反对证据、最优验证路径和失效条件；如果是短线票，围绕竞价与开盘条件推演，不要把盘后静态价格当成确定买点，也不要编造实时数据。`);
 		switchWorkspace('ai');
 	};
 

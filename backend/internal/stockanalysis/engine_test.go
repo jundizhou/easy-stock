@@ -38,6 +38,24 @@ func TestAnalyzeRoutesLiquidUptrendToTrendCapacity(t *testing.T) {
 	if analysis.ActionPlan.Invalidation == "" || len(analysis.Evidence) < 3 {
 		t.Fatalf("analysis missing actionable evidence: %+v", analysis)
 	}
+	if analysis.ActionPlan.Entry.PriceLow <= analysis.RiskControl.StopPrice || analysis.ActionPlan.Entry.PriceHigh < analysis.ActionPlan.Entry.PriceLow {
+		t.Fatalf("entry price zone is not executable: action=%+v risk=%+v", analysis.ActionPlan, analysis.RiskControl)
+	}
+	if analysis.ActionPlan.Hold.PriceLow <= analysis.RiskControl.StopPrice || analysis.ActionPlan.Hold.PriceHigh < analysis.ActionPlan.Hold.PriceLow {
+		t.Fatalf("hold price zone is not executable: action=%+v risk=%+v", analysis.ActionPlan, analysis.RiskControl)
+	}
+	if analysis.ActionPlan.StopLoss.PriceHigh != analysis.RiskControl.StopPrice || analysis.ActionPlan.StopLoss.Reason == "" || analysis.ActionPlan.Entry.Action == "" {
+		t.Fatalf("price decision reasons are incomplete: action=%+v risk=%+v", analysis.ActionPlan, analysis.RiskControl)
+	}
+	if analysis.ActionPlan.TakeProfit.PriceLow != analysis.RiskControl.TakeProfitFirst || analysis.ActionPlan.TakeProfit.PriceHigh != analysis.RiskControl.TakeProfitSecond {
+		t.Fatalf("take-profit price zone must match risk targets: action=%+v risk=%+v", analysis.ActionPlan, analysis.RiskControl)
+	}
+	if analysis.ActionPlan.TakeProfit.PriceLow <= analysis.ActionPlan.Entry.PriceHigh {
+		t.Fatalf("take-profit zone overlaps entry zone: action=%+v", analysis.ActionPlan)
+	}
+	if analysis.RiskControl.EntryReference < analysis.ActionPlan.Entry.PriceLow || analysis.RiskControl.EntryReference > analysis.ActionPlan.Entry.PriceHigh {
+		t.Fatalf("risk entry reference must use planned entry zone: action=%+v risk=%+v", analysis.ActionPlan, analysis.RiskControl)
+	}
 }
 
 func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
@@ -60,6 +78,35 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 	}
 	if analysis.RiskControl.RiskReward > 3.01 {
 		t.Fatalf("risk reward should use an executable target, got %.2f", analysis.RiskControl.RiskReward)
+	}
+	if analysis.ActionPlan.Entry.PriceLow <= analysis.Trend.LatestClose || !strings.Contains(analysis.ActionPlan.Entry.Action, "不是当前抄底价") {
+		t.Fatalf("weak-risk entry must require a right-side recovery price: %+v", analysis.ActionPlan.Entry)
+	}
+	if analysis.ActionPlan.StopLoss.PriceText == "" || analysis.ActionPlan.StopLoss.PriceHigh != analysis.RiskControl.StopPrice {
+		t.Fatalf("weak-risk stop-loss price is unclear: %+v", analysis.ActionPlan.StopLoss)
+	}
+	if analysis.ActionPlan.TakeProfit.PriceLow <= analysis.ActionPlan.Entry.PriceHigh {
+		t.Fatalf("weak-risk take-profit must be above confirmed entry zone: %+v", analysis.ActionPlan)
+	}
+}
+
+func TestBuildActionPriceZonesFallsBackWithoutTechnicalLevels(t *testing.T) {
+	trend := TrendAnalysis{LatestClose: 10, ATR14Percent: 0}
+	risk := RiskControl{EntryReference: 10, StopPrice: 9}
+	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk)
+	for _, zone := range []ActionPriceZone{plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss} {
+		if zone.PriceText == "" || zone.Reason == "" || zone.Action == "" || zone.PriceHigh <= 0 {
+			t.Fatalf("fallback price zone is incomplete: %+v", zone)
+		}
+	}
+	if plan.Entry.PriceLow <= risk.StopPrice || plan.Entry.PriceHigh < plan.Entry.PriceLow {
+		t.Fatalf("fallback entry zone is invalid: %+v", plan.Entry)
+	}
+	if plan.Hold.PriceLow <= risk.StopPrice || plan.Hold.PriceHigh < plan.Hold.PriceLow {
+		t.Fatalf("fallback hold zone is invalid: %+v", plan.Hold)
+	}
+	if plan.TakeProfit.PriceLow <= plan.Entry.PriceHigh {
+		t.Fatalf("fallback take-profit zone overlaps entry: action=%+v", plan)
 	}
 }
 
@@ -215,7 +262,47 @@ func TestAnalyzeNonShortStockIncludesFundamentalsAndResearch(t *testing.T) {
 	}
 }
 
-func TestAnalyzeEmotionLeaderSkipsFundamentalsAndResearch(t *testing.T) {
+func TestAnalyzeIncludesStockAndThemeNews(t *testing.T) {
+	lines := syntheticTrendLines("600519.SH", 180, 10, 0.08, 1_500_000_000)
+	now := time.Now()
+	analysis, err := Analyze(Input{
+		Symbol:   "600519.SH",
+		Quote:    foundation.Quote{Symbol: "600519.SH", Name: "贵州茅台", Price: lines[len(lines)-1].Close},
+		KLines:   lines,
+		Business: "白酒生产与销售",
+		Concepts: []string{"白酒消费"},
+		Announcements: []foundation.MarketResearchItem{{
+			ID: "a1", Title: "贵州茅台关于实施股份回购的公告", PublishedAt: now.Add(-2 * time.Hour), URL: "https://example.com/a1", Meta: foundation.SourceMeta{Source: "eastmoney:announcement"},
+		}},
+		News: []foundation.NewsItem{
+			{ID: "n1", Title: "贵州茅台渠道改革带动订单增长", Content: "公司订单增长，市场关注后续落地。", PublishedAt: now.Add(-time.Hour), Meta: foundation.SourceMeta{Source: "cls"}},
+			{ID: "n2", Title: "白酒消费迎来政策支持", Content: "行业景气预期改善。", PublishedAt: now.Add(-3 * time.Hour), Meta: foundation.SourceMeta{Source: "cls"}},
+			{ID: "n3", Title: "无关市场新闻", PublishedAt: now.Add(-4 * time.Hour), Meta: foundation.SourceMeta{Source: "cls"}},
+			{ID: "n4", Title: "贵州茅台旧新闻", PublishedAt: now.AddDate(0, 0, -45), Meta: foundation.SourceMeta{Source: "cls"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.StockNews == nil || !analysis.StockNews.Available || analysis.StockNews.ArticleCount != 2 {
+		t.Fatalf("stock news analysis missing: %+v", analysis.StockNews)
+	}
+	if analysis.ThemeNews == nil || !analysis.ThemeNews.Available || analysis.ThemeNews.ArticleCount != 1 {
+		t.Fatalf("theme news analysis missing: %+v", analysis.ThemeNews)
+	}
+	if len(analysis.StockNews.Catalysts) == 0 || analysis.StockNews.AnalysisSource != "local-rules" {
+		t.Fatalf("stock news catalysts missing: %+v", analysis.StockNews)
+	}
+	quality := map[string]string{}
+	for _, item := range analysis.DataQuality {
+		quality[item.Key] = item.Status
+	}
+	if quality["stock_news"] != "ready" || quality["theme_news"] != "ready" {
+		t.Fatalf("news data quality missing: %+v", quality)
+	}
+}
+
+func TestAnalyzeEmotionLeaderBuildsDynamicShortTermPlan(t *testing.T) {
 	lines := syntheticTrendLines("003032.SZ", 60, 10, 0.1, 800_000_000)
 	now := time.Now()
 	analysis, err := Analyze(Input{
@@ -227,8 +314,14 @@ func TestAnalyzeEmotionLeaderSkipsFundamentalsAndResearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if analysis.Profile.PrimaryType != "emotion_leader" || analysis.Fundamental != nil || analysis.Research != nil {
-		t.Fatalf("emotion leader should keep short-term route: %+v", analysis)
+	if analysis.Profile.PrimaryType != "emotion_leader" || analysis.Fundamental == nil || analysis.Research == nil {
+		t.Fatalf("emotion leader should retain global evidence for AI classification: %+v", analysis)
+	}
+	if analysis.ActionPlan.DecisionMode != "short_term" || analysis.ActionPlan.ShortTerm == nil {
+		t.Fatalf("emotion leader should use dynamic short-term plan: %+v", analysis.ActionPlan)
+	}
+	if analysis.ActionPlan.Entry.PriceText != "" || analysis.ActionPlan.ShortTerm.Auction.Status == "" || len(analysis.ActionPlan.ShortTerm.VetoConditions) == 0 {
+		t.Fatalf("short-term plan must use auction conditions instead of static prices: %+v", analysis.ActionPlan)
 	}
 }
 
@@ -255,8 +348,11 @@ func TestEnrichWithAIReplacesOnlyNarrativeConclusion(t *testing.T) {
 		Profile:    Profile{PrimaryType: "trend_capacity", TypeLabel: "趋势容量型"},
 		Trend:      TrendAnalysis{Score: 78, Phase: "主升"},
 		Conclusion: Conclusion{BestPath: "原始路径", MainRisk: "原始风险"},
+		StockNews:  &NewsAnalysis{Available: true, Summary: "本地个股新闻结论", AnalysisSource: "local-rules"},
+		ThemeNews:  &NewsAnalysis{Available: true, Summary: "本地题材新闻结论", AnalysisSource: "local-rules"},
 	}
-	prompter := fakeStockPrompter{content: `{"headline":"趋势仍在但不追高","summary":"中期结构保持向上，当前更适合等待回踩或放量突破确认。","action":"等待回踩确认","best_path":"缩量回踩后重新放量","main_risk":"跌破中期趋势线"}`}
+	capturedPrompt := ""
+	prompter := fakeStockPrompter{content: `{"headline":"趋势仍在但不追高","summary":"中期结构保持向上，当前更适合等待回踩或放量突破确认。","action":"等待回踩确认","best_path":"缩量回踩后重新放量","main_risk":"跌破中期趋势线","stock_news":{"tone":"偏多","summary":"订单与回购构成潜在催化，但需要观察兑现节奏。","catalysts":["订单增长"],"risks":["兑现不及预期"]},"theme_news":{"tone":"中性","summary":"题材有政策催化，持续性仍需板块扩散确认。","catalysts":["政策支持"],"risks":[]}}`, prompt: &capturedPrompt}
 	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -265,6 +361,61 @@ func TestEnrichWithAIReplacesOnlyNarrativeConclusion(t *testing.T) {
 	}
 	if analysis.Trend.Score != 78 || analysis.Profile.PrimaryType != "trend_capacity" {
 		t.Fatalf("AI must not rewrite deterministic fields: %+v", analysis)
+	}
+	if analysis.StockNews.AnalysisSource != "hermes-ai" || analysis.StockNews.Tone != "偏多" || analysis.ThemeNews.AnalysisSource != "hermes-ai" {
+		t.Fatalf("AI news synthesis not applied: stock=%+v theme=%+v", analysis.StockNews, analysis.ThemeNews)
+	}
+	if !strings.Contains(capturedPrompt, `"stock_news"`) || !strings.Contains(capturedPrompt, `"theme_news"`) {
+		t.Fatalf("news payload missing from AI prompt: %s", capturedPrompt)
+	}
+}
+
+func TestEnrichWithAIAppliesGlobalNonShortPricePlan(t *testing.T) {
+	lines := syntheticTrendLines("600519.SH", 180, 10, .08, 1_500_000_000)
+	analysis, err := Analyze(Input{Symbol: "600519.SH", KLines: lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompter := fakeStockPrompter{content: `{
+		"headline":"等待全局条件共振","summary":"趋势结构保持，但价格计划同时考虑题材持续性、基本面质量和资金承接。","action":"等待进入允许介入区后确认","best_path":"基本面预期稳定且回踩承接","main_risk":"题材转弱并跌破逻辑失效位",
+		"decision":{"decision_mode":"non_short","decision_label":"趋势与价值定价","decision_confidence":0.86,"horizon":"波段 / 1—3个月","rationale":"结合趋势支撑、基本面预期和题材持续性确定价格边界。","current_action":"等待回踩确认","position_hint":"首次验证不超过三成仓位","non_short_price_plan":{"entry":{"price_low":23,"price_high":24,"reason":"趋势支撑与基本面预期交集形成安全边际。","action":"缩量止跌并重新转强后分批介入。"},"hold":{"price_low":22,"price_high":28,"reason":"逻辑失效位上方且产业预期未下修时继续持有。","action":"趋势延续则持有，放量滞涨时降仓。"},"take_profit":{"price_low":28,"price_high":34,"reason":"前高压力与估值兑现区共同构成分批止盈目标。","action":"第一目标处理本金风险，第二目标不追高。"},"stop_loss":{"price_low":0,"price_high":21,"reason":"跌破结构支撑且题材与资金同步转弱，原逻辑失效。","action":"触发后减仓或止损。"}},"short_term_playbook":{}}
+	}`}
+	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err != nil {
+		t.Fatal(err)
+	}
+	if analysis.ActionPlan.DecisionMode != "non_short" || analysis.ActionPlan.PricingSource != "hermes-ai" {
+		t.Fatalf("AI non-short decision not applied: %+v", analysis.ActionPlan)
+	}
+	if analysis.ActionPlan.Entry.PriceLow != 23 || analysis.ActionPlan.StopLoss.PriceHigh != 21 || analysis.ActionPlan.TakeProfit.PriceLow != 28 {
+		t.Fatalf("AI price plan not applied: %+v", analysis.ActionPlan)
+	}
+	if analysis.RiskControl.EntryReference != 23.5 || analysis.RiskControl.StopPrice != 21 || analysis.RiskControl.TakeProfitFirst != 28 {
+		t.Fatalf("risk control not aligned to AI plan: %+v", analysis.RiskControl)
+	}
+}
+
+func TestEnrichWithAIAppliesShortTermAuctionPlaybook(t *testing.T) {
+	lines := syntheticTrendLines("003032.SZ", 60, 10, .1, 800_000_000)
+	now := time.Now()
+	analysis, err := Analyze(Input{
+		Symbol: "003032.SZ", KLines: lines,
+		LimitUps: []foundation.LimitUpEvent{{Symbol: "003032.SZ", Date: now.AddDate(0, 0, -2), Streak: 2}, {Symbol: "003032.SZ", Date: now.AddDate(0, 0, -1), Streak: 3}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompter := fakeStockPrompter{content: `{
+		"headline":"次日只看竞价与承接","summary":"该股收益来源依赖题材流动性和辨识度，盘后价格不能代替次日资金确认。","action":"等待9:25竞价确认","best_path":"板块正反馈后首次分歧承接","main_risk":"高位负反馈扩散",
+		"decision":{"decision_mode":"short_term","decision_label":"超短次日作战","decision_confidence":0.91,"horizon":"隔日","rationale":"连板身位和题材合力主导，次日竞价与开盘承接比静态技术价更重要。","current_action":"等待竞价与开盘双确认","position_hint":"T+1下只用小仓验证","non_short_price_plan":{},"short_term_playbook":{"positioning":"题材高辨识度核心","sentiment_cycle":"发酵转分歧","expected_pattern":"分歧转一致","overnight_conclusion":"盘后预案成立，但次日仍需板块同步确认。","data_status":"尚无次日竞价数据。","auction":{"label":"9:25竞价确认","status":"待9:25竞价确认","summary":"判断预期差与板块合力。","required":["板块核心正反馈","竞价最后阶段不持续回落"],"avoid":["高位股集体低开"]},"opening":{"label":"9:30—9:35开盘确认","status":"待开盘确认","summary":"观察首次分歧承接。","required":["回踩后主动收回"],"avoid":["放量跌破竞价低点"]},"participation_conditions":["竞价与开盘双确认"],"hold_conditions":["保持板块辨识度"],"exit_conditions":["低于预期且不能修复"],"veto_conditions":["高位股批量负反馈"],"scenarios":[{"name":"符合预期","tone":"neutral","condition":"竞价匹配地位且开盘有承接","action":"等待首次分歧确认"}]}}
+	}`}
+	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err != nil {
+		t.Fatal(err)
+	}
+	if analysis.ActionPlan.DecisionMode != "short_term" || analysis.ActionPlan.ShortTerm == nil || analysis.ActionPlan.ShortTerm.Auction.Status != "待9:25竞价确认" {
+		t.Fatalf("AI short-term playbook not applied: %+v", analysis.ActionPlan)
+	}
+	if analysis.ActionPlan.Entry.PriceText != "" || analysis.ActionPlan.PricingSource != "not-applicable" {
+		t.Fatalf("short-term decision must not expose static price plan: %+v", analysis.ActionPlan)
 	}
 }
 
@@ -292,8 +443,14 @@ func syntheticTrendLines(symbol string, count int, start, step, amount float64) 
 	return items
 }
 
-type fakeStockPrompter struct{ content string }
+type fakeStockPrompter struct {
+	content string
+	prompt  *string
+}
 
-func (p fakeStockPrompter) Prompt(context.Context, string) (hermes.PromptResult, error) {
+func (p fakeStockPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
+	if p.prompt != nil {
+		*p.prompt = prompt
+	}
 	return hermes.PromptResult{Content: p.content}, nil
 }

@@ -58,6 +58,14 @@ func TestStockAIAnalysisEndpointBuildsTrendProfile(t *testing.T) {
 				Available       bool   `json:"available"`
 				BenchmarkSymbol string `json:"benchmark_symbol"`
 			} `json:"relative_strength"`
+			StockNews struct {
+				Available    bool `json:"available"`
+				ArticleCount int  `json:"article_count"`
+			} `json:"stock_news"`
+			ThemeNews struct {
+				Available    bool `json:"available"`
+				ArticleCount int  `json:"article_count"`
+			} `json:"theme_news"`
 			NextDay struct {
 				Scenarios []struct {
 					Key string `json:"key"`
@@ -88,6 +96,9 @@ func TestStockAIAnalysisEndpointBuildsTrendProfile(t *testing.T) {
 	}
 	if len(payload.Data.NextDay.Scenarios) != 4 || payload.Data.RiskControl.StopPrice <= 0 {
 		t.Fatalf("decision and risk plans missing: %+v", payload.Data)
+	}
+	if !payload.Data.StockNews.Available || payload.Data.StockNews.ArticleCount < 1 || !payload.Data.ThemeNews.Available || payload.Data.ThemeNews.ArticleCount < 1 {
+		t.Fatalf("news analysis missing: stock=%+v theme=%+v", payload.Data.StockNews, payload.Data.ThemeNews)
 	}
 }
 
@@ -147,5 +158,8 @@ func (stockAnalysisThemes) Overviews(context.Context) ([]foundation.ThemeOvervie
 type stockAnalysisNews struct{}
 
 func (stockAnalysisNews) LatestNews(context.Context, int) ([]foundation.NewsItem, error) {
-	return nil, nil
+	return []foundation.NewsItem{
+		{ID: "stock-news", Title: "贵州茅台推进渠道合作", Content: "公司订单增长。", PublishedAt: time.Now(), Meta: foundation.SourceMeta{Source: "cls"}},
+		{ID: "theme-news", Title: "白酒消费迎来政策支持", Content: "板块景气预期改善。", PublishedAt: time.Now().Add(-time.Hour), Meta: foundation.SourceMeta{Source: "cls"}},
+	}, nil
 }
