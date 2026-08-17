@@ -210,6 +210,7 @@ export type KLine = {
   high: number;
   low: number;
   close: number;
+  previous_close?: number;
   volume: number;
   amount: number;
   turnover_rate?: number;

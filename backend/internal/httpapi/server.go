@@ -527,9 +527,58 @@ func (s *Server) klineBatch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) loadKLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
 	lines, err := s.kLinePrimary.KLine(ctx, symbol, period, limit)
 	if err == nil {
-		return lines, nil
+		return normalizeKLinePeriod(lines, period), nil
 	}
-	return s.kLineFallback.KLine(ctx, symbol, period, limit)
+	lines, err = s.kLineFallback.KLine(ctx, symbol, period, limit)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeKLinePeriod(lines, period), nil
+}
+
+func normalizeKLinePeriod(lines []foundation.KLine, period string) []foundation.KLine {
+	if strings.TrimSpace(period) != "1" || len(lines) == 0 {
+		return lines
+	}
+
+	chinaTime := time.FixedZone("Asia/Shanghai", 8*60*60)
+	latestTime := time.Time{}
+	for _, line := range lines {
+		if !line.Time.IsZero() && line.Time.After(latestTime) {
+			latestTime = line.Time
+		}
+	}
+	if latestTime.IsZero() {
+		return lines
+	}
+
+	latestDate := latestTime.In(chinaTime).Format("2006-01-02")
+	previousTime := time.Time{}
+	previousClose := 0.0
+	for _, line := range lines {
+		if line.Time.IsZero() || line.Time.In(chinaTime).Format("2006-01-02") == latestDate {
+			continue
+		}
+		if line.Close > 0 && line.Time.Before(latestTime) && line.Time.After(previousTime) {
+			previousTime = line.Time
+			previousClose = line.Close
+		}
+	}
+
+	filtered := make([]foundation.KLine, 0, len(lines))
+	for _, line := range lines {
+		if line.Time.IsZero() || line.Time.In(chinaTime).Format("2006-01-02") != latestDate {
+			continue
+		}
+		if line.PreviousClose <= 0 && previousClose > 0 {
+			line.PreviousClose = previousClose
+		}
+		filtered = append(filtered, line)
+	}
+	if len(filtered) == 0 {
+		return lines
+	}
+	return filtered
 }
 
 func (s *Server) news(w http.ResponseWriter, r *http.Request) {

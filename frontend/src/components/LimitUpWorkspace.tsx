@@ -33,6 +33,7 @@ import {
 } from '../lib/backend';
 import { KLineChart } from './KLineChart';
 import { classifyBillboardSeat } from '../lib/billboard';
+import { latestTradingDayKLines } from '../lib/kline';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type BillboardState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
@@ -107,7 +108,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 		requestJSON<{ data: KLine[] }>(config, `/api/v1/quotes/kline?symbol=${encodeURIComponent(selectedStock.symbol)}&period=${encodeURIComponent(period.apiPeriod)}&limit=${period.limit}`)
 			.then((payload) => {
 				if (cancelled) return;
-				const lines = payload.data || [];
+				const lines = period.key === 'intraday' ? latestTradingDayKLines(payload.data || []) : payload.data || [];
 				selectedKLineCache.current.set(cacheKey, lines);
 				setSelectedKLines(lines);
 				setSelectedKLineState('ready');

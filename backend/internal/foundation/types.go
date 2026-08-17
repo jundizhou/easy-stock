@@ -37,6 +37,7 @@ type KLine struct {
 	High          float64    `json:"high"`
 	Low           float64    `json:"low"`
 	Close         float64    `json:"close"`
+	PreviousClose float64    `json:"previous_close,omitempty"`
 	Volume        float64    `json:"volume"`
 	Amount        float64    `json:"amount"`
 	TurnoverRate  float64    `json:"turnover_rate,omitempty"`

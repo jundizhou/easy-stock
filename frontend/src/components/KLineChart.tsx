@@ -72,9 +72,12 @@ export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', per
 	const plotWidth = width - left - right;
 	const minPrice = Math.min(...sorted.map((line) => line.low));
 	const maxPrice = Math.max(...sorted.map((line) => line.high));
-	// Use the first bar as the period baseline. The percentage scale is
-	// deliberately symmetric so the 0% axis always sits in the middle.
-	const referencePrice = sorted[0].close > 0 ? sorted[0].close : Math.max(minPrice, 0.01);
+	// One-day intraday data is filtered to the latest trading day, so retain
+	// the previous close supplied by the API as the 0% baseline.
+	const suppliedPreviousClose = sorted.find((line) => line.previous_close != null && line.previous_close > 0)?.previous_close;
+	const referencePrice = mode === 'intraday' && suppliedPreviousClose && suppliedPreviousClose > 0
+		? suppliedPreviousClose
+		: sorted[0].close > 0 ? sorted[0].close : Math.max(minPrice, 0.01);
 	const percentChange = (value: number) => ((value - referencePrice) / referencePrice) * 100;
 	const percentRange = mode === 'intraday' ? intradayLimitPercent(symbol) : Math.max(
 		5,
@@ -95,10 +98,14 @@ export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', per
 	const intradayBaselines: Array<number | null> = [];
 	let currentDay = '';
 	let previousClose: number | null = null;
+	let currentDayBaseline = referencePrice;
 	for (const line of sorted) {
 		const key = dayKey(line.time);
-		if (key !== currentDay) currentDay = key;
-		intradayBaselines.push(previousClose);
+		if (key !== currentDay) {
+			if (currentDay && previousClose && previousClose > 0) currentDayBaseline = previousClose;
+			currentDay = key;
+		}
+		intradayBaselines.push(currentDayBaseline);
 		previousClose = line.close;
 	}
 	const barBasePrice = (index: number) => {

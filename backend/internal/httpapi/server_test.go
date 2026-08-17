@@ -562,6 +562,34 @@ func TestServerReturnsBatchKLines(t *testing.T) {
 	}
 }
 
+func TestNormalizeKLinePeriodKeepsOnlyLatestDayForOneMinuteChart(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	lines := []foundation.KLine{
+		{Time: time.Date(2026, 8, 14, 14, 50, 0, 0, location), Close: 67.10},
+		{Time: time.Date(2026, 8, 14, 15, 0, 0, 0, location), Close: 67.36},
+		{Time: time.Date(2026, 8, 17, 9, 30, 0, 0, location), Close: 80.83},
+		{Time: time.Date(2026, 8, 17, 15, 0, 0, 0, location), Close: 80.83},
+	}
+
+	intraday := normalizeKLinePeriod(lines, "1")
+	if len(intraday) != 2 {
+		t.Fatalf("intraday len=%d, want 2: %+v", len(intraday), intraday)
+	}
+	for _, line := range intraday {
+		if got := line.Time.In(location).Format("2006-01-02"); got != "2026-08-17" {
+			t.Fatalf("intraday date=%s, want 2026-08-17", got)
+		}
+		if line.PreviousClose != 67.36 {
+			t.Fatalf("previous close=%v, want 67.36", line.PreviousClose)
+		}
+	}
+
+	fiveDay := normalizeKLinePeriod(lines, "5")
+	if len(fiveDay) != len(lines) {
+		t.Fatalf("five-day len=%d, want %d", len(fiveDay), len(lines))
+	}
+}
+
 func TestServerEvaluatesInflectionSnapshot(t *testing.T) {
 	server := NewServer(nil)
 	body := `{
