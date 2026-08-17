@@ -93,7 +93,7 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 func TestBuildActionPriceZonesFallsBackWithoutTechnicalLevels(t *testing.T) {
 	trend := TrendAnalysis{LatestClose: 10, ATR14Percent: 0}
 	risk := RiskControl{EntryReference: 10, StopPrice: 9}
-	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk)
+	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{})
 	for _, zone := range []ActionPriceZone{plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss} {
 		if zone.PriceText == "" || zone.Reason == "" || zone.Action == "" || zone.PriceHigh <= 0 {
 			t.Fatalf("fallback price zone is incomplete: %+v", zone)
@@ -229,6 +229,44 @@ func TestAnalyzeThemePromotesAnnouncementBackedCompoundSemiconductor(t *testing.
 	}
 }
 
+func TestAnalyzeThemeIgnoresPublicationTitleKeyword(t *testing.T) {
+	lines := syntheticTrendLines("601858.SH", 80, 18, 0.08, 650_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "601858.SH", Quote: foundation.Quote{Symbol: "601858.SH", Name: "中国科传", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business: "科技出版、期刊出版与知识服务", Industry: "平面媒体", Concepts: []string{"知识产权", "数据要素", "在线教育", "央国企改革", "数字经济"},
+		Announcements: []foundation.MarketResearchItem{{
+			Title:       "中国科技出版传媒股份有限公司2025年年度股东会会议材料",
+			Category:    "股东大会资料",
+			Content:     "公司坚持科技出版主责主业。公司‘智能机器人基础理论与关键技术丛书’‘6G信息通信网络丛书’等9个项目入选国家出版基金项目。",
+			PublishedAt: time.Now(),
+			Meta:        foundation.SourceMeta{Source: "eastmoney:announcement"},
+		}},
+		Themes: []foundation.ThemeOverview{{Name: "机器人概念", TrendScore: 96, RisingNodes: 30, MatchedNodes: 32, LimitUpCount: 8, ActiveDays: 9}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.HotTheme != "" || analysis.Theme.Primary != "科技出版、期刊出版与知识服务" {
+		t.Fatalf("publication title keyword was incorrectly promoted: %+v", analysis.Theme)
+	}
+}
+
+func TestAnalyzeThemeDoesNotPromoteModelMappingFromStrongMarketAlone(t *testing.T) {
+	lines := syntheticTrendLines("601858.SH", 80, 18, 0.08, 650_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "601858.SH", Quote: foundation.Quote{Symbol: "601858.SH", Name: "中国科传", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business: "科技出版、期刊出版与知识服务", Industry: "平面媒体",
+		ModelThemeEvidence: []ThemeEvidence{{Theme: "机器人", Type: "market_mapping", Source: "hermes-ai", Snippet: "弱产业链映射", Strength: .98, Freshness: 1}},
+		Themes:             []foundation.ThemeOverview{{Name: "机器人概念", TrendScore: 99, RisingNodes: 30, MatchedNodes: 32, LimitUpCount: 8, ActiveDays: 9}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.HotTheme != "" || analysis.Theme.Primary != "科技出版、期刊出版与知识服务" {
+		t.Fatalf("market strength alone promoted a model mapping: %+v", analysis.Theme)
+	}
+}
+
 func TestThemeCatalogOnlyDoesNotCreateHotTheme(t *testing.T) {
 	lines := syntheticTrendLines("688297.SH", 80, 10, 0.02, 900_000_000)
 	analysis, err := Analyze(Input{Symbol: "688297.SH", Quote: foundation.Quote{Symbol: "688297.SH", Name: "样本股", Price: lines[len(lines)-1].Close}, KLines: lines, Business: "无人机系统", Concepts: []string{"西部大开发", "无人机"}, Themes: []foundation.ThemeOverview{{Name: "西部大开发", TrendScore: 95, RisingNodes: 30, MatchedNodes: 30}}})
@@ -325,6 +363,51 @@ func TestAnalyzeEmotionLeaderBuildsDynamicShortTermPlan(t *testing.T) {
 	}
 }
 
+func TestAnalyzeShortTermPlanUsesQuantifiedIndexAndThemePeers(t *testing.T) {
+	lines := syntheticTrendLines("003032.SZ", 60, 10, .1, 800_000_000)
+	benchmarkLines := syntheticTrendLines("399001.SZ", 60, 10_000, 8, 100_000_000_000)
+	tradeDate := time.Date(2026, 8, 17, 0, 0, 0, 0, time.Local)
+	analysis, err := Analyze(Input{
+		Symbol:          "003032.SZ",
+		Quote:           foundation.Quote{Symbol: "003032.SZ", Name: "目标股", Price: lines[len(lines)-1].Close},
+		KLines:          lines,
+		BenchmarkSymbol: "399001.SZ",
+		BenchmarkName:   "深证成指",
+		BenchmarkKLines: benchmarkLines,
+		CachedThemes:    []foundation.StockThemeAttribution{{Symbol: "003032.SZ", Theme: "机器人概念", Source: "duanxianxia:kaipanla-limit-up", TradeDate: "2026-08-17"}},
+		LimitUps: []foundation.LimitUpEvent{
+			{Symbol: "003032.SZ", Name: "目标股", Date: tradeDate, Streak: 3, PrimaryTheme: "机器人概念", Amount: 900_000_000},
+			{Symbol: "000001.SZ", Name: "同行甲", Date: tradeDate, Streak: 4, PrimaryTheme: "机器人概念", ThemeLeaderRole: "龙一", Amount: 1_200_000_000},
+			{Symbol: "000002.SZ", Name: "同行乙", Date: tradeDate, Streak: 2, PrimaryTheme: "机器人概念", ThemeLeaderRole: "龙二", Amount: 800_000_000},
+			{Symbol: "000003.SZ", Name: "同行丙", Date: tradeDate, Streak: 1, PrimaryTheme: "机器人概念", Amount: 600_000_000},
+		},
+		Catalog: []foundation.StockCatalogEntry{
+			{BoardStock: foundation.BoardStock{Symbol: "000001.SZ", Name: "同行甲", Price: 12, ChangePercent: 9.98, Amount: 1_200_000_000, LimitUpStreak: 4}, Concepts: []string{"机器人概念"}},
+			{BoardStock: foundation.BoardStock{Symbol: "000002.SZ", Name: "同行乙", Price: 8, ChangePercent: 5.2, Amount: 800_000_000, LimitUpStreak: 2}, Concepts: []string{"机器人概念"}},
+			{BoardStock: foundation.BoardStock{Symbol: "000003.SZ", Name: "同行丙", Price: 6, ChangePercent: 2.1, Amount: 600_000_000, LimitUpStreak: 1}, Concepts: []string{"机器人概念"}},
+		},
+		Themes: []foundation.ThemeOverview{{Name: "机器人概念", LimitUpCount: 4, BoardCount: 3, MaxStreak: 4, ActiveDays: 5, Leaders: []string{"同行甲 4板", "同行乙 2板", "同行丙 1板"}, TradeDate: "2026-08-17", Source: "duanxianxia"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playbook := analysis.ActionPlan.ShortTerm
+	if playbook == nil {
+		t.Fatalf("quantified short-term playbook missing: %+v", analysis.ActionPlan)
+	}
+	quantitative := playbook.Quantitative
+	if quantitative.Benchmark.Name != "深证成指" || quantitative.Stock.AuctionAmountMin <= 0 || quantitative.Stock.AuctionPriceMin <= 0 {
+		t.Fatalf("stock/index thresholds missing: %+v", quantitative)
+	}
+	if quantitative.Theme.Name != "机器人概念" || quantitative.Theme.MinimumPositivePeers != 2 || len(quantitative.Peers) < 3 {
+		t.Fatalf("theme peer thresholds missing: %+v", quantitative)
+	}
+	required := strings.Join(playbook.Auction.Required, "；")
+	if !strings.Contains(required, "深证成指") || !strings.Contains(required, "同行甲") || !strings.Contains(required, "竞价成交额") {
+		t.Fatalf("auction conditions are not concrete enough: %s", required)
+	}
+}
+
 func TestBenchmarkForSymbolRoutesByBoard(t *testing.T) {
 	tests := map[string]string{
 		"600519.SH": "000001.SH",
@@ -416,6 +499,9 @@ func TestEnrichWithAIAppliesShortTermAuctionPlaybook(t *testing.T) {
 	}
 	if analysis.ActionPlan.Entry.PriceText != "" || analysis.ActionPlan.PricingSource != "not-applicable" {
 		t.Fatalf("short-term decision must not expose static price plan: %+v", analysis.ActionPlan)
+	}
+	if analysis.ActionPlan.ShortTerm.Quantitative.Stock.AuctionChangeMax <= 0 || !strings.Contains(analysis.ActionPlan.ShortTerm.Auction.Required[0], "竞价涨幅") {
+		t.Fatalf("AI must preserve deterministic quantified conditions: %+v", analysis.ActionPlan.ShortTerm)
 	}
 }
 

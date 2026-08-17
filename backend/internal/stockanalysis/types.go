@@ -33,32 +33,33 @@ type Input struct {
 }
 
 type Analysis struct {
-	Symbol      string               `json:"symbol"`
-	Name        string               `json:"name"`
-	GeneratedAt time.Time            `json:"generated_at"`
-	Quote       foundation.Quote     `json:"quote"`
-	Profile     Profile              `json:"profile"`
-	Conclusion  Conclusion           `json:"conclusion"`
-	Trend       TrendAnalysis        `json:"trend"`
-	ShortTerm   ShortTermAnalysis    `json:"short_term"`
-	Theme       ThemeAnalysis        `json:"theme"`
-	Fundamental *FundamentalAnalysis `json:"fundamental,omitempty"`
-	Research    *ResearchAnalysis    `json:"research,omitempty"`
-	StockNews   *NewsAnalysis        `json:"stock_news,omitempty"`
-	ThemeNews   *NewsAnalysis        `json:"theme_news,omitempty"`
-	Market      *MarketContext       `json:"market,omitempty"`
-	Scorecard   Scorecard            `json:"scorecard"`
-	Timeframes  []TimeframeAnalysis  `json:"timeframes"`
-	Relative    RelativeStrength     `json:"relative_strength"`
-	Signals     []Signal             `json:"signals"`
-	NextDay     NextDayPlan          `json:"next_day"`
-	RiskControl RiskControl          `json:"risk_control"`
-	ActionPlan  ActionPlan           `json:"action_plan"`
-	Risks       []string             `json:"risks"`
-	Evidence    []Evidence           `json:"evidence"`
-	DataQuality []DataQuality        `json:"data_quality"`
-	Chart       []TrendPoint         `json:"chart"`
-	AI          AISynthesisStatus    `json:"ai"`
+	Symbol                string               `json:"symbol"`
+	Name                  string               `json:"name"`
+	GeneratedAt           time.Time            `json:"generated_at"`
+	Quote                 foundation.Quote     `json:"quote"`
+	Profile               Profile              `json:"profile"`
+	Conclusion            Conclusion           `json:"conclusion"`
+	Trend                 TrendAnalysis        `json:"trend"`
+	ShortTerm             ShortTermAnalysis    `json:"short_term"`
+	Theme                 ThemeAnalysis        `json:"theme"`
+	Fundamental           *FundamentalAnalysis `json:"fundamental,omitempty"`
+	Research              *ResearchAnalysis    `json:"research,omitempty"`
+	StockNews             *NewsAnalysis        `json:"stock_news,omitempty"`
+	ThemeNews             *NewsAnalysis        `json:"theme_news,omitempty"`
+	Market                *MarketContext       `json:"market,omitempty"`
+	Scorecard             Scorecard            `json:"scorecard"`
+	Timeframes            []TimeframeAnalysis  `json:"timeframes"`
+	Relative              RelativeStrength     `json:"relative_strength"`
+	Signals               []Signal             `json:"signals"`
+	NextDay               NextDayPlan          `json:"next_day"`
+	RiskControl           RiskControl          `json:"risk_control"`
+	ActionPlan            ActionPlan           `json:"action_plan"`
+	Risks                 []string             `json:"risks"`
+	Evidence              []Evidence           `json:"evidence"`
+	DataQuality           []DataQuality        `json:"data_quality"`
+	Chart                 []TrendPoint         `json:"chart"`
+	AI                    AISynthesisStatus    `json:"ai"`
+	shortTermQuantitative *ShortTermQuantitativePlan
 }
 
 type Profile struct {
@@ -360,6 +361,60 @@ type ShortTermDecisionScenario struct {
 	Action    string `json:"action"`
 }
 
+type ShortTermStockThresholds struct {
+	ReferenceClose     float64 `json:"reference_close"`
+	LimitUpPercent     float64 `json:"limit_up_percent"`
+	AuctionChangeMin   float64 `json:"auction_change_min"`
+	AuctionChangeMax   float64 `json:"auction_change_max"`
+	AuctionPriceMin    float64 `json:"auction_price_min"`
+	AuctionPriceMax    float64 `json:"auction_price_max"`
+	AuctionAmountMin   float64 `json:"auction_amount_min"`
+	AuctionAmountMax   float64 `json:"auction_amount_max"`
+	OpeningDrawdownMax float64 `json:"opening_drawdown_max"`
+	OpeningAmountMin   float64 `json:"opening_amount_min"`
+	RelativeIndexMin   float64 `json:"relative_index_min"`
+}
+
+type ShortTermBenchmarkThresholds struct {
+	Symbol           string  `json:"symbol"`
+	Name             string  `json:"name"`
+	ReferenceClose   float64 `json:"reference_close"`
+	AuctionChangeMin float64 `json:"auction_change_min"`
+	OpeningChangeMin float64 `json:"opening_change_min"`
+	FailureChange    float64 `json:"failure_change"`
+}
+
+type ShortTermThemeThresholds struct {
+	Name                 string  `json:"name"`
+	LimitUpCount         int     `json:"limit_up_count"`
+	BoardCount           int     `json:"board_count"`
+	MaxStreak            int     `json:"max_streak"`
+	ActiveDays           int     `json:"active_days"`
+	MinimumPositivePeers int     `json:"minimum_positive_peers"`
+	MaximumWeakPeers     int     `json:"maximum_weak_peers"`
+	PositiveThreshold    float64 `json:"positive_threshold"`
+	WeakThreshold        float64 `json:"weak_threshold"`
+	Source               string  `json:"source"`
+}
+
+type ShortTermPeerReference struct {
+	Symbol        string  `json:"symbol"`
+	Name          string  `json:"name"`
+	Role          string  `json:"role"`
+	Streak        int     `json:"streak"`
+	ChangePercent float64 `json:"change_percent"`
+	HasQuote      bool    `json:"has_quote"`
+}
+
+type ShortTermQuantitativePlan struct {
+	BaselineDate string                       `json:"baseline_date"`
+	Stock        ShortTermStockThresholds     `json:"stock"`
+	Benchmark    ShortTermBenchmarkThresholds `json:"benchmark"`
+	Theme        ShortTermThemeThresholds     `json:"theme"`
+	Peers        []ShortTermPeerReference     `json:"peers"`
+	Missing      []string                     `json:"missing,omitempty"`
+}
+
 // ShortTermPlaybook deliberately models an execution state machine instead of
 // pretending that an after-hours static price is a reliable entry instruction.
 // Auction and opening data are not available in an after-hours analysis, so the
@@ -370,6 +425,7 @@ type ShortTermPlaybook struct {
 	ExpectedPattern         string                      `json:"expected_pattern"`
 	OvernightConclusion     string                      `json:"overnight_conclusion"`
 	DataStatus              string                      `json:"data_status"`
+	Quantitative            ShortTermQuantitativePlan   `json:"quantitative"`
 	Auction                 ShortTermDecisionStage      `json:"auction"`
 	Opening                 ShortTermDecisionStage      `json:"opening"`
 	ParticipationConditions []string                    `json:"participation_conditions"`

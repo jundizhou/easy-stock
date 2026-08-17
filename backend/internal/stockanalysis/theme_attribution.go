@@ -41,6 +41,18 @@ var themeKeywordGroups = []struct {
 	{name: "储能", keywords: []string{"储能", "电化学储能"}, parent: "新能源"},
 }
 
+var themeCompanyFactKeywords = []string{
+	"研发", "开发", "生产", "制造", "销售", "供应", "产品", "业务", "主营",
+	"参股", "控股", "投资", "收购", "并购", "子公司", "订单", "中标", "签约",
+	"合作", "建设", "投产", "扩产", "产能", "客户", "收入", "营收", "项目", "布局",
+	"解决方案", "设备",
+}
+
+var themeReferenceOnlyKeywords = []string{
+	"丛书", "图书", "教材", "读物", "著作", "出版基金", "出版项目", "出版物", "期刊", "论文",
+	"文献", "书目", "课程", "培训材料", "研究报告", "行业报告",
+}
+
 func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) ThemeAnalysis {
 	buckets := map[string]*themeEvidenceBucket{}
 	ensure := func(name string) *themeEvidenceBucket {
@@ -76,10 +88,9 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 		}
 	}
 	for _, item := range input.Announcements {
-		text := strings.TrimSpace(item.Title + " " + item.Category + " " + item.Content)
 		for _, group := range themeKeywordGroups {
-			if containsAnyFold(text, group.keywords...) {
-				add(group.name, ThemeEvidence{Theme: group.name, Type: "announcement", Source: firstNonEmpty(item.Meta.Source, "eastmoney:announcement"), Title: item.Title, URL: item.URL, PublishedAt: item.PublishedAt, Snippet: truncateText(firstNonEmpty(item.Content, item.Category), 220), Strength: .95, Freshness: freshnessForTime(item.PublishedAt)}, true, false)
+			if snippet, ok := companyThemeFactSnippet(item.Title+"。"+item.Category+"。"+item.Content, append([]string{group.name}, group.keywords...)); ok {
+				add(group.name, ThemeEvidence{Theme: group.name, Type: "announcement", Source: firstNonEmpty(item.Meta.Source, "eastmoney:announcement"), Title: item.Title, URL: item.URL, PublishedAt: item.PublishedAt, Snippet: truncateText(snippet, 220), Strength: .95, Freshness: freshnessForTime(item.PublishedAt)}, true, false)
 			}
 		}
 	}
@@ -103,10 +114,18 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 		if item.Strength <= 0 {
 			item.Strength = .62
 		}
+		confirmed := false
+		if item.Type == "announcement" || item.Type == "fact" {
+			confirmed = inputConfirmsThemeFact(input, item.Theme)
+			if !confirmed {
+				item.Type = "inference"
+				item.Strength = math.Min(item.Strength, .55)
+			}
+		}
 		if item.Freshness <= 0 {
 			item.Freshness = freshnessForTime(item.PublishedAt)
 		}
-		add(item.Theme, item, item.Type == "announcement" || item.Type == "fact", item.Type == "inference" || item.Type == "market_mapping")
+		add(item.Theme, item, confirmed, item.Type == "inference" || item.Type == "market_mapping")
 	}
 	if base.HotTheme != "" {
 		for _, group := range themeKeywordGroups {
@@ -136,7 +155,7 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 
 	best := (*themeEvidenceBucket)(nil)
 	for _, candidate := range ordered {
-		if candidate.score < 55 || (!candidate.confirmed && !candidate.marketOK && !hasExplicitMarketAttribution(candidate.evidence)) {
+		if candidate.score < 55 || (!candidate.confirmed && !hasExplicitMarketAttribution(candidate.evidence)) {
 			continue
 		}
 		if best == nil || candidate.score > best.score {
@@ -195,6 +214,39 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	}
 	base.Resonance = calculateThemeResonance(input, short, *best)
 	return base
+}
+
+func companyThemeFactSnippet(text string, keywords []string) (string, bool) {
+	for _, clause := range strings.FieldsFunc(text, func(r rune) bool {
+		switch r {
+		case '。', '！', '？', '；', '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	}) {
+		clause = strings.TrimSpace(clause)
+		if clause == "" || !containsAnyFold(clause, keywords...) {
+			continue
+		}
+		if containsAnyFold(clause, themeReferenceOnlyKeywords...) {
+			continue
+		}
+		if containsAnyFold(clause, themeCompanyFactKeywords...) {
+			return clause, true
+		}
+	}
+	return "", false
+}
+
+func inputConfirmsThemeFact(input Input, theme string) bool {
+	keywords := append([]string{theme}, themeAliases(theme)...)
+	for _, item := range input.Announcements {
+		if _, ok := companyThemeFactSnippet(item.Title+"。"+item.Category+"。"+item.Content, keywords); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (theme ThemeAnalysis) EvidenceString() string { return firstString(theme.Evidence) }

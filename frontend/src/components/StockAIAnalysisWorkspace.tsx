@@ -45,6 +45,7 @@ import {
 	StockAINewsAnalysis,
 	StockAINextDayScenario,
 	StockAIShortTermDecisionStage,
+	StockAIShortTermQuantitativePlan,
 	StockAITrendPoint,
 	StockDirectoryData,
 	StockDirectoryEntry,
@@ -283,7 +284,7 @@ function AnalysisExportHeader({ analysis, mode }: { analysis: StockAIAnalysis; m
 function AnalysisExportFooter({ analysis }: { analysis: StockAIAnalysis }) {
 	return <footer className="stock-ai-export-footer">
 		<div><strong>easy-stock</strong><span>让数据、逻辑与 AI 一起服务于交易决策</span></div>
-		<div className="stock-ai-export-promo"><span><Github size={13} />开源免费使用 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
+		<div className="stock-ai-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>数据截至 {formatExportDate(analysis.generated_at)}</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;
 }
@@ -853,6 +854,7 @@ function ShortTermActionPlanPanel({ analysis }: { analysis: StockAIAnalysis }) {
 				<article><span>预期模式</span><strong>{playbook.expected_pattern}</strong></article>
 			</div>
 			<div className="stock-ai-short-conclusion"><Sparkles size={16} /><div><span>盘后结论</span><strong>{playbook.overnight_conclusion}</strong><small>{playbook.data_status}</small></div></div>
+			{playbook.quantitative && <ShortTermQuantitativePanel quantitative={playbook.quantitative} />}
 			<div className="stock-ai-short-stages">
 				<ShortTermStageCard stage={playbook.auction} icon={<Clock3 size={16} />} />
 				<ShortTermStageCard stage={playbook.opening} icon={<Activity size={16} />} />
@@ -871,6 +873,46 @@ function ShortTermActionPlanPanel({ analysis }: { analysis: StockAIAnalysis }) {
 			<p>该记录来自旧版缓存，重新分析后可查看竞价与开盘动态作战计划。</p>
 		</div>}
 		<div className="stock-ai-position"><ShieldCheck size={15} /><div><span>仓位约束</span><strong>{plan.position_hint}</strong></div></div>
+	</section>;
+}
+
+function ShortTermQuantitativePanel({ quantitative }: { quantitative: StockAIShortTermQuantitativePlan }) {
+	const stock = quantitative.stock;
+	const benchmark = quantitative.benchmark;
+	const theme = quantitative.theme;
+	return <section className="stock-ai-short-quantitative">
+		<header><div><span>量化执行锚点</span><strong>{quantitative.baseline_date ? `${quantitative.baseline_date} 盘后基线` : '盘后基线'}</strong></div><Calculator size={16} /></header>
+		<div className="stock-ai-short-quant-grid">
+			<article>
+				<span>个股竞价与开盘</span>
+				<strong>{signedPercent(stock.auction_change_min)}—{signedPercent(stock.auction_change_max)}</strong>
+				<ul>
+					<li>竞价价格 {formatPriceRange(stock.auction_price_min, stock.auction_price_max)}</li>
+					<li>竞价额 {formatCompactAmount(stock.auction_amount_min)}—{formatCompactAmount(stock.auction_amount_max)}</li>
+					<li>9:35回撤 ≤ {stock.opening_drawdown_max.toFixed(1)}%，累计额 ≥ {formatCompactAmount(stock.opening_amount_min)}</li>
+				</ul>
+			</article>
+			<article>
+				<span>基准指数门槛</span>
+				<strong>{benchmark.name}<small>{benchmark.symbol}</small></strong>
+				<ul>
+					<li>9:25竞价 ≥ {signedPercent(benchmark.auction_change_min)}</li>
+					<li>9:35涨幅 ≥ {signedPercent(benchmark.opening_change_min)}</li>
+					<li>跌至 {signedPercent(benchmark.failure_change)} 以下视为环境否决</li>
+				</ul>
+			</article>
+			<article>
+				<span>同题材联动门槛</span>
+				<strong>{theme.name}</strong>
+				<ul>
+					<li>基线：涨停 {theme.limit_up_count}、连板 {theme.board_count}、最高 {theme.max_streak} 板</li>
+					<li>核心股至少 {theme.minimum_positive_peers} 只涨幅 ≥ 0%</li>
+					<li>跌幅 ≤ {theme.weak_threshold.toFixed(1)}% 的核心股不超过 {theme.maximum_weak_peers} 只</li>
+				</ul>
+			</article>
+		</div>
+		{quantitative.peers?.length > 0 && <div className="stock-ai-short-peer-list"><span>同板块验证个股</span><div>{quantitative.peers.map((peer) => <article key={`${peer.symbol}-${peer.name}`}><strong>{peer.name}<small>{peer.symbol}</small></strong><em>{peer.streak > 0 ? `${peer.streak}板` : peer.role}</em>{peer.has_quote && <span>基线 {signedPercent(peer.change_percent)}</span>}</article>)}</div></div>}
+		{(quantitative.missing || []).length > 0 && <p className="stock-ai-short-quant-missing">数据缺项：{quantitative.missing?.join('；')}</p>}
 	</section>;
 }
 
@@ -1031,6 +1073,7 @@ function buildPlanText(analysis: StockAIAnalysis) {
 			`决策模型：${analysis.action_plan.decision_label || '超短次日作战'}；周期：${analysis.action_plan.horizon || '隔日 / 1—3个交易日'}`,
 			`当前动作：${analysis.action_plan.current_action}`,
 			`盘后结论：${playbook?.overnight_conclusion || analysis.conclusion.summary}`,
+			...(playbook?.quantitative ? buildShortTermQuantitativeText(playbook.quantitative) : []),
 			`竞价确认：${playbook?.auction?.status || '待9:25竞价确认'}；${playbook?.auction?.summary || '观察竞价强度、题材同步性和预期差'}`,
 			`竞价必要条件：${(playbook?.auction?.required || analysis.action_plan.entry_conditions || []).join('；')}`,
 			`开盘确认：${playbook?.opening?.status || '待9:30—9:35确认'}；${playbook?.opening?.summary || '观察开盘承接与板块反馈'}`,
@@ -1066,6 +1109,24 @@ function buildPlanText(analysis: StockAIAnalysis) {
 		`主要风险：${analysis.conclusion.main_risk}`,
 		`生成时间：${analysis.generated_at}`,
 	].join('\n');
+}
+
+function buildShortTermQuantitativeText(quantitative: StockAIShortTermQuantitativePlan) {
+	const stock = quantitative.stock;
+	const benchmark = quantitative.benchmark;
+	const theme = quantitative.theme;
+	const peers = (quantitative.peers || []).map((peer) => `${peer.name}${peer.symbol ? `（${peer.symbol}）` : ''}${peer.streak > 0 ? ` ${peer.streak}板` : peer.role ? ` ${peer.role}` : ''}`).join('、') || '缺少名单';
+	return [
+		`个股量化：竞价${signedPercent(stock.auction_change_min)}—${signedPercent(stock.auction_change_max)}，价格${formatPriceRange(stock.auction_price_min, stock.auction_price_max)}，竞价额${formatCompactAmount(stock.auction_amount_min)}—${formatCompactAmount(stock.auction_amount_max)}，9:35回撤≤${stock.opening_drawdown_max.toFixed(1)}%，累计额≥${formatCompactAmount(stock.opening_amount_min)}`,
+		`指数条件：${benchmark.name}（${benchmark.symbol}）9:25≥${signedPercent(benchmark.auction_change_min)}，9:35≥${signedPercent(benchmark.opening_change_min)}，环境否决≤${signedPercent(benchmark.failure_change)}`,
+		`题材条件：${theme.name}基线涨停${theme.limit_up_count}只、连板${theme.board_count}只、最高${theme.max_streak}板；核心股至少${theme.minimum_positive_peers}只不低于0%，≤${theme.weak_threshold.toFixed(1)}%的不超过${theme.maximum_weak_peers}只`,
+		`同板块验证个股：${peers}`,
+	];
+}
+
+function formatPriceRange(low: number, high: number) {
+	if (!(low > 0) || !(high > 0)) return '数据不足';
+	return `${low.toFixed(2)}—${high.toFixed(2)}元`;
 }
 
 function canvasToPNGBlob(canvas: HTMLCanvasElement) {

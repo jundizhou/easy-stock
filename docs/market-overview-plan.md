@@ -50,7 +50,7 @@ AI 对话
 
 参考仓库：[ArvinLovegood/go-stock](https://github.com/ArvinLovegood/go-stock)，核对快照为 commit `50ae57559f60a6176b910e9f363d99fb3367969c`。
 
-参考项目使用 GPLv3，easy-stock 当前使用 Apache-2.0。为了避免许可证和原创性风险，后续实施必须遵循：
+参考项目使用 GPLv3，easy-stock 当前使用 PolyForm Noncommercial 1.0.0。为了避免许可证和原创性风险，后续实施必须遵循：
 
 1. 只提取功能需求和用户问题，不复制源代码、组件结构、样式、图标搭配、提示词、文案、接口封装和数据字段命名。
 2. 不以“改变量名、改菜单名、打乱代码顺序”作为重构；所有模块根据 easy-stock 的领域模型重新实现。

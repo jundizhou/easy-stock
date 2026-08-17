@@ -17,6 +17,7 @@
   <img alt="Electron" src="https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white" />
   <img alt="Hermes" src="https://img.shields.io/badge/AI-Hermes-6D5BD0" />
   <img alt="Local First" src="https://img.shields.io/badge/Data-Local%20First-159A80" />
+  <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
 </p>
 
 <p align="center">
@@ -24,7 +25,8 @@
   <a href="#核心产品能力">核心能力</a> ·
   <a href="#ai-如何赋能-a-股研究">AI 研究方式</a> ·
   <a href="#ai-原生架构">系统架构</a> ·
-  <a href="#快速开始">快速开始</a>
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#许可与商业使用">许可</a>
 </p>
 
 ---
@@ -196,6 +198,19 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 ### 2. 开发者
 
 需要从源码运行、调试、测试或打包，请阅读 [开发者文档](./docs/development.md)。
+
+---
+
+## 许可与商业使用
+
+easy-stock 项目原创的后端、前端、桌面端和文档采用 [PolyForm Noncommercial License 1.0.0](./LICENSE) 授权。
+
+- 允许个人出于学习、研究、实验和其他非商业目的使用、修改及分发，但必须保留许可证与版权声明。
+- 未经作者明确书面许可，不得用于任何直接或间接的商业用途，包括但不限于企业生产环境、收费服务、SaaS、付费咨询或培训、商业产品集成、二次销售以及以本项目获利。
+- 如需商业使用，请通过 [GitHub 仓库](https://github.com/jundizhou/easy-stock) 联系作者 jundizhou，取得单独的商业授权。
+- 第三方依赖、数据源和随包材料不受本项目许可证重新授权，仍分别遵循其原始许可证及服务条款。
+
+> 本项目属于源码可用（source-available）软件，并非 OSI 定义下允许商业使用的开源软件。历史版本继续适用其发布时随附的许可证。
 
 ---
 

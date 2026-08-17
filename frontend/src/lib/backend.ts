@@ -659,12 +659,59 @@ export type StockAIShortTermDecisionScenario = {
 	action: string;
 };
 
+export type StockAIShortTermQuantitativePlan = {
+	baseline_date: string;
+	stock: {
+		reference_close: number;
+		limit_up_percent: number;
+		auction_change_min: number;
+		auction_change_max: number;
+		auction_price_min: number;
+		auction_price_max: number;
+		auction_amount_min: number;
+		auction_amount_max: number;
+		opening_drawdown_max: number;
+		opening_amount_min: number;
+		relative_index_min: number;
+	};
+	benchmark: {
+		symbol: string;
+		name: string;
+		reference_close: number;
+		auction_change_min: number;
+		opening_change_min: number;
+		failure_change: number;
+	};
+	theme: {
+		name: string;
+		limit_up_count: number;
+		board_count: number;
+		max_streak: number;
+		active_days: number;
+		minimum_positive_peers: number;
+		maximum_weak_peers: number;
+		positive_threshold: number;
+		weak_threshold: number;
+		source: string;
+	};
+	peers: Array<{
+		symbol: string;
+		name: string;
+		role: string;
+		streak: number;
+		change_percent: number;
+		has_quote: boolean;
+	}>;
+	missing?: string[];
+};
+
 export type StockAIShortTermPlaybook = {
 	positioning: string;
 	sentiment_cycle: string;
 	expected_pattern: string;
 	overnight_conclusion: string;
 	data_status: string;
+	quantitative?: StockAIShortTermQuantitativePlan;
 	auction: StockAIShortTermDecisionStage;
 	opening: StockAIShortTermDecisionStage;
 	participation_conditions: string[];

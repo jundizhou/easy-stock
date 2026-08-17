@@ -38,6 +38,7 @@ func Analyze(input Input) (Analysis, error) {
 	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
 	theme = enrichTheme(input, shortTerm, theme)
 	market := marketContext(input)
+	shortTermQuantitative := buildShortTermQuantitativePlan(input, shortTerm, theme, market)
 	profile := classifyProfile(trend, shortTerm, theme, market)
 	fundamentalValue := analyzeFundamentals(input.Fundamentals)
 	fundamental := &fundamentalValue
@@ -50,7 +51,7 @@ func Analyze(input Input) (Analysis, error) {
 	timeframes := analyzeTimeframes(lines)
 	relative := analyzeRelativeStrength(input, lines)
 	riskControl := buildRiskControl(profile, trend, shortTerm, market)
-	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl)
+	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl, shortTermQuantitative)
 	if action.DecisionMode != "short_term" {
 		riskControl = alignRiskControlWithActionPlan(riskControl, action)
 	}
@@ -62,32 +63,33 @@ func Analyze(input Input) (Analysis, error) {
 	quality := buildDataQuality(input, profile, lines, shortTerm, theme, market, relative, fundamental, research, stockNews, themeNews)
 
 	return Analysis{
-		Symbol:      input.Symbol,
-		Name:        name,
-		GeneratedAt: time.Now(),
-		Quote:       quote,
-		Profile:     profile,
-		Conclusion:  conclusion,
-		Trend:       trend,
-		ShortTerm:   shortTerm,
-		Theme:       theme,
-		Fundamental: fundamental,
-		Research:    research,
-		StockNews:   stockNews,
-		ThemeNews:   themeNews,
-		Market:      market,
-		Scorecard:   scorecard,
-		Timeframes:  timeframes,
-		Relative:    relative,
-		Signals:     signals,
-		NextDay:     nextDay,
-		RiskControl: riskControl,
-		ActionPlan:  action,
-		Risks:       risks,
-		Evidence:    evidence,
-		DataQuality: quality,
-		Chart:       chart,
-		AI:          AISynthesisStatus{Status: "rules", Message: "当前结论由本地结构化分析引擎生成"},
+		Symbol:                input.Symbol,
+		Name:                  name,
+		GeneratedAt:           time.Now(),
+		Quote:                 quote,
+		Profile:               profile,
+		Conclusion:            conclusion,
+		Trend:                 trend,
+		ShortTerm:             shortTerm,
+		Theme:                 theme,
+		Fundamental:           fundamental,
+		Research:              research,
+		StockNews:             stockNews,
+		ThemeNews:             themeNews,
+		Market:                market,
+		Scorecard:             scorecard,
+		Timeframes:            timeframes,
+		Relative:              relative,
+		Signals:               signals,
+		NextDay:               nextDay,
+		RiskControl:           riskControl,
+		ActionPlan:            action,
+		Risks:                 risks,
+		Evidence:              evidence,
+		DataQuality:           quality,
+		Chart:                 chart,
+		AI:                    AISynthesisStatus{Status: "rules", Message: "当前结论由本地结构化分析引擎生成"},
+		shortTermQuantitative: &shortTermQuantitative,
 	}, nil
 }
 
@@ -601,7 +603,7 @@ func classifyProfile(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAn
 	}
 }
 
-func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl) ActionPlan {
+func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, quantitative ShortTermQuantitativePlan) ActionPlan {
 	plan := ActionPlan{
 		DecisionMode:       "non_short",
 		DecisionLabel:      "趋势与价值定价",
@@ -665,7 +667,7 @@ func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalys
 		plan.Horizon = "隔日 / 1—3个交易日"
 		plan.Rationale = "该股的收益来源更依赖题材合力、辨识度、次日竞价与开盘承接，盘后静态价格不能替代次日确认。"
 		plan.PricingSource = "not-applicable"
-		plan.ShortTerm = buildShortTermPlaybook(profile, trend, short, theme, market, relative)
+		plan.ShortTerm = buildShortTermPlaybook(profile, trend, short, theme, market, relative, quantitative)
 	} else {
 		plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss = buildActionPriceZones(profile, trend, short, market, risk)
 	}
@@ -679,7 +681,7 @@ func shouldUseShortTermDecision(profile Profile, short ShortTermAnalysis, theme 
 	return theme.IsHot && short.LimitUpCount20 >= 2 && short.RecentReturn10 >= 12
 }
 
-func buildShortTermPlaybook(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength) *ShortTermPlaybook {
+func buildShortTermPlaybook(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, quantitative ShortTermQuantitativePlan) *ShortTermPlaybook {
 	marketPhase := "市场情绪待确认"
 	if market != nil && strings.TrimSpace(market.Phase) != "" {
 		marketPhase = market.Phase
@@ -705,11 +707,22 @@ func buildShortTermPlaybook(profile Profile, trend TrendAnalysis, short ShortTer
 	}
 	auctionStatus := "待9:25竞价确认"
 	openingStatus := "待9:30—9:35开盘确认"
+	stock := quantitative.Stock
+	benchmark := quantitative.Benchmark
+	themeQuant := quantitative.Theme
+	peerLabel := shortTermPeerLabel(quantitative.Peers, 4)
+	stockAuctionRange := fmt.Sprintf("竞价涨幅%s至%s，对应价格%.2f—%.2f元", formatSignedThreshold(stock.AuctionChangeMin), formatSignedThreshold(stock.AuctionChangeMax), stock.AuctionPriceMin, stock.AuctionPriceMax)
+	auctionAmountRange := fmt.Sprintf("竞价成交额%.2f—%.2f亿元", stock.AuctionAmountMin/100_000_000, stock.AuctionAmountMax/100_000_000)
+	benchmarkAuction := fmt.Sprintf("%s（%s）竞价涨幅不低于%s", benchmark.Name, benchmark.Symbol, formatSignedThreshold(benchmark.AuctionChangeMin))
+	benchmarkOpening := fmt.Sprintf("%s 9:35涨幅不低于%s", benchmark.Name, formatSignedThreshold(benchmark.OpeningChangeMin))
+	peerAuction := quantifiedPeerCondition(peerLabel, themeQuant.MinimumPositivePeers, themeQuant.MaximumWeakPeers, "竞价")
+	peerOpening := quantifiedPeerCondition(peerLabel, themeQuant.MinimumPositivePeers, themeQuant.MaximumWeakPeers, "9:35")
 	vetoes := []string{
-		"板块核心与同梯队个股竞价集体低于预期",
-		"个股爆量高开后竞价持续回落，且跟风强于核心",
-		"开盘后放量跌破竞价低点，首次反抽不能快速收回",
-		"高位股批量负反馈、题材进入退潮或出现公告与监管风险",
+		fmt.Sprintf("个股竞价低于%s，或竞价额低于%.2f亿元", formatSignedThreshold(stock.AuctionChangeMin), stock.AuctionAmountMin/100_000_000),
+		fmt.Sprintf("%s跌至%s以下，且个股相对指数没有跑赢%.1f个百分点", benchmark.Name, formatSignedThreshold(benchmark.FailureChange), stock.RelativeIndexMin),
+		fmt.Sprintf("%s中弱于%.1f%%的个股超过%d只", peerLabel, themeQuant.WeakThreshold, themeQuant.MaximumWeakPeers),
+		fmt.Sprintf("开盘至9:35相对开盘价最大回撤超过%.1f%%，且首次反抽不能收回竞价低点", stock.OpeningDrawdownMax),
+		"公告、监管或停复牌等事件使盘后逻辑失效",
 	}
 	if market != nil && (market.Phase == "退潮" || market.Phase == "冰点") {
 		vetoes = append([]string{"市场仍处于" + market.Phase + "，没有板块级修复前不因个股高开参与"}, vetoes...)
@@ -719,39 +732,55 @@ func buildShortTermPlaybook(profile Profile, trend TrendAnalysis, short ShortTer
 		SentimentCycle:      marketPhase + " · 个股" + short.State,
 		ExpectedPattern:     pattern,
 		OvernightConclusion: overnight,
-		DataStatus:          "当前是盘后预案，尚无次日9:25竞价和9:30后分时数据，因此只给条件，不给确定买点。",
+		DataStatus:          "当前是盘后预案；阈值按上一交易日收盘、20日成交额、基准指数波动和同题材核心股计算，次日实时数据需在9:25与9:35逐项核验。",
+		Quantitative:        quantitative,
 		Auction: ShortTermDecisionStage{
 			Label:   "9:25竞价确认",
 			Status:  auctionStatus,
-			Summary: "重点判断预期差、板块同步性和真实资金强度，不用单一高开幅度下结论。",
+			Summary: fmt.Sprintf("基准收盘价%.2f元；%s；%s；并与%s及同题材核心股比较。", stock.ReferenceClose, stockAuctionRange, auctionAmountRange, benchmark.Name),
 			Required: []string{
-				"9:20后竞价方向稳定，最后阶段不是持续撤单式回落",
-				"竞价成交额与近期成交活跃度匹配，不是无量虚强或异常爆量兑现",
-				"题材龙头、同身位和容量核心至少形成两处以上正反馈",
-				"个股开盘预期与自身地位匹配，跟风股不能反客为主",
+				stockAuctionRange,
+				auctionAmountRange + "，且9:20后价格不连续下移",
+				benchmarkAuction + fmt.Sprintf("，个股至少跑赢指数%.1f个百分点", stock.RelativeIndexMin),
+				peerAuction,
 			},
 			Avoid: uniqueStrings(vetoes, 4),
 		},
 		Opening: ShortTermDecisionStage{
 			Label:   "9:30—9:35开盘确认",
 			Status:  openingStatus,
-			Summary: "竞价符合预期后仍需检查承接；A股T+1下，当日无法纠错卖出，开盘确认优先于抢第一笔。",
+			Summary: fmt.Sprintf("9:35前验证价格回撤、累计成交额、%s和%s核心股，不以单次拉升代替承接。", benchmark.Name, themeQuant.Name),
 			Required: []string{
-				"首次分歧有承接，分时低点不连续下移",
-				"回踩开盘价或竞价关键位后能够主动收回",
-				"上涨放量、回落缩量，且强度不弱于题材核心",
-				"板块扩散和赚钱效应没有在开盘后快速坍塌",
+				fmt.Sprintf("9:35价格相对开盘价回撤不超过%.1f%%，且不有效跌破竞价低点", stock.OpeningDrawdownMax),
+				fmt.Sprintf("9:35累计成交额不低于%.2f亿元（20日均额的8%%）", stock.OpeningAmountMin/100_000_000),
+				benchmarkOpening + fmt.Sprintf("，个股相对指数强度不低于+%.1f个百分点", stock.RelativeIndexMin),
+				peerOpening,
 			},
-			Avoid: []string{"高开直线下杀且放量", "冲高时板块不跟随", "炸板或破位后反抽无力", "盘口只剩个股脉冲而没有题材合力"},
+			Avoid: []string{
+				fmt.Sprintf("9:35相对开盘价回撤超过%.1f%%且放量", stock.OpeningDrawdownMax),
+				fmt.Sprintf("%s跌破%s", benchmark.Name, formatSignedThreshold(benchmark.FailureChange)),
+				fmt.Sprintf("%s中达到非负涨幅的不足%d只", peerLabel, themeQuant.MinimumPositivePeers),
+				"炸板或跌破竞价低点后，首次反抽仍不能收回",
+			},
 		},
-		ParticipationConditions: []string{"竞价结果达到预期", "开盘承接确认", "题材与个股形成共振", "不存在一票否决风险"},
-		HoldConditions:          []string{"仍保持板块辨识度", "关键分时低点不破", "题材梯队与容量核心没有明显转弱"},
-		ExitConditions:          []string{"表现低于盘后预期且不能快速修复", "板块核心转弱或高位负反馈扩散", "炸板、破位或放量冲高回落后承接消失"},
-		VetoConditions:          uniqueStrings(vetoes, 5),
+		ParticipationConditions: []string{stockAuctionRange, auctionAmountRange, benchmarkAuction, peerAuction},
+		HoldConditions: []string{
+			fmt.Sprintf("分时不破竞价低点，9:35回撤始终不超过%.1f%%", stock.OpeningDrawdownMax),
+			benchmarkOpening + fmt.Sprintf("，个股继续跑赢至少%.1f个百分点", stock.RelativeIndexMin),
+			peerOpening,
+			fmt.Sprintf("%s基线为涨停%d只、连板%d只、最高%d板，盘中梯队不得降为仅剩个股独涨", themeQuant.Name, themeQuant.LimitUpCount, themeQuant.BoardCount, themeQuant.MaxStreak),
+		},
+		ExitConditions: []string{
+			fmt.Sprintf("竞价低于%s或9:35相对开盘回撤超过%.1f%%", formatSignedThreshold(stock.AuctionChangeMin), stock.OpeningDrawdownMax),
+			fmt.Sprintf("%s跌破%s且个股同步转弱", benchmark.Name, formatSignedThreshold(benchmark.FailureChange)),
+			fmt.Sprintf("%s中弱于%.1f%%的个股超过%d只", peerLabel, themeQuant.WeakThreshold, themeQuant.MaximumWeakPeers),
+			"炸板、破位或放量冲高回落后首次反抽不能收回",
+		},
+		VetoConditions: uniqueStrings(vetoes, 5),
 		Scenarios: []ShortTermDecisionScenario{
-			{Name: "超预期", Tone: "positive", Condition: "竞价强度、板块反馈与开盘承接同时超出盘后预期", Action: "等待首次可验证分歧，确认后再参与，不追无量直线加速"},
-			{Name: "符合预期", Tone: "neutral", Condition: "竞价表现匹配地位，开盘后量价与板块保持同步", Action: "按计划观察回踩承接或放量转强，只做模式内动作"},
-			{Name: "低于预期", Tone: "negative", Condition: "竞价走弱、板块核心负反馈或开盘承接失败", Action: "取消参与；已有仓位优先执行退出条件，不把短线被套改成中线"},
+			{Name: "超预期", Tone: "positive", Condition: fmt.Sprintf("竞价涨幅≥%s、竞价额≥%.2f亿元，且%s", formatSignedThreshold(stock.AuctionChangeMax*.7), stock.AuctionAmountMin/100_000_000, peerAuction), Action: "只等首次回踩承接，9:35前回撤仍不得超过量化上限，不追无量直线加速"},
+			{Name: "符合预期", Tone: "neutral", Condition: fmt.Sprintf("%s；%s；%s", stockAuctionRange, benchmarkAuction, peerOpening), Action: "四项量化条件全部满足后，才按计划观察首次分歧承接"},
+			{Name: "低于预期", Tone: "negative", Condition: fmt.Sprintf("竞价低于%s，或%s低于%s，或同题材弱势股超过%d只", formatSignedThreshold(stock.AuctionChangeMin), benchmark.Name, formatSignedThreshold(benchmark.FailureChange), themeQuant.MaximumWeakPeers), Action: "取消参与；已有仓位优先按退出条件处理，不把短线被套改成中线"},
 		},
 	}
 }

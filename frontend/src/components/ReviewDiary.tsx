@@ -691,7 +691,7 @@ function ReviewSummaryExportBrand({ summary }: { summary: ReviewDailySummary }) 
 function ReviewSummaryExportFooter({ summary }: { summary: ReviewDailySummary }) {
 	return <footer className="review-summary-export-footer">
 		<div><strong>easy-stock</strong><span>AI 时代的 A 股行情分析软件</span></div>
-		<div className="review-summary-export-promo"><span><Github size={13} />开源免费使用 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
+		<div className="review-summary-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>{formatDateTime(summary.generated_at)} 生成</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;
 }

@@ -88,9 +88,10 @@ func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input I
 规则：
 1. 区分 fact（公告或公司明确事实）、market_mapping（产业链/市场映射）、inference（弱推断）。
 2. 不要把主营行业、宽泛概念目录直接当成热点；不要编造公告未出现的公司事实。
-3. 题材名称使用短而具体的中文，例如“化合物半导体”“砷化镓”“光电子器件”“CPO”。
-4. 每项必须给出原文标题或摘要作为snippet，strength为0到1。
-5. 只输出JSON：{"items":[{"theme":"...","type":"fact|market_mapping|inference","source":"...","title":"...","snippet":"...","strength":0.0}]}
+3. 公司出版、引用或获奖的图书、丛书、教材、论文标题即使包含题材词，也不代表公司经营该产业，不得据此输出题材。
+4. 题材名称使用短而具体的中文，例如“化合物半导体”“砷化镓”“光电子器件”“CPO”。
+5. 每项必须给出原文标题或摘要作为snippet，strength为0到1。
+6. 只输出JSON：{"items":[{"theme":"...","type":"fact|market_mapping|inference","source":"...","title":"...","snippet":"...","strength":0.0}]}
 
 [输入]
 ` + source.String()
@@ -160,7 +161,7 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 5. scorecard、relative、theme、fundamental等事实和分数不得篡改；action_plan与risk_control里的价格只是本地候选，你可以依据全局分析重新定价。
 6. decision_mode=non_short时必须计算完整价格计划。价格不能只由均线或ATR决定，原因需要同时结合至少两个不同维度，例如基本面/研报预期、题材持续性、资金与趋势结构、新闻风险。必须满足：止损价 < 允许介入区间 < 第一止盈价 <= 第二止盈价；持有区间必须高于止损价。弱势非短线票可以把允许介入价设为右侧修复确认区，但仍要给出价格。
 7. decision_mode=short_term时不要输出静态介入、止盈价格。重点输出盘后预案、9:25竞价确认、9:30—9:35开盘确认、参与/持有/退出条件和一票否决。输入没有次日实时竞价时，auction.status必须明确为“待9:25竞价确认”，不得假装已经看到竞价。
-8. 短线决策必须考虑A股T+1、题材梯队、龙头/跟风关系、竞价量价、开盘承接、炸板与高位负反馈；综合分数不能抵消一票否决条件。
+8. 短线决策必须使用action_plan.short_term_playbook.quantitative中的确定性阈值，逐条引用具体指数名称与代码、竞价涨幅区间、竞价成交额、9:35回撤/成交额，以及peers中的同题材个股名称；不得把这些条件改写成“板块同步”“资金较强”“承接良好”等笼统话术，也不得自行修改量化阈值。
 9. 非情绪型必须结合fundamental与research；机构评级仅代表第三方观点，不得当作确定性结论。
 10. 分别分析stock_news与theme_news：区分事实、潜在催化、风险、已兑现事件与未兑现预期，并判断新闻是否可能已被价格反映；不得把新闻标题直接等同于买卖建议。
 11. 新闻结论只能引用输入中的文章；新闻为空时明确写“暂无匹配新闻”，不得补充模型记忆中的新闻。
@@ -223,7 +224,11 @@ func applyAIDecision(analysis *Analysis, decision aiDecisionPlan) string {
 	if mode == "short_term" {
 		fallback := plan.ShortTerm
 		if fallback == nil {
-			fallback = buildShortTermPlaybook(analysis.Profile, analysis.Trend, analysis.ShortTerm, analysis.Theme, analysis.Market, analysis.Relative)
+			quantitative := ShortTermQuantitativePlan{}
+			if analysis.shortTermQuantitative != nil {
+				quantitative = *analysis.shortTermQuantitative
+			}
+			fallback = buildShortTermPlaybook(analysis.Profile, analysis.Trend, analysis.ShortTerm, analysis.Theme, analysis.Market, analysis.Relative, quantitative)
 		}
 		plan.ShortTerm = mergeShortTermPlaybook(decision.ShortTermPlaybook, fallback)
 		plan.ShortTerm.Auction.Status = "待9:25竞价确认"
@@ -313,12 +318,13 @@ func mergeShortTermPlaybook(input ShortTermPlaybook, fallback *ShortTermPlaybook
 	result.ExpectedPattern = truncateText(firstNonEmpty(strings.TrimSpace(result.ExpectedPattern), fallback.ExpectedPattern), 180)
 	result.OvernightConclusion = truncateText(firstNonEmpty(strings.TrimSpace(result.OvernightConclusion), fallback.OvernightConclusion), 300)
 	result.DataStatus = truncateText(firstNonEmpty(strings.TrimSpace(result.DataStatus), fallback.DataStatus), 180)
+	result.Quantitative = fallback.Quantitative
 	result.Auction = mergeShortTermStage(result.Auction, fallback.Auction)
 	result.Opening = mergeShortTermStage(result.Opening, fallback.Opening)
-	result.ParticipationConditions = uniqueStrings(append(result.ParticipationConditions, fallback.ParticipationConditions...), 4)
-	result.HoldConditions = uniqueStrings(append(result.HoldConditions, fallback.HoldConditions...), 4)
-	result.ExitConditions = uniqueStrings(append(result.ExitConditions, fallback.ExitConditions...), 4)
-	result.VetoConditions = uniqueStrings(append(result.VetoConditions, fallback.VetoConditions...), 5)
+	result.ParticipationConditions = uniqueStrings(append(fallback.ParticipationConditions, result.ParticipationConditions...), 4)
+	result.HoldConditions = uniqueStrings(append(fallback.HoldConditions, result.HoldConditions...), 4)
+	result.ExitConditions = uniqueStrings(append(fallback.ExitConditions, result.ExitConditions...), 4)
+	result.VetoConditions = uniqueStrings(append(fallback.VetoConditions, result.VetoConditions...), 5)
 	if len(result.Scenarios) == 0 {
 		result.Scenarios = fallback.Scenarios
 	}
@@ -343,8 +349,8 @@ func mergeShortTermStage(input, fallback ShortTermDecisionStage) ShortTermDecisi
 		Label:    truncateText(firstNonEmpty(strings.TrimSpace(input.Label), fallback.Label), 32),
 		Status:   truncateText(firstNonEmpty(strings.TrimSpace(input.Status), fallback.Status), 48),
 		Summary:  truncateText(firstNonEmpty(strings.TrimSpace(input.Summary), fallback.Summary), 240),
-		Required: uniqueStrings(append(input.Required, fallback.Required...), 4),
-		Avoid:    uniqueStrings(append(input.Avoid, fallback.Avoid...), 4),
+		Required: uniqueStrings(append(fallback.Required, input.Required...), 4),
+		Avoid:    uniqueStrings(append(fallback.Avoid, input.Avoid...), 4),
 	}
 }
 
