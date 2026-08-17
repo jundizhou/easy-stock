@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -77,6 +78,42 @@ func TestReviewDiaryImportAndList(t *testing.T) {
 	server.ServeHTTP(emptyRecorder, emptyRequest)
 	if emptyRecorder.Code != http.StatusOK || !strings.Contains(emptyRecorder.Body.String(), `"total":0`) {
 		t.Fatalf("empty list status=%d body=%s", emptyRecorder.Code, emptyRecorder.Body.String())
+	}
+}
+
+func TestReviewDiaryDeleteAuthorAndAllPosts(t *testing.T) {
+	store, err := review.OpenStore(filepath.Join(t.TempDir(), "reviews.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	for index := 1; index <= 2; index++ {
+		if _, err := store.UpsertPost(context.Background(), review.Post{
+			ID: fmt.Sprintf("author-post-%d", index), Source: "official", ExternalID: fmt.Sprintf("external-%d", index), AuthorID: "author-delete",
+			AuthorName: "待删除作者", Title: fmt.Sprintf("复盘%d", index), ContentText: "正文", OriginalURL: fmt.Sprintf("https://example.com/%d", index),
+			PublishedAt: now, FetchedAt: now, RelatedStocks: []string{}, RelatedThemes: []string{},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := NewServer(Config{ReviewStore: store})
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/reviews/authors/author-delete?source=official", nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"posts_deleted":2`) {
+		t.Fatalf("delete author status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	posts, total, err := store.ListPosts(context.Background(), review.Query{Limit: 20})
+	if err != nil || total != 0 || len(posts) != 0 {
+		t.Fatalf("posts after author deletion total=%d posts=%+v err=%v", total, posts, err)
+	}
+
+	missingRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/reviews/authors/author-delete?source=official", nil)
+	missingRecorder := httptest.NewRecorder()
+	server.ServeHTTP(missingRecorder, missingRequest)
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("missing author status=%d body=%s", missingRecorder.Code, missingRecorder.Body.String())
 	}
 }
 

@@ -24,7 +24,7 @@ import {
 	Zap,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, ReviewAuthor, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 
 type Props = {
 	config: BackendConfig | null;
@@ -66,6 +66,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	const [syncing, setSyncing] = useState('');
 	const [analyzing, setAnalyzing] = useState('');
 	const [deletingPost, setDeletingPost] = useState('');
+	const [deletingAuthor, setDeletingAuthor] = useState('');
 	const [dailySummary, setDailySummary] = useState<ReviewDailySummary | null>(null);
 	const [dailySummaryJob, setDailySummaryJob] = useState<ReviewDailySummaryJob | null>(null);
 	const [dailyValidation, setDailyValidation] = useState<ReviewDailyValidation | null>(null);
@@ -259,7 +260,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 	};
 
 	const deletePost = async (post: ReviewPost) => {
-		if (!config || deletingPost) return;
+		if (!config || deletingPost || deletingAuthor) return;
 		if (!window.confirm(`确定删除《${post.title}》吗？\n\n本机保存的文章正文和这篇文章自身的 AI 提炼缓存都会一并删除。此操作不可撤销。`)) return;
 		setDeletingPost(post.id); setError(''); setNotice('');
 		try {
@@ -270,6 +271,31 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 			setError(cause instanceof Error ? readableAPIError(cause.message) : '删除文章失败');
 		} finally {
 			setDeletingPost('');
+		}
+	};
+
+	const deleteAuthor = async (author: ReviewAuthor) => {
+		if (!config || deletingAuthor || deletingPost) return;
+		if (!window.confirm(`确定删除作者“${author.name}”吗？\n\n将永久删除本机保存的 ${author.post_count} 篇文章及其 AI 分析缓存，匹配的自动订阅也会一并删除，系统不会在后台自动恢复该作者。此操作不可撤销。`)) return;
+		const authorKey = `${author.source}:${author.id}`;
+		setDeletingAuthor(authorKey); setError(''); setNotice('');
+		try {
+			const payload = await requestJSON<{ data: ReviewAuthorDeleteResult }>(config, `/api/v1/reviews/authors/${encodeURIComponent(author.id)}?source=${encodeURIComponent(author.source)}`, { method: 'DELETE' });
+			setDailySummary(null);
+			setDailySummaryJob(null);
+			setDailyValidation(null);
+			setDailyValidationJob(null);
+			if (activeAuthor === author.id) {
+				setActiveAuthor('all');
+			} else {
+				await loadDiary();
+			}
+			const subscriptionNotice = payload.data.subscriptions_deleted ? `，并移除 ${payload.data.subscriptions_deleted} 个自动订阅` : '';
+			setNotice(`已删除作者“${payload.data.author_name}”及 ${payload.data.posts_deleted} 篇文章${subscriptionNotice}`);
+		} catch (cause) {
+			setError(cause instanceof Error ? readableAPIError(cause.message) : '删除作者失败');
+		} finally {
+			setDeletingAuthor('');
 		}
 	};
 
@@ -485,8 +511,11 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 				<aside className="review-author-rail">
 					<div className="review-section-heading"><div><span>关注列表</span><h3>复盘作者</h3></div><Users size={17} /></div>
 					<div className="review-author-list">
-						<button type="button" className={activeAuthor === 'all' ? 'active' : ''} onClick={() => setActiveAuthor('all')}><span className="author-avatar all"><Users size={15} /></span><span><strong>全部作者</strong><small>{total} 篇复盘</small></span></button>
-						{authors.map((author) => <button type="button" className={activeAuthor === author.id ? 'active' : ''} onClick={() => setActiveAuthor(author.id)} key={`${author.source}-${author.id}`}><span className={`author-avatar ${author.source}`}>{author.name.slice(0, 1)}</span><span><strong>{author.name}</strong><small>{sourceLabel(author.source)} · {author.post_count}篇</small></span></button>)}
+						<div className="review-author-item all"><button type="button" className={`review-author-select ${activeAuthor === 'all' ? 'active' : ''}`} onClick={() => setActiveAuthor('all')}><span className="author-avatar all"><Users size={15} /></span><span><strong>全部作者</strong><small>{total} 篇复盘</small></span></button></div>
+						{authors.map((author) => {
+							const authorKey = `${author.source}:${author.id}`;
+							return <div className="review-author-item" key={`${author.source}-${author.id}`}><button type="button" className={`review-author-select ${activeAuthor === author.id ? 'active' : ''}`} onClick={() => setActiveAuthor(author.id)}><span className={`author-avatar ${author.source}`}>{author.name.slice(0, 1)}</span><span><strong>{author.name}</strong><small>{sourceLabel(author.source)} · {author.post_count}篇</small></span></button><button type="button" className="review-author-delete" title={`删除${author.name}及其全部文章`} aria-label={`删除作者${author.name}及其全部文章`} disabled={!!deletingAuthor || !!deletingPost} onClick={() => void deleteAuthor(author)}>{deletingAuthor === authorKey ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}</button></div>;
+						})}
 					</div>
 					<div className="review-source-health">
 						<strong>数据源状态</strong>
@@ -504,7 +533,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 							const day = formatDay(post.published_at);
 							const previousDay = index > 0 ? formatDay(posts[index - 1].published_at) : '';
 							const hasDateDivider = day !== previousDay;
-							return <div className={`review-feed-entry ${hasDateDivider ? 'has-date-divider' : ''}`} key={post.id}>{hasDateDivider && <div className="review-date-divider"><CalendarDays size={14} /><span>{day}</span></div>}<button type="button" className={`review-post-card ${selectedPost?.id === post.id ? 'active' : ''}`} onClick={() => setSelectedID(post.id)}><div className="review-post-meta"><span className={`source-badge ${post.source}`}>{sourceLabel(post.source)}</span><strong>{post.author_name}</strong><time>{formatClock(post.published_at)}</time></div><h3>{post.title}</h3><p>{post.digest || '暂无摘要'}</p><div className="review-post-tags">{post.related_themes.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}{post.related_stocks.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}</div></button><button type="button" className="review-post-delete" title="删除本地文章和缓存" aria-label={`删除《${post.title}》`} disabled={!!deletingPost} onClick={() => void deletePost(post)}>{deletingPost === post.id ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}</button></div>;
+							return <div className={`review-feed-entry ${hasDateDivider ? 'has-date-divider' : ''}`} key={post.id}>{hasDateDivider && <div className="review-date-divider"><CalendarDays size={14} /><span>{day}</span></div>}<button type="button" className={`review-post-card ${selectedPost?.id === post.id ? 'active' : ''}`} onClick={() => setSelectedID(post.id)}><div className="review-post-meta"><span className={`source-badge ${post.source}`}>{sourceLabel(post.source)}</span><strong>{post.author_name}</strong><time>{formatClock(post.published_at)}</time></div><h3>{post.title}</h3><p>{post.digest || '暂无摘要'}</p><div className="review-post-tags">{post.related_themes.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}{post.related_stocks.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}</div></button><button type="button" className="review-post-delete" title="删除本地文章和缓存" aria-label={`删除《${post.title}》`} disabled={!!deletingPost || !!deletingAuthor} onClick={() => void deletePost(post)}>{deletingPost === post.id ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}</button></div>;
 						})}
 						{state === 'loading' && <div className="review-empty"><RefreshCw className="spin" size={22} /><strong>正在整理复盘内容</strong></div>}
 						{state === 'ready' && !posts.length && <div className="review-empty"><MessageCircleMore size={24} /><strong>还没有复盘文章</strong><span>从上方粘贴文章链接开始建立自己的复盘资料库。</span></div>}
@@ -513,7 +542,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 
 				<article className="review-reader">
 					{selectedPost ? <>
-						<div className="review-reader-heading"><div><span className={`source-badge ${selectedPost.source}`}>{sourceLabel(selectedPost.source)}</span><small>{selectedPost.author_name} · {formatDateTime(selectedPost.published_at)}</small></div><div className="review-reader-actions"><a href={selectedPost.original_url} target="_blank" rel="noreferrer">查看原文 <ExternalLink size={14} /></a><button type="button" title="删除本地文章和缓存" disabled={!!deletingPost} onClick={() => void deletePost(selectedPost)}>{deletingPost === selectedPost.id ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}删除</button></div></div>
+						<div className="review-reader-heading"><div><span className={`source-badge ${selectedPost.source}`}>{sourceLabel(selectedPost.source)}</span><small>{selectedPost.author_name} · {formatDateTime(selectedPost.published_at)}</small></div><div className="review-reader-actions"><a href={selectedPost.original_url} target="_blank" rel="noreferrer">查看原文 <ExternalLink size={14} /></a><button type="button" title="删除本地文章和缓存" disabled={!!deletingPost || !!deletingAuthor} onClick={() => void deletePost(selectedPost)}>{deletingPost === selectedPost.id ? <RefreshCw className="spin" size={14} /> : <Trash2 size={14} />}删除</button></div></div>
 						<h2>{selectedPost.title}</h2>
 						<div className={`review-ai-placeholder ${selectedPost.ai_summary ? 'ready' : ''}`}><Sparkles size={15} /><div><strong>Hermes AI 复盘提炼</strong>{selectedPost.ai_summary ? <><p>{selectedPost.ai_summary}</p>{selectedPost.ai_key_points?.length > 0 && <ul>{selectedPost.ai_key_points.map((point) => <li key={point}>{point}</li>)}</ul>}{selectedPost.ai_outlook && <span><b>后市预期：</b>{selectedPost.ai_outlook}</span>}</> : <span>{selectedPost.ai_error || '在系统设置中配置 Hermes 模型后，可自动提炼核心观点和后市预期。'}</span>}</div><button type="button" disabled={analyzing === selectedPost.id} onClick={() => void analyzePost(selectedPost.id)}>{analyzing === selectedPost.id ? <RefreshCw className="spin" size={14} /> : <Sparkles size={14} />}{selectedPost.ai_summary ? '重新提炼' : '立即提炼'}</button></div>
 						<div className="review-article-text">{selectedPost.content_text || selectedPost.digest || '正文暂未获取，请查看原文。'}</div>

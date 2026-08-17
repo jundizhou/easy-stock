@@ -362,6 +362,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
+	s.mux.HandleFunc("DELETE /api/v1/reviews/authors/{id}", s.reviewAuthorDelete)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts/{id}", s.reviewPost)
 	s.mux.HandleFunc("DELETE /api/v1/reviews/posts/{id}", s.reviewPostDelete)

@@ -3,6 +3,8 @@ package review
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -78,6 +80,74 @@ func TestStoreDeletePostRemovesOnlyArticle(t *testing.T) {
 	}
 	if _, err := store.GetDailySummaryJob(context.Background(), summary.TradeDate); err != nil {
 		t.Fatalf("cached summary job should be retained: %v", err)
+	}
+}
+
+func TestStoreDeleteAuthorRemovesPostsSubscriptionAndDerivedCaches(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "reviews.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	authorExternalID := "author-external-id"
+	authorID := stableID("xueqiu\n" + authorExternalID)[:24]
+	for index := 1; index <= 2; index++ {
+		post := Post{
+			ID: fmt.Sprintf("author-post-%d", index), Source: "xueqiu", ExternalID: fmt.Sprintf("external-%d", index), AuthorID: authorID,
+			AuthorName: "待删除作者", Title: fmt.Sprintf("复盘%d", index), ContentText: "本地正文", OriginalURL: fmt.Sprintf("https://xueqiu.com/1/%d", index),
+			PublishedAt: now.Add(time.Duration(index) * time.Minute), FetchedAt: now, RelatedStocks: []string{}, RelatedThemes: []string{},
+		}
+		if _, err := store.UpsertPost(context.Background(), post); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remainingPost := Post{
+		ID: "remaining-post", Source: "xueqiu", ExternalID: "remaining-external", AuthorID: "remaining-author",
+		AuthorName: "保留作者", Title: "保留复盘", ContentText: "保留正文", OriginalURL: "https://xueqiu.com/2/1",
+		PublishedAt: now, FetchedAt: now, RelatedStocks: []string{}, RelatedThemes: []string{},
+	}
+	if _, err := store.UpsertPost(context.Background(), remainingPost); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSubscription(context.Background(), Subscription{ID: "delete-sub", Source: "xueqiu", Name: "待删除作者", HomepageURL: "https://xueqiu.com/u/1", ExternalID: authorExternalID, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSubscription(context.Background(), Subscription{ID: "keep-sub", Source: "xueqiu", Name: "待删除作者", HomepageURL: "https://xueqiu.com/u/2", ExternalID: "remaining-author", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveDailySummary(context.Background(), DailySummary{TradeDate: "2026-08-17", ArticleCount: 3, AuthorCount: 2, GeneratedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveDailySummaryJob(context.Background(), DailySummaryJob{TradeDate: "2026-08-17", Status: "succeeded", Stage: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.DeleteAuthor(context.Background(), "xueqiu", authorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PostsDeleted != 2 || result.SubscriptionsDeleted != 1 || !result.SummaryCacheCleared || result.AuthorName != "待删除作者" {
+		t.Fatalf("delete result=%+v", result)
+	}
+	posts, total, err := store.ListPosts(context.Background(), Query{Limit: 20})
+	if err != nil || total != 1 || len(posts) != 1 || posts[0].ID != remainingPost.ID {
+		t.Fatalf("remaining posts total=%d posts=%+v err=%v", total, posts, err)
+	}
+	subscriptions, err := store.ListSubscriptions(context.Background())
+	if err != nil || len(subscriptions) != 1 || subscriptions[0].ID != "keep-sub" {
+		t.Fatalf("remaining subscriptions=%+v err=%v", subscriptions, err)
+	}
+	deleted, err := store.IsAuthorDeleted(context.Background(), "xueqiu", authorID)
+	if err != nil || !deleted {
+		t.Fatalf("author deletion marker=%v err=%v", deleted, err)
+	}
+	if _, err := store.GetDailySummary(context.Background(), "2026-08-17"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("daily summary cache err=%v", err)
+	}
+	if _, err := store.GetDailySummaryJob(context.Background(), "2026-08-17"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("daily summary job cache err=%v", err)
 	}
 }
 

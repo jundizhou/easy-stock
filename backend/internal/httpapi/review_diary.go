@@ -71,6 +71,28 @@ func (s *Server) reviewAuthors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": authors})
 }
 
+func (s *Server) reviewAuthorDelete(w http.ResponseWriter, r *http.Request) {
+	if s.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "复盘日记存储不可用")
+		return
+	}
+	source := strings.TrimSpace(r.URL.Query().Get("source"))
+	if source == "" || source == "all" {
+		writeError(w, http.StatusBadRequest, "source is required")
+		return
+	}
+	result, err := s.reviewStore.DeleteAuthor(r.Context(), source, strings.TrimSpace(r.PathValue("id")))
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "复盘作者不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
 func (s *Server) reviewPosts(w http.ResponseWriter, r *http.Request) {
 	if s.reviewStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "复盘日记存储不可用")

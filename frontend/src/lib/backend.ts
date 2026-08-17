@@ -1183,6 +1183,15 @@ export type ReviewAuthor = {
 	latest_at: string;
 };
 
+export type ReviewAuthorDeleteResult = {
+	author_id: string;
+	author_name: string;
+	source: string;
+	posts_deleted: number;
+	subscriptions_deleted: number;
+	summary_cache_cleared: boolean;
+};
+
 export type ReviewPost = {
 	id: string;
 	source: string;

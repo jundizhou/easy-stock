@@ -57,6 +57,15 @@ type Author struct {
 	LatestAt  time.Time `json:"latest_at"`
 }
 
+type AuthorDeleteResult struct {
+	AuthorID             string `json:"author_id"`
+	AuthorName           string `json:"author_name"`
+	Source               string `json:"source"`
+	PostsDeleted         int64  `json:"posts_deleted"`
+	SubscriptionsDeleted int64  `json:"subscriptions_deleted"`
+	SummaryCacheCleared  bool   `json:"summary_cache_cleared"`
+}
+
 type Query struct {
 	Source   string
 	AuthorID string

@@ -161,15 +161,32 @@ func (s *RemoteDailySync) SyncToday(ctx context.Context) (RemoteDailySyncStatus,
 	if err != nil {
 		return s.updateFailure(tradeDate, now, fmt.Errorf("读取远程大V清单: %w", err))
 	}
+	configuredAuthors := 0
 	enabledAuthors := make([]RemoteDailyAuthor, 0, len(authors))
 	for _, author := range authors {
-		if author.Enabled {
+		if !author.Enabled {
+			continue
+		}
+		configuredAuthors++
+		deleted, checkErr := s.store.IsAuthorDeleted(ctx, remoteDailySource, author.ID)
+		if checkErr != nil {
+			return s.updateFailure(tradeDate, now, fmt.Errorf("检查已删除作者%s: %w", author.Name, checkErr))
+		}
+		if !deleted {
 			enabledAuthors = append(enabledAuthors, author)
 		}
 	}
 	if len(enabledAuthors) == 0 {
+		if configuredAuthors == 0 {
+			status := RemoteDailySyncStatus{
+				TradeDate: tradeDate, Status: "not_found", Message: "远程尚未配置启用的大V",
+				Authors: []RemoteDailyAuthorSyncStatus{}, LastAttemptAt: now, NextAttemptAt: now.Add(s.interval),
+			}
+			s.setStatus(status)
+			return status, nil
+		}
 		status := RemoteDailySyncStatus{
-			TradeDate: tradeDate, Status: "not_found", Message: "远程尚未配置启用的大V",
+			TradeDate: tradeDate, Status: "synced", Message: "远程作者均已从本机关注列表删除；仍会定时刷新清单以发现新增作者",
 			Authors: []RemoteDailyAuthorSyncStatus{}, LastAttemptAt: now, NextAttemptAt: now.Add(s.interval),
 		}
 		s.setStatus(status)

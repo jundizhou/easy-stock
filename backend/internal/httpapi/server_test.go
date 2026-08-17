@@ -708,6 +708,30 @@ func TestServerRequiresConfiguredTokenForPrivateRoutes(t *testing.T) {
 	}
 }
 
+func TestServerCORSPreflightAllowsDelete(t *testing.T) {
+	server := NewServer(Config{Token: "secret"})
+	request := httptest.NewRequest(http.MethodOptions, "/api/v1/reviews/authors/author-id?source=official", nil)
+	request.Header.Set("Origin", "http://127.0.0.1:20073")
+	request.Header.Set("Access-Control-Request-Method", http.MethodDelete)
+	request.Header.Set("Access-Control-Request-Headers", "authorization")
+	recorder := httptest.NewRecorder()
+
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if recorder.Header().Get("Access-Control-Allow-Origin") != "http://127.0.0.1:20073" {
+		t.Fatalf("allow origin = %q", recorder.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if !strings.Contains(recorder.Header().Get("Access-Control-Allow-Methods"), http.MethodDelete) {
+		t.Fatalf("allow methods = %q", recorder.Header().Get("Access-Control-Allow-Methods"))
+	}
+	if !strings.Contains(strings.ToLower(recorder.Header().Get("Access-Control-Allow-Headers")), "authorization") {
+		t.Fatalf("allow headers = %q", recorder.Header().Get("Access-Control-Allow-Headers"))
+	}
+}
+
 func TestWebSocketStreamSendsRealtimeQuoteSnapshot(t *testing.T) {
 	server := NewServer(Config{
 		Token:    "secret",

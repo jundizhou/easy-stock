@@ -4054,7 +4054,14 @@ a:focus-visible {
 
 .review-author-rail { display: flex; flex-direction: column; }
 .review-author-list { display: grid; gap: 3px; padding: 7px; overflow-y: auto; }
-.review-author-list button {
+.review-author-item {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 30px;
+	align-items: center;
+	gap: 2px;
+}
+.review-author-item.all { grid-template-columns: minmax(0, 1fr); }
+.review-author-select {
 	display: grid;
 	grid-template-columns: 34px minmax(0, 1fr);
 	align-items: center;
@@ -4068,9 +4075,23 @@ a:focus-visible {
 	text-align: left;
 	cursor: pointer;
 }
-.review-author-list button:hover { background: #f5f8fb; }
-.review-author-list button.active { border-color: #c5d9ef; background: #edf5ff; }
-.review-author-list button > span:last-child { display: grid; min-width: 0; gap: 3px; }
+.review-author-select:hover { background: #f5f8fb; }
+.review-author-select.active { border-color: #c5d9ef; background: #edf5ff; }
+.review-author-select > span:last-child { display: grid; min-width: 0; gap: 3px; }
+.review-author-delete {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: #a6b0ba;
+	cursor: pointer;
+}
+.review-author-delete:hover:not(:disabled) { background: #fff0f0; color: #d14343; }
+.review-author-delete:disabled { cursor: not-allowed; opacity: .55; }
 .review-author-list strong,
 .review-author-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-author-list strong { font-size: 12px; }

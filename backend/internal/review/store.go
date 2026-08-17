@@ -78,6 +78,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		);
 		CREATE INDEX IF NOT EXISTS review_posts_source_time ON review_posts(source, published_at DESC);
 		CREATE INDEX IF NOT EXISTS review_posts_author_time ON review_posts(author_id, published_at DESC);
+		CREATE TABLE IF NOT EXISTS review_deleted_authors (
+			source TEXT NOT NULL,
+			author_id TEXT NOT NULL,
+			author_name TEXT NOT NULL DEFAULT '',
+			deleted_at TEXT NOT NULL,
+			PRIMARY KEY(source, author_id)
+		);
 		CREATE TABLE IF NOT EXISTS review_subscriptions (
 			id TEXT PRIMARY KEY,
 			source TEXT NOT NULL,
@@ -219,6 +226,100 @@ func (s *Store) DeletePost(ctx context.Context, id string) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Store) DeleteAuthor(ctx context.Context, source, authorID string) (AuthorDeleteResult, error) {
+	source = strings.TrimSpace(source)
+	authorID = strings.TrimSpace(authorID)
+	if source == "" || authorID == "" {
+		return AuthorDeleteResult{}, sql.ErrNoRows
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthorDeleteResult{}, fmt.Errorf("begin delete review author: %w", err)
+	}
+	defer tx.Rollback()
+
+	var authorName string
+	if err := tx.QueryRowContext(ctx, `SELECT author_name FROM review_posts WHERE source=? AND author_id=? ORDER BY published_at DESC LIMIT 1`, source, authorID).Scan(&authorName); err != nil {
+		return AuthorDeleteResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO review_deleted_authors (source,author_id,author_name,deleted_at)
+		VALUES(?,?,?,?) ON CONFLICT(source,author_id) DO UPDATE SET author_name=excluded.author_name,deleted_at=excluded.deleted_at`,
+		source, authorID, authorName, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return AuthorDeleteResult{}, fmt.Errorf("remember deleted review author: %w", err)
+	}
+	postResult, err := tx.ExecContext(ctx, `DELETE FROM review_posts WHERE source=? AND author_id=?`, source, authorID)
+	if err != nil {
+		return AuthorDeleteResult{}, fmt.Errorf("delete review author posts: %w", err)
+	}
+	postsDeleted, err := postResult.RowsAffected()
+	if err != nil {
+		return AuthorDeleteResult{}, fmt.Errorf("read deleted review author post count: %w", err)
+	}
+	subscriptionsDeleted, err := deleteAuthorSubscriptions(ctx, tx, source, authorID)
+	if err != nil {
+		return AuthorDeleteResult{}, err
+	}
+	for _, table := range []string{"review_daily_summaries", "review_daily_summary_jobs", "review_daily_validations", "review_daily_validation_jobs"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table); err != nil {
+			return AuthorDeleteResult{}, fmt.Errorf("clear review summary cache %s: %w", table, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthorDeleteResult{}, fmt.Errorf("commit delete review author: %w", err)
+	}
+	return AuthorDeleteResult{
+		AuthorID: authorID, AuthorName: authorName, Source: source,
+		PostsDeleted: postsDeleted, SubscriptionsDeleted: subscriptionsDeleted, SummaryCacheCleared: true,
+	}, nil
+}
+
+func (s *Store) IsAuthorDeleted(ctx context.Context, source, authorID string) (bool, error) {
+	var deleted int
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM review_deleted_authors WHERE source=? AND author_id=?)`, strings.TrimSpace(source), strings.TrimSpace(authorID)).Scan(&deleted)
+	if err != nil {
+		return false, fmt.Errorf("check deleted review author: %w", err)
+	}
+	return deleted == 1, nil
+}
+
+func deleteAuthorSubscriptions(ctx context.Context, tx *sql.Tx, source, authorID string) (int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,homepage_url,external_id FROM review_subscriptions WHERE source=?`, source)
+	if err != nil {
+		return 0, fmt.Errorf("list review author subscriptions: %w", err)
+	}
+	type subscriptionIdentity struct{ id, name, homepageURL, externalID string }
+	items := []subscriptionIdentity{}
+	for rows.Next() {
+		var item subscriptionIdentity
+		if err := rows.Scan(&item.id, &item.name, &item.homepageURL, &item.externalID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan review author subscription: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("close review author subscriptions: %w", err)
+	}
+	deleted := int64(0)
+	for _, item := range items {
+		identityID := stableID(source + "\n" + firstValue(item.externalID, item.homepageURL))[:24]
+		nameID := stableID(source + "\n" + strings.TrimSpace(item.name))[:24]
+		if authorID != identityID && authorID != nameID {
+			continue
+		}
+		result, err := tx.ExecContext(ctx, `DELETE FROM review_subscriptions WHERE id=?`, item.id)
+		if err != nil {
+			return 0, fmt.Errorf("delete review author subscription: %w", err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("read deleted review author subscription count: %w", err)
+		}
+		deleted += count
+	}
+	return deleted, nil
 }
 
 func (s *Store) HasPostBySourceExternalID(ctx context.Context, source, externalID string) (bool, error) {
