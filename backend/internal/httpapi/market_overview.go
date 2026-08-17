@@ -141,6 +141,17 @@ func (s *Server) marketFlowsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) marketMarginBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	limit, err := marketLimitQuery(r, 120, 500)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	marketOverviewList(s, w, r, fmt.Sprintf("margin-balance:%d", limit), func(ctx context.Context) ([]foundation.MarketMarginPoint, foundation.SourceMeta, error) {
+		return s.marketOverview.MarketMarginSeries(ctx, limit)
+	})
+}
+
 func (s *Server) marketBillboardHandler(w http.ResponseWriter, r *http.Request) {
 	tradeDate := strings.TrimSpace(r.URL.Query().Get("trade_date"))
 	if tradeDate != "" {

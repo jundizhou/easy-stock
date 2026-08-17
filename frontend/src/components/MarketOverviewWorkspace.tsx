@@ -5,6 +5,7 @@ import {
 	Bot,
 	Building2,
 	ChartCandlestick,
+	ChartSpline,
 	ChevronRight,
 	Clock3,
 	Database,
@@ -29,6 +30,7 @@ import type {
 	MarketIndexSeries,
 	MarketIndexSnapshot,
 	MarketIndustryMomentum,
+	MarketMarginPoint,
 	MarketResearchItem,
 	NewsItem,
 	SourceHealth,
@@ -51,6 +53,7 @@ import {
 	CoreIndexView,
 	FundFlowView,
 	IndustryMomentumView,
+	MarginBalanceView,
 	ModuleState,
 	ResearchView,
 } from './market/MarketDataViews';
@@ -69,6 +72,7 @@ const moduleIcons = {
 	'industry-flow': Building2,
 	'theme-flow': Sparkles,
 	'stock-flow': Activity,
+	'margin-balance': ChartSpline,
 	billboard: Landmark,
 	announcements: Megaphone,
 	'institution-reports': FileSearch,
@@ -93,6 +97,8 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	const [seriesLoading, setSeriesLoading] = useState(false);
 	const [industries, setIndustries] = useState<MarketIndustryMomentum[]>([]);
 	const [flows, setFlows] = useState<MarketFundFlow[]>([]);
+	const [margins, setMargins] = useState<MarketMarginPoint[]>([]);
+	const [marginLimit, setMarginLimit] = useState(120);
 	const [billboard, setBillboard] = useState<MarketBillboardItem[]>([]);
 	const [billboardDetails, setBillboardDetails] = useState<Record<string, BillboardDetailEntry>>({});
 	const [tradeDate, setTradeDate] = useState('');
@@ -156,6 +162,10 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				const payload = await requestJSON<{ data: MarketFundFlow[]; meta: SourceMeta }>(config, `/api/v1/market/flows?dimension=${dimension}&sort=net&limit=100`);
 				setFlows(payload.data);
 				setModuleMeta(payload.meta);
+			} else if (activeView === 'margin-balance') {
+				const payload = await requestJSON<{ data: MarketMarginPoint[]; meta: SourceMeta }>(config, `/api/v1/market/margin-balance?limit=${marginLimit}`);
+				setMargins(payload.data);
+				setModuleMeta(payload.meta);
 			} else if (activeView === 'billboard') {
 				const query = tradeDate ? `&trade_date=${encodeURIComponent(tradeDate)}` : '';
 				const payload = await requestJSON<{ data: MarketBillboardItem[]; meta: SourceMeta }>(config, `/api/v1/market/billboard?limit=100${query}`);
@@ -179,7 +189,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 			setModuleError(errorMessage(error, `${activeModule.name}加载失败`));
 			setModuleState('error');
 		}
-	}, [activeModule.name, activeView, announcementCategory, config, submittedQuery, tradeDate]);
+	}, [activeModule.name, activeView, announcementCategory, config, marginLimit, submittedQuery, tradeDate]);
 
 	const requestBillboardDetail = useCallback(async (item: MarketBillboardItem) => {
 		if (!config) throw new Error('后端尚未连接');
@@ -239,14 +249,15 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		indexes: activeView === 'core-indexes' ? indexes : undefined,
 		industries: activeView === 'industry-momentum' ? industries : undefined,
 		flows: isFlowView(activeView) ? flows : undefined,
+		margins: activeView === 'margin-balance' ? margins : undefined,
 		billboard: activeView === 'billboard' ? billboard : undefined,
 		research: isResearchView(activeView) ? research : undefined,
 		meta: moduleMeta,
-	}), [activeView, billboard, flows, indexes, industries, moduleMeta, research]);
+	}), [activeView, billboard, flows, indexes, industries, margins, moduleMeta, research]);
 
 	const hasEvidence = activeView === 'pulse'
 		? Boolean(news.length || themes.length)
-		: Boolean(activeEvidence.indexes?.length || activeEvidence.industries?.length || activeEvidence.flows?.length || activeEvidence.billboard?.length || activeEvidence.research?.length);
+		: Boolean(activeEvidence.indexes?.length || activeEvidence.industries?.length || activeEvidence.flows?.length || activeEvidence.margins?.length || activeEvidence.billboard?.length || activeEvidence.research?.length);
 
 	const askAI = async () => {
 		const asOf = formatDateTime(lastUpdated || new Date().toISOString());
@@ -316,6 +327,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				{activeView === 'core-indexes' && <CoreIndexView indexes={indexes} selectedID={selectedIndexID} onSelect={setSelectedIndexID} series={indexSeries} seriesLoading={seriesLoading} meta={moduleMeta} />}
 				{activeView === 'industry-momentum' && <IndustryMomentumView items={industries} meta={moduleMeta} />}
 				{isFlowView(activeView) && <FundFlowView key={activeView} items={flows} dimension={flowDimension(activeView)} meta={moduleMeta} />}
+				{activeView === 'margin-balance' && <MarginBalanceView items={margins} limit={marginLimit} onLimit={setMarginLimit} meta={moduleMeta} />}
 				{activeView === 'billboard' && <BillboardView items={billboard} tradeDate={tradeDate} onTradeDate={setTradeDate} meta={moduleMeta} details={billboardDetails} onLoadDetail={loadBillboardDetail} />}
 				{isResearchView(activeView) && <ResearchView kind={researchKind(activeView)} items={research} queryDraft={searchDraft} onQueryDraft={setSearchDraft} onSearch={submitResearch} category={announcementCategory} onCategory={setAnnouncementCategory} meta={moduleMeta} />}
 			</ModuleState>}

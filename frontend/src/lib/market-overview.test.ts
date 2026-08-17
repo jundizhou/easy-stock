@@ -5,6 +5,7 @@ describe('market overview navigation', () => {
 	it('uses the approved product names and grouping', () => {
 		expect(marketOverviewGroups.map((group) => group.name)).toEqual(['市场总览', '资金结构', '研究信号']);
 		expect(marketOverviewGroups.flatMap((group) => group.modules.map((module) => module.name))).toContain('市场核心指数');
+		expect(marketOverviewGroups.flatMap((group) => group.modules.map((module) => module.name))).toContain('融资融券余额');
 		expect(marketOverviewGroups.flatMap((group) => group.modules.map((module) => module.name))).toContain('龙虎榜');
 		expect(marketOverviewGroups.flatMap((group) => group.modules.map((module) => module.name))).not.toContain('全球温度');
 		expect(marketOverviewGroups.flatMap((group) => group.modules.every((module) => module.status === 'ready'))).toEqual([true, true, true]);
@@ -13,12 +14,30 @@ describe('market overview navigation', () => {
 	it('resolves supported market hashes and falls back to pulse', () => {
 		expect(resolveMarketOverviewView('#market/core-indexes')).toBe('core-indexes');
 		expect(resolveMarketOverviewView('#market/billboard')).toBe('billboard');
+		expect(resolveMarketOverviewView('#market/margin-balance')).toBe('margin-balance');
 		expect(resolveMarketOverviewView('#market/global')).toBe('pulse');
 		expect(resolveMarketOverviewView('#market/unknown')).toBe('pulse');
 	});
 });
 
 describe('market module AI prompt', () => {
+	it('includes margin balance trend evidence', () => {
+		const prompt = buildMarketModulePrompt('margin-balance', {
+			margins: [{
+				trade_date: '2026-08-11', financing_balance: 2_700_000_000_000,
+				securities_lending_balance: 30_000_000_000, margin_balance: 2_730_000_000_000,
+				margin_balance_change: 12_000_000_000, financing_buy_amount: 120_000_000_000,
+				financing_repay_amount: 108_000_000_000, financing_net_buy_amount: 12_000_000_000,
+				securities_lending_sell_volume: 1_000_000, securities_lending_repay_volume: 800_000,
+				meta: { source: 'eastmoney:margin-balance', fetched_at: '2026-08-11T18:00:00+08:00', latency_ms: 10, stale: false },
+			}],
+			meta: { source: 'eastmoney:margin-balance', fetched_at: '2026-08-11T18:00:00+08:00', latency_ms: 10, stale: false },
+		}, '2026-08-11 18:10');
+		expect(prompt).toContain('两融余额 2.73万亿');
+		expect(prompt).toContain('融资净买入 120.00亿');
+		expect(prompt).toContain('eastmoney:margin-balance');
+	});
+
 	it('keeps fund-flow values, source and fallback evidence', () => {
 		const prompt = buildMarketModulePrompt('stock-flow', {
 			flows: [{

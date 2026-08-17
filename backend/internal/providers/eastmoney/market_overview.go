@@ -316,6 +316,106 @@ func (c *Client) MarketFundFlows(ctx context.Context, dimension string, sortKey 
 	return items, meta, nil
 }
 
+func (c *Client) MarketMarginSeries(ctx context.Context, limit int) ([]foundation.MarketMarginPoint, foundation.SourceMeta, error) {
+	if limit <= 0 {
+		limit = 120
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	endpoint := c.datacenterBaseURL + "/api/data/v1/get"
+	start := time.Now()
+	pointsByDate := make(map[string]*foundation.MarketMarginPoint, limit+1)
+	lastRequestURL := ""
+	for page := 1; page <= 6; page++ {
+		params := url.Values{}
+		params.Set("reportName", "RPTA_WEB_RZRQ_LSSH")
+		params.Set("columns", "DIM_DATE,SCDM,XOB_MARKET_0001,RZYE,RQYE,RZRQYE,RZMRE,RZCHE,RZJME,RQMCL,RQCHL")
+		params.Set("source", "WEB")
+		params.Set("client", "WEB")
+		params.Set("sortColumns", "DIM_DATE,SCDM")
+		params.Set("sortTypes", "-1,1")
+		params.Set("pageNumber", strconv.Itoa(page))
+		params.Set("pageSize", "500")
+		requestURL := endpoint + "?" + params.Encode()
+		lastRequestURL = requestURL
+		var payload struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Result  struct {
+				Pages int `json:"pages"`
+				Data  []struct {
+					Date                         string  `json:"DIM_DATE"`
+					FinancingBalance             float64 `json:"RZYE"`
+					SecuritiesLendingBalance     float64 `json:"RQYE"`
+					MarginBalance                float64 `json:"RZRQYE"`
+					FinancingBuyAmount           float64 `json:"RZMRE"`
+					FinancingRepayAmount         float64 `json:"RZCHE"`
+					FinancingNetBuyAmount        float64 `json:"RZJME"`
+					SecuritiesLendingSellVolume  float64 `json:"RQMCL"`
+					SecuritiesLendingRepayVolume float64 `json:"RQCHL"`
+				} `json:"data"`
+			} `json:"result"`
+		}
+		if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
+			return nil, foundation.SourceMeta{}, err
+		}
+		if !payload.Success {
+			return nil, foundation.SourceMeta{}, fmt.Errorf("eastmoney margin balance unavailable: %s", firstString(payload.Message, "unknown response"))
+		}
+		for _, raw := range payload.Result.Data {
+			tradeDate := strings.TrimSpace(strings.SplitN(raw.Date, " ", 2)[0])
+			if tradeDate == "" {
+				continue
+			}
+			point := pointsByDate[tradeDate]
+			if point == nil {
+				point = &foundation.MarketMarginPoint{TradeDate: tradeDate}
+				pointsByDate[tradeDate] = point
+			}
+			point.FinancingBalance += raw.FinancingBalance
+			point.SecuritiesLendingBalance += raw.SecuritiesLendingBalance
+			point.MarginBalance += raw.MarginBalance
+			point.FinancingBuyAmount += raw.FinancingBuyAmount
+			point.FinancingRepayAmount += raw.FinancingRepayAmount
+			point.FinancingNetBuyAmount += raw.FinancingNetBuyAmount
+			point.SecuritiesLendingSellVolume += raw.SecuritiesLendingSellVolume
+			point.SecuritiesLendingRepayVolume += raw.SecuritiesLendingRepayVolume
+		}
+		if len(pointsByDate) >= limit+1 || len(payload.Result.Data) < 500 || (payload.Result.Pages > 0 && page >= payload.Result.Pages) {
+			break
+		}
+	}
+	if len(pointsByDate) == 0 {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("eastmoney returned no margin balance history")
+	}
+
+	tradeDates := make([]string, 0, len(pointsByDate))
+	for tradeDate := range pointsByDate {
+		tradeDates = append(tradeDates, tradeDate)
+	}
+	sort.Strings(tradeDates)
+	meta := foundation.SourceMeta{
+		Source: "eastmoney:margin-balance", SourceURL: lastRequestURL,
+		AvailableFields: []string{"financing_balance", "securities_lending_balance", "margin_balance", "margin_balance_change", "financing_buy_amount", "financing_repay_amount", "financing_net_buy_amount", "securities_lending_sell_volume", "securities_lending_repay_volume"},
+		FetchedAt:       time.Now(), LatencyMS: time.Since(start).Milliseconds(), TradeDate: tradeDates[len(tradeDates)-1],
+	}
+	points := make([]foundation.MarketMarginPoint, 0, len(tradeDates))
+	for _, tradeDate := range tradeDates {
+		point := *pointsByDate[tradeDate]
+		if len(points) > 0 {
+			point.MarginBalanceChange = point.MarginBalance - points[len(points)-1].MarginBalance
+		}
+		point.Meta = meta
+		points = append(points, point)
+	}
+	if len(points) > limit {
+		points = points[len(points)-limit:]
+	}
+	return points, meta, nil
+}
+
 func (c *Client) MarketBillboard(ctx context.Context, tradeDate string, limit int) ([]foundation.MarketBillboardItem, foundation.SourceMeta, error) {
 	if limit <= 0 {
 		limit = 50

@@ -19,7 +19,11 @@ func TestMarketOverviewProvidersParsePrimarySources(t *testing.T) {
 		case "/api/qt/clist/get":
 			_, _ = w.Write([]byte(`{"rc":0,"data":{"diff":[{"f12":"BK001","f14":"半导体","f2":1234.5,"f3":2.5,"f8":3.2,"f24":8.1,"f62":320000000,"f66":120000000,"f69":3.1,"f72":200000000,"f75":5.2,"f78":-50000000,"f81":-1.2,"f84":-270000000,"f87":-7.1,"f104":51,"f105":10,"f109":5.6,"f128":"样本股份","f136":9.9,"f184":8.3}]}}`))
 		case "/api/data/v1/get":
-			_, _ = w.Write([]byte(`{"success":true,"message":"ok","result":{"data":[{"SECUCODE":"600001.SH","SECURITY_NAME_ABBR":"样本股份","CLOSE_PRICE":12.3,"CHANGE_RATE":9.9,"TURNOVERRATE":16.2,"EXPLANATION":"日涨幅偏离值达7%","EXPLAIN":"买一为2家机构","BILLBOARD_BUY_AMT":50000000,"BILLBOARD_SELL_AMT":20000000,"BILLBOARD_NET_AMT":30000000,"BUY_SEAT":5,"SELL_SEAT":5}]}}`))
+			if r.URL.Query().Get("reportName") == "RPTA_WEB_RZRQ_LSSH" {
+				_, _ = w.Write([]byte(`{"success":true,"message":"ok","result":{"pages":1,"data":[{"DIM_DATE":"2026-08-10 00:00:00","SCDM":"001","RZYE":100,"RQYE":10,"RZRQYE":110,"RZMRE":30,"RZCHE":20,"RZJME":10,"RQMCL":3,"RQCHL":2},{"DIM_DATE":"2026-08-10 00:00:00","SCDM":"007","RZYE":200,"RQYE":20,"RZRQYE":220,"RZMRE":50,"RZCHE":45,"RZJME":5,"RQMCL":4,"RQCHL":3},{"DIM_DATE":"2026-08-11 00:00:00","SCDM":"001","RZYE":120,"RQYE":11,"RZRQYE":131,"RZMRE":32,"RZCHE":21,"RZJME":11,"RQMCL":5,"RQCHL":2},{"DIM_DATE":"2026-08-11 00:00:00","SCDM":"007","RZYE":230,"RQYE":21,"RZRQYE":251,"RZMRE":55,"RZCHE":44,"RZJME":11,"RQMCL":6,"RQCHL":3}]}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"success":true,"message":"ok","result":{"data":[{"SECUCODE":"600001.SH","SECURITY_NAME_ABBR":"样本股份","CLOSE_PRICE":12.3,"CHANGE_RATE":9.9,"TURNOVERRATE":16.2,"EXPLANATION":"日涨幅偏离值达7%","EXPLAIN":"买一为2家机构","BILLBOARD_BUY_AMT":50000000,"BILLBOARD_SELL_AMT":20000000,"BILLBOARD_NET_AMT":30000000,"BUY_SEAT":5,"SELL_SEAT":5}]}}`))
+			}
 		case "/securities/api/data/v1/get":
 			if r.URL.Query().Get("filter") == "" {
 				t.Fatal("billboard seat request should include filters")
@@ -66,6 +70,10 @@ func TestMarketOverviewProvidersParsePrimarySources(t *testing.T) {
 	flows, _, err := client.MarketFundFlows(ctx, "stock", "ratio", 10)
 	if err != nil || len(flows) != 1 || flows[0].MainNetInflowRatio != 8.3 || flows[0].MainNetInflow != 320000000 {
 		t.Fatalf("flows=%+v err=%v", flows, err)
+	}
+	margins, marginMeta, err := client.MarketMarginSeries(ctx, 2)
+	if err != nil || len(margins) != 2 || margins[1].MarginBalance != 382 || margins[1].FinancingBalance != 350 || margins[1].SecuritiesLendingBalance != 32 || margins[1].MarginBalanceChange != 52 || marginMeta.Source != "eastmoney:margin-balance" {
+		t.Fatalf("margins=%+v meta=%+v err=%v", margins, marginMeta, err)
 	}
 	billboard, _, err := client.MarketBillboard(ctx, "2026-08-11", 10)
 	if err != nil || len(billboard) != 1 || billboard[0].InstitutionBuyers != 2 || billboard[0].NetAmount != 30000000 {

@@ -6040,6 +6040,50 @@ a:focus-visible {
 .market-data-view .down { color: var(--down) !important; }
 .market-data-view .flat { color: var(--muted) !important; }
 
+.market-margin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #ffffff; }
+.market-margin-toolbar > div { display: grid; gap: 3px; }
+.market-margin-toolbar strong { color: #30445c; font-size: 10px; }
+.market-margin-toolbar span { color: #8794a4; font-size: 8px; }
+.market-margin-toolbar nav { display: flex; align-items: center; gap: 4px; }
+.market-margin-toolbar button { min-width: 48px; min-height: 28px; padding: 0 9px; border: 1px solid #d5e0eb; border-radius: 7px; background: #f9fbfd; color: #718197; font-size: 8px; cursor: pointer; }
+.market-margin-toolbar button:hover { border-color: #aac5e1; color: #2476d2; }
+.market-margin-toolbar button.active { border-color: #73a5da; background: #edf6ff; color: #2476d2; font-weight: 700; }
+.market-margin-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.market-margin-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #ffffff; }
+.market-margin-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 64px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); background: #fbfcfe; }
+.market-margin-panel > header > div:first-child { display: grid; gap: 2px; }
+.market-margin-panel > header > div:first-child span { color: #2476d2; font-size: 7px; font-weight: 750; letter-spacing: .08em; }
+.market-margin-panel h3 { margin: 0; color: #293b51; font-size: 15px; }
+.market-margin-legend { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px; color: #748398; font-size: 8px; }
+.market-margin-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.market-margin-legend span::before { width: 15px; height: 2px; border-radius: 999px; background: currentColor; content: ""; }
+.market-margin-legend .total { color: #2476d2; }
+.market-margin-legend .financing { color: #df6b63; }
+.market-margin-legend .lending { color: #269b76; }
+.market-margin-chart-wrap { position: relative; min-height: 380px; padding: 8px 12px 0; }
+.market-margin-chart { display: block; width: 100%; height: 380px; overflow: visible; }
+.market-margin-grid { stroke: #e8edf3; stroke-width: 1; }
+.market-margin-axis { fill: #8290a0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; }
+.market-margin-area { fill: url(#marginBalanceArea); }
+.market-margin-line { fill: none; stroke-width: 2.1; vector-effect: non-scaling-stroke; }
+.market-margin-line.total { stroke: #2476d2; }
+.market-margin-line.financing { stroke: #df6b63; stroke-width: 1.7; }
+.market-margin-line.lending { stroke: #269b76; stroke-width: 1.7; }
+.market-margin-date { fill: #8290a0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; }
+.market-margin-crosshair line { stroke: #91a3b6; stroke-dasharray: 4 4; stroke-width: 1; }
+.market-margin-crosshair circle { fill: #ffffff; stroke-width: 2; }
+.market-margin-crosshair circle.total { stroke: #2476d2; }
+.market-margin-crosshair circle.financing { stroke: #df6b63; }
+.market-margin-crosshair circle.lending { stroke: #269b76; }
+.market-margin-hover-layer { fill: transparent; cursor: crosshair; }
+.market-margin-tooltip { position: absolute; top: 28px; z-index: 2; display: grid; gap: 5px; width: 178px; padding: 10px 11px; border: 1px solid #cbd8e5; border-radius: 9px; background: rgba(255, 255, 255, .96); box-shadow: 0 12px 28px rgba(41, 65, 90, .15); pointer-events: none; }
+.market-margin-tooltip.left { left: 92px; }
+.market-margin-tooltip.right { right: 92px; }
+.market-margin-tooltip > strong { padding-bottom: 5px; border-bottom: 1px solid #e4eaf0; color: #2d4159; font-size: 9px; }
+.market-margin-tooltip > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #7b8999; font-size: 8px; }
+.market-margin-tooltip b { color: #34485f; font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; }
+.market-margin-panel > footer { padding: 8px 14px 11px; border-top: 1px solid var(--line-soft); color: #8b97a5; font-size: 7px; line-height: 1.6; }
+
 .market-index-selector { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 7px; }
 .market-index-selector button { display: grid; gap: 4px; min-width: 0; min-height: 72px; padding: 9px 10px; border: 1px solid #d9e1ea; border-radius: 9px; background: #ffffff; color: #66768b; text-align: left; cursor: pointer; }
 .market-index-selector button:hover { border-color: #a9c5e2; }
@@ -6214,6 +6258,7 @@ a:focus-visible {
 	.market-pulse-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.market-billboard-list { grid-template-columns: 1fr; }
 	.market-billboard-seat-grid { grid-template-columns: 1fr; }
+	.market-margin-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 880px) {
@@ -6223,6 +6268,8 @@ a:focus-visible {
 	.market-overview-nav button { flex: 0 0 180px; }
 	.market-index-chart-wrap { grid-template-columns: 1fr; }
 	.market-index-chart-wrap > aside { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: none; }
+	.market-margin-panel > header { align-items: flex-start; flex-direction: column; }
+	.market-margin-legend { justify-content: flex-start; }
 }
 
 @media (max-width: 620px) {
@@ -6233,6 +6280,13 @@ a:focus-visible {
 	.market-pulse-metrics { grid-template-columns: 1fr; }
 	.market-theme-ranking > article { grid-template-columns: 24px minmax(0, 1fr) 58px; }
 	.market-flow-summary { grid-template-columns: 1fr; }
+	.market-margin-toolbar { align-items: stretch; flex-direction: column; }
+	.market-margin-toolbar nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.market-margin-toolbar button { min-width: 0; }
+	.market-margin-summary { grid-template-columns: 1fr; }
+	.market-margin-chart-wrap { padding-inline: 2px; }
+	.market-margin-tooltip.left { left: 60px; }
+	.market-margin-tooltip.right { right: 60px; }
 	.market-filter-bar { align-items: stretch; flex-direction: column; }
 	.market-filter-bar > label:first-child { min-width: 0; width: 100%; }
 	.market-filter-bar .market-date-control { width: 100%; }

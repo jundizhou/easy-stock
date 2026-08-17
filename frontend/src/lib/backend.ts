@@ -291,6 +291,20 @@ export type MarketFundFlow = {
 	meta: SourceMeta;
 };
 
+export type MarketMarginPoint = {
+	trade_date: string;
+	financing_balance: number;
+	securities_lending_balance: number;
+	margin_balance: number;
+	margin_balance_change: number;
+	financing_buy_amount: number;
+	financing_repay_amount: number;
+	financing_net_buy_amount: number;
+	securities_lending_sell_volume: number;
+	securities_lending_repay_volume: number;
+	meta: SourceMeta;
+};
+
 export type MarketBillboardItem = {
 	trade_date: string;
 	symbol: string;

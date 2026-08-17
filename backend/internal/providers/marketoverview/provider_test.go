@@ -23,6 +23,9 @@ func (failingPrimary) IndustryMomentum(context.Context, int) ([]foundation.Marke
 func (failingPrimary) MarketFundFlows(context.Context, string, string, int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
 	return nil, foundation.SourceMeta{}, fmt.Errorf("eastmoney unavailable")
 }
+func (failingPrimary) MarketMarginSeries(context.Context, int) ([]foundation.MarketMarginPoint, foundation.SourceMeta, error) {
+	return nil, foundation.SourceMeta{}, fmt.Errorf("margin balance unavailable")
+}
 func (failingPrimary) MarketBillboard(context.Context, string, int) ([]foundation.MarketBillboardItem, foundation.SourceMeta, error) {
 	return nil, foundation.SourceMeta{}, nil
 }

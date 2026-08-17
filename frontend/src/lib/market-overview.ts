@@ -4,6 +4,7 @@ import type {
 	MarketFundFlow,
 	MarketIndexSnapshot,
 	MarketIndustryMomentum,
+	MarketMarginPoint,
 	MarketResearchItem,
 	NewsItem,
 	SourceMeta,
@@ -19,6 +20,7 @@ export type MarketOverviewView =
 	| 'industry-flow'
 	| 'theme-flow'
 	| 'stock-flow'
+	| 'margin-balance'
 	| 'billboard'
 	| 'announcements'
 	| 'institution-reports'
@@ -54,6 +56,7 @@ export const marketOverviewGroups: MarketOverviewGroup[] = [
 			{ id: 'industry-flow', name: '行业资金', description: '行业资金净流入与持续性', status: 'ready' },
 			{ id: 'theme-flow', name: '题材概念', description: '题材概念资金强度与领涨结构', status: 'ready' },
 			{ id: 'stock-flow', name: '个股资金流入流出', description: '个股总资金、主力与散户流向排名', status: 'ready' },
+			{ id: 'margin-balance', name: '融资融券余额', description: '全市场两融余额与融资、融券趋势', status: 'ready' },
 			{ id: 'billboard', name: '龙虎榜', description: '机构席位、营业部和上榜原因', status: 'ready' },
 		],
 	},
@@ -108,6 +111,7 @@ export type MarketOverviewEvidence = {
 	indexes?: MarketIndexSnapshot[];
 	industries?: MarketIndustryMomentum[];
 	flows?: MarketFundFlow[];
+	margins?: MarketMarginPoint[];
 	billboard?: MarketBillboardItem[];
 	research?: MarketResearchItem[];
 	meta?: SourceMeta | null;
@@ -256,6 +260,9 @@ export function buildMarketModulePrompt(view: Exclude<MarketOverviewView, 'pulse
 			return `${index + 1}. ${item.name}${item.symbol ? `（${item.symbol}）` : ''}：${facts.length ? facts.join('，') : '当前来源未提供可验证明细'}`;
 		}));
 	}
+	if (evidence.margins?.length) {
+		lines.push(...evidence.margins.slice(-30).map((item, index) => `${index + 1}. ${item.trade_date}：两融余额 ${formatLargeMoney(item.margin_balance)}，融资余额 ${formatLargeMoney(item.financing_balance)}，融券余额 ${formatLargeMoney(item.securities_lending_balance)}，两融余额日变动 ${formatLargeMoney(item.margin_balance_change)}，融资净买入 ${formatLargeMoney(item.financing_net_buy_amount)}`));
+	}
 	if (evidence.billboard?.length) {
 		lines.push(...evidence.billboard.slice(0, 20).map((item, index) => `${index + 1}. ${item.name}（${item.symbol}）：${item.trade_date} 上榜，净买额 ${formatMoney(item.net_amount)}，买入 ${formatMoney(item.buy_amount)}，卖出 ${formatMoney(item.sell_amount)}，机构买方 ${item.institution_buyers}，原因 ${item.reason}`));
 	}
@@ -279,6 +286,7 @@ function firstEvidenceSource(evidence: MarketOverviewEvidence) {
 	return evidence.indexes?.[0]?.meta.source
 		|| evidence.industries?.[0]?.meta.source
 		|| evidence.flows?.[0]?.meta.source
+		|| evidence.margins?.[0]?.meta.source
 		|| evidence.billboard?.[0]?.meta.source
 		|| evidence.research?.[0]?.meta.source;
 }
@@ -294,4 +302,10 @@ function formatMoney(value: number) {
 	if (absolute >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}亿`;
 	if (absolute >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
 	return value.toFixed(0);
+}
+
+function formatLargeMoney(value: number) {
+	if (!Number.isFinite(value)) return '--';
+	if (Math.abs(value) >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(2)}万亿`;
+	return formatMoney(value);
 }

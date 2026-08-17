@@ -44,6 +44,11 @@ func (p *fakeMarketOverviewProvider) MarketFundFlows(_ context.Context, dimensio
 	return []foundation.MarketFundFlow{{Dimension: dimension, Code: "BK001", Name: "电子", MainNetInflow: 100, Meta: meta}}, meta, err
 }
 
+func (p *fakeMarketOverviewProvider) MarketMarginSeries(context.Context, int) ([]foundation.MarketMarginPoint, foundation.SourceMeta, error) {
+	meta, err := p.source()
+	return []foundation.MarketMarginPoint{{TradeDate: "2026-08-11", MarginBalance: 2_800_000_000_000, FinancingBalance: 2_770_000_000_000, SecuritiesLendingBalance: 30_000_000_000, Meta: meta}}, meta, err
+}
+
 func (p *fakeMarketOverviewProvider) MarketBillboard(context.Context, string, int) ([]foundation.MarketBillboardItem, foundation.SourceMeta, error) {
 	meta, err := p.source()
 	return []foundation.MarketBillboardItem{{TradeDate: "2026-08-11", Symbol: "600001.SH", Name: "样本股份", NetAmount: 100, Meta: meta}}, meta, err
@@ -82,6 +87,7 @@ func TestMarketOverviewRoutesReturnStructuredData(t *testing.T) {
 		{"/api/v1/market/index-series?id=sse&period=day&limit=30", "lines"},
 		{"/api/v1/market/industries?limit=20", "电子"},
 		{"/api/v1/market/flows?dimension=theme&sort=ratio&limit=20", "theme"},
+		{"/api/v1/market/margin-balance?limit=120", "margin_balance"},
 		{"/api/v1/market/billboard?trade_date=2026-08-11", "样本股份"},
 		{"/api/v1/market/billboard/detail?symbol=600001.SH&trade_date=2026-08-11&reason=%E6%97%A5%E6%B6%A8%E5%B9%85%E5%81%8F%E7%A6%BB%E5%80%BC%E8%BE%BE7%25", "机构专用"},
 		{"/api/v1/research/announcements?q=公告", "announcement"},
@@ -104,6 +110,7 @@ func TestMarketOverviewValidatesQueries(t *testing.T) {
 		"/api/v1/market/indexes?scope=invalid",
 		"/api/v1/market/index-series",
 		"/api/v1/market/flows?dimension=invalid",
+		"/api/v1/market/margin-balance?limit=1000",
 		"/api/v1/market/billboard?trade_date=11-08-2026",
 		"/api/v1/market/billboard/detail?symbol=600001.SH&trade_date=11-08-2026&reason=test",
 		"/api/v1/market/billboard/detail?symbol=600001.SH&trade_date=2026-08-11",

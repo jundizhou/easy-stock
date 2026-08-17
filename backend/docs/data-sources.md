@@ -9,6 +9,7 @@ This document tracks the stock-related data sources that form the `easy-stock` d
 | Sina Finance | `hq.sinajs.cn` | `/api/v1/quotes/realtime` | A-share realtime quote. |
 | EastMoney | `push2his.eastmoney.com` | `/api/v1/quotes/kline` | A-share K-line data. |
 | EastMoney | `push2.eastmoney.com` | `/api/v1/sector-map` | Board list, board quote, board fund flow, board constituents. |
+| EastMoney Datacenter | `datacenter-web.eastmoney.com` | `/api/v1/market/margin-balance` | Shanghai, Shenzhen, and Beijing financing balance, securities-lending balance, total margin balance, and financing net purchases. |
 | CLS | `www.cls.cn` | `/api/v1/market/news` | Market telegraph news. |
 | 短线侠 / 开盘啦 | `duanxianxia.com`, `ds.duanxianxia.com` | `/api/v1/themes/overview`, `/api/v1/themes/screen`, `/api/v1/short-term/limit-up-ladder` | 开盘啦题材排名、龙一至龙五、涨停/连板池与逐股炒作题材。 |
 
@@ -61,7 +62,7 @@ If EastMoney `push2` closes the constituent connection, the node falls back to `
 | --- | --- | --- |
 | Tencent Finance | `qt.gtimg.cn`, `web.ifzq.gtimg.cn`, `proxy.finance.qq.com` | HK/US quote, index, minute data, global indexes. |
 | Tushare | `api.tushare.pro` | Stock basics, index basics, A/HK/US daily bars. Requires token. |
-| EastMoney Datacenter | `datacenter.eastmoney.com`, `datacenter-web.eastmoney.com` | F10, finance, shareholder, margin trading, macro, stock selection. |
+| EastMoney Datacenter | `datacenter.eastmoney.com`, `datacenter-web.eastmoney.com` | Additional F10, finance, shareholder, macro, and stock-selection datasets. |
 | EastMoney Report | `reportapi.eastmoney.com`, `np-anotice-stock.eastmoney.com` | Research reports and announcements. |
 | Iwencai | `openapi.iwencai.com` | Screening, report/news/investor/announcement search. Requires API key. |
 | Xueqiu | `xueqiu.com`, `stock.xueqiu.com` | Hot stocks, hot events, finance pages. May require browser cookies. |

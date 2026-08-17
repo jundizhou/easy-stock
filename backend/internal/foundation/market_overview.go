@@ -75,6 +75,20 @@ type MarketFundFlow struct {
 	Meta               SourceMeta `json:"meta"`
 }
 
+type MarketMarginPoint struct {
+	TradeDate                    string     `json:"trade_date"`
+	FinancingBalance             float64    `json:"financing_balance"`
+	SecuritiesLendingBalance     float64    `json:"securities_lending_balance"`
+	MarginBalance                float64    `json:"margin_balance"`
+	MarginBalanceChange          float64    `json:"margin_balance_change"`
+	FinancingBuyAmount           float64    `json:"financing_buy_amount"`
+	FinancingRepayAmount         float64    `json:"financing_repay_amount"`
+	FinancingNetBuyAmount        float64    `json:"financing_net_buy_amount"`
+	SecuritiesLendingSellVolume  float64    `json:"securities_lending_sell_volume"`
+	SecuritiesLendingRepayVolume float64    `json:"securities_lending_repay_volume"`
+	Meta                         SourceMeta `json:"meta"`
+}
+
 type MarketBillboardItem struct {
 	TradeDate         string     `json:"trade_date"`
 	Symbol            string     `json:"symbol"`
