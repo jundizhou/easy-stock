@@ -141,7 +141,7 @@ async function createWindow() {
     height: 860,
     minWidth: 980,
     minHeight: 680,
-		title: 'easy-stock · AI A股投研工作台',
+		title: 'easy-stock · AI A股投研工作台 · 仅限个人非商业使用',
 		...(fs.existsSync(windowIcon) ? { icon: windowIcon } : {}),
     backgroundColor: '#f4f5f7',
     webPreferences: {
