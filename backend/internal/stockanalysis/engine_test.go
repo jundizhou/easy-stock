@@ -93,7 +93,7 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 func TestBuildActionPriceZonesFallsBackWithoutTechnicalLevels(t *testing.T) {
 	trend := TrendAnalysis{LatestClose: 10, ATR14Percent: 0}
 	risk := RiskControl{EntryReference: 10, StopPrice: 9}
-	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{})
+	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{}, trend.LatestClose)
 	for _, zone := range []ActionPriceZone{plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss} {
 		if zone.PriceText == "" || zone.Reason == "" || zone.Action == "" || zone.PriceHigh <= 0 {
 			t.Fatalf("fallback price zone is incomplete: %+v", zone)
@@ -451,6 +451,9 @@ func TestEnrichWithAIReplacesOnlyNarrativeConclusion(t *testing.T) {
 	if !strings.Contains(capturedPrompt, `"stock_news"`) || !strings.Contains(capturedPrompt, `"theme_news"`) {
 		t.Fatalf("news payload missing from AI prompt: %s", capturedPrompt)
 	}
+	if !strings.Contains(capturedPrompt, `"price_context"`) || !strings.Contains(capturedPrompt, `"daily_bars"`) || !strings.Contains(capturedPrompt, `"current_price"`) {
+		t.Fatalf("price and daily K-line context missing from AI prompt: %s", capturedPrompt)
+	}
 }
 
 func TestEnrichWithAIAppliesGlobalNonShortPricePlan(t *testing.T) {
@@ -474,6 +477,27 @@ func TestEnrichWithAIAppliesGlobalNonShortPricePlan(t *testing.T) {
 	}
 	if analysis.RiskControl.EntryReference != 23.5 || analysis.RiskControl.StopPrice != 21 || analysis.RiskControl.TakeProfitFirst != 28 {
 		t.Fatalf("risk control not aligned to AI plan: %+v", analysis.RiskControl)
+	}
+}
+
+func TestValidatedAIPricePlanRejectsTakeProfitBelowCurrentPrice(t *testing.T) {
+	input := aiNonShortPricePlan{
+		Entry:      aiPriceZone{PriceLow: 80, PriceHigh: 82, Reason: "回踩支撑", Action: "确认后介入"},
+		Hold:       aiPriceZone{PriceLow: 82, PriceHigh: 90, Reason: "趋势未破", Action: "继续持有"},
+		TakeProfit: aiPriceZone{PriceLow: 88, PriceHigh: 94, Reason: "阶段压力", Action: "分批兑现"},
+		StopLoss:   aiPriceZone{PriceHigh: 75, Reason: "跌破支撑", Action: "执行止损"},
+	}
+	if _, _, _, _, ok := validatedAIPricePlan(input, 100); ok {
+		t.Fatal("AI price plan with take-profit below current price must be rejected")
+	}
+}
+
+func TestLocalPricePlanKeepsTakeProfitAboveCurrentPrice(t *testing.T) {
+	trend := TrendAnalysis{LatestClose: 80, ATR14Percent: 4, Support: 76, Resistance: 86}
+	risk := RiskControl{EntryReference: 80, StopPrice: 74}
+	_, _, takeProfit, _ := buildActionPriceZones(Profile{PrimaryType: "trend_growth"}, trend, ShortTermAnalysis{}, nil, risk, 100)
+	if takeProfit.PriceLow <= 100 || takeProfit.PriceHigh <= takeProfit.PriceLow {
+		t.Fatalf("local price plan must be above current price: %+v", takeProfit)
 	}
 }
 

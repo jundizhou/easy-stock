@@ -937,17 +937,20 @@ function resolveActionPricePlan(analysis: StockAIAnalysis) {
 	if (isShortTermDecision(analysis)) return null;
 	if (!plan.entry?.price_text || !plan.hold?.price_text) return null;
 	const stopPrice = analysis.risk_control.stop_price;
+	const currentPrice = Number(analysis.quote?.price || analysis.trend.latest_close || 0);
 	const plannedEntry = (plan.entry.price_low + plan.entry.price_high) / 2;
 	const riskDistance = Math.max(plannedEntry - stopPrice, plannedEntry * 0.01);
-	const firstTarget = Math.max(plannedEntry + riskDistance, plan.entry.price_high + Math.max(plannedEntry * 0.005, 0.01));
-	const secondTarget = Math.max(plannedEntry + riskDistance * 2, firstTarget + riskDistance);
-	const takeProfit = plan.take_profit?.price_text && plan.take_profit.price_low > plan.entry.price_high ? plan.take_profit : firstTarget > 0 ? {
+	const minimumForwardTarget = currentPrice > 0 ? currentPrice + Math.max(currentPrice * 0.01, 0.01) : 0;
+	const firstTarget = Math.max(plannedEntry + riskDistance, plan.entry.price_high + Math.max(plannedEntry * 0.005, 0.01), minimumForwardTarget);
+	const secondTarget = Math.max(plannedEntry + riskDistance * 2, firstTarget + riskDistance, currentPrice + Math.max(currentPrice * 0.02, 0.02));
+	const hasForwardTakeProfit = !!plan.take_profit?.price_text && plan.take_profit.price_low > plan.entry.price_high && (!currentPrice || plan.take_profit.price_low > currentPrice);
+	const takeProfit = hasForwardTakeProfit ? plan.take_profit : firstTarget > 0 ? {
 		label: '止盈价格',
 		price_low: firstTarget,
 		price_high: secondTarget,
 		price_text: formatDecisionPriceRange(firstTarget, secondTarget),
-		reason: `以允许介入区间中枢${plannedEntry.toFixed(2)}为计划成本、${stopPrice.toFixed(2)}为止损，第一目标${firstTarget.toFixed(2)}参考约1R，第二目标${secondTarget.toFixed(2)}参考约2R。`,
-		action: '到达第一目标后分批兑现；若量价保持强势可保留部分仓位，接近第二目标不再盲目加仓。',
+		reason: currentPrice >= plan.entry.price_high ? `现价${currentPrice.toFixed(2)}已高于原计划介入区，止盈区改按现价上方的趋势延伸空间重算；第一目标${firstTarget.toFixed(2)}，第二目标${secondTarget.toFixed(2)}。` : `以允许介入区间中枢${plannedEntry.toFixed(2)}为计划成本、${stopPrice.toFixed(2)}为止损，第一目标${firstTarget.toFixed(2)}参考约1R，第二目标${secondTarget.toFixed(2)}参考约2R。`,
+		action: currentPrice >= plan.entry.price_high ? '已有仓位分批兑现并上移保护位；新仓不追高，等待回踩或重新确认。' : '到达第一目标后分批兑现；若量价保持强势可保留部分仓位，接近第二目标不再盲目加仓。',
 	} : undefined;
 	const stopSource = plan.stop_loss?.price_text ? plan.stop_loss : plan.forbidden;
 	const stopLoss = stopSource?.price_text ? stopSource : stopPrice > 0 ? {

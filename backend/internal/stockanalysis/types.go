@@ -60,6 +60,23 @@ type Analysis struct {
 	Chart                 []TrendPoint         `json:"chart"`
 	AI                    AISynthesisStatus    `json:"ai"`
 	shortTermQuantitative *ShortTermQuantitativePlan
+	dailyBars             []AIDailyBar
+}
+
+// AIDailyBar is the compact daily OHLCV representation sent to Hermes.
+// Keeping only the fields used for price planning avoids leaking provider
+// metadata and keeps the prompt bounded while preserving the recent price
+// structure, volume and turnover context.
+type AIDailyBar struct {
+	Date          string  `json:"date"`
+	Open          float64 `json:"open"`
+	High          float64 `json:"high"`
+	Low           float64 `json:"low"`
+	Close         float64 `json:"close"`
+	Volume        float64 `json:"volume"`
+	Amount        float64 `json:"amount"`
+	TurnoverRate  float64 `json:"turnover_rate,omitempty"`
+	ChangePercent float64 `json:"change_percent,omitempty"`
 }
 
 type Profile struct {

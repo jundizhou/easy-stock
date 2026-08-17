@@ -145,6 +145,13 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 		"action_plan":  analysis.ActionPlan,
 		"risks":        analysis.Risks,
 		"data_quality": analysis.DataQuality,
+		"price_context": map[string]any{
+			"current_quote":      analysis.Quote,
+			"current_price":      analysis.Quote.Price,
+			"current_trade_time": analysis.Quote.TradeTime,
+			"latest_daily_bar":   latestDailyBar(analysis.dailyBars),
+			"daily_bars":         analysis.dailyBars,
+		},
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -158,8 +165,9 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 2. profile.primary_type只是本地初筛，不是最终答案。你必须综合市场情绪、题材共振、个股地位、涨停历史、量价趋势、相对强度、基本面、研报、公告和新闻，自主判断decision_mode。
 3. 不模拟任何投资名人的口吻，不使用“大佬投票”或人格化结论。
 4. action 必须是条件化建议，不能承诺收益；隔日预期只能描述情景，不得表述为确定性预测。
-5. scorecard、relative、theme、fundamental等事实和分数不得篡改；action_plan与risk_control里的价格只是本地候选，你可以依据全局分析重新定价。
-6. decision_mode=non_short时必须计算完整价格计划。价格不能只由均线或ATR决定，原因需要同时结合至少两个不同维度，例如基本面/研报预期、题材持续性、资金与趋势结构、新闻风险。必须满足：止损价 < 允许介入区间 < 第一止盈价 <= 第二止盈价；持有区间必须高于止损价。弱势非短线票可以把允许介入价设为右侧修复确认区，但仍要给出价格。
+5. price_context.current_price是当前行情价，优先级高于任何由日K推导出的旧收盘价；latest_daily_bar是最近一根日K，必须结合日期判断是否为当日收盘。daily_bars是最近120个交易日的精简日K序列，价格计划必须同时参考现价、日K结构、成交量和阶段压力。
+6. scorecard、relative、theme、fundamental等事实和分数不得篡改；action_plan与risk_control里的价格只是本地候选，你可以依据全局分析重新定价。
+7. decision_mode=non_short时必须计算完整价格计划。价格不能只由均线或ATR决定，原因需要同时结合至少两个不同维度，例如基本面/研报预期、题材持续性、资金与趋势结构、新闻风险。必须满足：止损价 < 允许介入区间 < 第一止盈价 <= 第二止盈价，且第一止盈价必须高于当前现价；持有区间必须高于止损价。若现价已经超过原先按介入成本计算的目标，重新以现价上方的趋势延伸或压力位重算止盈区，并明确已有仓位如何移动保护位、新仓不追高。弱势非短线票可以把允许介入价设为右侧修复确认区，但仍要给出价格。
 7. decision_mode=short_term时不要输出静态介入、止盈价格。重点输出盘后预案、9:25竞价确认、9:30—9:35开盘确认、参与/持有/退出条件和一票否决。输入没有次日实时竞价时，auction.status必须明确为“待9:25竞价确认”，不得假装已经看到竞价。
 8. 短线决策必须使用action_plan.short_term_playbook.quantitative中的确定性阈值，逐条引用具体指数名称与代码、竞价涨幅区间、竞价成交额、9:35回撤/成交额，以及peers中的同题材个股名称；不得把这些条件改写成“板块同步”“资金较强”“承接良好”等笼统话术，也不得自行修改量化阈值。
 9. 非情绪型必须结合fundamental与research；机构评级仅代表第三方观点，不得当作确定性结论。
@@ -246,9 +254,9 @@ func applyAIDecision(analysis *Analysis, decision aiDecisionPlan) string {
 
 	plan.ShortTerm = nil
 	if plan.Entry.PriceLow <= 0 {
-		plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss = buildActionPriceZones(analysis.Profile, analysis.Trend, analysis.ShortTerm, analysis.Market, analysis.RiskControl)
+		plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss = buildActionPriceZones(analysis.Profile, analysis.Trend, analysis.ShortTerm, analysis.Market, analysis.RiskControl, currentAnalysisPrice(analysis))
 	}
-	if entry, hold, takeProfit, stopLoss, ok := validatedAIPricePlan(decision.NonShortPricePlan, analysis.Trend.LatestClose); ok {
+	if entry, hold, takeProfit, stopLoss, ok := validatedAIPricePlan(decision.NonShortPricePlan, currentAnalysisPrice(analysis)); ok {
 		plan.Entry = entry
 		plan.Hold = hold
 		plan.TakeProfit = takeProfit
@@ -278,7 +286,7 @@ func validatedAIPricePlan(input aiNonShortPricePlan, latest float64) (ActionPric
 	holdLow, holdHigh := round2(input.Hold.PriceLow), round2(input.Hold.PriceHigh)
 	takeLow, takeHigh := round2(input.TakeProfit.PriceLow), round2(input.TakeProfit.PriceHigh)
 	stop := round2(firstPositive(input.StopLoss.PriceHigh, input.StopLoss.PriceLow))
-	if entryLow <= 0 || entryHigh < entryLow || holdLow <= 0 || holdHigh < holdLow || stop <= 0 || stop >= entryLow || holdLow <= stop || takeLow <= entryHigh || takeHigh < takeLow {
+	if entryLow <= 0 || entryHigh < entryLow || holdLow <= 0 || holdHigh < holdLow || stop <= 0 || stop >= entryLow || holdLow <= stop || takeLow <= entryHigh || takeHigh < takeLow || (latest > 0 && takeLow <= latest) {
 		return ActionPriceZone{}, ActionPriceZone{}, ActionPriceZone{}, ActionPriceZone{}, false
 	}
 	entryMid := (entryLow + entryHigh) / 2
@@ -299,6 +307,20 @@ func validatedAIPricePlan(input aiNonShortPricePlan, latest float64) (ActionPric
 		Reason: truncateText(input.StopLoss.Reason, 280), Action: truncateText(firstNonEmpty(strings.TrimSpace(input.StopLoss.Action), "触发后执行减仓或止损，不在逻辑失效后补仓。"), 220),
 	}
 	return entry, hold, takeProfit, stopLoss, true
+}
+
+func currentAnalysisPrice(analysis *Analysis) float64 {
+	if analysis == nil {
+		return 0
+	}
+	return firstPositive(analysis.Quote.Price, analysis.Trend.LatestClose)
+}
+
+func latestDailyBar(bars []AIDailyBar) AIDailyBar {
+	if len(bars) == 0 {
+		return AIDailyBar{}
+	}
+	return bars[len(bars)-1]
 }
 
 func makeAIPriceZone(label string, low, high float64, input aiPriceZone) ActionPriceZone {

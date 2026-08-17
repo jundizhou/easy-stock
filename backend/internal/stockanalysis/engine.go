@@ -34,6 +34,7 @@ func Analyze(input Input) (Analysis, error) {
 	}
 
 	trend, chart := analyzeTrend(lines)
+	currentPrice := firstPositive(quote.Price, trend.LatestClose)
 	shortTerm := analyzeShortTerm(input.Symbol, lines, input.LimitUps)
 	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
 	theme = enrichTheme(input, shortTerm, theme)
@@ -51,7 +52,7 @@ func Analyze(input Input) (Analysis, error) {
 	timeframes := analyzeTimeframes(lines)
 	relative := analyzeRelativeStrength(input, lines)
 	riskControl := buildRiskControl(profile, trend, shortTerm, market)
-	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl, shortTermQuantitative)
+	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl, shortTermQuantitative, currentPrice)
 	if action.DecisionMode != "short_term" {
 		riskControl = alignRiskControlWithActionPlan(riskControl, action)
 	}
@@ -90,6 +91,7 @@ func Analyze(input Input) (Analysis, error) {
 		Chart:                 chart,
 		AI:                    AISynthesisStatus{Status: "rules", Message: "当前结论由本地结构化分析引擎生成"},
 		shortTermQuantitative: &shortTermQuantitative,
+		dailyBars:             compactDailyBars(lines, 120),
 	}, nil
 }
 
@@ -603,7 +605,7 @@ func classifyProfile(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAn
 	}
 }
 
-func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, quantitative ShortTermQuantitativePlan) ActionPlan {
+func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, quantitative ShortTermQuantitativePlan, currentPrice float64) ActionPlan {
 	plan := ActionPlan{
 		DecisionMode:       "non_short",
 		DecisionLabel:      "趋势与价值定价",
@@ -669,7 +671,7 @@ func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalys
 		plan.PricingSource = "not-applicable"
 		plan.ShortTerm = buildShortTermPlaybook(profile, trend, short, theme, market, relative, quantitative)
 	} else {
-		plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss = buildActionPriceZones(profile, trend, short, market, risk)
+		plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss = buildActionPriceZones(profile, trend, short, market, risk, currentPrice)
 	}
 	return plan
 }
@@ -785,11 +787,12 @@ func buildShortTermPlaybook(profile Profile, trend TrendAnalysis, short ShortTer
 	}
 }
 
-func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, market *MarketContext, risk RiskControl) (ActionPriceZone, ActionPriceZone, ActionPriceZone, ActionPriceZone) {
+func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, market *MarketContext, risk RiskControl, currentPrice float64) (ActionPriceZone, ActionPriceZone, ActionPriceZone, ActionPriceZone) {
 	latest := firstPositive(trend.LatestClose, risk.EntryReference)
 	if latest <= 0 {
 		latest = 1
 	}
+	currentPrice = firstPositive(currentPrice, latest)
 	atrPercent := clamp(trend.ATR14Percent, 1.5, 10)
 	zonePercent := clamp(atrPercent*0.14, 0.3, 1.2)
 	stop := risk.StopPrice
@@ -853,8 +856,12 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 	plannedEntry := round2((entryLow + entryHigh) / 2)
 	riskDistance := math.Max(plannedEntry-stop, plannedEntry*0.01)
 	minimumTarget := entryHigh + math.Max(plannedEntry*0.005, 0.01)
-	takeProfitLow := math.Max(plannedEntry+riskDistance, minimumTarget)
-	takeProfitHigh := math.Max(plannedEntry+riskDistance*2, takeProfitLow+riskDistance)
+	// A target for a new position must never be displayed below the live quote.
+	// If the quote has already moved beyond the original 1R/2R plan, rebase the
+	// forward target from the current price instead of showing a stale target.
+	minimumForwardTarget := currentPrice + math.Max(currentPrice*0.01, 0.01)
+	takeProfitLow := math.Max(math.Max(plannedEntry+riskDistance, minimumTarget), minimumForwardTarget)
+	takeProfitHigh := math.Max(math.Max(plannedEntry+riskDistance*2, takeProfitLow+riskDistance), currentPrice+math.Max(currentPrice*0.02, 0.02))
 	if trend.Resistance > takeProfitLow && trend.Resistance <= plannedEntry+riskDistance*1.6 {
 		takeProfitLow = trend.Resistance
 	}
@@ -865,6 +872,10 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 	takeProfitHigh = round2(math.Max(takeProfitHigh, takeProfitLow+0.01))
 	takeProfitReason := fmt.Sprintf("以允许介入区间中枢%.2f为计划成本，止损%.2f，每股风险约%.2f；第一目标%.2f参考约1R或阶段压力，第二目标%.2f参考约2R。", plannedEntry, stop, riskDistance, takeProfitLow, takeProfitHigh)
 	takeProfitAction := "到达第一目标后分批兑现并降低本金风险；放量突破可保留部分仓位，接近第二目标不再盲目加仓。"
+	if currentPrice >= minimumTarget {
+		takeProfitReason = fmt.Sprintf("现价%.2f已高于原计划目标，止盈区改按现价上方的趋势延伸空间重算；同时观察阶段压力和量价强弱。", currentPrice)
+		takeProfitAction = "现价已进入原计划目标上方，已有仓位分批兑现并上移保护位；新仓不追高，等待回踩或重新确认。"
+	}
 	if profile.PrimaryType == "emotion_leader" {
 		takeProfitReason = fmt.Sprintf("以允许介入区间中枢%.2f为计划成本、%.2f为止损，按风险收益计算%.2f—%.2f止盈区；情绪股还需同步观察回封质量和板块梯队。", plannedEntry, stop, takeProfitLow, takeProfitHigh)
 		takeProfitAction = "进入止盈区后按强弱分批兑现；炸板、板块退潮或辨识度下降时优先落袋，不等待固定最高价。"
@@ -883,6 +894,30 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 		Action:    "触发后停止介入，已有仓位执行减仓或止损；不在止损位下方补仓摊薄成本。",
 	}
 	return entry, hold, takeProfit, stopLoss
+}
+
+func compactDailyBars(lines []foundation.KLine, limit int) []AIDailyBar {
+	if limit <= 0 || len(lines) == 0 {
+		return []AIDailyBar{}
+	}
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	result := make([]AIDailyBar, 0, len(lines))
+	for _, line := range lines {
+		result = append(result, AIDailyBar{
+			Date:          line.Time.Format("2006-01-02"),
+			Open:          round2(line.Open),
+			High:          round2(line.High),
+			Low:           round2(line.Low),
+			Close:         round2(line.Close),
+			Volume:        line.Volume,
+			Amount:        line.Amount,
+			TurnoverRate:  round2(line.TurnoverRate),
+			ChangePercent: round2(line.ChangePercent),
+		})
+	}
+	return result
 }
 
 func alignRiskControlWithActionPlan(risk RiskControl, action ActionPlan) RiskControl {
