@@ -210,7 +210,7 @@ easy-stock 项目原创的后端、前端、桌面端和文档采用 [PolyForm N
 - 如需商业使用，请通过 [GitHub 仓库](https://github.com/jundizhou/easy-stock) 联系作者 jundizhou，取得单独的商业授权。
 - 第三方依赖、数据源和随包材料不受本项目许可证重新授权，仍分别遵循其原始许可证及服务条款。
 
-> 本项目属于源码可用（source-available）软件，并非 OSI 定义下允许商业使用的开源软件。历史版本继续适用其发布时随附的许可证。
+> 本项目属于源码可用（source-available）软件，并非 OSI 定义下允许商业使用的开源软件。
 
 ---
 
