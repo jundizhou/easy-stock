@@ -102,6 +102,54 @@ func TestStockAIAnalysisEndpointBuildsTrendProfile(t *testing.T) {
 	}
 }
 
+func TestStockAIAnalysisEndpointSupportsNewListingWithOneKLine(t *testing.T) {
+	server := NewServer(Config{
+		Realtime:      stockAnalysisNewListingRealtime{},
+		KLinePrimary:  stockAnalysisNewListingKLines{},
+		KLineFallback: stockAnalysisNewListingKLines{},
+		ReviewDBPath:  ":memory:",
+		SettingsPath:  "",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stocks/ai-analysis", strings.NewReader(`{"symbol":"688836"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Profile struct {
+				PrimaryType string `json:"primary_type"`
+			} `json:"profile"`
+			Trend struct {
+				HistoryDays int     `json:"history_days"`
+				MA20        float64 `json:"ma20"`
+			} `json:"trend"`
+			RiskControl struct {
+				StopPrice            float64 `json:"stop_price"`
+				SuggestedPositionMax int     `json:"suggested_position_max_percent"`
+			} `json:"risk_control"`
+			DataQuality []struct {
+				Key    string `json:"key"`
+				Status string `json:"status"`
+			} `json:"data_quality"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.Profile.PrimaryType != "new_listing" || payload.Data.Trend.HistoryDays != 1 || payload.Data.Trend.MA20 != 0 {
+		t.Fatalf("unexpected new-listing response: %+v", payload.Data)
+	}
+	if payload.Data.RiskControl.StopPrice <= 0 || payload.Data.RiskControl.SuggestedPositionMax > 10 {
+		t.Fatalf("new-listing risk controls missing: %+v", payload.Data.RiskControl)
+	}
+	if len(payload.Data.DataQuality) == 0 || payload.Data.DataQuality[0].Key != "kline" || payload.Data.DataQuality[0].Status != "limited" {
+		t.Fatalf("new-listing data quality missing: %+v", payload.Data.DataQuality)
+	}
+}
+
 type stockAnalysisRealtime struct{}
 
 func (stockAnalysisRealtime) Realtime(context.Context, []string) ([]foundation.Quote, error) {
@@ -109,6 +157,18 @@ func (stockAnalysisRealtime) Realtime(context.Context, []string) ([]foundation.Q
 		Symbol: "600519.SH", Name: "贵州茅台", Price: 25.2, ChangePercent: 1.8,
 		Meta: foundation.SourceMeta{Source: "test", FetchedAt: time.Now()},
 	}}, nil
+}
+
+type stockAnalysisNewListingRealtime struct{}
+
+func (stockAnalysisNewListingRealtime) Realtime(context.Context, []string) ([]foundation.Quote, error) {
+	return []foundation.Quote{{Symbol: "688836.SH", Name: "测试新股", Price: 88, ChangePercent: 22.22, Meta: foundation.SourceMeta{Source: "test", FetchedAt: time.Now()}}}, nil
+}
+
+type stockAnalysisNewListingKLines struct{}
+
+func (stockAnalysisNewListingKLines) KLine(_ context.Context, symbol, _ string, _ int) ([]foundation.KLine, error) {
+	return []foundation.KLine{{Symbol: symbol, Time: time.Date(2026, 8, 18, 0, 0, 0, 0, time.Local), Open: 72, High: 96, Low: 70, Close: 88, Volume: 42_000_000, Amount: 920_000_000, TurnoverRate: 58, ChangePercent: 22.22, Meta: foundation.SourceMeta{Source: "test", FetchedAt: time.Now()}}}, nil
 }
 
 type stockAnalysisKLines struct{}

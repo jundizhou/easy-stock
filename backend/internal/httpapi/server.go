@@ -20,6 +20,7 @@ import (
 	"easy-stock/backend/internal/providers/cls"
 	"easy-stock/backend/internal/providers/duanxianxia"
 	"easy-stock/backend/internal/providers/eastmoney"
+	"easy-stock/backend/internal/providers/hotstock"
 	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
 	"easy-stock/backend/internal/providers/sina"
 	"easy-stock/backend/internal/providers/tencent"
@@ -42,11 +43,13 @@ type Server struct {
 	stockConcepts         StockConceptProvider
 	stockBusiness         StockBusinessProfileProvider
 	stockDirectory        StockDirectoryProvider
+	hotStockProvider      HotStockProvider
 	marketOverview        MarketOverviewProvider
 	inflection            InflectionEvaluator
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
 	stockDirectories      *stockDirectoryCache
+	hotStockRanks         *hotStockRankCache
 	marketSnapshots       *marketOverviewCache
 	marketEmotion         *marketEmotionEngine
 	marketEmotionIntraday *marketEmotionIntradayCache
@@ -179,6 +182,9 @@ func NewServer(config any) *Server {
 			cfg.SettingsStore, _ = appsettings.Open("")
 		}
 	}
+	if cfg.HotStocks == nil {
+		cfg.HotStocks = hotstock.NewClient()
+	}
 	if cfg.HermesGateway != nil && (!cfg.StrictPersistence || len(startupErrors) == 0) {
 		values := cfg.SettingsStore.Snapshot()
 		var migratedKey *string
@@ -229,11 +235,13 @@ func NewServer(config any) *Server {
 		stockConcepts:         cfg.StockConcept,
 		stockBusiness:         cfg.StockBusiness,
 		stockDirectory:        cfg.StockDirectory,
+		hotStockProvider:      cfg.HotStocks,
 		marketOverview:        cfg.MarketOverview,
 		inflection:            cfg.Inflection,
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
 		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
 		stockDirectories:      newStockDirectoryCache(6 * time.Hour),
+		hotStockRanks:         newHotStockRankCache(2 * time.Minute),
 		marketSnapshots:       newMarketOverviewCache(45 * time.Second),
 		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
 		reviewStore:           cfg.ReviewStore,
@@ -361,6 +369,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/short-term/mastery/refresh", s.masteryRefresh)
 	s.mux.HandleFunc("POST /api/v1/stocks/ai-analysis", s.stockAIAnalysis)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
+	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
 	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
 	s.mux.HandleFunc("DELETE /api/v1/reviews/authors/{id}", s.reviewAuthorDelete)
@@ -368,6 +377,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reviews/posts/{id}", s.reviewPost)
 	s.mux.HandleFunc("DELETE /api/v1/reviews/posts/{id}", s.reviewPostDelete)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary", s.reviewDailySummaryGet)
+	s.mux.HandleFunc("POST /api/v1/reviews/daily-summary/anonymize", s.reviewDailySummaryAnonymize)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/window", s.reviewDailySummaryWindow)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/status", s.reviewDailySummaryStatus)
 	s.mux.HandleFunc("POST /api/v1/reviews/daily-summary", s.reviewDailySummaryCreate)

@@ -10,6 +10,102 @@ import (
 	"easy-stock/backend/internal/hermes"
 )
 
+func TestAnalyzeNewListingWithOneTradingDay(t *testing.T) {
+	lines := syntheticTrendLines("688836.SH", 1, 86, 0, 920_000_000)
+	lines[0].Open = 72
+	lines[0].High = 96
+	lines[0].Low = 70
+	lines[0].Close = 88
+	lines[0].ChangePercent = 22.22
+	lines[0].TurnoverRate = 58
+	analysis, err := Analyze(Input{Symbol: "688836.SH", Quote: foundation.Quote{Symbol: "688836.SH", Name: "测试新股", Price: 88}, KLines: lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Profile.PrimaryType != "new_listing" || analysis.Profile.Confidence >= .5 {
+		t.Fatalf("unexpected new-listing profile: %+v", analysis.Profile)
+	}
+	if analysis.Trend.HistoryDays != 1 || analysis.Trend.ListingHigh != 96 || analysis.Trend.ListingLow != 70 || analysis.Trend.ListingReturn == 0 {
+		t.Fatalf("listing-period trend missing: %+v", analysis.Trend)
+	}
+	if analysis.Trend.MA20 != 0 || analysis.Trend.MA60 != 0 || analysis.Trend.MA120 != 0 || analysis.Trend.ATR14Percent != 0 || analysis.Trend.Return20 != 0 {
+		t.Fatalf("new-listing analysis must not fabricate mature indicators: %+v", analysis.Trend)
+	}
+	if analysis.RiskControl.StopPrice <= 0 || analysis.RiskControl.StopPrice >= analysis.RiskControl.EntryReference || analysis.RiskControl.SuggestedPositionMax > 10 {
+		t.Fatalf("new-listing risk controls are invalid: %+v", analysis.RiskControl)
+	}
+	if analysis.ActionPlan.DecisionLabel != "新股价格发现" || analysis.ActionPlan.Entry.PriceLow <= analysis.RiskControl.StopPrice || analysis.ActionPlan.StopLoss.PriceHigh != analysis.RiskControl.StopPrice {
+		t.Fatalf("new-listing action plan is incomplete: %+v", analysis.ActionPlan)
+	}
+	if len(analysis.Timeframes) != 4 || analysis.Relative.Available || analysis.Scorecard.Conviction != "较低" {
+		t.Fatalf("limited-sample workspace is misleading: timeframes=%+v relative=%+v scorecard=%+v", analysis.Timeframes, analysis.Relative, analysis.Scorecard)
+	}
+	foundLimitedKLine := false
+	for _, item := range analysis.DataQuality {
+		if item.Key == "kline" && item.Status == "limited" && strings.Contains(item.Message, "新股价格发现模型") {
+			foundLimitedKLine = true
+		}
+	}
+	if !foundLimitedKLine {
+		t.Fatalf("limited K-line quality missing: %+v", analysis.DataQuality)
+	}
+}
+
+func TestAnalyzeNewListingBoundaryAtNineteenTradingDays(t *testing.T) {
+	lines := syntheticTrendLines("301678.SZ", 19, 20, .3, 650_000_000)
+	analysis, err := Analyze(Input{Symbol: "301678.SZ", KLines: lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Profile.PrimaryType != "new_listing" || analysis.Trend.HistoryDays != 19 {
+		t.Fatalf("19-day stock did not use new-listing flow: profile=%+v trend=%+v", analysis.Profile, analysis.Trend)
+	}
+	if state := analysis.Timeframes[1].State; !strings.Contains(state, "1个交易日") {
+		t.Fatalf("MA20 maturity status = %q", state)
+	}
+}
+
+func TestAnalyzeUsesMatureFlowAtTwentyTradingDays(t *testing.T) {
+	analysis, err := Analyze(Input{Symbol: "600000.SH", KLines: syntheticTrendLines("600000.SH", 20, 10, .1, 500_000_000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Profile.PrimaryType == "new_listing" || analysis.Trend.MA20 <= 0 {
+		t.Fatalf("20-day stock must use mature flow: profile=%+v trend=%+v", analysis.Profile, analysis.Trend)
+	}
+}
+
+func TestAnalyzeRejectsNoValidKLines(t *testing.T) {
+	_, err := Analyze(Input{Symbol: "688836.SH", KLines: []foundation.KLine{{Close: 0}}})
+	if err == nil || !strings.Contains(err.Error(), "至少需要1个有效交易日") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestEnrichWithAIPreservesNewListingRiskPlan(t *testing.T) {
+	lines := syntheticTrendLines("688836.SH", 1, 86, 0, 920_000_000)
+	lines[0].Open, lines[0].High, lines[0].Low, lines[0].Close = 72, 96, 70, 88
+	analysis, err := Analyze(Input{Symbol: "688836.SH", KLines: lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalPlan := analysis.ActionPlan
+	prompt := ""
+	prompter := fakeStockPrompter{prompt: &prompt, content: `{
+		"headline":"上市初期继续观察","summary":"交易样本不足二十日，价格仍处于发现阶段，不能据此外推成熟趋势。","action":"等待更多交易日","best_path":"观察波动收敛","main_risk":"样本不足",
+		"decision":{"decision_mode":"non_short","decision_label":"成熟趋势定价","decision_confidence":0.99,"horizon":"中期","rationale":"模型尝试覆盖","current_action":"追涨","position_hint":"重仓","non_short_price_plan":{"entry":{"price_low":90,"price_high":92,"reason":"假计划","action":"买入"},"hold":{"price_low":89,"price_high":95,"reason":"假计划","action":"持有"},"take_profit":{"price_low":100,"price_high":110,"reason":"假计划","action":"止盈"},"stop_loss":{"price_high":85,"reason":"假计划","action":"止损"}}}
+	}`}
+	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "profile.primary_type=new_listing") || !strings.Contains(prompt, "不得推断MA20/60/120") {
+		t.Fatalf("new-listing AI constraints missing from prompt: %s", prompt)
+	}
+	if analysis.ActionPlan.DecisionLabel != originalPlan.DecisionLabel || analysis.ActionPlan.CurrentAction != originalPlan.CurrentAction || analysis.ActionPlan.Entry.PriceLow != originalPlan.Entry.PriceLow || analysis.RiskControl.SuggestedPositionMax > 10 {
+		t.Fatalf("AI overrode constrained new-listing plan: before=%+v after=%+v risk=%+v", originalPlan, analysis.ActionPlan, analysis.RiskControl)
+	}
+}
+
 func TestAnalyzeRoutesLiquidUptrendToTrendCapacity(t *testing.T) {
 	lines := syntheticTrendLines("600519.SH", 180, 10, 0.08, 1_500_000_000)
 	analysis, err := Analyze(Input{

@@ -387,8 +387,37 @@ export type StockDirectoryData = {
 	stale: boolean;
 };
 
+export type HotStockRankSource = 'ths' | 'eastmoney';
+
+export type HotStockRankEntry = {
+	symbol: string;
+	code: string;
+	name: string;
+	source_count: number;
+	consensus_score: number;
+	ranks: Partial<Record<HotStockRankSource, number>>;
+};
+
+export type HotStockRankSourceStatus = {
+	id: HotStockRankSource;
+	name: string;
+	available: boolean;
+	count: number;
+	error?: string;
+	fetched_at?: string;
+};
+
+export type HotStockRankData = {
+	stocks: HotStockRankEntry[];
+	sources: HotStockRankSourceStatus[];
+	total: number;
+	updated_at: string;
+	expires_at: string;
+	stale: boolean;
+};
+
 export type StockAIProfile = {
-	primary_type: 'emotion_leader' | 'trend_capacity' | 'trend_growth' | 'range_watch' | 'weak_risk' | string;
+	primary_type: 'new_listing' | 'emotion_leader' | 'trend_capacity' | 'trend_growth' | 'range_watch' | 'weak_risk' | string;
 	type_label: string;
 	price_phase: string;
 	market_role: string;
@@ -416,6 +445,15 @@ export type StockAITrend = {
 	resistance: number;
 	invalidation: string;
 	reasons: string[];
+	history_days?: number;
+	listing_return?: number;
+	listing_high?: number;
+	listing_low?: number;
+	listing_range_position?: number;
+	listing_drawdown?: number;
+	average_turnover?: number;
+	average_amount?: number;
+	observed_volatility?: number;
 };
 
 export type StockAIDimensionScore = {

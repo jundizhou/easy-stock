@@ -12,8 +12,11 @@ import (
 
 func Analyze(input Input) (Analysis, error) {
 	lines := normalizeKLines(input.KLines)
+	if len(lines) == 0 {
+		return Analysis{}, fmt.Errorf("个股AI分析至少需要1个有效交易日K线，当前只有0个")
+	}
 	if len(lines) < 20 {
-		return Analysis{}, fmt.Errorf("个股AI分析至少需要20个交易日K线，当前只有%d个", len(lines))
+		return analyzeNewListing(input, lines), nil
 	}
 
 	quote := input.Quote

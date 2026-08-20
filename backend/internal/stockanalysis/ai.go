@@ -167,6 +167,7 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 4. action 必须是条件化建议，不能承诺收益；隔日预期只能描述情景，不得表述为确定性预测。
 5. price_context.current_price是当前行情价，优先级高于任何由日K推导出的旧收盘价；latest_daily_bar是最近一根日K，必须结合日期判断是否为当日收盘。daily_bars是最近120个交易日的精简日K序列，价格计划必须同时参考现价、日K结构、成交量和阶段压力。
 6. scorecard、relative、theme、fundamental等事实和分数不得篡改；action_plan与risk_control里的价格只是本地候选，你可以依据全局分析重新定价。
+6.1 当profile.primary_type=new_listing时，这是不足20个交易日的上市初期受限样本分析。不得推断MA20/60/120、ATR14、20/60/120日收益或成熟趋势结构，不得把价格发现评分表述为成熟趋势评分；维持观察优先、小仓验证和上市区间失效约束。
 7. decision_mode=non_short时必须计算完整价格计划。价格不能只由均线或ATR决定，原因需要同时结合至少两个不同维度，例如基本面/研报预期、题材持续性、资金与趋势结构、新闻风险。必须满足：止损价 < 允许介入区间 < 第一止盈价 <= 第二止盈价，且第一止盈价必须高于当前现价；持有区间必须高于止损价。若现价已经超过原先按介入成本计算的目标，重新以现价上方的趋势延伸或压力位重算止盈区，并明确已有仓位如何移动保护位、新仓不追高。弱势非短线票可以把允许介入价设为右侧修复确认区，但仍要给出价格。
 7. decision_mode=short_term时不要输出静态介入、止盈价格。重点输出盘后预案、9:25竞价确认、9:30—9:35开盘确认、参与/持有/退出条件和一票否决。输入没有次日实时竞价时，auction.status必须明确为“待9:25竞价确认”，不得假装已经看到竞价。
 8. 短线决策必须使用action_plan.short_term_playbook.quantitative中的确定性阈值，逐条引用具体指数名称与代码、竞价涨幅区间、竞价成交额、9:35回撤/成交额，以及peers中的同题材个股名称；不得把这些条件改写成“板块同步”“资金较强”“承接良好”等笼统话术，也不得自行修改量化阈值。
@@ -212,6 +213,11 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 }
 
 func applyAIDecision(analysis *Analysis, decision aiDecisionPlan) string {
+	// New listings deliberately keep the local constrained-sample plan. A model
+	// must not turn one to nineteen bars into a mature moving-average trade.
+	if analysis.Profile.PrimaryType == "new_listing" {
+		return "Hermes已结合上市初期证据完成综合研判；价格发现与风控计划沿用本地受限样本模型"
+	}
 	mode := normalizeDecisionMode(decision.DecisionMode)
 	if mode == "" {
 		return "Hermes已基于结构化证据完成综合研判；交易计划沿用本地校验结果"

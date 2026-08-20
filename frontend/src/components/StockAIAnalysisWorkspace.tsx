@@ -20,6 +20,7 @@ import {
 	LineChart,
 	ExternalLink,
 	FileSearch,
+	Flame,
 	ListChecks,
 	LoaderCircle,
 	Newspaper,
@@ -49,6 +50,9 @@ import {
 	StockAITrendPoint,
 	StockDirectoryData,
 	StockDirectoryEntry,
+	HotStockRankData,
+	HotStockRankEntry,
+	HotStockRankSource,
 	requestJSON,
 } from '../lib/backend';
 import {
@@ -90,6 +94,7 @@ const directoryStorageTTL = 24 * 60 * 60 * 1000;
 const examples = ['600519', '300750', '002594', '601138', '688981'];
 
 type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
+type HotRankState = 'idle' | 'loading' | 'ready' | 'error';
 
 export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, onOpenSettings }: Props) {
 	const [query, setQuery] = useState(() => window.localStorage.getItem(symbolStorageKey) || '');
@@ -102,6 +107,9 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	const [exportNotice, setExportNotice] = useState('');
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedStockDirectory);
 	const [directoryState, setDirectoryState] = useState<DirectoryState>(() => directory.length > 0 ? 'cached' : 'idle');
+	const [hotRanks, setHotRanks] = useState<HotStockRankData | null>(null);
+	const [hotRankState, setHotRankState] = useState<HotRankState>('idle');
+	const [hotRankError, setHotRankError] = useState('');
 	const exportRef = useRef<HTMLDivElement>(null);
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
@@ -169,6 +177,25 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 			});
 		return () => { cancelled = true; };
 	}, [config]);
+
+	const loadHotRanks = useCallback(async (force = false) => {
+		if (!config) return;
+		setHotRankState('loading');
+		setHotRankError('');
+		try {
+			const suffix = force ? '?refresh=1' : '';
+			const payload = await requestJSON<{ data: HotStockRankData }>(config, `/api/v1/stocks/hot-ranks${suffix}`);
+			setHotRanks(payload.data);
+			setHotRankState('ready');
+		} catch (loadError) {
+			setHotRankError(loadError instanceof Error ? loadError.message : '热股榜暂不可用');
+			setHotRankState('error');
+		}
+	}, [config]);
+
+	useEffect(() => {
+		void loadHotRanks();
+	}, [loadHotRanks]);
 
 	useEffect(() => {
 		if (refreshKey <= 0 || !analysis?.symbol) return;
@@ -239,39 +266,107 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	return (
 		<section className="stock-ai-workspace">
 			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
-			{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
+			<div className="stock-ai-shell">
+				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
+				<div className="stock-ai-main">
+					{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
 
-			{state === 'loading' && (
-				<div className="stock-ai-loading">
-					<LoaderCircle className="spin" size={30} />
-					<div><strong>正在建立完整决策画像</strong><span>同步300日趋势、基准指数、涨停结构、题材、市场情绪，并生成多周期评分、隔日情景与风控参数。</span></div>
-				</div>
-			)}
+					{state === 'loading' && (
+						<div className="stock-ai-loading">
+							<LoaderCircle className="spin" size={30} />
+							<div><strong>正在建立完整决策画像</strong><span>同步300日趋势、基准指数、涨停结构、题材、市场情绪，并生成多周期评分、隔日情景与风控参数。</span></div>
+						</div>
+					)}
 
-			{state === 'error' && (
-				<div className="stock-ai-error">
-					<CircleAlert size={22} />
-					<div><strong>分析没有完成</strong><span>{error}</span></div>
-					<button type="button" onClick={() => void runAnalysis(query)}><RefreshCw size={14} />重试</button>
-				</div>
-			)}
+					{state === 'error' && (
+						<div className="stock-ai-error">
+							<CircleAlert size={22} />
+							<div><strong>分析没有完成</strong><span>{error}</span></div>
+							<button type="button" onClick={() => void runAnalysis(query)}><RefreshCw size={14} />重试</button>
+						</div>
+					)}
 
-			{state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => void runAnalysis(symbol)} />}
-			{state !== 'loading' && analysis && (
-				<div className="stock-ai-result">
-					<div className="stock-ai-export-sheet" ref={exportRef}>
-						<AnalysisExportHeader analysis={analysis} mode={mode} />
-						<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => void runAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
-					{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
-					{mode === 'expectation' && <ExpectationView analysis={analysis} />}
-					{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
-						<AnalysisExportFooter analysis={analysis} />
-					</div>
-					{exportNotice && <div className={`stock-ai-export-notice ${exportNotice.includes('失败') ? 'error' : ''}`} role="status">{exportNotice}</div>}
+					{state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => void runAnalysis(symbol)} />}
+					{state !== 'loading' && analysis && (
+						<div className="stock-ai-result">
+							<div className="stock-ai-export-sheet" ref={exportRef}>
+								<AnalysisExportHeader analysis={analysis} mode={mode} />
+								<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => void runAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
+								{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
+								{mode === 'expectation' && <ExpectationView analysis={analysis} />}
+								{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
+								<AnalysisExportFooter analysis={analysis} />
+							</div>
+							{exportNotice && <div className={`stock-ai-export-notice ${exportNotice.includes('失败') ? 'error' : ''}`} role="status">{exportNotice}</div>}
+						</div>
+					)}
 				</div>
-			)}
+			</div>
 		</section>
 	);
+}
+
+function HotStockSidebar({ data, state, error, activeSymbol, onRefresh, onSelect }: {
+	data: HotStockRankData | null;
+	state: HotRankState;
+	error: string;
+	activeSymbol?: string;
+	onRefresh: () => void;
+	onSelect: (symbol: string) => void;
+}) {
+	const [filter, setFilter] = useState<'all' | HotStockRankSource>('all');
+	const [query, setQuery] = useState('');
+	const stocks = useMemo(() => {
+		const needle = query.trim().toLowerCase();
+		return (data?.stocks || [])
+			.map((stock, unionIndex) => ({ stock, unionIndex }))
+			.filter(({ stock }) => {
+				if (filter !== 'all' && !stock.ranks[filter]) return false;
+				return !needle || stock.name.toLowerCase().includes(needle) || stock.code.includes(needle);
+			});
+	}, [data?.stocks, filter, query]);
+	const filters: Array<{ id: 'all' | HotStockRankSource; label: string; count: number; disabled?: boolean; title?: string }> = [
+		{ id: 'all', label: '并集', count: data?.total || 0 },
+		...(data?.sources || []).map((source) => ({ id: source.id, label: source.id === 'ths' ? '同花顺' : '东方财富', count: source.count, disabled: !source.available, title: source.error })),
+	];
+	return (
+		<aside className="stock-hot-sidebar" aria-label="同花顺和东方财富热股并集">
+			<header>
+				<span className="stock-hot-icon"><Flame size={17} /></span>
+				<div><strong>热股并集</strong><small>同花顺 · 东方财富</small></div>
+				<em>{data?.total || '--'}</em>
+				<button type="button" onClick={onRefresh} disabled={state === 'loading'} title="刷新热股榜" aria-label="刷新热股榜"><RefreshCw className={state === 'loading' ? 'spin' : ''} size={14} /></button>
+			</header>
+			<div className="stock-hot-filters" role="group" aria-label="热股来源筛选">
+				{filters.map((item) => <button type="button" className={filter === item.id ? 'active' : ''} onClick={() => setFilter(item.id)} disabled={item.disabled} title={item.title} aria-pressed={filter === item.id} key={item.id}><span>{item.label}</span><em>{item.count || '--'}</em></button>)}
+			</div>
+			<label className="stock-hot-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="筛选名称或代码" aria-label="筛选热股" /></label>
+			<div className="stock-hot-list">
+				{state === 'loading' && !data && Array.from({ length: 9 }, (_, index) => <div className="stock-hot-skeleton" key={index}><i /><span /><em /></div>)}
+				{state === 'error' && !data && <div className="stock-hot-empty"><CircleAlert size={18} /><strong>热股榜暂不可用</strong><span>{error}</span></div>}
+				{state !== 'loading' && data && stocks.length === 0 && <div className="stock-hot-empty"><FileSearch size={18} /><strong>没有匹配股票</strong></div>}
+				{stocks.map(({ stock, unionIndex }) => <HotStockRow stock={stock} index={unionIndex} active={stock.symbol === activeSymbol} onSelect={onSelect} key={stock.symbol} />)}
+			</div>
+			{data && <footer><span>{data.stale ? '缓存快照' : '实时热榜'}</span><time>{formatHotRankTime(data.updated_at)}</time></footer>}
+		</aside>
+	);
+}
+
+function HotStockRow({ stock, index, active, onSelect }: { stock: HotStockRankEntry; index: number; active: boolean; onSelect: (symbol: string) => void }) {
+	return <button type="button" className={`${active ? 'active' : ''} ${index < 3 ? 'top' : ''}`.trim()} onClick={() => onSelect(stock.symbol)}>
+		<i>{String(index + 1).padStart(2, '0')}</i>
+		<span><strong>{stock.name}</strong><small>{stock.code} · {stockMarketLabel(stock.symbol)}</small></span>
+		<em>
+			{stock.ranks.ths && <span className="ths" title={`同花顺第 ${stock.ranks.ths} 名`}>同<b>{stock.ranks.ths}</b></span>}
+			{stock.ranks.eastmoney && <span className="eastmoney" title={`东方财富第 ${stock.ranks.eastmoney} 名`}>东<b>{stock.ranks.eastmoney}</b></span>}
+		</em>
+	</button>;
+}
+
+function formatHotRankTime(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return '刚刚更新';
+	return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 function AnalysisExportHeader({ analysis, mode }: { analysis: StockAIAnalysis; mode: StockAIWorkspaceMode }) {
@@ -303,7 +398,7 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 	const suggestions = useMemo(() => searchStockDirectory(directory, query), [directory, query]);
 	const resolvedSymbol = useMemo(() => resolveStockDirectorySymbol(query, directory), [directory, query]);
 	const descriptions: Record<StockAIWorkspaceMode, string> = {
-		analysis: '自动路由趋势容量、成长趋势、情绪短线与风险结构，形成多周期、相对强度和题材共振结论。',
+		analysis: '自动路由新股价格发现、趋势容量、成长趋势、情绪短线与风险结构，形成与样本成熟度匹配的结论。',
 		expectation: '将确定性预测改为可验证的隔日情景，覆盖高开承接、平开确认、低开修复与破位失效。',
 		risk: '依据结构失效位、账户风险预算和仓位上限，反推可执行股数、止盈与纪律清单。',
 	};
@@ -458,7 +553,18 @@ function AnalysisVerdict({ analysis, copied, exporting, onRefresh, onExport, onC
 	);
 }
 
+function NewListingNotice({ analysis }: { analysis: StockAIAnalysis }) {
+	const days = analysis.trend.history_days || analysis.chart.length;
+	const remaining = Math.max(20 - days, 1);
+	return <section className="stock-ai-new-listing-notice">
+		<span><CircleAlert size={18} /></span>
+		<div><strong>已切换至新股分析流程</strong><p>当前仅有 {days} 个交易日样本，采用上市期价格发现、流动性、换手与高风险约束模型；MA20 / MA60 / MA120、ATR14 和成熟趋势评分均未启用。</p></div>
+		<em>还需 {remaining} 个交易日形成 MA20</em>
+	</section>;
+}
+
 function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
+	const isNewListing = analysis.profile.primary_type === 'new_listing';
 	const theme = normalizeStockAITheme(analysis.theme);
 	const themeSource = stockThemeSourceLabel(theme.source);
 	const themeRole = theme.role && theme.role !== '待确认' ? theme.role : '';
@@ -467,12 +573,13 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 		: [themeSource, '未发现明确热点炒作'].filter(Boolean).join(' · ');
 	return (
 		<>
+			{isNewListing && <NewListingNotice analysis={analysis} />}
 			<section className="stock-ai-kpis stock-ai-kpis-complete">
-				<KPICard icon={<Gauge size={17} />} label="综合评分" value={`${analysis.scorecard.overall} · ${analysis.scorecard.grade}`} detail={`${analysis.scorecard.direction} · 置信度${analysis.scorecard.conviction}`} tone="blue" />
-				<KPICard icon={<TrendingUp size={17} />} label="趋势强度" value={`${analysis.trend.score}`} detail={`${analysis.trend.strength} · ${analysis.trend.setup}`} tone="green" />
+				<KPICard icon={<Gauge size={17} />} label={isNewListing ? '观察评分' : '综合评分'} value={`${analysis.scorecard.overall} · ${analysis.scorecard.grade}`} detail={`${analysis.scorecard.direction} · 置信度${analysis.scorecard.conviction}`} tone="blue" />
+				<KPICard icon={<TrendingUp size={17} />} label={isNewListing ? '价格发现' : '趋势强度'} value={`${analysis.trend.score}`} detail={`${analysis.trend.strength} · ${analysis.trend.setup}`} tone="green" />
 				<KPICard icon={<Scale size={17} />} label="相对强度" value={analysis.relative_strength.available ? `${analysis.relative_strength.score}` : '--'} detail={analysis.relative_strength.available ? `${analysis.relative_strength.state} · ${analysis.relative_strength.benchmark_name}` : analysis.relative_strength.detail} tone="purple" />
 				<KPICard icon={<ShieldCheck size={17} />} label="交易风险" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
-				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={`近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
+				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={isNewListing ? `上市 ${analysis.trend.history_days || analysis.chart.length} 日 · ${analysis.short_term.tradability}` : `近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
 				<KPICard icon={<Target size={17} />} label={theme.is_hot ? '热点定位' : '主业定位'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />
 			</section>
 
@@ -495,26 +602,32 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 
 			<div className="stock-ai-main-grid">
 				<section className="stock-ai-panel stock-ai-chart-panel">
-					<header><div><span>趋势结构</span><h3>价格与 MA20 / MA60 / MA120</h3></div><LineChart size={19} /></header>
-					<TrendChart points={analysis.chart} />
-					<div className="stock-ai-trend-metrics">
+					<header><div><span>{isNewListing ? '价格发现' : '趋势结构'}</span><h3>{isNewListing ? '上市期价格区间' : '价格与 MA20 / MA60 / MA120'}</h3></div><LineChart size={19} /></header>
+					<TrendChart points={analysis.chart} newListing={isNewListing} />
+					{isNewListing ? <div className="stock-ai-trend-metrics">
+						<Metric label="上市期" value={signedPercent(analysis.trend.listing_return || 0)} />
+						<Metric label="区间位置" value={`${(analysis.trend.listing_range_position || 0).toFixed(0)}%`} />
+						<Metric label="平均换手" value={`${(analysis.trend.average_turnover || 0).toFixed(1)}%`} />
+						<Metric label="平均成交额" value={formatCompactAmount(analysis.trend.average_amount || 0)} />
+						<Metric label="观测波动" value={`${(analysis.trend.observed_volatility || 0).toFixed(1)}%`} />
+					</div> : <div className="stock-ai-trend-metrics">
 						<Metric label="20日" value={signedPercent(analysis.trend.return_20d)} />
 						<Metric label="60日" value={signedPercent(analysis.trend.return_60d)} />
 						<Metric label="区间位置" value={`${analysis.trend.range_position_60d.toFixed(0)}%`} />
 						<Metric label="量比 5/20" value={analysis.trend.volume_ratio_5d_20d.toFixed(2)} />
 						<Metric label="ATR14" value={`${analysis.trend.atr_14_percent.toFixed(1)}%`} />
-					</div>
+					</div>}
 					<div className="stock-ai-levels">
-						<div><span>参考支撑</span><strong>{formatPrice(analysis.trend.support)}</strong></div>
-						<div><span>阶段压力</span><strong>{formatPrice(analysis.trend.resistance)}</strong></div>
+						<div><span>{isNewListing ? '上市区间低点' : '参考支撑'}</span><strong>{formatPrice(analysis.trend.support)}</strong></div>
+						<div><span>{isNewListing ? '上市区间高点' : '阶段压力'}</span><strong>{formatPrice(analysis.trend.resistance)}</strong></div>
 						<div><span>失效条件</span><strong>{analysis.trend.invalidation}</strong></div>
 					</div>
 				</section>
 
 				<section className="stock-ai-panel stock-ai-timeframe-panel">
-					<header><div><span>周期共振</span><h3>五周期一致性</h3></div><Layers3 size={19} /></header>
+					<header><div><span>{isNewListing ? '样本成熟度' : '周期共振'}</span><h3>{isNewListing ? '交易日积累进度' : '五周期一致性'}</h3></div><Layers3 size={19} /></header>
 					<div className="stock-ai-timeframes">
-						{analysis.timeframes.map((item) => <article className={scoreClass(item.score)} key={item.key}><div><strong>{item.label}</strong><em>{item.score}</em></div><span>{item.state}</span><div className="stock-ai-score-bar"><i style={{ width: `${item.score}%` }} /></div><small>{signedPercent(item.return_percent)} · 均线{item.above_moving_average ? '上方' : '下方'} · 斜率{signedPercent(item.slope_percent)}</small></article>)}
+						{analysis.timeframes.map((item) => <article className={scoreClass(item.score)} key={item.key}><div><strong>{item.label}</strong><em>{item.score || '--'}</em></div><span>{item.state}</span><div className="stock-ai-score-bar"><i style={{ width: `${item.score}%` }} /></div><small>{isNewListing ? (item.key === 'listing_period' ? `${item.window}个交易日 · 上市期${signedPercent(item.return_percent)}` : `目标 ${item.window} 个交易日 · 暂不计算均线`) : `${signedPercent(item.return_percent)} · 均线${item.above_moving_average ? '上方' : '下方'} · 斜率${signedPercent(item.slope_percent)}`}</small></article>)}
 					</div>
 					<RelativeStrengthCard analysis={analysis} />
 				</section>
@@ -649,7 +762,7 @@ function ExpectationView({ analysis }: { analysis: StockAIAnalysis }) {
 			<section className={`stock-ai-expectation-hero ${scoreClass(plan.score)}`}>
 				<div><span>隔日基础预期</span><h2>{plan.bias}</h2><p>{plan.expectation}</p></div>
 				<div className="stock-ai-expectation-score"><strong>{plan.score}</strong><span>情景评分</span></div>
-				<div className="stock-ai-expected-range"><span>预估正常波动区间</span><strong>{formatPrice(plan.expected_low)} — {formatPrice(plan.expected_high)}</strong><small>基于ATR的观察区间，不是价格预测</small></div>
+				<div className="stock-ai-expected-range"><span>预估正常波动区间</span><strong>{formatPrice(plan.expected_low)} — {formatPrice(plan.expected_high)}</strong><small>{analysis.profile.primary_type === 'new_listing' ? '基于上市期观测振幅的风险区间，不是价格预测' : '基于ATR的观察区间，不是价格预测'}</small></div>
 			</section>
 
 			<section className="stock-ai-level-strip">{plan.levels.map((level) => <article key={level.label}><span>{level.label}</span><strong>{formatPrice(level.price)}</strong><small>{level.detail}</small></article>)}</section>
@@ -1024,27 +1137,26 @@ function QualityRow({ item }: { item: StockAIDataQuality }) {
 	return <div className={item.status}><span>{item.status === 'ready' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}</span><div><strong>{qualityLabel(item.key)}</strong><small>{item.message}</small></div><em>{item.status === 'ready' ? '完整' : item.status === 'missing' ? '缺失' : '受限'}</em></div>;
 }
 
-function TrendChart({ points }: { points: StockAITrendPoint[] }) {
+function TrendChart({ points, newListing = false }: { points: StockAITrendPoint[]; newListing?: boolean }) {
 	const geometry = useMemo(() => buildChartGeometry(points), [points]);
 	if (!geometry) return <div className="stock-ai-chart-empty">趋势数据不足</div>;
 	return (
 		<div className="stock-ai-chart-wrap">
-			<svg viewBox="0 0 760 260" role="img" aria-label="个股近120日趋势图">
+			<svg viewBox="0 0 760 260" role="img" aria-label={newListing ? '个股上市期价格图' : '个股近120日趋势图'}>
 				{[0, 1, 2, 3].map((row) => <line x1="42" x2="744" y1={30 + row * 58} y2={30 + row * 58} key={row} />)}
-				<polyline className="ma120" points={geometry.ma120} />
-				<polyline className="ma60" points={geometry.ma60} />
-				<polyline className="ma20" points={geometry.ma20} />
+				{!newListing && <><polyline className="ma120" points={geometry.ma120} /><polyline className="ma60" points={geometry.ma60} /><polyline className="ma20" points={geometry.ma20} /></>}
 				<polyline className="close" points={geometry.close} />
+				{points.length === 1 && <circle className="close-point" cx={geometry.lastX} cy={geometry.lastY} r="4" />}
 				<text x="5" y="34">{geometry.max.toFixed(2)}</text>
 				<text x="5" y="208">{geometry.min.toFixed(2)}</text>
 			</svg>
-			<div className="stock-ai-chart-legend"><span className="close">收盘</span><span className="ma20">MA20</span><span className="ma60">MA60</span><span className="ma120">MA120</span><em>{points[0]?.date} — {points.at(-1)?.date}</em></div>
+			<div className="stock-ai-chart-legend"><span className="close">收盘</span>{!newListing && <><span className="ma20">MA20</span><span className="ma60">MA60</span><span className="ma120">MA120</span></>}<em>{points[0]?.date} — {points.at(-1)?.date}</em></div>
 		</div>
 	);
 }
 
 function buildChartGeometry(points: StockAITrendPoint[]) {
-	if (points.length < 2) return null;
+	if (points.length < 1) return null;
 	const values = points.flatMap((point) => [point.close, point.ma20, point.ma60, point.ma120]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
 	if (!values.length) return null;
 	const min = Math.min(...values);
@@ -1056,7 +1168,8 @@ function buildChartGeometry(points: StockAITrendPoint[]) {
 		const value = getter(point);
 		return value && Number.isFinite(value) ? `${x(index).toFixed(1)},${y(value).toFixed(1)}` : '';
 	}).filter(Boolean).join(' ');
-	return { min, max, close: line((point) => point.close), ma20: line((point) => point.ma20), ma60: line((point) => point.ma60), ma120: line((point) => point.ma120) };
+	const lastIndex = points.length - 1;
+	return { min, max, close: line((point) => point.close), ma20: line((point) => point.ma20), ma60: line((point) => point.ma60), ma120: line((point) => point.ma120), lastX: x(lastIndex), lastY: y(points[lastIndex].close) };
 }
 
 function loadAnalysisHistory(): AnalysisHistoryItem[] {
@@ -1170,7 +1283,7 @@ function formatExportDate(value: string) {
 }
 
 function qualityLabel(key: string) {
-	const labels: Record<string, string> = { kline: '趋势K线', quote: '实时行情', limit_up: '涨停结构', theme: '题材归因', fundamental: '基本面', research: '机构研报', stock_news: '个股新闻', theme_news: '题材新闻', market_emotion: '市场情绪', benchmark: '基准指数', collection: '数据采集' };
+	const labels: Record<string, string> = { kline: '趋势K线', technical_window: '技术窗口', quote: '实时行情', limit_up: '涨停结构', theme: '题材归因', fundamental: '基本面', research: '机构研报', stock_news: '个股新闻', theme_news: '题材新闻', market_emotion: '市场情绪', benchmark: '基准指数', collection: '数据采集' };
 	return labels[key] || key;
 }
 

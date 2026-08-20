@@ -69,6 +69,10 @@ type StockDirectoryProvider interface {
 	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
 }
 
+type HotStockProvider interface {
+	HotStockRanks(ctx context.Context, limit int) []foundation.HotStockRankList
+}
+
 type MarketOverviewProvider interface {
 	MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
 	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
@@ -103,6 +107,7 @@ type Config struct {
 	StockConcept         StockConceptProvider
 	StockBusiness        StockBusinessProfileProvider
 	StockDirectory       StockDirectoryProvider
+	HotStocks            HotStockProvider
 	MarketOverview       MarketOverviewProvider
 	Inflection           InflectionEvaluator
 	ReviewDBPath         string

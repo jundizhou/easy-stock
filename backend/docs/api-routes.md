@@ -28,6 +28,7 @@ WebSocket 可以通过 query 传 token：
 | `GET` | `/api/v1/market/margin-balance?limit=120` | Aggregated Shanghai, Shenzhen, and Beijing margin-financing and securities-lending balances by trading day. |
 | `GET` | `/api/v1/market/news?source=cls&limit=20` | Market news. Current implementation supports `cls`. |
 | `GET` | `/api/v1/stocks/directory` | Cached A-share stock names and codes for local fuzzy search. |
+| `GET` | `/api/v1/stocks/hot-ranks` | Deduplicated union of the Tonghuashun and EastMoney A-share hot-stock Top 100 lists, including each source rank. |
 | `GET` | `/api/v1/themes/overview` | One-snapshot overview of all configured themes, including average change, breadth, fund flow, and strongest node. |
 | `GET` | `/api/v1/sector-map?theme=semiconductor_materials` | Industry chain map. Current implementation uses a local theme rule layer, EastMoney board quotes, and EastMoney board constituents. |
 | `POST` | `/api/v1/strategy/inflections/evaluate` | Evaluate one market snapshot for old anchors, new carriers, and big/small inflection signals. |

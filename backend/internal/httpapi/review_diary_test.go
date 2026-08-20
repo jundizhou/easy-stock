@@ -221,3 +221,26 @@ func TestReviewDailySummaryWindowEndpoints(t *testing.T) {
 	}
 	t.Fatal("summary background job did not stop")
 }
+
+func TestReviewDailySummaryAnonymizeUsesHermesAndReturnsReplacements(t *testing.T) {
+	gateway := &fakeHermesGateway{promptResult: hermes.PromptResult{Content: `{"replacements":[{"from":"作者甲","to":"圆桌成员 A"},{"from":"甲老师","to":"圆桌成员 A"},{"from":"股票代码","to":"不应替换"},{"from":"过长无效","to":"圆桌成员 B"}]}`}}
+	server := NewServer(Config{HermesGateway: gateway})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/reviews/daily-summary/anonymize", strings.NewReader(`{"summary":{"author_views":[{"author":"作者甲"}],"market_analysis":"作者甲认为甲老师关注股票代码"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("anonymize status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Replacements []dailySummaryAnonymizeReplacement `json:"replacements"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data.Replacements) != 3 || payload.Data.Replacements[0].To != "圆桌成员 A" {
+		t.Fatalf("unexpected replacements: %+v", payload.Data.Replacements)
+	}
+}

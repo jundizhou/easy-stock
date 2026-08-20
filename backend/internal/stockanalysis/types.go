@@ -98,25 +98,34 @@ type Conclusion struct {
 }
 
 type TrendAnalysis struct {
-	Score               int      `json:"score"`
-	Strength            string   `json:"strength"`
-	Phase               string   `json:"phase"`
-	Setup               string   `json:"setup"`
-	LatestClose         float64  `json:"latest_close"`
-	MA20                float64  `json:"ma20"`
-	MA60                float64  `json:"ma60"`
-	MA120               float64  `json:"ma120"`
-	Return20            float64  `json:"return_20d"`
-	Return60            float64  `json:"return_60d"`
-	Return120           float64  `json:"return_120d"`
-	RangePosition60     float64  `json:"range_position_60d"`
-	DrawdownFromHigh120 float64  `json:"drawdown_from_high_120d"`
-	VolumeRatio         float64  `json:"volume_ratio_5d_20d"`
-	ATR14Percent        float64  `json:"atr_14_percent"`
-	Support             float64  `json:"support"`
-	Resistance          float64  `json:"resistance"`
-	Invalidation        string   `json:"invalidation"`
-	Reasons             []string `json:"reasons"`
+	Score                int      `json:"score"`
+	Strength             string   `json:"strength"`
+	Phase                string   `json:"phase"`
+	Setup                string   `json:"setup"`
+	LatestClose          float64  `json:"latest_close"`
+	MA20                 float64  `json:"ma20"`
+	MA60                 float64  `json:"ma60"`
+	MA120                float64  `json:"ma120"`
+	Return20             float64  `json:"return_20d"`
+	Return60             float64  `json:"return_60d"`
+	Return120            float64  `json:"return_120d"`
+	RangePosition60      float64  `json:"range_position_60d"`
+	DrawdownFromHigh120  float64  `json:"drawdown_from_high_120d"`
+	VolumeRatio          float64  `json:"volume_ratio_5d_20d"`
+	ATR14Percent         float64  `json:"atr_14_percent"`
+	Support              float64  `json:"support"`
+	Resistance           float64  `json:"resistance"`
+	Invalidation         string   `json:"invalidation"`
+	Reasons              []string `json:"reasons"`
+	HistoryDays          int      `json:"history_days,omitempty"`
+	ListingReturn        float64  `json:"listing_return,omitempty"`
+	ListingHigh          float64  `json:"listing_high,omitempty"`
+	ListingLow           float64  `json:"listing_low,omitempty"`
+	ListingRangePosition float64  `json:"listing_range_position,omitempty"`
+	ListingDrawdown      float64  `json:"listing_drawdown,omitempty"`
+	AverageTurnover      float64  `json:"average_turnover,omitempty"`
+	AverageAmount        float64  `json:"average_amount,omitempty"`
+	ObservedVolatility   float64  `json:"observed_volatility,omitempty"`
 }
 
 type Scorecard struct {

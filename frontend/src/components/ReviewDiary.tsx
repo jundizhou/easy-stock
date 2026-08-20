@@ -21,6 +21,7 @@ import {
 	TrendingUp,
 	RadioTower,
 	Users,
+	X,
 	Zap,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -473,7 +474,7 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 			{notice && <div className="review-notice"><Sparkles size={15} /><span>{notice}</span></div>}
 
 			{reviewView === 'summary' && (dailySummary
-				? <DailyViewpointSummary summary={dailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => setSummaryWindow({ start: toDateTimeLocal(new Date(dailySummary.window_start)), end: toDateTimeLocal(new Date(dailySummary.window_end)) })} onShowAuthors={() => setReviewView('authors')} />
+				? <DailyViewpointSummary config={config} summary={dailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => setSummaryWindow({ start: toDateTimeLocal(new Date(dailySummary.window_start)), end: toDateTimeLocal(new Date(dailySummary.window_end)) })} onShowAuthors={() => setReviewView('authors')} />
 				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} />)}
 
 			{reviewView === 'validation' && (dailyValidation
@@ -629,20 +630,48 @@ function ValidationBullets({ title, items }: { title: string; items?: string[] }
 	return <div className="validation-bullets"><strong>{title}</strong>{items?.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <span>暂无记录</span>}</div>;
 }
 
-function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuthors }: { summary: ReviewDailySummary; regenerating: boolean; onRegenerate: () => void; onShowAuthors: () => void }) {
+type ExportAnonymizationReplacement = { from: string; to: string };
+
+function DailyViewpointSummary({ config, summary, regenerating, onRegenerate, onShowAuthors }: { config: BackendConfig | null; summary: ReviewDailySummary; regenerating: boolean; onRegenerate: () => void; onShowAuthors: () => void }) {
 	const playbook = summary.tomorrow_playbook || { pre_open: [], opening: [], intraday: [], close: [] };
 	const framework = summary.market_framework || { cycle: '', capital_pricing: '', direction_competition: '', trading_method: '' };
 	const authorViews = summary.author_views || [];
 	const exportRef = useRef<HTMLElement>(null);
 	const [exporting, setExporting] = useState(false);
+	const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
 	const [exportNotice, setExportNotice] = useState('');
-	const exportSummaryImage = async () => {
+	useEffect(() => {
+		if (!exportOptionsOpen) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setExportOptionsOpen(false);
+		};
+		document.addEventListener('keydown', onKeyDown);
+		return () => document.removeEventListener('keydown', onKeyDown);
+	}, [exportOptionsOpen]);
+	const exportSummaryImage = async (anonymizeAuthors: boolean) => {
 		if (!exportRef.current || exporting) return;
 		setExporting(true);
+		setExportOptionsOpen(false);
 		setExportNotice('');
 		try {
 			await document.fonts?.ready;
 			const { default: html2canvas } = await import('html2canvas');
+			const authorMask = anonymizeAuthors ? buildRoundtableAuthorMask(summary) : null;
+			let modelReplacements: ExportAnonymizationReplacement[] = [];
+			let usedFallbackAnonymization = false;
+			if (anonymizeAuthors && config) {
+				try {
+					const payload = await requestJSON<{ data: { replacements?: ExportAnonymizationReplacement[] } }>(config, '/api/v1/reviews/daily-summary/anonymize', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ summary }),
+					});
+					modelReplacements = payload.data?.replacements || [];
+				} catch (cause) {
+					console.warn('AI anonymization failed; using structured author masking fallback', cause);
+					usedFallbackAnonymization = true;
+				}
+			}
 			const scale = Math.max(1, Math.min(1.5, 28000 / Math.max(exportRef.current.scrollHeight, 1)));
 			const canvas = await html2canvas(exportRef.current, {
 				backgroundColor: '#f4f5fb',
@@ -652,6 +681,15 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 				windowWidth: 1600,
 				onclone: (_document, element) => {
 					element.classList.add('is-exporting');
+					if (modelReplacements.length > 0) replaceExportText(_document, element, modelReplacements);
+					if (authorMask) {
+						element.classList.add('is-anonymized');
+						element.querySelectorAll<HTMLElement>('[data-review-author]').forEach((node) => {
+							const originalName = node.dataset.reviewAuthor || '';
+							const maskedName = authorMask.get(originalName);
+							if (maskedName) node.textContent = maskedName;
+						});
+					}
 					element.querySelectorAll('details').forEach((detail) => { detail.open = true; });
 				},
 			});
@@ -659,12 +697,12 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 			const href = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = href;
-			link.download = buildReviewSummaryFilename(summary);
+			link.download = buildReviewSummaryFilename(summary, anonymizeAuthors);
 			document.body.appendChild(link);
 			link.click();
 			link.remove();
 			window.setTimeout(() => URL.revokeObjectURL(href), 1000);
-			setExportNotice('复盘长图已生成并保存');
+			setExportNotice(usedFallbackAnonymization ? '模型脱敏暂不可用，已使用作者字段脱敏导出' : '复盘长图已生成并保存');
 		} catch (exportError) {
 			console.error('Failed to export daily review summary image', exportError);
 			setExportNotice('长图生成失败，请稍后重试');
@@ -673,26 +711,28 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 			window.setTimeout(() => setExportNotice(''), 2600);
 		}
 	};
-	return <section className="daily-viewpoint-summary" id="daily-viewpoint-summary" ref={exportRef}>
+	return <>
+	<section className="daily-viewpoint-summary" id="daily-viewpoint-summary" ref={exportRef}>
 		<ReviewSummaryExportBrand summary={summary} />
 		<header className="daily-summary-heading">
 			<div><span><BrainCircuit size={15} />AI DAILY REVIEW</span><h2>{summary.trade_date} 市场复盘与次日剧本</h2><small>{summary.author_count} 位作者 / {summary.article_count} 篇有效文章 · {formatDateTime(summary.generated_at)} 生成</small>{summary.window_start && <small className="daily-summary-window">有效窗口 {formatSummaryWindow(summary.window_start, summary.window_end)} · {summary.freshness_rule}</small>}</div>
-			<div><button type="button" className="daily-summary-export-button" onClick={() => void exportSummaryImage()} disabled={exporting}>{exporting ? <RefreshCw className="spin" size={14} /> : <Download size={14} />}{exporting ? '正在生成…' : '导出长图'}</button><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
+			<div className="daily-summary-heading-actions"><div className="daily-summary-export-control"><button type="button" className="daily-summary-export-button" onClick={() => setExportOptionsOpen(true)} disabled={exporting} aria-haspopup="dialog" aria-expanded={exportOptionsOpen}>{exporting ? <RefreshCw className="spin" size={14} /> : <Download size={14} />}{exporting ? '正在生成…' : '导出长图'}</button></div><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
 		</header>
+		<div className="daily-summary-anonymous-note">作者已脱敏：使用圆桌成员 A/B/C… 代替真实作者名</div>
 		<section className="daily-summary-block daily-summary-lead"><span>{summary.market_regime || '样本不足'}</span><div><small>一句话市场结论 · 跨作者综合</small><p>{summary.executive_summary}</p></div></section>
 		<section className="daily-summary-block market-framework-block"><header><TrendingUp size={16} /><div><strong>市场四层框架</strong><small>综合所有有效观点，直接归纳周期、资金、方向与执行</small></div></header><div className="market-framework-grid"><FrameworkItem label="周期位置" content={framework.cycle} /><FrameworkItem label="资金定价" content={framework.capital_pricing} /><FrameworkItem label="方向竞争" content={framework.direction_competition} /><FrameworkItem label="交易方法" content={framework.trading_method} /></div></section>
 		<div className="daily-summary-two-column">
 			<SummaryTextCard icon={<TrendingUp size={16} />} title="今日盘面分析" subtitle="跨作者综合盘面结论" content={summary.market_analysis} />
 			<SummaryTextCard icon={<Target size={16} />} title="明日预期" subtitle="跨作者综合次日推演" content={summary.tomorrow_outlook} />
 		</div>
-		{authorViews.length > 0 && <section className="daily-summary-block author-preview-block"><header><Users size={16} /><div><strong>主要作者观点</strong><small>先看各自最终判断，避免用跨作者结论抹平差异</small></div><button type="button" onClick={onShowAuthors}>查看全部 {authorViews.length} 位</button></header><div className="author-preview-grid">{authorViews.slice(0, 6).map((view) => <article key={`${view.source}-${view.author}`}><div><span className={`author-avatar ${sourceClass(view.source)}`}>{view.author.slice(0, 1)}</span><div><strong>{view.author}</strong><small>{view.source} · {view.confidence || '未评级'}置信度</small></div></div><p>{view.core_view}</p><div>{(view.themes || []).slice(0, 3).map((theme) => <span key={theme}>{theme}</span>)}</div></article>)}</div></section>}
+		{authorViews.length > 0 && <section className="daily-summary-block author-preview-block"><header><Users size={16} /><div><strong>主要作者观点</strong><small>先看各自最终判断，避免用跨作者结论抹平差异</small></div><button type="button" onClick={onShowAuthors}>查看全部 {authorViews.length} 位</button></header><div className="author-preview-grid">{authorViews.slice(0, 6).map((view) => <article key={`${view.source}-${view.author}`}><div><span className={`author-avatar ${sourceClass(view.source)}`} data-review-author={view.author}>{view.author.slice(0, 1)}</span><div><strong data-review-author={view.author}>{view.author}</strong><small>{view.source} · {view.confidence || '未评级'}置信度</small></div></div><p>{view.core_view}</p><div>{(view.themes || []).slice(0, 3).map((theme) => <span key={theme}>{theme}</span>)}</div></article>)}</div></section>}
 		<section className="daily-summary-block consensus-block">
 			<header><Zap size={16} /><div><strong>跨作者高频共识</strong><small>默认只看共识标题，点击后展开结论和依据</small></div></header>
-			<div className="daily-consensus-grid">{summary.consensus?.length ? summary.consensus.map((item) => <details className="daily-consensus-item" key={`${item.topic}-${item.conclusion}`}><summary><strong>{item.topic}</strong><ChevronDown size={16} /></summary><div className="daily-consensus-detail"><p>{item.conclusion}</p><div><em>{item.support_count} 位作者共同支持</em>{item.authors.length > 0 && <small>{item.authors.join(' · ')}</small>}</div>{item.evidence?.length > 0 && <ul>{item.evidence.slice(0, 3).map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>}</div></details>) : <SummaryEmpty text="今日文章尚未形成两位以上作者共同支持的明确共识。" />}</div>
+			<div className="daily-consensus-grid">{summary.consensus?.length ? summary.consensus.map((item) => <details className="daily-consensus-item" key={`${item.topic}-${item.conclusion}`}><summary><strong>{item.topic}</strong><ChevronDown size={16} /></summary><div className="daily-consensus-detail"><p>{item.conclusion}</p><div><em>{item.support_count} 位作者共同支持</em>{item.authors.length > 0 && <small className="review-author-names"><ReviewAuthorNames names={item.authors} /></small>}</div>{item.evidence?.length > 0 && <ul>{item.evidence.slice(0, 3).map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>}</div></details>) : <SummaryEmpty text="今日文章尚未形成两位以上作者共同支持的明确共识。" />}</div>
 		</section>
-		<section className="daily-summary-block disagreement-table-block"><header><GitCompareArrows size={16} /><div><strong>共识之外的关键分歧</strong><small>按作者保留原立场，不把分歧平均成一句空泛结论</small></div></header><div className="daily-disagreement-table">{summary.disagreements?.length ? summary.disagreements.map((item) => <article key={item.topic}><h3>{item.topic}</h3>{item.positions?.length ? item.positions.map((position) => <div key={`${position.author}-${position.view}`}><strong>{position.author}</strong><em>{position.stance || '观点'}</em><p>{position.view}</p>{position.evidence && <small>{position.evidence}</small>}</div>) : item.views.map((view, index) => <div key={view}><strong>{item.authors[index] || '作者观点'}</strong><p>{view}</p></div>)}</article>) : <SummaryEmpty text="今日样本未发现清晰的跨作者分歧。" />}</div></section>
+		<section className="daily-summary-block disagreement-table-block"><header><GitCompareArrows size={16} /><div><strong>共识之外的关键分歧</strong><small>按作者保留原立场，不把分歧平均成一句空泛结论</small></div></header><div className="daily-disagreement-table">{summary.disagreements?.length ? summary.disagreements.map((item) => <article key={item.topic}><h3>{item.topic}</h3>{item.positions?.length ? item.positions.map((position) => <div key={`${position.author}-${position.view}`}><strong data-review-author={position.author}>{position.author}</strong><em>{position.stance || '观点'}</em><p>{position.view}</p>{position.evidence && <small>{position.evidence}</small>}</div>) : item.views.map((view, index) => { const author = item.authors[index] || '作者观点'; return <div key={view}><strong data-review-author={author}>{author}</strong><p>{view}</p></div>; })}</article>) : <SummaryEmpty text="今日样本未发现清晰的跨作者分歧。" />}</div></section>
 		<section className="daily-summary-block scenario-block"><header><Target size={16} /><div><strong>次日三情景推演</strong><small>预期不是一个点位，而是三条可以被盘面证伪的路径</small></div></header><div className="daily-scenario-grid">{summary.scenarios?.length ? summary.scenarios.map((scenario) => <article className={scenario.key} key={scenario.key}><span>{scenario.name}</span><p>{scenario.summary}</p><dl><div><dt>触发</dt><dd>{scenario.trigger || '未明确'}</dd></div><div><dt>确认</dt><dd>{scenario.confirmation || '未明确'}</dd></div><div><dt>失效</dt><dd>{scenario.invalidation || '未明确'}</dd></div></dl>{scenario.focus?.length > 0 && <footer>{scenario.focus.map((item) => <em key={item}>{item}</em>)}</footer>}</article>) : <SummaryEmpty text="当前样本未形成完整的基础、偏强、偏弱三情景。" />}</div></section>
-		<section className="daily-summary-block direction-block"><header><GitCompareArrows size={16} /><div><strong>题材与方向优先级</strong><small>同时展示支持者、反对者、确认与失效条件</small></div></header><div className="daily-direction-list">{summary.directions?.length ? summary.directions.map((direction) => <article key={direction.name}><div><strong>{direction.name}</strong><em>{direction.stance || '等待验证'}</em></div><p>{direction.summary}</p>{direction.stocks?.length > 0 && <div className="direction-stock-tags">{direction.stocks.map((stock) => <span key={stock}>{stock}</span>)}</div>}<dl><div><dt>支持</dt><dd>{direction.supporting_authors?.join(' · ') || '无'}</dd></div><div><dt>保留/反对</dt><dd>{direction.opposing_authors?.join(' · ') || '无'}</dd></div><div><dt>确认</dt><dd>{direction.trigger || '未明确'}</dd></div><div><dt>失效</dt><dd>{direction.invalidation || '未明确'}</dd></div></dl>{direction.risks?.length > 0 && <small><b>风险：</b>{direction.risks.join('；')}</small>}</article>) : <SummaryEmpty text="作者观点尚不足以形成有来源的方向优先级。" />}</div></section>
+		<section className="daily-summary-block direction-block"><header><GitCompareArrows size={16} /><div><strong>题材与方向优先级</strong><small>同时展示支持者、反对者、确认与失效条件</small></div></header><div className="daily-direction-list">{summary.directions?.length ? summary.directions.map((direction) => <article key={direction.name}><div><strong>{direction.name}</strong><em>{direction.stance || '等待验证'}</em></div><p>{direction.summary}</p>{direction.stocks?.length > 0 && <div className="direction-stock-tags">{direction.stocks.map((stock) => <span key={stock}>{stock}</span>)}</div>}<dl><div><dt>支持</dt><dd><ReviewAuthorNames names={direction.supporting_authors} emptyLabel="无" /></dd></div><div><dt>保留/反对</dt><dd><ReviewAuthorNames names={direction.opposing_authors} emptyLabel="无" /></dd></div><div><dt>确认</dt><dd>{direction.trigger || '未明确'}</dd></div><div><dt>失效</dt><dd>{direction.invalidation || '未明确'}</dd></div></dl>{direction.risks?.length > 0 && <small><b>风险：</b>{direction.risks.join('；')}</small>}</article>) : <SummaryEmpty text="作者观点尚不足以形成有来源的方向优先级。" />}</div></section>
 		<div className="daily-summary-two-column stock-view-columns">
 			<StockViewSection title="今日超预期个股" subtitle="文章明确提到主动走强、逆势承接或超出盘前预期" items={summary.today_surprises || []} tone="surprise" />
 			<StockViewSection title="明日预期个股" subtitle="只保留有逻辑、触发条件和失效条件的观察对象" items={summary.tomorrow_focus || []} tone="focus" />
@@ -703,11 +743,13 @@ function DailyViewpointSummary({ summary, regenerating, onRegenerate, onShowAuth
 		</section>
 		<section className="daily-summary-block"><header><ShieldAlert size={16} /><div><strong>催化与风险</strong><small>重点防范共识拥挤和盘后叙事偏差</small></div></header><div className="daily-risk-grid"><SummaryBulletList title="潜在催化" items={summary.catalysts || []} /><SummaryBulletList title="主要风险" items={summary.risks || []} /></div></section>
 		<section className="daily-summary-block verification-block"><header><ListChecks size={16} /><div><strong>明日验证清单</strong><small>逐条核对，而不是把预期当成结论</small></div></header><ol>{(summary.verification_checklist || []).map((item) => <li key={item}>{item}</li>)}</ol></section>
-		{summary.sources?.length > 0 && <section className="daily-summary-block daily-sources-block"><header><BookOpen size={16} /><div><strong>来源与证据样本</strong><small>链接回到原作者文章，便于复核 AI 归纳是否准确</small></div></header><div>{summary.sources.slice(0, 12).map((source, index) => source.url ? <a href={source.url} target="_blank" rel="noreferrer" key={`${source.post_id || source.url}-${index}`}><strong>{source.author}</strong><span>{source.title}</span><ExternalLink size={13} /></a> : <span key={`${source.author}-${source.title}-${index}`}><strong>{source.author}</strong>{source.title}</span>)}</div></section>}
+		{summary.sources?.length > 0 && <section className="daily-summary-block daily-sources-block"><header><BookOpen size={16} /><div><strong>来源与证据样本</strong><small>链接回到原作者文章，便于复核 AI 归纳是否准确</small></div></header><div>{summary.sources.slice(0, 12).map((source, index) => source.url ? <a href={source.url} target="_blank" rel="noreferrer" key={`${source.post_id || source.url}-${index}`}><strong data-review-author={source.author}>{source.author}</strong><span>{source.title}</span><ExternalLink size={13} /></a> : <span key={`${source.author}-${source.title}-${index}`}><strong data-review-author={source.author}>{source.author}</strong>{source.title}</span>)}</div></section>}
 		{summary.limitations?.length > 0 && <footer><strong>样本局限</strong><span>{summary.limitations.join('；')}</span></footer>}
 		<ReviewSummaryExportFooter summary={summary} />
 		{exportNotice && <div className={`review-summary-export-notice ${exportNotice.includes('失败') ? 'error' : ''}`} role="status">{exportNotice}</div>}
-	</section>;
+	</section>
+	{exportOptionsOpen && <ExportAuthorDialog onClose={() => setExportOptionsOpen(false)} onChoose={(anonymize) => void exportSummaryImage(anonymize)} />}
+	</>;
 }
 
 function ReviewSummaryExportBrand({ summary }: { summary: ReviewDailySummary }) {
@@ -723,6 +765,79 @@ function ReviewSummaryExportFooter({ summary }: { summary: ReviewDailySummary })
 		<div className="review-summary-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>{formatDateTime(summary.generated_at)} 生成</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;
+}
+
+function ExportAuthorDialog({ onClose, onChoose }: { onClose: () => void; onChoose: (anonymizeAuthors: boolean) => void }) {
+	return <div className="daily-summary-export-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+		<section className="daily-summary-export-modal" role="dialog" aria-modal="true" aria-labelledby="daily-summary-export-modal-title">
+			<header><div><span><Download size={16} />EXPORT SUMMARY IMAGE</span><h2 id="daily-summary-export-modal-title">导出大V复盘 AI 总结</h2><p>选择图片中如何显示作者姓名。此选择只影响导出的长图，不会修改页面或本地数据。</p></div><button type="button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header>
+			<div className="daily-summary-export-options">
+				<button type="button" onClick={() => onChoose(false)}><strong>保留作者名</strong><span>图片中显示真实作者姓名，便于回看来源。</span></button>
+				<button type="button" onClick={() => onChoose(true)}><strong>脱敏为圆桌成员 A/B/C…</strong><span>同一作者在整张图片中使用同一个成员编号。</span></button>
+			</div>
+			<footer><span>原始作者信息不会被删除或覆盖</span><button type="button" className="secondary" onClick={onClose}>取消</button></footer>
+		</section>
+	</div>;
+}
+
+function ReviewAuthorNames({ names, emptyLabel = '' }: { names?: string[]; emptyLabel?: string }) {
+	const visibleNames = (names || []).map((name) => name.trim()).filter(Boolean);
+	if (!visibleNames.length) return emptyLabel ? <span>{emptyLabel}</span> : null;
+	return <>{visibleNames.map((name, index) => <span key={`${name}-${index}`} data-review-author={name}>{name}{index < visibleNames.length - 1 ? ' · ' : ''}</span>)}</>;
+}
+
+function replaceExportText(document: Document, root: HTMLElement, replacements: ExportAnonymizationReplacement[]) {
+	const sorted = replacements
+		.filter((item) => item.from.trim() && item.to.trim())
+		.sort((left, right) => right.from.length - left.from.length);
+	if (!sorted.length) return;
+	const walker = document.createTreeWalker(root, 4);
+	const textNodes: Text[] = [];
+	let current = walker.nextNode();
+	while (current) {
+		textNodes.push(current as Text);
+		current = walker.nextNode();
+	}
+	textNodes.forEach((node) => {
+		let text = node.nodeValue || '';
+		sorted.forEach((item) => { text = text.split(item.from).join(item.to); });
+		node.nodeValue = text;
+	});
+}
+
+function buildRoundtableAuthorMask(summary: ReviewDailySummary) {
+	const names: string[] = [];
+	const seen = new Set<string>();
+	const add = (name?: string) => {
+		const normalized = name?.trim() || '';
+		if (!normalized || normalized === '作者观点' || normalized === '无' || seen.has(normalized)) return;
+		seen.add(normalized);
+		names.push(normalized);
+	};
+	(summary.author_views || []).forEach((view) => add(view.author));
+	(summary.authors || []).forEach(add);
+	(summary.consensus || []).forEach((item) => (item.authors || []).forEach(add));
+	(summary.disagreements || []).forEach((item) => {
+		(item.authors || []).forEach(add);
+		(item.positions || []).forEach((position) => add(position.author));
+	});
+	(summary.directions || []).forEach((direction) => {
+		(direction.supporting_authors || []).forEach(add);
+		(direction.opposing_authors || []).forEach(add);
+	});
+	[...(summary.today_surprises || []), ...(summary.tomorrow_focus || [])].forEach((stock) => (stock.authors || []).forEach(add));
+	(summary.sources || []).forEach((source) => add(source.author));
+	return new Map(names.map((name, index) => [name, `圆桌成员 ${roundtableMemberLabel(index)}`]));
+}
+
+function roundtableMemberLabel(index: number) {
+	let value = Math.max(0, index);
+	let label = '';
+	while (value >= 0) {
+		label = String.fromCharCode(65 + (value % 26)) + label;
+		value = Math.floor(value / 26) - 1;
+	}
+	return label;
 }
 
 function FrameworkItem({ label, content }: { label: string; content: string }) {
@@ -765,7 +880,7 @@ function SummaryWindowDialog({ value, onChange, onClose, onConfirm, submitting }
 }
 
 function StockViewSection({ title, subtitle, items, tone }: { title: string; subtitle: string; items: ReviewDailyStockView[]; tone: string }) {
-	return <section className={`daily-summary-block stock-view-section ${tone}`}><header><Target size={16} /><div><strong>{title}</strong><small>{subtitle}</small></div></header><div className="daily-stock-view-list">{items.length ? items.map((item) => <article key={`${item.name}-${item.logic}`}><div><strong>{item.name}</strong>{item.symbol && <span>{item.symbol}</span>}<em>{item.support_count > 1 ? `${item.support_count}位共识` : '单一来源'}</em></div><p>{item.logic}</p>{item.trigger && <small><b>确认：</b>{item.trigger}</small>}{item.invalidation && <small><b>失效：</b>{item.invalidation}</small>}{item.risk && <small><b>风险：</b>{item.risk}</small>}<footer>{item.authors.join(' · ')}</footer></article>) : <SummaryEmpty text="文章没有提供足够证据。" />}</div></section>;
+	return <section className={`daily-summary-block stock-view-section ${tone}`}><header><Target size={16} /><div><strong>{title}</strong><small>{subtitle}</small></div></header><div className="daily-stock-view-list">{items.length ? items.map((item) => <article key={`${item.name}-${item.logic}`}><div><strong>{item.name}</strong>{item.symbol && <span>{item.symbol}</span>}<em>{item.support_count > 1 ? `${item.support_count}位共识` : '单一来源'}</em></div><p>{item.logic}</p>{item.trigger && <small><b>确认：</b>{item.trigger}</small>}{item.invalidation && <small><b>失效：</b>{item.invalidation}</small>}{item.risk && <small><b>风险：</b>{item.risk}</small>}<footer className="review-author-names"><ReviewAuthorNames names={item.authors} /></footer></article>) : <SummaryEmpty text="文章没有提供足够证据。" />}</div></section>;
 }
 
 function PlaybookStage({ label, items }: { label: string; items: string[] }) {
@@ -832,9 +947,9 @@ function reviewCanvasToPNGBlob(canvas: HTMLCanvasElement) {
 	});
 }
 
-function buildReviewSummaryFilename(summary: ReviewDailySummary) {
+function buildReviewSummaryFilename(summary: ReviewDailySummary, anonymized = false) {
 	const tradeDate = sanitizeReviewFilename(summary.trade_date || '市场复盘');
-	return `easy-stock-${tradeDate}-AI复盘总结.png`;
+	return `easy-stock-${tradeDate}-AI复盘总结${anonymized ? '-脱敏' : ''}.png`;
 }
 
 function sanitizeReviewFilename(value: string) {
