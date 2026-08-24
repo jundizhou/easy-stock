@@ -8,6 +8,8 @@ import {
 	Building2,
 	Calculator,
 	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
 	CircleAlert,
 	Clipboard,
 	Clock3,
@@ -90,6 +92,7 @@ const symbolStorageKey = 'easy-stock.stock-ai-symbol.v1';
 const historyStorageKey = 'easy-stock.stock-ai-history.v2';
 const capitalStorageKey = 'easy-stock.stock-ai-capital.v1';
 const directoryStorageKey = 'easy-stock.stock-directory.v1';
+const hotStockSidebarStorageKey = 'easy-stock.stock-ai-popular-sidebar-collapsed.v1';
 const directoryStorageTTL = 24 * 60 * 60 * 1000;
 const examples = ['600519', '300750', '002594', '601138', '688981'];
 
@@ -110,6 +113,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	const [hotRanks, setHotRanks] = useState<HotStockRankData | null>(null);
 	const [hotRankState, setHotRankState] = useState<HotRankState>('idle');
 	const [hotRankError, setHotRankError] = useState('');
+	const [hotStockSidebarCollapsed, setHotStockSidebarCollapsed] = useState(() => window.localStorage.getItem(hotStockSidebarStorageKey) === '1');
 	const exportRef = useRef<HTMLDivElement>(null);
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
@@ -188,10 +192,18 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 			setHotRanks(payload.data);
 			setHotRankState('ready');
 		} catch (loadError) {
-			setHotRankError(loadError instanceof Error ? loadError.message : '热股榜暂不可用');
+			setHotRankError(loadError instanceof Error ? loadError.message : '人气股暂不可用');
 			setHotRankState('error');
 		}
 	}, [config]);
+
+	const toggleHotStockSidebar = () => {
+		setHotStockSidebarCollapsed((current) => {
+			const next = !current;
+			window.localStorage.setItem(hotStockSidebarStorageKey, next ? '1' : '0');
+			return next;
+		});
+	};
 
 	useEffect(() => {
 		void loadHotRanks();
@@ -266,8 +278,8 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	return (
 		<section className="stock-ai-workspace">
 			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
-			<div className="stock-ai-shell">
-				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
+			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
+				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
 				<div className="stock-ai-main">
 					{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
 
@@ -306,11 +318,13 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 	);
 }
 
-function HotStockSidebar({ data, state, error, activeSymbol, onRefresh, onSelect }: {
+function HotStockSidebar({ data, state, error, activeSymbol, collapsed, onToggle, onRefresh, onSelect }: {
 	data: HotStockRankData | null;
 	state: HotRankState;
 	error: string;
 	activeSymbol?: string;
+	collapsed: boolean;
+	onToggle: () => void;
 	onRefresh: () => void;
 	onSelect: (symbol: string) => void;
 }) {
@@ -329,25 +343,34 @@ function HotStockSidebar({ data, state, error, activeSymbol, onRefresh, onSelect
 		{ id: 'all', label: '并集', count: data?.total || 0 },
 		...(data?.sources || []).map((source) => ({ id: source.id, label: source.id === 'ths' ? '同花顺' : '东方财富', count: source.count, disabled: !source.available, title: source.error })),
 	];
+	if (collapsed) {
+		return <aside className="stock-hot-sidebar is-collapsed" aria-label="同花顺和东方财富人气股">
+			<div className="stock-hot-collapsed">
+				<span className="stock-hot-icon" title="人气股"><Flame size={17} /></span>
+				<button type="button" onClick={onToggle} title="展开人气股" aria-label="展开人气股" aria-expanded="false"><ChevronRight size={16} /></button>
+			</div>
+		</aside>;
+	}
 	return (
-		<aside className="stock-hot-sidebar" aria-label="同花顺和东方财富热股并集">
+		<aside className="stock-hot-sidebar" aria-label="同花顺和东方财富人气股">
 			<header>
 				<span className="stock-hot-icon"><Flame size={17} /></span>
-				<div><strong>热股并集</strong><small>同花顺 · 东方财富</small></div>
+				<div><strong>人气股</strong><small>同花顺 · 东方财富</small></div>
 				<em>{data?.total || '--'}</em>
-				<button type="button" onClick={onRefresh} disabled={state === 'loading'} title="刷新热股榜" aria-label="刷新热股榜"><RefreshCw className={state === 'loading' ? 'spin' : ''} size={14} /></button>
+				<button type="button" onClick={onRefresh} disabled={state === 'loading'} title="刷新人气股" aria-label="刷新人气股"><RefreshCw className={state === 'loading' ? 'spin' : ''} size={14} /></button>
+				<button type="button" onClick={onToggle} title="收拢人气股" aria-label="收拢人气股" aria-expanded="true"><ChevronLeft size={16} /></button>
 			</header>
-			<div className="stock-hot-filters" role="group" aria-label="热股来源筛选">
+			<div className="stock-hot-filters" role="group" aria-label="人气股来源筛选">
 				{filters.map((item) => <button type="button" className={filter === item.id ? 'active' : ''} onClick={() => setFilter(item.id)} disabled={item.disabled} title={item.title} aria-pressed={filter === item.id} key={item.id}><span>{item.label}</span><em>{item.count || '--'}</em></button>)}
 			</div>
-			<label className="stock-hot-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="筛选名称或代码" aria-label="筛选热股" /></label>
+			<label className="stock-hot-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="筛选名称或代码" aria-label="筛选人气股" /></label>
 			<div className="stock-hot-list">
 				{state === 'loading' && !data && Array.from({ length: 9 }, (_, index) => <div className="stock-hot-skeleton" key={index}><i /><span /><em /></div>)}
-				{state === 'error' && !data && <div className="stock-hot-empty"><CircleAlert size={18} /><strong>热股榜暂不可用</strong><span>{error}</span></div>}
+				{state === 'error' && !data && <div className="stock-hot-empty"><CircleAlert size={18} /><strong>人气股暂不可用</strong><span>{error}</span></div>}
 				{state !== 'loading' && data && stocks.length === 0 && <div className="stock-hot-empty"><FileSearch size={18} /><strong>没有匹配股票</strong></div>}
 				{stocks.map(({ stock, unionIndex }) => <HotStockRow stock={stock} index={unionIndex} active={stock.symbol === activeSymbol} onSelect={onSelect} key={stock.symbol} />)}
 			</div>
-			{data && <footer><span>{data.stale ? '缓存快照' : '实时热榜'}</span><time>{formatHotRankTime(data.updated_at)}</time></footer>}
+			{data && <footer><span>{data.stale ? '缓存快照' : '实时人气榜'}</span><time>{formatHotRankTime(data.updated_at)}</time></footer>}
 		</aside>
 	);
 }
