@@ -23,6 +23,18 @@ type themeEvidenceBucket struct {
 	score       int
 }
 
+type themePriceConfirmation struct {
+	matched       bool
+	detail        string
+	stockDaily    float64
+	stockFive     float64
+	stockTwenty   float64
+	themeDaily    float64
+	themeFive     float64
+	stockMomentum int
+	relative      int
+}
+
 var themeKeywordGroups = []struct {
 	name     string
 	keywords []string
@@ -154,20 +166,52 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	})
 
 	best := (*themeEvidenceBucket)(nil)
+	rejected := (*themeEvidenceBucket)(nil)
+	rejectedPrice := themePriceConfirmation{}
 	for _, candidate := range ordered {
 		if candidate.score < 55 || (!candidate.confirmed && !hasExplicitMarketAttribution(candidate.evidence)) {
 			continue
 		}
-		if best == nil || candidate.score > best.score {
-			best = candidate
+		price := confirmThemePrice(input, short, *candidate)
+		if !price.matched {
+			if rejected == nil {
+				rejected, rejectedPrice = candidate, price
+			}
+			continue
 		}
+		best = candidate
+		break
 	}
 	if best == nil {
 		base.HotTheme, base.IsHot, base.HotScore = "", false, 0
 		base.Primary = firstNonEmpty(base.Business, input.Industry)
 		base.BusinessTheme = base.Primary
 		base.Confidence = "低"
-		base.Resonance = ThemeResonance{Available: false, State: "暂无题材", Detail: "未发现同时具备事件证据和盘面验证的有效热点题材"}
+		base.Source = firstNonEmpty(input.BusinessSource, base.Source, "eastmoney-f10-business")
+		base.AsOf = ""
+		base.TrendScore, base.ActiveDays, base.MaxStreak = 0, 0, 0
+		base.TrendStage, base.Role = "", "待确认"
+		base.EvidenceItems = nil
+		base.Evidence = nil
+		if input.BusinessDetail != "" {
+			base.Evidence = []string{"F10主营资料：" + truncateText(input.BusinessDetail, 120)}
+		}
+		base.ConfirmedThemes, base.SpeculativeThemes = nil, nil
+		if rejected != nil {
+			tag := ThemeTag{Name: rejected.name, Score: rejected.score, EvidenceCount: len(rejected.evidence), Detail: rejectedPrice.detail, Confidence: confidenceForScore(rejected.score)}
+			if rejected.confirmed {
+				tag.Layer = "事实支撑"
+				base.ConfirmedThemes = []ThemeTag{tag}
+			} else {
+				tag.Layer = "市场延伸"
+				base.SpeculativeThemes = []ThemeTag{tag}
+			}
+			base.Description = fmt.Sprintf("%s虽为近期热点候选，但%s；当前按公司主业%s定位", rejected.name, rejectedPrice.detail, firstNonEmpty(base.Primary, "未取得"))
+			base.Resonance = ThemeResonance{Available: false, State: "价格未确认", Detail: rejectedPrice.detail, StockMomentum: rejectedPrice.stockMomentum, RelativeStrength: rejectedPrice.relative}
+		} else {
+			base.Description = fmt.Sprintf("未发现同时具备事件证据、热点强度和个股涨幅验证的有效题材，当前按公司主业%s定位", firstNonEmpty(base.Primary, "未取得"))
+			base.Resonance = ThemeResonance{Available: false, State: "暂无题材", Detail: "未发现同时具备事件证据、热点强度和个股涨幅验证的有效题材"}
+		}
 		return base
 	}
 
@@ -328,6 +372,10 @@ type themeConstituentStats struct {
 	nearLimitRatio   float64
 	leaderPosition   int
 	capitalDiffusion int
+	stockDaily       float64
+	stockFive        float64
+	themeDaily       float64
+	themeFive        float64
 }
 
 func themeConstituentStatsFor(input Input, theme string) themeConstituentStats {
@@ -370,8 +418,9 @@ func themeConstituentStatsFor(input Input, theme string) themeConstituentStats {
 		totalAmount += math.Max(entry.Amount, 0)
 	}
 	stockDaily, stockFive := stockRecentReturns(input.KLines)
-	dailyExcess := stockDaily - trimmedMean(dailyValues)
-	fiveExcess := stockFive - trimmedMean(fiveValues)
+	themeDaily, themeFive := trimmedMean(dailyValues), trimmedMean(fiveValues)
+	dailyExcess := stockDaily - themeDaily
+	fiveExcess := stockFive - themeFive
 	relative := int(math.Round(clamp((50+dailyExcess*8)*.4+(50+fiveExcess*3)*.6, 0, 100)))
 	breadth := int(math.Round(clamp(float64(rising)/float64(len(members))*70+float64(strong)/float64(len(members))*30, 0, 100)))
 	leader := percentileScore(stockFive, fiveValues)
@@ -379,7 +428,93 @@ func themeConstituentStatsFor(input Input, theme string) themeConstituentStats {
 	if totalAmount > 0 {
 		capital = int(math.Round(clamp(risingAmount/totalAmount*100, 0, 100)))
 	}
-	return themeConstituentStats{available: true, relativeStrength: relative, breadth: breadth, nearLimitRatio: float64(nearLimit) / float64(len(members)), leaderPosition: leader, capitalDiffusion: capital}
+	return themeConstituentStats{available: true, relativeStrength: relative, breadth: breadth, nearLimitRatio: float64(nearLimit) / float64(len(members)), leaderPosition: leader, capitalDiffusion: capital, stockDaily: stockDaily, stockFive: stockFive, themeDaily: themeDaily, themeFive: themeFive}
+}
+
+func confirmThemePrice(input Input, short ShortTermAnalysis, bucket themeEvidenceBucket) themePriceConfirmation {
+	lines := normalizeKLines(input.KLines)
+	result := themePriceConfirmation{relative: 35}
+	if len(lines) == 0 {
+		result.detail = "缺少个股价格数据，无法验证近期热点涨幅"
+		return result
+	}
+	result.stockDaily, result.stockFive = stockRecentReturns(lines)
+	result.stockTwenty = windowReturn(closesOf(lines), min(len(lines), 20))
+	if len(lines) == 1 {
+		result.stockFive, result.stockTwenty = result.stockDaily, result.stockDaily
+	}
+	result.stockMomentum = int(math.Round(normalizeStockMomentum(lines)))
+
+	stats := themeConstituentStatsFor(input, bucket.name)
+	if stats.available {
+		result.themeDaily, result.themeFive = stats.themeDaily, stats.themeFive
+		result.relative = stats.relativeStrength
+	} else {
+		result.themeDaily = bucket.market.ChangePercent
+	}
+
+	if stockIsNamedLeader(input, bucket.market) || hasRecentThemeLimitUp(input, bucket.name, lines[len(lines)-1].Time) {
+		result.matched = true
+		result.detail = themePriceDetail(bucket.name, result, stats.available, "已由近期领涨或涨停事件确认")
+		return result
+	}
+
+	if len(lines) < 5 {
+		result.matched = result.stockDaily > 0 || short.LimitUpCount20 > 0
+		reason := "上市期涨幅已形成正向反馈"
+		if !result.matched {
+			reason = "上市期涨幅未形成正向反馈"
+		}
+		result.detail = themePriceDetail(bucket.name, result, stats.available, reason)
+		return result
+	}
+
+	reason := "个股近期涨幅与热点方向相符"
+	result.matched = true
+	if result.stockMomentum < 25 {
+		result.matched = false
+		reason = "个股近期动能过弱"
+	} else if stats.available && result.themeFive >= 1 {
+		minimumFive := math.Max(.5, result.themeFive-8)
+		if result.stockFive < minimumFive {
+			result.matched = false
+			reason = "个股5日涨幅未跟随热点成分股"
+		}
+	} else if stats.available && result.relative < 25 {
+		result.matched = false
+		reason = "个股相对热点成分股明显落后"
+	} else if result.themeDaily >= 1.5 && result.stockDaily <= -1.5 && result.stockFive <= 0 {
+		result.matched = false
+		reason = "热点上涨时个股反向下跌"
+	} else if !stats.available && result.stockFive < -3 && result.stockTwenty <= 0 {
+		result.matched = false
+		reason = "个股5日和20日涨幅均未验证热点"
+	}
+	result.detail = themePriceDetail(bucket.name, result, stats.available, reason)
+	return result
+}
+
+func hasRecentThemeLimitUp(input Input, theme string, latest time.Time) bool {
+	for _, event := range input.LimitUps {
+		if event.Symbol != input.Symbol || event.Date.IsZero() {
+			continue
+		}
+		if canonicalTheme(event.PrimaryTheme) != canonicalTheme(theme) && !containsAnyFold(event.PrimaryTheme, themeAliases(theme)...) {
+			continue
+		}
+		days := latest.Sub(event.Date).Hours() / 24
+		if days >= -1 && days <= 10 {
+			return true
+		}
+	}
+	return false
+}
+
+func themePriceDetail(theme string, result themePriceConfirmation, hasThemeReturns bool, reason string) string {
+	if hasThemeReturns {
+		return fmt.Sprintf("%s：%s；个股当日%+.1f%%、5日%+.1f%%、20日%+.1f%%，题材成分当日均值%+.1f%%、5日均值%+.1f%%，相对题材%d分", theme, reason, result.stockDaily, result.stockFive, result.stockTwenty, result.themeDaily, result.themeFive, result.relative)
+	}
+	return fmt.Sprintf("%s：%s；个股当日%+.1f%%、5日%+.1f%%、20日%+.1f%%，近期动能%d分", theme, reason, result.stockDaily, result.stockFive, result.stockTwenty, result.stockMomentum)
 }
 
 func themeLimitEnergy(overview foundation.ThemeOverview, stats themeConstituentStats) int {

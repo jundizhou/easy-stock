@@ -570,7 +570,7 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 	const themeRole = theme.role && theme.role !== '待确认' ? theme.role : '';
 	const themeDetail = theme.is_hot
 		? [themeRole, themeSource, theme.business ? `主业：${theme.business}` : ''].filter(Boolean).join(' · ')
-		: [themeSource, '未发现明确热点炒作'].filter(Boolean).join(' · ');
+		: [themeSource, theme.resonance.state === '价格未确认' ? '热点涨幅未通过验证' : '未发现明确热点炒作'].filter(Boolean).join(' · ');
 	return (
 		<>
 			{isNewListing && <NewListingNotice analysis={analysis} />}
@@ -649,7 +649,7 @@ function ThemeAttributionPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	return <section className="stock-ai-panel stock-ai-theme-attribution-panel">
 		<header><div><span>事件驱动归因</span><h3>主业 · 事实题材 · 当前炒作 · 市场延伸</h3></div><Target size={19} /></header>
 		<div className="stock-ai-theme-attribution-body">
-			<div className="stock-ai-theme-primary"><span>当前主炒作</span><strong>{theme.is_hot ? theme.hot_theme || theme.primary : theme.business_theme || theme.primary || '暂无有效题材'}</strong><em>{theme.is_hot ? `置信度${theme.confidence} · 炒作相关性${theme.hot_score}` : '未发现事件与盘面共振'}</em><small>{theme.description}</small></div>
+			<div className="stock-ai-theme-primary"><span>{theme.is_hot ? '当前主炒作' : '当前主业'}</span><strong>{theme.is_hot ? theme.hot_theme || theme.primary : theme.business_theme || theme.primary || '暂无有效题材'}</strong><em>{theme.is_hot ? `置信度${theme.confidence} · 炒作相关性${theme.hot_score}` : theme.resonance.state === '价格未确认' ? '热点涨幅未通过验证 · 已回退主业' : '未发现事件与盘面共振'}</em><small>{theme.description}</small></div>
 			<div className="stock-ai-theme-columns">
 				<div><span>事实支撑</span>{(theme.confirmed_themes || []).length ? theme.confirmed_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>{item.confidence} · {item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无结构化事实题材</small>}</div>
 				<div><span>市场延伸 / 映射</span>{(theme.speculative_themes || []).length ? theme.speculative_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>{item.confidence} · {item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无有效延伸题材</small>}</div>

@@ -1079,6 +1079,8 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("已完成事件驱动题材归因：%s；共振%d分", theme.Primary, theme.Resonance.Score)})
 	case theme.IsHot:
 		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: fmt.Sprintf("已识别事实题材%s，等待题材成分股盘面验证", theme.Primary)})
+	case theme.Resonance.State == "价格未确认":
+		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("近期热点关联未通过个股涨幅验证，当前按东方财富F10主营业务%s定位", theme.Primary)})
 	case strings.Contains(theme.Source, "kaipanla-limit-up"):
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已命中开盘啦短线连板缓存"})
 	case strings.Contains(theme.Source, "kaipanla-theme-leader"):

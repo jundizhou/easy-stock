@@ -325,6 +325,49 @@ func TestAnalyzeThemePromotesAnnouncementBackedCompoundSemiconductor(t *testing.
 	}
 }
 
+func TestAnalyzeThemeFallsBackToBusinessWhenHotThemePriceDoesNotMatch(t *testing.T) {
+	lines := syntheticTrendLines("688521.SH", 80, 260, -1, 1_500_000_000)
+	analysis, err := Analyze(Input{
+		Symbol:   "688521.SH",
+		Quote:    foundation.Quote{Symbol: "688521.SH", Name: "芯原股份", Price: lines[len(lines)-1].Close},
+		KLines:   lines,
+		Business: "集成电路", BusinessDetail: "公司主营半导体IP授权和芯片定制服务", BusinessSource: "eastmoney:f10-business",
+		Announcements: []foundation.MarketResearchItem{{
+			Title:       "关于提质增效重回报行动方案的半年度评估报告",
+			Content:     "公司为卫星通信客户开发芯片IP和集成电路解决方案。",
+			PublishedAt: time.Now(),
+			Meta:        foundation.SourceMeta{Source: "eastmoney:announcement"},
+		}},
+		Catalog: []foundation.StockCatalogEntry{
+			{BoardStock: foundation.BoardStock{Symbol: "600001.SH", Name: "航天甲", ChangePercent: 8, FiveDayChangePercent: 18}, Concepts: []string{"商业航天"}},
+			{BoardStock: foundation.BoardStock{Symbol: "600002.SH", Name: "航天乙", ChangePercent: 6, FiveDayChangePercent: 14}, Concepts: []string{"商业航天"}},
+			{BoardStock: foundation.BoardStock{Symbol: "600003.SH", Name: "航天丙", ChangePercent: 4, FiveDayChangePercent: 10}, Concepts: []string{"商业航天"}},
+		},
+		Themes: []foundation.ThemeOverview{{Name: "商业航天", TrendScore: 82, RisingNodes: 5, MatchedNodes: 5, LimitUpCount: 5, ActiveDays: 5, FiveDayStrengthScore: 80}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.HotTheme != "" || analysis.Theme.Primary != "集成电路" || analysis.Theme.Source != "eastmoney:f10-business" {
+		t.Fatalf("price-divergent hot theme should fall back to main business: %+v", analysis.Theme)
+	}
+	if analysis.Theme.Resonance.State != "价格未确认" || !strings.Contains(analysis.Theme.Description, "5日涨幅未跟随") || !strings.Contains(analysis.Theme.Description, "公司主业集成电路") {
+		t.Fatalf("price rejection reason missing: %+v", analysis.Theme)
+	}
+	if len(analysis.Theme.ConfirmedThemes) != 1 || analysis.Theme.ConfirmedThemes[0].Name != "商业航天" {
+		t.Fatalf("rejected theme evidence should remain inspectable: %+v", analysis.Theme.ConfirmedThemes)
+	}
+	foundThemeQuality := false
+	for _, item := range analysis.DataQuality {
+		if item.Key == "theme" && strings.Contains(item.Message, "未通过个股涨幅验证") && strings.Contains(item.Message, "集成电路") {
+			foundThemeQuality = true
+		}
+	}
+	if !foundThemeQuality {
+		t.Fatalf("theme price validation quality missing: %+v", analysis.DataQuality)
+	}
+}
+
 func TestAnalyzeThemeIgnoresPublicationTitleKeyword(t *testing.T) {
 	lines := syntheticTrendLines("601858.SH", 80, 18, 0.08, 650_000_000)
 	analysis, err := Analyze(Input{
