@@ -1,0 +1,51 @@
+name: 功能建议
+description: 提议一个明确的 A股研究、数据或产品能力
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你在什么研究流程中遇到了什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 期望结果
+      description: 描述完成后的行为，不必限定具体实现方式。
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: 当前替代方案
+      description: 目前如何完成这项工作，成本或限制是什么？
+  - type: textarea
+    id: source
+    attributes:
+      label: 数据源或参考资料
+      description: 涉及新数据源时，请提供公开文档、使用条款、登录要求和更新频率。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能领域
+      options:
+        - 行情总览与数据源
+        - 趋势题材与市场情绪
+        - 个股 AI 分析
+        - 大 V 复盘与文章采集
+        - AI Copilot 与研究记忆
+        - 桌面端、安装与更新
+        - 其他
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issue，未发现相同建议
+          required: true

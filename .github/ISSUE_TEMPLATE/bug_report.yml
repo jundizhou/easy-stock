@@ -1,0 +1,66 @@
+name: Bug 报告
+description: 报告可以稳定复现的功能、数据或桌面端问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请勿提交 API Key、Cookie、Token、账号、持仓或其他敏感信息。
+  - type: input
+    id: version
+    attributes:
+      label: easy-stock 版本
+      placeholder: 例如 v0.7.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Windows 11
+        - Windows 10
+        - Linux / 源码运行
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 说明预期结果和实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 看到……
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 已脱敏的日志或截图
+      description: 删除密钥、Cookie、Token、账号、持仓和本地路径中的个人信息后再提交。
+  - type: input
+    id: source
+    attributes:
+      label: 相关数据源与发生时间
+      placeholder: 例如 东方财富，2026-08-25 15:10 Asia/Shanghai
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issue，未发现相同问题
+          required: true
+        - label: 我已移除所有密钥、登录信息和个人数据
+          required: true

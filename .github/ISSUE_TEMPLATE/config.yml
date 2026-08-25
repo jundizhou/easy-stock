@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用交流与案例分享
+    url: https://github.com/jundizhou/easy-stock/discussions
+    about: 提问、讨论 A股研究方法或分享 easy-stock 使用案例
+  - name: 安全问题
+    url: https://github.com/jundizhou/easy-stock/security
+    about: 涉及密钥、登录状态或本地数据的安全问题请优先私下报告
+  - name: 使用与开发文档
+    url: https://github.com/jundizhou/easy-stock/blob/main/docs/development.md
+    about: 查看源码运行、测试、打包和故障定位说明

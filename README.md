@@ -2,13 +2,20 @@
   <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
 </p>
 
-<h1 align="center">easy-stock</h1>
+<h1 align="center">easy-stock：A股 AI 智能投研工作台</h1>
 
-<p align="center"><strong>AI 时代的 A 股行情分析与智能投研工作台</strong></p>
+<p align="center"><strong>面向个人投资者的 A股行情分析、股票分析与 AI投研桌面应用</strong></p>
 
 <p align="center">
   让 AI 看懂市场，让每一次判断都有证据。<br />
   把盘中观察、盘后复盘和长期认知，沉淀为一套持续进化的研究系统。
+</p>
+
+<p align="center">
+  <a href="https://github.com/jundizhou/easy-stock/releases/latest"><strong>下载最新版</strong></a> ·
+  <a href="#核心产品能力">查看核心能力</a> ·
+  <a href="https://github.com/jundizhou/easy-stock/issues/new/choose">反馈问题</a> ·
+  <a href="./ROADMAP.md">产品路线图</a>
 </p>
 
 <p align="center">
@@ -18,6 +25,8 @@
   <img alt="Hermes" src="https://img.shields.io/badge/AI-Hermes-6D5BD0" />
   <img alt="Local First" src="https://img.shields.io/badge/Data-Local%20First-159A80" />
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
+  <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
+  <a href="https://github.com/jundizhou/easy-stock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jundizhou/easy-stock?style=flat" /></a>
 </p>
 
 <p align="center">
@@ -26,8 +35,18 @@
   <a href="#ai-如何赋能-a-股研究">AI 研究方式</a> ·
   <a href="#ai-原生架构">系统架构</a> ·
   <a href="#快速开始">快速开始</a> ·
+  <a href="https://github.com/jundizhou/easy-stock/discussions">社区讨论</a> ·
+  <a href="./CONTRIBUTING.md">参与贡献</a> ·
   <a href="#许可与商业使用">许可</a>
 </p>
+
+<p align="center">
+  <a href="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png">
+    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png" width="1280" alt="easy-stock A股 AI 智能投研工作台，覆盖行情分析、题材主线、股票分析与市场复盘" />
+  </a>
+</p>
+
+<p align="center"><sub>行情总览 · 大 V 自动复盘 · 趋势题材雷达 · 超短情绪 · 个股 AI 分析 · 本地研究记忆</sub></p>
 
 ---
 
@@ -35,9 +54,9 @@
 
 AI 时代的炒股软件，不应该只是在传统行情终端旁边多放一个聊天框。
 
-传统行情软件擅长展示价格、涨跌幅和成交额，但 A 股交易真正困难的是理解价格背后的结构：今天的主线是什么、题材是否扩散、连板高度是否打开、昨日强势股是否获得溢价、趋势是否仍然成立、情绪处于修复还是退潮。
+传统行情软件擅长展示价格、涨跌幅和成交额，但 A股交易真正困难的是理解价格背后的结构：今天的主线是什么、题材是否扩散、连板高度是否打开、昨日强势股是否获得溢价、趋势是否仍然成立、情绪处于修复还是退潮。
 
-easy-stock 希望构建一套真正理解 A 股语境的 AI 原生工作台：
+easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把行情分析、题材研究、股票分析、盘后复盘与可追溯证据放进同一个本地优先的研究流程：
 
 | AI 原生能力 | easy-stock 的实现方式 |
 | --- | --- |
@@ -199,6 +218,14 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 
 需要从源码运行、调试、测试或打包，请阅读 [开发者文档](./docs/development.md)。
 
+## 社区与贡献
+
+- 使用交流、研究方法和案例分享，请前往 [GitHub Discussions](https://github.com/jundizhou/easy-stock/discussions)。
+- 遇到错误或数据异常，请使用 [Bug 报告](https://github.com/jundizhou/easy-stock/issues/new/choose)，并尽量附上系统版本、应用版本和复现步骤。
+- 有产品建议或数据源需求，请提交 [功能建议](https://github.com/jundizhou/easy-stock/issues/new/choose)，说明使用场景和期望结果。
+- 希望参与代码或文档建设，请先阅读 [贡献指南](./CONTRIBUTING.md) 和 [产品路线图](./ROADMAP.md)。
+- 涉及安全问题时，请按照 [安全策略](./SECURITY.md) 私下报告，不要公开敏感细节。
+
 ---
 
 ## 许可与商业使用
@@ -209,6 +236,7 @@ easy-stock 项目原创的后端、前端、桌面端和文档采用 [PolyForm N
 - 未经作者明确书面许可，不得用于任何直接或间接的商业用途，包括但不限于企业生产环境、收费服务、SaaS、付费咨询或培训、商业产品集成、二次销售以及以本项目获利。
 - 如需商业使用，请通过 [GitHub 仓库](https://github.com/jundizhou/easy-stock) 联系作者 jundizhou，取得单独的商业授权。
 - 第三方依赖、数据源和随包材料不受本项目许可证重新授权，仍分别遵循其原始许可证及服务条款。
+- 欢迎在许可范围内提交 Issue、文档改进和代码贡献；贡献代码在被合并后按本项目相同许可证发布。
 
 > 本项目属于源码可用（source-available）软件，并非 OSI 定义下允许商业使用的开源软件。
 
