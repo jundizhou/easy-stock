@@ -109,6 +109,8 @@ func requestFeature(path string) string {
 		return "short-term"
 	case strings.HasPrefix(path, "/api/v1/stocks/ai-analysis"):
 		return "stock-analysis"
+	case strings.HasPrefix(path, "/api/v1/portfolio-inspections"):
+		return "portfolio-inspection"
 	case strings.HasPrefix(path, "/api/v1/stocks"):
 		return "stocks"
 	case strings.HasPrefix(path, "/api/v1/reviews"):

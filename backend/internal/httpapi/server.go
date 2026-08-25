@@ -18,6 +18,7 @@ import (
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/providers/cls"
 	"easy-stock/backend/internal/providers/duanxianxia"
 	"easy-stock/backend/internal/providers/eastmoney"
@@ -56,6 +57,8 @@ type Server struct {
 	marketEmotion         *marketEmotionEngine
 	marketEmotionIntraday *marketEmotionIntradayCache
 	reviewStore           *review.Store
+	portfolioStore        *portfolioinspection.Store
+	portfolioInspection   *portfolioinspection.Service
 	reviewImporter        ReviewImporter
 	wechatAPIURL          string
 	settingsStore         *appsettings.Store
@@ -179,6 +182,17 @@ func NewServer(config any) *Server {
 			cfg.MarketEmotionStore, _ = marketemotion.OpenStore("")
 		}
 	}
+	if cfg.PortfolioStore == nil {
+		store, err := portfolioinspection.OpenStore(cfg.PortfolioDBPath)
+		if err == nil {
+			cfg.PortfolioStore = store
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open portfolio inspection database: %w", err))
+			cfg.PortfolioStore, _ = portfolioinspection.OpenStore(":memory:")
+		} else {
+			cfg.PortfolioStore, _ = portfolioinspection.OpenStore(":memory:")
+		}
+	}
 	if cfg.ReviewHTTP == nil {
 		cfg.ReviewHTTP = &http.Client{Timeout: 90 * time.Second}
 	}
@@ -256,6 +270,7 @@ func NewServer(config any) *Server {
 		marketSnapshots:       newMarketOverviewCache(45 * time.Second),
 		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
 		reviewStore:           cfg.ReviewStore,
+		portfolioStore:        cfg.PortfolioStore,
 		reviewImporter:        cfg.ReviewImporter,
 		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
 		settingsStore:         cfg.SettingsStore,
@@ -278,6 +293,7 @@ func NewServer(config any) *Server {
 		s.kLineFallback,
 		s.stockConcepts,
 	)
+	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
 	s.routes()
 	return s
 }
@@ -299,6 +315,9 @@ func (s *Server) Close() error {
 	}
 	if s.marketEmotionStore != nil {
 		closeErrors = append(closeErrors, s.marketEmotionStore.Close())
+	}
+	if s.portfolioStore != nil {
+		closeErrors = append(closeErrors, s.portfolioStore.Close())
 	}
 	if s.themeRadarStore != nil {
 		closeErrors = append(closeErrors, s.themeRadarStore.Close())
@@ -419,6 +438,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/stocks/ai-analysis", s.stockAIAnalysis)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
+	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
+	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
+	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)
 	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
 	s.mux.HandleFunc("DELETE /api/v1/reviews/authors/{id}", s.reviewAuthorDelete)

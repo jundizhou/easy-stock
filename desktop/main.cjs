@@ -346,6 +346,7 @@ function buildRuntimeEnv(resourcesRoot) {
 		A_STOCK_APP_VERSION: app.getVersion(),
     A_STOCK_SETTINGS_PATH: path.join(userData, 'settings.json'),
     A_STOCK_REVIEW_DB: path.join(userData, 'reviews.db'),
+    A_STOCK_PORTFOLIO_DB: path.join(userData, 'portfolio-inspections.db'),
     A_STOCK_MARKET_EMOTION_DB: path.join(userData, 'market-emotion.db'),
     A_STOCK_THEME_RADAR_DB: path.join(userData, 'theme-radar.db'),
     A_STOCK_MASTERY_CACHE: path.join(userData, 'trading-mastery'),

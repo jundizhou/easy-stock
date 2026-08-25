@@ -24,6 +24,7 @@ func TestStrictPersistenceReportsInvalidDatabasePaths(t *testing.T) {
 	invalidDatabasePath := t.TempDir()
 	server := NewServer(Config{
 		ReviewDBPath:        invalidDatabasePath,
+		PortfolioDBPath:     invalidDatabasePath,
 		MarketEmotionDBPath: invalidDatabasePath,
 		ThemeRadarDBPath:    invalidDatabasePath,
 		StrictPersistence:   true,
@@ -34,7 +35,7 @@ func TestStrictPersistenceReportsInvalidDatabasePaths(t *testing.T) {
 	if err == nil {
 		t.Fatal("StartupError() = nil, want database persistence errors")
 	}
-	for _, message := range []string{"review database", "market emotion database", "theme radar database"} {
+	for _, message := range []string{"review database", "portfolio inspection database", "market emotion database", "theme radar database"} {
 		if !strings.Contains(err.Error(), message) {
 			t.Errorf("StartupError() = %q, want %q", err, message)
 		}

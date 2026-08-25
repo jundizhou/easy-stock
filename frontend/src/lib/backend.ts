@@ -876,6 +876,109 @@ export type StockAIAnalysis = {
 	};
 };
 
+export type PortfolioTraderProfile = 'aggressive' | 'balanced' | 'steady';
+
+export type PortfolioHolding = {
+	symbol: string;
+	name?: string;
+	weight_percent: number;
+	cost_price?: number;
+};
+
+export type PortfolioProfileRules = {
+	id: PortfolioTraderProfile;
+	label: string;
+	description: string;
+	max_single_percent: number;
+	max_top_three_percent: number;
+	minimum_cash_percent: number;
+	max_high_risk_percent: number;
+	max_stop_loss_risk_percent: number;
+	preferred_short_term_max_percent: number;
+};
+
+export type PortfolioHoldingResult = {
+	holding: PortfolioHolding;
+	status: 'queued' | 'running' | 'succeeded' | 'failed' | string;
+	error?: string;
+	completed_at?: string;
+	analysis?: StockAIAnalysis;
+};
+
+export type PortfolioMetrics = {
+	total_position_percent: number;
+	cash_percent: number;
+	coverage_percent: number;
+	max_single_percent: number;
+	top_three_percent: number;
+	concentration_hhi: number;
+	weighted_stock_score: number;
+	weighted_risk_score: number;
+	stop_loss_risk_percent: number;
+	short_term_percent: number;
+	new_listing_percent: number;
+	high_risk_percent: number;
+	style_match_score: number;
+	style_breaches: string[];
+	theme_exposures: Array<{ theme: string; weight_percent: number; stock_count: number }>;
+	high_correlations: Array<{ left_symbol: string; right_symbol: string; correlation: number }>;
+	risk_contributions: Array<{ symbol: string; name: string; weight_percent: number; score: number; contribution_percent: number }>;
+};
+
+export type PortfolioAIReport = {
+	health_score: number;
+	risk_level: string;
+	style_match: string;
+	executive_summary: string;
+	primary_risks: string[];
+	concentration_findings: string[];
+	holdings: Array<{
+		symbol: string;
+		portfolio_role: string;
+		risk_contribution: number;
+		conclusion: string;
+		action_priority: string;
+		action: string;
+		confirmation: string;
+		invalidation: string;
+	}>;
+	adjustment_order: string[];
+	scenarios: Array<{ name: string; condition: string; portfolio_action: string }>;
+	next_checklist: string[];
+	data_limitations: string[];
+	confidence: number;
+	source: string;
+};
+
+export type PortfolioInspectionReport = {
+	id: string;
+	prompt_version: string;
+	profile: PortfolioProfileRules;
+	holdings: PortfolioHoldingResult[];
+	metrics: PortfolioMetrics;
+	conclusion: PortfolioAIReport;
+	generated_at: string;
+};
+
+export type PortfolioInspectionJob = {
+	id: string;
+	status: 'running' | 'succeeded' | 'partial' | 'failed' | 'interrupted' | string;
+	stage: string;
+	request: { trader_profile: PortfolioTraderProfile; holdings: PortfolioHolding[] };
+	results: PortfolioHoldingResult[];
+	completed_stocks: number;
+	total_stocks: number;
+	coverage_percent: number;
+	current_symbols: string[];
+	message: string;
+	error?: string;
+	started_at?: string;
+	updated_at?: string;
+	completed_at?: string;
+	report_available: boolean;
+	report?: PortfolioInspectionReport;
+};
+
 export type NewsItem = {
 	id?: string;
 	title: string;

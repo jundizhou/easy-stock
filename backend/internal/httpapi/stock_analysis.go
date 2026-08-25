@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -32,8 +33,33 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	analysis, err := s.analyzeStock(r.Context(), normalized.Canonical)
+	if err != nil {
+		status := http.StatusBadGateway
+		var runError *stockAnalysisRunError
+		if errors.As(err, &runError) {
+			status = runError.status
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": analysis})
+}
 
-	dataCtx, cancelData := context.WithTimeout(r.Context(), 35*time.Second)
+type stockAnalysisRunError struct {
+	status int
+	err    error
+}
+
+func (e *stockAnalysisRunError) Error() string { return e.err.Error() }
+func (e *stockAnalysisRunError) Unwrap() error { return e.err }
+
+func (s *Server) analyzeStock(ctx context.Context, canonicalSymbol string) (stockanalysis.Analysis, error) {
+	normalized, err := foundation.NormalizeSymbol(canonicalSymbol)
+	if err != nil {
+		return stockanalysis.Analysis{}, err
+	}
+	dataCtx, cancelData := context.WithTimeout(ctx, 35*time.Second)
 	defer cancelData()
 	benchmarkSymbol, benchmarkName := stockanalysis.BenchmarkForSymbol(normalized.Canonical)
 
@@ -147,8 +173,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	collectionWG.Wait()
 	if lineErr != nil {
-		writeError(w, http.StatusBadGateway, "个股K线加载失败: "+lineErr.Error())
-		return
+		return stockanalysis.Analysis{}, &stockAnalysisRunError{status: http.StatusBadGateway, err: fmt.Errorf("个股K线加载失败: %w", lineErr)}
 	}
 
 	concepts := make([]string, 0, 8)
@@ -234,7 +259,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	if s.hermesGateway != nil {
 		status := s.hermesGateway.Status()
 		if status.Available && status.Configured && (len(announcements) > 0 || len(news) > 0) {
-			themeCtx, cancelTheme := context.WithTimeout(r.Context(), s.modelResponseTimeout())
+			themeCtx, cancelTheme := context.WithTimeout(ctx, s.modelResponseTimeout())
 			modelEvidence, modelErr := stockanalysis.ExtractThemeEvidence(themeCtx, s.hermesGateway, analysisInput)
 			cancelTheme()
 			if modelErr == nil {
@@ -246,8 +271,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	analysis, err := stockanalysis.Analyze(analysisInput)
 	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
+		return stockanalysis.Analysis{}, &stockAnalysisRunError{status: http.StatusUnprocessableEntity, err: err}
 	}
 
 	if s.hermesGateway == nil {
@@ -261,7 +285,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		} else {
 			methodologyContext := ""
 			if s.masteryLibrary != nil {
-				knowledgeCtx, cancelKnowledge := context.WithTimeout(r.Context(), 6*time.Second)
+				knowledgeCtx, cancelKnowledge := context.WithTimeout(ctx, 6*time.Second)
 				methodologyContext, _ = s.masteryLibrary.ContextForPrompt(
 					knowledgeCtx,
 					fmt.Sprintf("结合游资心法、情绪周期、趋势与风险控制分析%s %s", analysis.Name, analysis.Symbol),
@@ -269,7 +293,7 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 				)
 				cancelKnowledge()
 			}
-			aiCtx, cancelAI := context.WithTimeout(r.Context(), s.modelResponseTimeout())
+			aiCtx, cancelAI := context.WithTimeout(ctx, s.modelResponseTimeout())
 			if aiErr := stockanalysis.EnrichWithAI(aiCtx, s.hermesGateway, &analysis, methodologyContext); aiErr != nil {
 				analysis.AI.Status = "error"
 				analysis.AI.Message = aiErr.Error() + "；已保留本地结构化研判"
@@ -278,5 +302,5 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"data": analysis})
+	return analysis, nil
 }

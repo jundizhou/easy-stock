@@ -11,6 +11,7 @@ import (
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/strategy/inflection"
 )
@@ -112,12 +113,14 @@ type Config struct {
 	MarketOverview       MarketOverviewProvider
 	Inflection           InflectionEvaluator
 	ReviewDBPath         string
+	PortfolioDBPath      string
 	MarketEmotionDBPath  string
 	ThemeRadarDBPath     string
 	DuanxianxiaBaseURL   string
 	WeChatAPIURL         string
 	ReviewHTTP           *http.Client
 	ReviewStore          *review.Store
+	PortfolioStore       *portfolioinspection.Store
 	MarketEmotionStore   *marketemotion.Store
 	ReviewImporter       ReviewImporter
 	SettingsPath         string

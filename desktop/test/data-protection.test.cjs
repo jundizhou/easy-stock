@@ -19,6 +19,7 @@ test('update backup preserves models, articles, memories and login state byte-fo
   const fixtures = {
     'settings.json': '{"llm":{"provider":"openai","model":"gpt-test"}}',
     'reviews.db': Buffer.from([0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0, 0xff]),
+    'portfolio-inspections.db': 'portfolio-inspection-history',
     'market-emotion.db': 'emotion-data',
     'theme-radar.db': 'theme-data',
     'hermes-home/.env': 'OPENAI_API_KEY=test-secret\n',
