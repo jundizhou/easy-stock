@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -719,6 +721,30 @@ func TestServerRequiresConfiguredTokenForPrivateRoutes(t *testing.T) {
 	server.ServeHTTP(queryRec, queryReq)
 	if queryRec.Code != http.StatusOK {
 		t.Fatalf("query authorized status = %d, want %d", queryRec.Code, http.StatusOK)
+	}
+}
+
+func TestServerLogsSanitizedFeatureRequestWithCorrelationID(t *testing.T) {
+	var logs bytes.Buffer
+	server := NewServer(Config{
+		Token:  "secret-token",
+		Logger: log.New(&logs, "", 0),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sources?token=secret-token", nil)
+	request.Header.Set("X-Request-ID", "support-123")
+	recorder := httptest.NewRecorder()
+
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Header().Get("X-Request-ID") != "support-123" {
+		t.Fatalf("unexpected response: status=%d request_id=%q", recorder.Code, recorder.Header().Get("X-Request-ID"))
+	}
+	content := logs.String()
+	if !strings.Contains(content, `feature="data-sources"`) || !strings.Contains(content, `request_id="support-123"`) || !strings.Contains(content, `path="/api/v1/sources"`) {
+		t.Fatalf("missing request diagnostics: %s", content)
+	}
+	if strings.Contains(content, "secret-token") || strings.Contains(content, "?token=") {
+		t.Fatalf("request log leaked query credentials: %s", content)
 	}
 }
 

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"sort"
@@ -12,6 +13,7 @@ import (
 
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
+	"easy-stock/backend/internal/runtimelog"
 )
 
 const marketEmotionBootstrapDays = 7
@@ -1099,11 +1101,20 @@ func buildMarketEmotionHistory(points []marketemotion.Snapshot, state marketemot
 	return history
 }
 
-func (e *marketEmotionEngine) runScheduler(ctx context.Context) {
+func (e *marketEmotionEngine) runScheduler(ctx context.Context, logger *log.Logger) {
 	run := func() {
+		startedAt := time.Now()
 		checkCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 		defer cancel()
-		_, _ = e.load(checkCtx)
+		_, err := e.load(checkCtx)
+		if logger == nil {
+			return
+		}
+		if err != nil {
+			logger.Printf("level=warn event=scheduler_error feature=short-term task=market_emotion duration_ms=%d error=%q", time.Since(startedAt).Milliseconds(), runtimelog.Redact(err.Error()))
+			return
+		}
+		logger.Printf("level=info event=scheduler_run feature=short-term task=market_emotion duration_ms=%d", time.Since(startedAt).Milliseconds())
 	}
 	run()
 	ticker := time.NewTicker(30 * time.Minute)

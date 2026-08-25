@@ -32,6 +32,7 @@ const { resolveHermesRuntimeRoot } = require('./hermes-runtime-root.cjs');
 const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs');
 const { UpdateManager } = require('./update-manager.cjs');
 const { resolveUpdateFeedURL } = require('./update-feed.cjs');
+const { createRotatingLogger } = require('./runtime-logger.cjs');
 
 app.setName('easy-stock');
 const defaultUserDataPath = app.getPath('userData');
@@ -43,6 +44,26 @@ const selectedUserDataPath = resolveUserDataPath({
 if (selectedUserDataPath !== defaultUserDataPath) {
   app.setPath('userData', selectedUserDataPath);
 }
+
+const runtimeLogDirectory = path.resolve(process.env.A_STOCK_LOG_DIR || path.join(app.getPath('userData'), 'logs'));
+fs.mkdirSync(runtimeLogDirectory, { recursive: true, mode: 0o700 });
+app.setAppLogsPath(runtimeLogDirectory);
+const desktopLogger = createRotatingLogger({
+  directory: runtimeLogDirectory,
+  fileName: 'desktop.log',
+  component: 'desktop',
+  mirror: console,
+});
+const rendererLogger = createRotatingLogger({
+  directory: runtimeLogDirectory,
+  fileName: 'renderer.log',
+  component: 'renderer',
+  mirror: console,
+});
+
+desktopLogger.event('info', 'runtime', `started version=${app.getVersion()} packaged=${app.isPackaged} platform=${process.platform} arch=${process.arch}`);
+process.on('uncaughtExceptionMonitor', (error, origin) => desktopLogger.event('error', 'runtime', `uncaught exception origin=${origin}`, error));
+process.on('unhandledRejection', (reason) => desktopLogger.event('error', 'runtime', 'unhandled rejection', reason));
 
 let backendProcess;
 let backendConfig;
@@ -57,6 +78,21 @@ let updateManager;
 let updateCheckTimer;
 const reviewLoginWindows = new Map();
 
+function featureLogger(feature) {
+  return {
+    debug: (...values) => desktopLogger.event('debug', feature, ...values),
+    info: (...values) => desktopLogger.event('info', feature, ...values),
+    log: (...values) => desktopLogger.event('info', feature, ...values),
+    warn: (...values) => desktopLogger.event('warn', feature, ...values),
+    error: (...values) => desktopLogger.event('error', feature, ...values),
+  };
+}
+
+function logChildOutput(feature, level, chunk) {
+  const message = String(chunk || '').trim();
+  if (message) desktopLogger.event(level, feature, message);
+}
+
 function resourcesRoot() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'resources')
@@ -64,6 +100,7 @@ function resourcesRoot() {
 }
 
 async function bootWechatService() {
+	desktopLogger.event('info', 'wechat-service', 'starting');
   const bundledRoot = resourcesRoot();
   const sourceDir = process.env.A_STOCK_WECHAT_SERVICE_SOURCE || path.join(bundledRoot, 'wechat-download-api');
   const workDir = process.env.A_STOCK_WECHAT_SERVICE_HOME || path.join(app.getPath('userData'), 'wechat-download-api');
@@ -74,21 +111,25 @@ async function bootWechatService() {
   const port = await findFreePort('127.0.0.1', 30000, 39999);
   const baseURL = `http://127.0.0.1:${port}`;
   wechatServiceProcess = startWechatService({ python, workDir, port, baseURL });
-  wechatServiceProcess.stdout?.resume();
-  wechatServiceProcess.stderr?.on('data', (chunk) => console.error(`[wechat-service] ${chunk}`.trim()));
+	wechatServiceProcess.stdout?.on('data', (chunk) => logChildOutput('wechat-service', 'info', chunk));
+	wechatServiceProcess.stderr?.on('data', (chunk) => logChildOutput('wechat-service', 'warn', chunk));
+	wechatServiceProcess.once('error', (error) => desktopLogger.event('error', 'wechat-service', 'process error', error));
   wechatServiceProcess.once('exit', (code, signal) => {
+		desktopLogger.event(app.isQuitting ? 'info' : 'error', 'wechat-service', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`);
     if (!app.isQuitting) {
       wechatServiceError = `内置微信公众号服务已停止（${signal || `退出码 ${code}`}）`;
-      console.error(`[wechat-service] ${wechatServiceError}`);
+			desktopLogger.event('error', 'wechat-service', wechatServiceError);
     }
   });
   await waitForWechatHealth(baseURL);
   wechatServiceConfig = { baseURL, workDir };
   wechatServiceError = '';
+	desktopLogger.event('info', 'wechat-service', 'ready');
   return wechatServiceConfig;
 }
 
 async function bootBackend() {
+	desktopLogger.event('info', 'backend-process', 'starting');
   const port = await findFreePort();
   const token = crypto.randomBytes(24).toString('hex');
   const addr = `127.0.0.1:${port}`;
@@ -113,11 +154,14 @@ async function bootBackend() {
     token,
     extraEnv: buildRuntimeEnv(bundledRoot),
   });
-  backendProcess.stdout?.on('data', (chunk) => console.log(`[backend] ${chunk}`.trim()));
-  backendProcess.stderr?.on('data', (chunk) => console.error(`[backend] ${chunk}`.trim()));
+	backendProcess.stdout?.on('data', (chunk) => logChildOutput('backend-process', 'info', chunk));
+	backendProcess.stderr?.on('data', (chunk) => logChildOutput('backend-process', 'warn', chunk));
+	backendProcess.once('error', (error) => desktopLogger.event('error', 'backend-process', 'process error', error));
+	backendProcess.once('exit', (code, signal) => desktopLogger.event(app.isQuitting ? 'info' : 'error', 'backend-process', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`));
 
   await waitForHealth(backendUrl);
   backendConfig = { backendUrl, token };
+	desktopLogger.event('info', 'backend-process', 'ready');
   return backendConfig;
 }
 
@@ -127,7 +171,7 @@ async function createWindow() {
     bootTaogubaBrowserBridge(),
     bootWechatService().catch((error) => {
       wechatServiceError = error.message || String(error);
-      console.error(`[wechat-service] startup failed: ${wechatServiceError}`);
+			desktopLogger.event('error', 'wechat-service', 'startup failed', error);
       if (wechatServiceProcess && !wechatServiceProcess.killed) wechatServiceProcess.kill();
       wechatServiceProcess = undefined;
       wechatServiceConfig = undefined;
@@ -169,6 +213,12 @@ async function createWindow() {
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
   });
+	window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+		if (isMainFrame) desktopLogger.event('error', 'renderer', `load failed code=${errorCode} description=${errorDescription} path=${safeURLPath(validatedURL)}`);
+	});
+	window.webContents.on('render-process-gone', (_event, details) => {
+		desktopLogger.event('error', 'renderer', `process gone reason=${details.reason} exit_code=${details.exitCode}`);
+	});
 
   const rendererURL = process.env.ELECTRON_RENDERER_URL;
   if (rendererURL) {
@@ -255,7 +305,7 @@ function initializeUpdateManager() {
       fromVersion,
       toVersion,
     }),
-    logger: console,
+		logger: featureLogger('updater'),
   });
   updateManager.on('status', (status) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -292,6 +342,8 @@ function buildRuntimeEnv(resourcesRoot) {
   fs.mkdirSync(hermesWorkDir, { recursive: true });
   fs.mkdirSync(browserStateDir, { recursive: true, mode: 0o700 });
   return {
+		A_STOCK_LOG_DIR: runtimeLogDirectory,
+		A_STOCK_APP_VERSION: app.getVersion(),
     A_STOCK_SETTINGS_PATH: path.join(userData, 'settings.json'),
     A_STOCK_REVIEW_DB: path.join(userData, 'reviews.db'),
     A_STOCK_MARKET_EMOTION_DB: path.join(userData, 'market-emotion.db'),
@@ -318,10 +370,10 @@ function buildRuntimeEnv(resourcesRoot) {
 
 async function bootXueqiuBrowserBridge() {
   if (xueqiuBrowserBridgeConfig) return xueqiuBrowserBridgeConfig;
-  xueqiuBrowserBridge = createXueqiuBrowserBridge({
+	xueqiuBrowserBridge = createXueqiuBrowserBridge({
     BrowserWindow,
     partitionForProfile: (profileId) => partitionForProfile('xueqiu', profileId),
-    logger: console,
+		logger: featureLogger('xueqiu-bridge'),
   });
   xueqiuBrowserBridgeConfig = await xueqiuBrowserBridge.start();
   return xueqiuBrowserBridgeConfig;
@@ -329,10 +381,10 @@ async function bootXueqiuBrowserBridge() {
 
 async function bootTaogubaBrowserBridge() {
   if (taogubaBrowserBridgeConfig) return taogubaBrowserBridgeConfig;
-  taogubaBrowserBridge = createTaogubaBrowserBridge({
+	taogubaBrowserBridge = createTaogubaBrowserBridge({
     BrowserWindow,
     partitionForProfile: (profileId) => partitionForProfile('taoguba', profileId),
-    logger: console,
+		logger: featureLogger('taoguba-bridge'),
   });
   taogubaBrowserBridgeConfig = await taogubaBrowserBridge.start();
   return taogubaBrowserBridgeConfig;
@@ -344,6 +396,26 @@ function agentBrowserBinaryName() {
 }
 
 ipcMain.handle('backend-config', () => backendConfig);
+ipcMain.handle('runtime-log-status', () => ({
+	available: true,
+	directory: runtimeLogDirectory,
+	max_file_mb: 5,
+	backup_files: 5,
+}));
+ipcMain.handle('runtime-open-logs', async () => {
+	fs.mkdirSync(runtimeLogDirectory, { recursive: true, mode: 0o700 });
+	const error = await shell.openPath(runtimeLogDirectory);
+	if (error) throw new Error(error);
+	desktopLogger.event('info', 'runtime', 'opened log directory');
+});
+ipcMain.handle('runtime-log', (_event, entry = {}) => {
+	const value = entry && typeof entry === 'object' ? entry : {};
+	const level = ['debug', 'info', 'warn', 'error'].includes(value.level) ? value.level : 'info';
+	const feature = String(value.feature || 'renderer').replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 80) || 'renderer';
+	const message = String(value.message || '').slice(0, 16 * 1024);
+	rendererLogger.event(level, feature, message);
+	return true;
+});
 ipcMain.handle('wechat-service-status', () => currentWechatServiceStatus());
 ipcMain.handle('open-wechat-login', async () => {
   const status = await currentWechatServiceStatus();
@@ -434,7 +506,7 @@ async function exportReviewStorageState(source, profileId, window) {
         if (localStorage.length) origins = [{ origin: originState.origin, localStorage }];
       }
     } catch (error) {
-      console.warn(`export ${normalized} localStorage failed: ${error.message}`);
+		desktopLogger.event('warn', `${normalized}-login`, 'export localStorage failed', error);
     }
   }
   writeStorageState(statePathForProfile(browserAuthRoot(), profileId, normalized), {
@@ -497,7 +569,7 @@ function openReviewSourceLogin(source, profileId, homepageURL) {
   const scheduleExport = () => {
     clearTimeout(exportTimer);
     exportTimer = setTimeout(() => {
-      void exportReviewStorageState(normalized, key, loginWindow).catch((error) => console.warn(`save ${normalized} auth failed: ${error.message}`));
+		void exportReviewStorageState(normalized, key, loginWindow).catch((error) => desktopLogger.event('warn', `${normalized}-login`, 'save auth failed', error));
     }, 700);
   };
   const cookieListener = () => scheduleExport();
@@ -533,7 +605,7 @@ function openReviewSourceLogin(source, profileId, homepageURL) {
     reviewLoginWindows.delete(windowKey);
   });
   void loginWindow.loadURL(validReviewSourceURL(normalized, homepageURL)).catch((error) => {
-    console.warn(`open ${normalized} login page failed: ${error.message}`);
+		desktopLogger.event('warn', `${normalized}-login`, 'open login page failed', error);
   });
   return done;
 }
@@ -550,29 +622,39 @@ function isReviewSourceHost(value, source) {
   return hostname === 'tgb.cn' || hostname.endsWith('.tgb.cn') || hostname === 'taoguba.com.cn' || hostname.endsWith('.taoguba.com.cn');
 }
 
+function safeURLPath(value) {
+	try {
+		return new URL(value).pathname;
+	} catch {
+		return '';
+	}
+}
+
 app.whenReady().then(() => {
+	desktopLogger.event('info', 'runtime', 'electron ready');
   const dockIcon = path.join(__dirname, 'assets', 'easy-stock.png');
   if (process.platform === 'darwin' && app.dock && fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
   try {
     initializeUpdateManager();
   } catch (error) {
-    console.error('[updater] initialization failed', error);
+		desktopLogger.event('error', 'updater', 'initialization failed', error);
     updateManager = new UpdateManager({
       updater: autoUpdater,
       enabled: false,
       currentVersion: app.getVersion(),
       platform: process.platform,
       canInstallAutomatically: process.platform === 'win32',
-      logger: console,
+			logger: featureLogger('updater'),
     });
   }
   createWindow().catch((error) => {
-    console.error(error);
+		desktopLogger.event('error', 'runtime', 'window startup failed', error);
     app.quit();
   });
 });
 
 app.on('before-quit', () => {
+	desktopLogger.event('info', 'runtime', 'stopping');
   app.isQuitting = true;
   clearInterval(updateCheckTimer);
   if (xueqiuBrowserBridge) void xueqiuBrowserBridge.close();

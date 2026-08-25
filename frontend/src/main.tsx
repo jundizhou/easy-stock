@@ -1,7 +1,10 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installRuntimeLogging } from './lib/runtime-log';
 import './styles.css';
+
+installRuntimeLogging();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

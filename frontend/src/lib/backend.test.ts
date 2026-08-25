@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { buildStreamUrl, resolveBackendConfig } from './backend';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildStreamUrl, requestJSON, resolveBackendConfig } from './backend';
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe('backend configuration', () => {
   it('prefers Electron bridge configuration', async () => {
@@ -39,4 +43,18 @@ describe('backend configuration', () => {
 
     expect(url).toBe('ws://127.0.0.1:20001/api/v1/ws/stream?symbols=000001.SZ%2C600000.SH&interval_ms=3000&token=desktop-token');
   });
+
+	it('adds a correlation ID to HTTP requests', async () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"ok":true}', {
+			status: 200,
+			headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'backend-id' },
+		}));
+
+		await requestJSON({ backendUrl: 'http://127.0.0.1:20001', token: 'desktop-token' }, '/api/v1/sources?mode=test');
+
+		const requestInit = fetchMock.mock.calls[0][1];
+		const headers = requestInit?.headers as Headers;
+		expect(headers.get('Authorization')).toBe('Bearer desktop-token');
+		expect(headers.get('X-Request-ID')).toMatch(/\S+/);
+	});
 });

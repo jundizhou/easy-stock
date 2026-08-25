@@ -1,4 +1,5 @@
 import type { BackendConfig } from './backend';
+import { logRuntimeEvent, runtimeErrorDetails } from './runtime-log';
 
 export type HermesStreamResult = {
 	content: string;
@@ -55,7 +56,12 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 			settled = true;
 			cleanup();
 			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
-			if (error) reject(error);
+			if (error) {
+				if (!(error instanceof Error) || error.name !== 'AbortError') {
+					logRuntimeEvent('error', 'ai-chat', { event: 'websocket_failure', error: runtimeErrorDetails(error) });
+				}
+				reject(error);
+			}
 			else resolve({ content, hermesSessionID: storedSessionID });
 		};
 		const armTimeout = (message: string) => {
@@ -92,6 +98,7 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 		try {
 			socket = new WebSocket(buildHermesWebSocketURL(request.config));
 		} catch (error) {
+			logRuntimeEvent('error', 'ai-chat', { event: 'websocket_open_failure', error: runtimeErrorDetails(error) });
 			reject(error);
 			return;
 		}

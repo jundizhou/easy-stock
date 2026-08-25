@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/httpapi"
 	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/runtimelog"
 )
 
 func main() {
@@ -44,6 +46,19 @@ func main() {
 	if masteryCacheDir == "" {
 		masteryCacheDir = dataPath(dataDir, "trading-mastery")
 	}
+	logDirectory := os.Getenv("A_STOCK_LOG_DIR")
+	if logDirectory == "" {
+		logDirectory = dataPath(dataDir, "logs")
+	}
+	if logDirectory != "" {
+		logger, closer, err := runtimelog.ConfigureStandard(logDirectory, "backend")
+		if err != nil {
+			log.Printf("runtime logging unavailable: %v", err)
+		} else {
+			defer closer.Close()
+			logger.Printf("level=info event=runtime_start component=backend version=%q", runtimeVersion())
+		}
+	}
 	hermesHome := os.Getenv("A_STOCK_HERMES_HOME")
 	if hermesHome == "" {
 		hermesHome = dataPath(dataDir, "hermes-home")
@@ -73,6 +88,7 @@ func main() {
 		SettingsPath:         settingsPath,
 		HermesGateway:        hermesGateway,
 		MasteryLibrary:       masteryLibrary,
+		Logger:               log.Default(),
 		StrictPersistence:    true,
 	})
 	if err := server.StartupError(); err != nil {
@@ -98,6 +114,13 @@ func main() {
 	if err := server.Close(); err != nil {
 		log.Printf("close persistent data: %v", err)
 	}
+}
+
+func runtimeVersion() string {
+	if value := strings.TrimSpace(os.Getenv("A_STOCK_APP_VERSION")); value != "" {
+		return value
+	}
+	return "development"
 }
 
 func preferredDataDir(configDir string) string {

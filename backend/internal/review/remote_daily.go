@@ -8,11 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"easy-stock/backend/internal/runtimelog"
 )
 
 const (
@@ -128,11 +131,35 @@ func (s *RemoteDailySync) Status() RemoteDailySyncStatus {
 	return s.status
 }
 
-func (s *RemoteDailySync) Run(ctx context.Context) {
+func (s *RemoteDailySync) Run(ctx context.Context, loggers ...*log.Logger) {
 	if s == nil || s.store == nil {
 		return
 	}
-	s.syncWithTimeout(ctx)
+	var logger *log.Logger
+	if len(loggers) > 0 {
+		logger = loggers[0]
+	}
+	run := func() {
+		s.syncWithTimeout(ctx)
+		if logger == nil {
+			return
+		}
+		status := s.Status()
+		level := "info"
+		if strings.TrimSpace(status.LastError) != "" || status.Status == "error" {
+			level = "warn"
+		}
+		logger.Printf(
+			"level=%s event=scheduler_run feature=reviews task=remote_daily_sync status=%q total=%d synced=%d pending=%d error=%q",
+			level,
+			status.Status,
+			status.TotalAuthors,
+			status.SyncedAuthors,
+			status.PendingAuthors,
+			runtimelog.Redact(status.LastError),
+		)
+	}
+	run()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -141,7 +168,7 @@ func (s *RemoteDailySync) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if s.shouldPoll(s.now()) {
-				s.syncWithTimeout(ctx)
+				run()
 			}
 		}
 	}

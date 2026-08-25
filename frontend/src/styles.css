@@ -2802,6 +2802,15 @@ a:focus-visible {
 .settings-section-title h3 { margin: 0; font-size: 15px; }
 .settings-section-title p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 
+.runtime-log-summary { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 13px; border: 1px solid #cfe0f2; border-radius: 8px; background: #f7faff; }
+.runtime-log-summary > span { display: grid; gap: 4px; min-width: 0; }
+.runtime-log-summary strong { color: var(--text); font-size: 12px; }
+.runtime-log-summary small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.runtime-log-summary code { overflow: hidden; color: var(--subtle); font: 9px "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-log-summary > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 36px; padding: 0 11px; border: 1px solid #b9cce0; border-radius: 7px; background: #ffffff; color: #315573; font-size: 10px; font-weight: 650; cursor: pointer; }
+.runtime-log-summary > button:hover:not(:disabled) { background: #eaf4ff; }
+.runtime-log-summary > button:disabled { opacity: .52; cursor: default; }
+
 .settings-grid { display: grid; gap: 12px; }
 .settings-grid.two-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .llm-profile-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; padding: 10px; border: 1px solid #cfe0f2; border-radius: 9px; background: #f7fbff; }
@@ -2959,7 +2968,7 @@ a:focus-visible {
 
 .secret-input-row {
 	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) auto;
+	grid-template-columns: 18px minmax(0, 1fr) auto auto;
 	align-items: center;
 	gap: 7px;
 	min-height: 42px;
@@ -2973,17 +2982,20 @@ a:focus-visible {
 .secret-input-row button {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 4px;
 	align-self: stretch;
-	padding: 0 10px;
 	border: 0;
 	border-left: 1px solid var(--line-soft);
 	background: transparent;
-	color: #b23740;
 	font-size: 10px;
 	cursor: pointer;
 }
-.secret-input-row button:hover { background: #fff4f5; }
+.secret-input-row .secret-visibility-button { width: 40px; padding: 0; color: #526b86; }
+.secret-input-row .secret-visibility-button:hover:not(:disabled) { background: #edf5ff; color: #175ea9; }
+.secret-input-row .secret-visibility-button:disabled { color: #aab5c1; cursor: default; }
+.secret-input-row .secret-clear-button { padding: 0 10px; color: #b23740; }
+.secret-input-row .secret-clear-button:hover { background: #fff4f5; }
 .secret-field.clearing .secret-input-row { border-color: #edc7ca; background: #fff8f8; }
 
 .llm-connection-test {
@@ -3105,6 +3117,8 @@ a:focus-visible {
 	.llm-connection-test { align-items: stretch; flex-direction: column; }
 	.llm-connection-test > button { width: 100%; }
 	.app-update-actions button { flex: 1 1 120px; }
+	.runtime-log-summary { align-items: stretch; flex-direction: column; }
+	.runtime-log-summary > button { width: 100%; }
 	.agent-settings-heading { align-items: stretch; flex-direction: column; }
 	.agent-settings-heading > label { width: 100%; }
 	.agent-settings-heading > button { align-self: flex-start; }

@@ -50,6 +50,7 @@ const config = {
     'review-login-preload.cjs',
     'xueqiu-login-preload.cjs',
     'backend-process.cjs',
+    'runtime-logger.cjs',
     'browser-auth.cjs',
     'data-protection.cjs',
     'hermes-runtime-root.cjs',

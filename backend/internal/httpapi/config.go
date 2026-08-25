@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -126,6 +127,7 @@ type Config struct {
 	RemoteDailySync      *review.RemoteDailySync
 	HermesGateway        hermes.Gateway
 	MasteryLibrary       *methodology.Library
+	Logger               *log.Logger
 	StrictPersistence    bool
 }
 

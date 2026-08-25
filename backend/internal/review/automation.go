@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +21,7 @@ import (
 
 	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/hermes"
+	"easy-stock/backend/internal/runtimelog"
 )
 
 type URLImporter interface {
@@ -762,7 +764,11 @@ func (a *Automation) withRuntimeProfile(profile appsettings.ReviewSourceProfile)
 	}
 	return profile
 }
-func (a *Automation) RunScheduler(ctx context.Context) {
+func (a *Automation) RunScheduler(ctx context.Context, loggers ...*log.Logger) {
+	var logger *log.Logger
+	if len(loggers) > 0 {
+		logger = loggers[0]
+	}
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -771,8 +777,26 @@ func (a *Automation) RunScheduler(ctx context.Context) {
 			return
 		case <-ticker.C:
 			syncCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			a.syncDue(syncCtx)
+			results := a.syncDue(syncCtx)
 			cancel()
+			if logger != nil && len(results) > 0 {
+				failures := 0
+				for _, result := range results {
+					if strings.TrimSpace(result.Error) != "" {
+						failures++
+					}
+				}
+				level := "info"
+				if failures > 0 {
+					level = "warn"
+				}
+				logger.Printf("level=%s event=scheduler_run feature=reviews task=subscription_sync total=%d failures=%d", level, len(results), failures)
+				for _, result := range results {
+					if strings.TrimSpace(result.Error) != "" {
+						logger.Printf("level=warn event=scheduler_error feature=reviews task=subscription_sync error=%q", runtimelog.Redact(result.Error))
+					}
+				}
+			}
 		}
 	}
 }

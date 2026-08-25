@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('aStock', {
   getBackendConfig: () => ipcRenderer.invoke('backend-config'),
+	getRuntimeLogStatus: () => ipcRenderer.invoke('runtime-log-status'),
+	openRuntimeLogs: () => ipcRenderer.invoke('runtime-open-logs'),
+	logRuntimeEvent: (entry) => ipcRenderer.invoke('runtime-log', entry),
   getWechatServiceStatus: () => ipcRenderer.invoke('wechat-service-status'),
   openWechatLogin: () => ipcRenderer.invoke('open-wechat-login'),
   getBrowserAuthStatus: (profileId, source = 'xueqiu') => ipcRenderer.invoke('browser-auth-status', profileId, source),

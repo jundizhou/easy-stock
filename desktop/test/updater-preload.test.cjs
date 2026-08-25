@@ -38,6 +38,14 @@ test('preload exposes updater IPC calls and removes status listeners cleanly', a
     'app-update-download',
     'app-update-install',
   ]);
+  await exposed.getRuntimeLogStatus();
+  await exposed.openRuntimeLogs();
+  await exposed.logRuntimeEvent({ level: 'warn', feature: 'test', message: 'failed' });
+  assert.deepEqual(invocations.slice(-3), [
+    ['runtime-log-status'],
+    ['runtime-open-logs'],
+    ['runtime-log', { level: 'warn', feature: 'test', message: 'failed' }],
+  ]);
 
   let received;
   const unsubscribe = exposed.onUpdateStatus((status) => { received = status; });

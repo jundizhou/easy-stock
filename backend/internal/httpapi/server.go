@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"easy-stock/backend/internal/providers/sina"
 	"easy-stock/backend/internal/providers/tencent"
 	"easy-stock/backend/internal/review"
+	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/sector"
 	"easy-stock/backend/internal/strategy/inflection"
 )
@@ -64,10 +66,14 @@ type Server struct {
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
 	startupError          error
+	logger                *log.Logger
 }
 
 func NewServer(config any) *Server {
 	cfg := normalizeConfig(config)
+	if cfg.Logger == nil {
+		cfg.Logger = log.Default()
+	}
 	var startupErrors []error
 	sinaClient := sina.NewClient()
 	eastMoneyClient := eastmoney.NewClient()
@@ -259,6 +265,7 @@ func NewServer(config any) *Server {
 		masteryLibrary:        cfg.MasteryLibrary,
 		marketEmotionStore:    cfg.MarketEmotionStore,
 		startupError:          errors.Join(startupErrors...),
+		logger:                cfg.Logger,
 	}
 	if kaipanlaService != nil {
 		s.themeRadarStore = kaipanlaService.Store()
@@ -300,33 +307,45 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.withCORS(w, r)
+	startedAt := time.Now()
+	requestID := runtimeRequestID(r)
+	loggedWriter := &requestLogWriter{ResponseWriter: w}
+	loggedWriter.Header().Set("X-Request-ID", requestID)
+	defer s.logRequest(r, loggedWriter, requestID, startedAt)
+
+	s.withCORS(loggedWriter, r)
 	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
+		loggedWriter.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if !s.authorized(r) {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		writeError(loggedWriter, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	s.mux.ServeHTTP(w, r)
+	s.mux.ServeHTTP(loggedWriter, r)
 }
 
 func (s *Server) RunReviewScheduler(ctx context.Context) {
 	if s.reviewAutomation != nil {
-		s.reviewAutomation.RunScheduler(ctx)
+		s.logSchedulerLifecycle(ctx, "reviews", "subscription_sync", func() {
+			s.reviewAutomation.RunScheduler(ctx, s.logger)
+		})
 	}
 }
 
 func (s *Server) RunRemoteDailyReviewScheduler(ctx context.Context) {
 	if s.remoteDailySync != nil {
-		s.remoteDailySync.Run(ctx)
+		s.logSchedulerLifecycle(ctx, "reviews", "remote_daily_sync", func() {
+			s.remoteDailySync.Run(ctx, s.logger)
+		})
 	}
 }
 
 func (s *Server) RunMarketEmotionScheduler(ctx context.Context) {
 	if s.marketEmotion != nil {
-		s.marketEmotion.runScheduler(ctx)
+		s.logSchedulerLifecycle(ctx, "short-term", "market_emotion", func() {
+			s.marketEmotion.runScheduler(ctx, s.logger)
+		})
 	}
 }
 
@@ -334,7 +353,11 @@ func (s *Server) RunMasteryScheduler(ctx context.Context) {
 	if s.masteryLibrary == nil {
 		return
 	}
-	_, _ = s.masteryLibrary.Snapshot(ctx, false)
+	if s.logger != nil {
+		s.logger.Printf("level=info event=scheduler_start feature=trading-mastery task=mastery_snapshot")
+		defer s.logger.Printf("level=info event=scheduler_stop feature=trading-mastery task=mastery_snapshot")
+	}
+	s.refreshMasterySnapshot(ctx, false)
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {
@@ -342,9 +365,30 @@ func (s *Server) RunMasteryScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = s.masteryLibrary.Snapshot(ctx, true)
+			s.refreshMasterySnapshot(ctx, true)
 		}
 	}
+}
+
+func (s *Server) logSchedulerLifecycle(_ context.Context, feature, task string, run func()) {
+	if s.logger != nil {
+		s.logger.Printf("level=info event=scheduler_start feature=%s task=%s", feature, task)
+		defer s.logger.Printf("level=info event=scheduler_stop feature=%s task=%s", feature, task)
+	}
+	run()
+}
+
+func (s *Server) refreshMasterySnapshot(ctx context.Context, force bool) {
+	startedAt := time.Now()
+	_, err := s.masteryLibrary.Snapshot(ctx, force)
+	if s.logger == nil {
+		return
+	}
+	if err != nil {
+		s.logger.Printf("level=warn event=scheduler_error feature=trading-mastery task=mastery_snapshot force=%t duration_ms=%d error=%q", force, time.Since(startedAt).Milliseconds(), runtimelog.Redact(err.Error()))
+		return
+	}
+	s.logger.Printf("level=info event=scheduler_run feature=trading-mastery task=mastery_snapshot force=%t duration_ms=%d", force, time.Since(startedAt).Milliseconds())
 }
 
 func (s *Server) routes() {
@@ -686,6 +730,9 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
+	if status >= http.StatusInternalServerError {
+		log.Printf("level=error event=http_error status=%d message=%q", status, runtimelog.Redact(message))
+	}
 	writeJSON(w, status, map[string]string{"error": message})
 }
 

@@ -1,3 +1,5 @@
+import { logRuntimeEvent, runtimeErrorDetails, runtimeFeatureForPath } from './runtime-log';
+
 export type BackendConfig = {
   backendUrl: string;
   token: string;
@@ -5,6 +7,9 @@ export type BackendConfig = {
 
 export type BackendBridge = {
   getBackendConfig: () => Promise<BackendConfig>;
+	getRuntimeLogStatus?: () => Promise<RuntimeLogStatus>;
+	openRuntimeLogs?: () => Promise<void>;
+	logRuntimeEvent?: (entry: RuntimeLogEntry) => Promise<boolean>;
   getWechatServiceStatus?: () => Promise<WechatServiceStatus>;
   openWechatLogin?: () => Promise<WechatServiceStatus>;
   getBrowserAuthStatus?: (profileId: string, source?: 'xueqiu' | 'taoguba') => Promise<BrowserAuthStatus>;
@@ -17,6 +22,19 @@ export type BackendBridge = {
   openUpdateRelease?: () => Promise<void>;
   openUpdateBackups?: () => Promise<void>;
   onUpdateStatus?: (listener: (status: AppUpdateStatus) => void) => () => void;
+};
+
+export type RuntimeLogStatus = {
+	available: boolean;
+	directory: string;
+	max_file_mb: number;
+	backup_files: number;
+};
+
+export type RuntimeLogEntry = {
+	level: 'debug' | 'info' | 'warn' | 'error';
+	feature: string;
+	message: string;
 };
 
 export type AppUpdateState = 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'installing';
@@ -1559,11 +1577,23 @@ export function buildStreamUrl(config: BackendConfig, symbols: string[], interva
 export async function requestJSON<T>(config: BackendConfig, path: string, init: RequestInit = {}): Promise<T> {
 	const headers = new Headers(init.headers);
 	if (config.token) headers.set('Authorization', `Bearer ${config.token}`);
-	const response = await fetch(new URL(path, config.backendUrl), {
-		...init,
-		headers,
-	});
+	const requestID = createRuntimeRequestID();
+	headers.set('X-Request-ID', requestID);
+	const requestURL = new URL(path, config.backendUrl);
+	let response: Response;
+	try {
+		response = await fetch(requestURL, { ...init, headers });
+	} catch (error) {
+		logRuntimeEvent('error', runtimeFeatureForPath(requestURL.pathname), {
+			event: 'network_failure', request_id: requestID, method: init.method || 'GET', path: requestURL.pathname, error: runtimeErrorDetails(error),
+		});
+		throw error;
+	}
   if (!response.ok) {
+		const responseRequestID = response.headers.get('X-Request-ID') || requestID;
+		logRuntimeEvent('warn', runtimeFeatureForPath(requestURL.pathname), {
+			event: 'http_failure', request_id: responseRequestID, method: init.method || 'GET', path: requestURL.pathname, status: response.status,
+		});
     const text = await response.text();
 		let message = text;
 		try {
@@ -1574,7 +1604,12 @@ export async function requestJSON<T>(config: BackendConfig, path: string, init: 
 		throw new Error(message || `HTTP ${response.status}`);
   }
 	if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+	return response.json() as Promise<T>;
+}
+
+function createRuntimeRequestID() {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+	return `renderer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function normalizeConfig(config: BackendConfig): BackendConfig {

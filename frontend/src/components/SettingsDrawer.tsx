@@ -1,10 +1,13 @@
 import {
 	Bot,
 	CheckCircle2,
-	Database,
 	CircleAlert,
-	Globe2,
 	Clock3,
+	Database,
+	Eye,
+	EyeOff,
+	FolderOpen,
+	Globe2,
 	KeyRound,
 	LoaderCircle,
 	LogIn,
@@ -19,7 +22,7 @@ import {
 	X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, RuntimeLogStatus, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
 import { llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { HermesAgentSettingsPanel } from './HermesAgentSettingsPanel';
@@ -77,6 +80,8 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 	const [wechatServiceStatus, setWechatServiceStatus] = useState<WechatServiceStatus>({ available: false, configured: false, authenticated: false, state: 'starting', message: '内置微信公众号服务正在启动' });
 	const [wechatLoginURL, setWechatLoginURL] = useState('');
 	const [wechatLoginBaseline, setWechatLoginBaseline] = useState('');
+	const [runtimeLogStatus, setRuntimeLogStatus] = useState<RuntimeLogStatus | null>(null);
+	const [openingRuntimeLogs, setOpeningRuntimeLogs] = useState(false);
 	const modelFetchSequence = useRef(0);
 
 	useEffect(() => {
@@ -129,6 +134,14 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 			modelFetchSequence.current += 1;
 		};
 	}, [config, open]);
+
+	useEffect(() => {
+		if (!open || !window.aStock?.getRuntimeLogStatus) {
+			setRuntimeLogStatus(null);
+			return;
+		}
+		void window.aStock.getRuntimeLogStatus().then(setRuntimeLogStatus).catch(() => setRuntimeLogStatus(null));
+	}, [open]);
 
 	useEffect(() => {
 		if (!open) {
@@ -229,7 +242,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		setTestState('idle');
 		setTestResult(null);
 		setModelListMessage(nextDefinition.baseURL
-			? '输入模型 API Key 后将自动获取模型，也可手动点击“获取模型”。'
+			? '请确认 Base URL，输入模型 API Key，然后点击“获取模型”。'
 			: '请输入兼容接口的 Base URL 和 API Key，再获取模型列表。');
 	};
 
@@ -279,14 +292,14 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		setTestResult(null);
 	};
 
-	const fetchModels = async (overrides: { provider?: string; baseURL?: string; apiKey?: string; automatic?: boolean } = {}) => {
+	const fetchModels = async () => {
 		if (!config) return;
 		const fetchID = ++modelFetchSequence.current;
-		const requestProvider = overrides.provider || provider;
-		const requestBaseURL = overrides.baseURL ?? baseURL.trim();
-		const requestAPIKey = overrides.apiKey ?? (profileKeyValues[activeLLMProfileID] || '').trim();
+		const requestProvider = provider;
+		const requestBaseURL = baseURL.trim();
+		const requestAPIKey = (profileKeyValues[activeLLMProfileID] || '').trim();
 		setModelListState('loading');
-		setModelListMessage(overrides.automatic ? `正在自动读取 ${llmProviderDefinition(requestProvider).label} 的模型列表…` : '正在读取模型服务的模型列表…');
+		setModelListMessage('正在读取模型服务的模型列表…');
 		try {
 			const request: { provider: string; base_url: string; api_key?: string } = { provider: requestProvider, base_url: requestBaseURL };
 			if (requestAPIKey || clearProfileKeys.has(activeLLMProfileID)) request.api_key = requestAPIKey;
@@ -308,17 +321,6 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 			setModelListMessage(error instanceof Error ? error.message : '获取模型列表失败');
 			setManualModel(true);
 		}
-	};
-
-	const fetchModelsAfterAPIKeyInput = (apiKey: string) => {
-		const trimmedAPIKey = apiKey.trim();
-		if (!trimmedAPIKey) return;
-		if (!baseURL.trim()) {
-			setModelListState('error');
-			setModelListMessage('请先填写 API Base URL，再自动获取模型列表。');
-			return;
-		}
-		void fetchModels({ apiKey: trimmedAPIKey, automatic: true });
 	};
 
 	const updateReviewProfile = (id: string, patch: Partial<ReviewProfileDraft>) => setReviewProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
@@ -447,6 +449,19 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		}
 	};
 
+	const openRuntimeLogs = async () => {
+		if (!window.aStock?.openRuntimeLogs) return;
+		setOpeningRuntimeLogs(true);
+		try {
+			await window.aStock.openRuntimeLogs();
+		} catch (error) {
+			setState('error');
+			setMessage(error instanceof Error ? error.message : '打开日志目录失败');
+		} finally {
+			setOpeningRuntimeLogs(false);
+		}
+	};
+
 	if (!open) return null;
 
 	return (
@@ -483,18 +498,16 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 								<label><span>服务商</span><select value={provider} onChange={(event) => updateProvider(event.target.value)}>{llmProviders.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
 								<label><span>接口协议</span><select value={apiMode} onChange={(event) => { setAPIMode(event.target.value); patchSelectedLLMProfile({ api_mode: event.target.value }); setTestState('idle'); setTestResult(null); }}><option value="chat_completions">Chat Completions</option><option value="codex_responses">Responses API</option><option value="anthropic_messages">Anthropic Messages</option></select></label>
 							</div>
-							<SecretField label="模型 API Key" secretKey="llm_api_key" status={selectedLLMProfile?.api_key} value={profileKeyValues[activeLLMProfileID] || ''} clearing={clearProfileKeys.has(activeLLMProfileID)} onChange={updateSecret} onBlur={(_key, value) => fetchModelsAfterAPIKeyInput(value)} onClear={toggleClear} hint="每套配置独立安全保存；切换配置不会覆盖其他密钥" />
-							<div className="settings-grid two-columns">
+								<label><span>API Base URL</span><input value={baseURL} onChange={(event) => updateBaseURL(event.target.value)} placeholder="https://api.example.com/v1" /></label>
+								<SecretField key={`llm-api-key-${activeLLMProfileID}`} label="模型 API Key" secretKey="llm_api_key" status={selectedLLMProfile?.api_key} value={profileKeyValues[activeLLMProfileID] || ''} clearing={clearProfileKeys.has(activeLLMProfileID)} onChange={updateSecret} onClear={toggleClear} hint="每套配置独立安全保存；切换配置不会覆盖其他密钥" revealable />
 								<div className="model-field">
 									<span className="model-field-heading"><span>模型</span>{modelListState === 'success' && <button type="button" onClick={() => setManualModel((current) => !current)}>{manualModel ? '使用下拉' : '手动输入'}</button>}</span>
 									<span className="model-picker-row">
 										{modelListState === 'success' && !manualModel ? <select value={model} onChange={(event) => { if (event.target.value === manualModelOption) setManualModel(true); else updateModel(event.target.value); }}><option value="">请选择模型</option>{selectableModels.map((option) => <option value={option.id} key={option.id}>{modelOptionLabel(option)}</option>)}<option value={manualModelOption}>手动输入其他模型…</option></select> : <input value={model} onChange={(event) => updateModel(event.target.value)} placeholder="例如 gpt-5.5 或 deepseek-chat" />}
 										<button type="button" className="model-refresh-button" onClick={() => void fetchModels()} disabled={!config || state === 'saving' || modelListState === 'loading'}>{modelListState === 'loading' ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{modelListState === 'success' ? '刷新' : '获取模型'}</button>
 									</span>
-									<small className={`model-list-message ${modelListState}`}>{modelListMessage || '从当前 Base URL 的 /models 接口读取，也可继续手动输入。'}</small>
+									<small className={`model-list-message ${modelListState}`}>{modelListMessage || '请先填写 Base URL 和 API Key，再获取模型列表；也可继续手动输入。'}</small>
 								</div>
-								<label><span>API Base URL</span><input value={baseURL} onChange={(event) => updateBaseURL(event.target.value)} placeholder="https://api.example.com/v1" /></label>
-							</div>
 							<label className="settings-timeout-field"><span>模型响应等待时间（秒）</span><input type="number" min={30} max={3600} step={30} value={responseTimeoutSeconds} onChange={(event) => setResponseTimeoutSeconds(Number(event.target.value) || defaultResponseTimeoutSeconds)} /><small>默认 300 秒，范围 30–3600 秒；模型长时间无响应时将等待更久再重试。</small></label>
 							<div className={`llm-connection-test ${testState}`}>
 								<div><PlugZap size={17} /><span><strong>{testState === 'success' ? 'Hermes 模型连接可用' : testState === 'error' ? '连接测试未通过' : testState === 'testing' ? 'Hermes 正在请求模型' : 'Hermes 真实模型探针'}</strong><small>{testResult ? `Hermes · ${testResult.model} · ${testResult.api_mode} · ${testResult.latency_ms}ms · ${testResult.response}` : '保存当前配置后由 Hermes 发送最小提示词，并验证模型确实返回内容。'}</small></span></div>
@@ -527,6 +540,14 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 						</section>
 
 						<AppUpdatePanel />
+
+						<section className="settings-section runtime-log-section">
+							<div className="settings-section-title"><FolderOpen size={18} /><div><h3>运行日志</h3><p>遇到问题时，可将此目录中的日志文件提供给开发者排查。</p></div></div>
+							<div className="runtime-log-summary">
+								<span><strong>{runtimeLogStatus?.available ? '日志正在自动保存' : '请在桌面应用中查看日志'}</strong><small>{runtimeLogStatus ? `每个文件最多 ${runtimeLogStatus.max_file_mb} MB，保留 ${runtimeLogStatus.backup_files} 份历史记录；密钥和登录凭据会在写入前隐藏。` : '浏览器开发模式不保存桌面运行日志。'}</small>{runtimeLogStatus?.directory && <code title={runtimeLogStatus.directory}>{runtimeLogStatus.directory}</code>}</span>
+								<button type="button" onClick={() => void openRuntimeLogs()} disabled={!runtimeLogStatus?.available || openingRuntimeLogs}>{openingRuntimeLogs ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开日志目录</button>
+							</div>
+						</section>
 
 						<footer className="settings-footer">
 							<div className={`settings-message ${state}`}>{state === 'saved' && <CheckCircle2 size={15} />}{state === 'error' && <KeyRound size={15} />}<span>{message || '留空的模型密钥会保留 Hermes .env 中的现有值。'}</span></div>
@@ -610,24 +631,26 @@ function modelOptionLabel(option: LLMModelOption) {
 	return detail && detail !== option.id ? `${option.id} · ${detail}` : option.id;
 }
 
-function SecretField({ label, secretKey, status, value, clearing, onChange, onBlur, onClear, hint }: {
+function SecretField({ label, secretKey, status, value, clearing, onChange, onClear, hint, revealable = false }: {
 	label: string;
 	secretKey: SecretKey;
 	status?: SecretSettingStatus;
 	value: string;
 	clearing: boolean;
 	onChange: (key: SecretKey, value: string) => void;
-	onBlur?: (key: SecretKey, value: string) => void;
 	onClear: (key: SecretKey) => void;
 	hint?: string;
+	revealable?: boolean;
 }) {
+	const [revealed, setRevealed] = useState(false);
 	return (
 		<label className={`secret-field ${clearing ? 'clearing' : ''}`}>
 			<span className="secret-field-heading"><span>{label}{hint && <small>{hint}</small>}</span>{status?.configured && <em>{clearing ? '等待清除' : `已配置 ${status.masked || ''}`}</em>}</span>
 			<span className="secret-input-row">
 				<KeyRound size={15} />
-				<input type="password" autoComplete="new-password" value={value} disabled={clearing} onChange={(event) => onChange(secretKey, event.target.value)} onBlur={(event) => onBlur?.(secretKey, event.target.value)} placeholder={status?.configured ? '输入新值可覆盖，留空保持不变' : '输入凭据'} />
-				{status?.configured && <button type="button" onClick={() => onClear(secretKey)} title={clearing ? '取消清除' : '清除已保存凭据'}><Trash2 size={14} />{clearing ? '撤销' : '清除'}</button>}
+				<input type={revealable && revealed ? 'text' : 'password'} autoComplete="new-password" value={value} disabled={clearing} onChange={(event) => onChange(secretKey, event.target.value)} placeholder={status?.configured ? '输入新值可覆盖，留空保持不变' : '输入凭据'} />
+				{revealable && <button type="button" className="secret-visibility-button" onClick={() => setRevealed((current) => !current)} disabled={clearing || !value} title={revealed ? '隐藏 API Key' : '显示 API Key'} aria-label={revealed ? '隐藏 API Key' : '显示 API Key'} aria-pressed={revealed}>{revealed ? <EyeOff size={15} /> : <Eye size={15} />}</button>}
+				{status?.configured && <button type="button" className="secret-clear-button" onClick={() => onClear(secretKey)} title={clearing ? '取消清除' : '清除已保存凭据'}><Trash2 size={14} />{clearing ? '撤销' : '清除'}</button>}
 			</span>
 		</label>
 	);

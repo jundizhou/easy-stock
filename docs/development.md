@@ -153,6 +153,7 @@ Electron 桌面模式
 | `A_STOCK_MARKET_EMOTION_DB` | 市场情绪历史 SQLite 路径 |
 | `A_STOCK_THEME_RADAR_DB` | 趋势题材与短线侠快照 SQLite 路径 |
 | `A_STOCK_MASTERY_CACHE` | 游资心法缓存目录 |
+| `A_STOCK_LOG_DIR` | 运行日志目录；桌面端默认使用用户数据目录下的 `logs` |
 | `A_STOCK_DUANXIANXIA_BASE_URL` | 短线侠服务地址覆盖，主要用于测试 |
 | `A_STOCK_WECHAT_API_URL` | 微信公众号采集服务地址 |
 
@@ -270,6 +271,18 @@ Go 后端在未显式配置路径时，会使用操作系统用户配置目录�
 - Hermes 配置、密钥和会话；
 - 游资心法缓存；
 - 雪球、淘股吧等持久浏览器会话。
+
+桌面端会在用户数据目录的 `logs` 子目录滚动保存三类运行日志：
+
+| 文件 | 内容 |
+| --- | --- |
+| `desktop.log` | 应用启动、自动更新、内置服务、浏览器登录桥接和子进程状态 |
+| `backend.log` | 各功能接口、数据源错误和后台定时任务 |
+| `renderer.log` | 页面未捕获异常、网络失败和非成功接口响应 |
+
+每个文件最大 5 MB，并保留 5 份历史文件，例如 `backend.log.1`。接口日志使用 `X-Request-ID` 关联前端和后端记录，只保存接口路径，不保存查询参数或请求体。日志写入前会隐藏 Token、Cookie、API Key 和 Authorization 等凭据，也不会主动记录用户粘贴的文章正文或对话内容。
+
+普通用户可从「系统设置 → 运行日志」直接打开目录。直接运行后端时，可通过 `A_STOCK_LOG_DIR` 指定相同的日志目录。
 
 可使用 `A_STOCK_USER_DATA_DIR` 覆盖 Electron 用户数据目录。清理这些目录会删除本机配置、登录态和历史数据，操作前应先备份。
 

@@ -67,6 +67,7 @@ import { AIChatWorkspace } from './components/AIChatWorkspace';
 import { MarketOverviewWorkspace } from './components/MarketOverviewWorkspace';
 import { TradingMastery } from './components/TradingMastery';
 import { StockAIAnalysisWorkspace, StockAIWorkspaceMode } from './components/StockAIAnalysisWorkspace';
+import { logRuntimeEvent } from './lib/runtime-log';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'ai' | 'market';
@@ -497,10 +498,17 @@ export function App() {
 			setStreamStatus('实时流待命');
 			return;
 		}
+		let disposed = false;
 		const socket = new WebSocket(buildStreamUrl(config, streamSymbols, 3000));
 		socket.onopen = () => setStreamStatus('实时行情已连接');
-		socket.onclose = () => setStreamStatus('实时行情已断开');
-		socket.onerror = () => setStreamStatus('实时行情异常');
+		socket.onclose = () => {
+			setStreamStatus('实时行情已断开');
+			if (!disposed) logRuntimeEvent('warn', 'quotes', { event: 'websocket_closed' });
+		};
+		socket.onerror = () => {
+			setStreamStatus('实时行情异常');
+			logRuntimeEvent('error', 'quotes', { event: 'websocket_failure' });
+		};
 		socket.onmessage = (event) => {
 			const message = JSON.parse(event.data) as StreamMessage;
 			if (message.type === 'quotes' && message.quotes) {
@@ -509,9 +517,13 @@ export function App() {
 			}
 			if (message.type === 'error') {
 				setStreamStatus(message.error || '实时行情异常');
+				logRuntimeEvent('warn', 'quotes', { event: 'websocket_message_error' });
 			}
 		};
-		return () => socket.close();
+		return () => {
+			disposed = true;
+			socket.close();
+		};
 	}, [config, streamKey, workspaceMode]);
 
 	const loadLimitUpLadder = useCallback(async () => {
