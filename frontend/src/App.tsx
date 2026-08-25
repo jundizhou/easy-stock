@@ -137,7 +137,7 @@ export function App() {
 	const historyFlightsRef = useRef<Map<string, Promise<void>>>(new Map());
 	const priorityPrefetchPromiseRef = useRef<Promise<void> | null>(null);
 
-	const rankedThemes = useMemo(() => rankThemeOverviews(themeOverviews, themeStrengthWindow), [themeOverviews, themeStrengthWindow]);
+	const rankedThemes = useMemo(() => rankThemeOverviews(themeOverviews, themeStrengthWindow).slice(0, 16), [themeOverviews, themeStrengthWindow]);
 	const activeOverview = useMemo(
 		() => themeOverviews.find((item) => item.theme === activeTheme) || null,
 		[activeTheme, themeOverviews],
@@ -145,7 +145,7 @@ export function App() {
 	const activeStrengthScore = activeOverview ? themeStrengthScore(activeOverview, themeStrengthWindow) : null;
 	const activeEmotion = activeOverview ? calculateThemeEmotion(activeOverview, activeStrengthScore ?? undefined) : null;
 	const isTrendOverview = typeof activeOverview?.trend_score === 'number';
-	const isKaipanlaOverview = activeOverview?.source === 'duanxianxia:kaipanla';
+	const isKaipanlaOverview = activeOverview?.theme.startsWith('kpl:') || activeOverview?.theme.startsWith('fusion:') || false;
 	const activeSnapshotID = activeOverview?.snapshot_id || '';
 	const baseThemeStocks = useMemo(() => buildThemeStocks(sectorMap), [sectorMap]);
 	const themeStocks = useMemo(
@@ -625,9 +625,11 @@ export function App() {
 	const currentStatusText = workspaceMode === 'limit-up'
 		? limitUpState === 'loading' ? '同步连板梯队' : limitUpState === 'error' ? '连板数据异常' : '连板结构已更新'
 		: workspaceMode === 'mastery' ? '游资心法库已连接' : workspaceMode === 'reviews' ? '复盘资料库已连接' : workspaceMode === 'stock-ai' ? '个股分析引擎已连接' : workspaceMode === 'ai' ? 'AI 助手已连接' : workspaceMode === 'market' ? '行情数据层已连接' : statusText;
-	const themeSourceStatus = overviewMeta?.source === 'duanxianxia:kaipanla'
-		? overviewMeta.carry_forward ? '沿用 ' + (overviewMeta.trade_date || '上一交易日') + ' 开盘啦' : (overviewMeta.trade_date || '当日') + ' 开盘啦'
-		: '本地趋势题材';
+	const themeSourceStatus = overviewMeta?.source === 'theme-radar:fusion'
+		? overviewMeta.carry_forward ? '行业趋势 · 开盘啦衰减融合' : '行业趋势 · 开盘啦融合'
+		: overviewMeta?.source === 'duanxianxia:kaipanla'
+			? overviewMeta.carry_forward ? '沿用 ' + (overviewMeta.trade_date || '上一交易日') + ' 开盘啦' : (overviewMeta.trade_date || '当日') + ' 开盘啦'
+			: '行业趋势强度';
 	const currentSubStatus = workspaceMode === 'limit-up'
 		? limitUpData ? `${limitUpData.current.trade_date} · ${limitUpData.session_status} · ${limitUpData.meta.source.includes('duanxianxia') ? '开盘啦涨停池' : '东方财富兜底'} · ${limitUpData.concept_status === 'ready' ? '题材已归因' : '题材降级'}` : '开盘啦涨停池优先'
 		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Hermes 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'ai' ? '本机 Hermes AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : themeSourceStatus + ' · ' + streamStatus;
@@ -730,7 +732,6 @@ export function App() {
 					<div className="theme-list">
 						{rankedThemes.map((theme, index) => {
 							const emotion = calculateThemeEmotion(theme, themeStrengthScore(theme, themeStrengthWindow));
-							const sourceLabel = themeSourceLabel(theme);
 							return (
 								<button
 									type="button"
@@ -742,7 +743,6 @@ export function App() {
 									<span className="theme-copy">
 										<span className="theme-name-line">
 											<strong>{theme.name}</strong>
-											{sourceLabel && <em className={theme.provisional ? 'provisional' : 'primary'}>{sourceLabel}</em>}
 										</span>
 										<small>{emotion.stage} · {theme.leaders?.[0] || theme.top_node || '等待主线证据'}</small>
 										<span className="theme-meter"><i style={{ width: `${emotion.score}%` }} /></span>
@@ -1175,13 +1175,6 @@ function sourceHealthMessage(message?: string) {
 	if (!message) return '异常';
 	if (message === 'requires token') return '需要 Token';
 	return message;
-}
-
-function themeSourceLabel(theme: ThemeOverview) {
-	if (theme.provisional) return '趋势新增';
-	if (theme.source === 'duanxianxia:kaipanla') return theme.carry_forward ? '' : '开盘啦';
-	if (theme.source === 'local-fallback') return '本地补充';
-	return '本地趋势';
 }
 
 function kaipanlaLeaderRank(role?: string) {

@@ -36,7 +36,10 @@ func (p *fakeMarketOverviewProvider) MarketIndexSeries(context.Context, string, 
 
 func (p *fakeMarketOverviewProvider) IndustryMomentum(context.Context, int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {
 	meta, err := p.source()
-	return []foundation.MarketIndustryMomentum{{Code: "BK001", Name: "电子", Score: 88, Meta: meta}}, meta, err
+	return []foundation.MarketIndustryMomentum{
+		{Code: "BK001", Name: "电子", Score: 88, Meta: meta},
+		{Code: "pt01801047", Name: "通信", Score: 84, Meta: meta},
+	}, meta, err
 }
 
 func (p *fakeMarketOverviewProvider) MarketFundFlows(_ context.Context, dimension string, _ string, _ int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {

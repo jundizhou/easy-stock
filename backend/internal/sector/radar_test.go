@@ -3,6 +3,7 @@ package sector
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,18 @@ func (f fakeRadarSource) SnapshotByID(ctx context.Context, id string) (duanxianx
 type fakeRadarFallback struct {
 	items         []foundation.ThemeOverview
 	sectorMap     foundation.SectorMap
+	sectorMaps    map[string]foundation.SectorMap
 	builtThemeIDs *[]string
+}
+
+type fakeIndustryMomentumSource struct {
+	items []foundation.MarketIndustryMomentum
+	meta  foundation.SourceMeta
+	err   error
+}
+
+func (f fakeIndustryMomentumSource) IndustryMomentum(context.Context, int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {
+	return append([]foundation.MarketIndustryMomentum(nil), f.items...), f.meta, f.err
 }
 
 type fakeRadarStrengthFallback struct {
@@ -74,6 +86,11 @@ func (f fakeRadarFallback) Build(ctx context.Context, themeID string) (foundatio
 	if f.builtThemeIDs != nil {
 		*f.builtThemeIDs = append(*f.builtThemeIDs, themeID)
 	}
+	if mapped, exists := f.sectorMaps[themeID]; exists {
+		result := mapped
+		result.Theme = themeID
+		return result, nil
+	}
 	if f.sectorMap.Theme != "" || len(f.sectorMap.Groups) > 0 {
 		result := f.sectorMap
 		result.Theme = themeID
@@ -82,35 +99,72 @@ func (f fakeRadarFallback) Build(ctx context.Context, themeID string) (foundatio
 	return foundation.SectorMap{Theme: themeID, Name: "本地题材", Meta: foundation.SourceMeta{Source: "local-trend"}}, nil
 }
 
-func TestRadarProviderInsertsNewLocalFirstAtSecondPosition(t *testing.T) {
+func TestRadarProviderFusesIndustryAndKaipanlaWithoutLocalTrend(t *testing.T) {
 	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	snapshot := duanxianxia.Snapshot{
-		ID: "snapshot-yesterday", TradeDate: "2026-08-06", FetchedAt: now.Add(-time.Hour),
+		ID: "snapshot-current", TradeDate: "2026-08-07", FetchedAt: now,
 		Themes: []duanxianxia.Theme{
-			{Code: "801660", Name: "通信", Rank: 1, Leaders: []duanxianxia.Leader{{Rank: 1, Role: "龙一", Symbol: "002792.SZ", Name: "通宇通讯"}}},
-			{Code: "801001", Name: "芯片", Rank: 2},
-			{Code: "803023", Name: "AI应用", Rank: 3},
-			{Code: "801807", Name: "算力", Rank: 4},
+			{Code: "801001", Name: "芯片", Rank: 1, Strength: 9800, History: []duanxianxia.RankPoint{{TradeDate: "2026-08-07", Rank: 1}}},
+			{Code: "803023", Name: "AI应用", Rank: 2, Strength: 8600},
 		},
 	}
+	industry := fakeIndustryMomentumSource{items: []foundation.MarketIndustryMomentum{
+		{Code: "BK1036", Name: "半导体", ChangePercent: 3, FiveDayChangePercent: 8, TwentyDayChange: 12, Score: 88},
+		{Code: "BK0801", Name: "农业", ChangePercent: 2, FiveDayChangePercent: 5, TwentyDayChange: 6, Score: 74},
+	}, meta: foundation.SourceMeta{Source: "test:industry", FetchedAt: now, TradeDate: "2026-08-07"}}
 	provider := NewRadarProvider(
 		fakeRadarSource{snapshot: snapshot},
 		fakeRadarFallback{items: []foundation.ThemeOverview{{Theme: "compute_rental", Name: "算力租赁", TrendScore: 91, TradeDate: "2026-08-07"}}},
 		nil,
-		RadarProviderConfig{Now: func() time.Time { return now }, FallbackFillLimit: 4},
+		RadarProviderConfig{Now: func() time.Time { return now }, IndustryMomentum: industry, FallbackFillLimit: 4},
 	)
 	items, meta, err := provider.Overviews(context.Background())
 	if err != nil {
 		t.Fatalf("Overviews: %v", err)
 	}
-	if len(items) != 5 {
+	if len(items) != 3 {
 		t.Fatalf("items=%+v", items)
 	}
-	if items[0].Name != "通信" || items[1].Name != "算力租赁" || items[2].Name != "芯片" {
-		t.Fatalf("unexpected order: %+v", items)
+	chip, found := findRadarOverview(items, "芯片")
+	if !found || chip.Source != radarFusionSource || chip.IndustryDailyScore == 0 || chip.KaipanlaDailyScore == 0 {
+		t.Fatalf("chip was not fused: %+v", items)
 	}
-	if !items[1].Provisional || items[1].SourceRank != 2 || items[0].SourceRank != 1 || !meta.CarryForward {
-		t.Fatalf("unexpected source metadata: item=%+v meta=%+v", items[1], meta)
+	fusion, ok := parseRadarFusionThemeID(chip.Theme)
+	if !ok || fusion.KaipanlaCode != "801001" || fusion.IndustryCode != "BK1036" || fusion.IndustryName != "半导体" {
+		t.Fatalf("fused theme identity lost its source pair: theme=%q ref=%+v", chip.Theme, fusion)
+	}
+	if chip.DailyStrengthScore != fusedRadarScore(chip.IndustryDailyScore, chip.KaipanlaDailyScore) {
+		t.Fatalf("fused score is not equally weighted: %+v", chip)
+	}
+	if _, found := findRadarOverview(items, "算力租赁"); found {
+		t.Fatalf("local trend leaked into fused candidates: %+v", items)
+	}
+	if meta.Source != radarFusionSource || chip.Provisional {
+		t.Fatalf("unexpected fused metadata: item=%+v meta=%+v", chip, meta)
+	}
+}
+
+func TestRadarProviderUsesIndustryWhenKaipanlaIsUnavailable(t *testing.T) {
+	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	industry := fakeIndustryMomentumSource{items: []foundation.MarketIndustryMomentum{
+		{Code: "BK1", Name: "煤炭开采", ChangePercent: 3, FiveDayChangePercent: 6, TwentyDayChange: 9, Score: 82},
+	}, meta: foundation.SourceMeta{Source: "test:industry", FetchedAt: now}}
+	provider := NewRadarProvider(
+		nil,
+		fakeRadarFallback{items: []foundation.ThemeOverview{{Theme: "local", Name: "本地趋势", TrendScore: 99}}},
+		nil,
+		RadarProviderConfig{Now: func() time.Time { return now }, IndustryMomentum: industry, FallbackFillLimit: 4},
+	)
+
+	items, meta, err := provider.Overviews(context.Background())
+	if err != nil {
+		t.Fatalf("Overviews: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "煤炭开采" || items[0].Source != radarIndustrySource {
+		t.Fatalf("industry-only fallback failed: %+v", items)
+	}
+	if meta.Source != radarIndustrySource || !strings.Contains(meta.FallbackReason, "kaipanla") {
+		t.Fatalf("unexpected industry-only metadata: %+v", meta)
 	}
 }
 
@@ -279,7 +333,7 @@ func TestRadarProviderDoesNotInsertMappedFallbackThemeAsProvisional(t *testing.T
 	}
 }
 
-func TestRadarProviderDoesNotInsertStaleLocalFirst(t *testing.T) {
+func TestRadarProviderNeverUsesLocalTrendAsCandidate(t *testing.T) {
 	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	snapshot := duanxianxia.Snapshot{
 		ID: "snapshot-yesterday", TradeDate: "2026-08-06", FetchedAt: now.Add(-time.Hour),
@@ -298,34 +352,33 @@ func TestRadarProviderDoesNotInsertStaleLocalFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Overviews: %v", err)
 	}
-	if len(items) != 3 || items[0].Name != "通信" || items[1].Name != "芯片" || items[2].Name != "算力租赁" {
-		t.Fatalf("stale local trend may only be a tail supplement: %+v", items)
-	}
-	if items[2].Provisional || items[2].Source != "local-fallback" {
-		t.Fatalf("stale local trend was incorrectly marked as new: %+v", items[2])
+	if len(items) != 2 || items[0].Name != "通信" || items[1].Name != "芯片" {
+		t.Fatalf("local trend must not enter the radar list: %+v", items)
 	}
 }
 
-func TestRadarProviderShowsAllKaipanlaThemesBeforeFallbackFill(t *testing.T) {
+func TestRadarProviderInterleavesIndustryAndKaipanlaCandidates(t *testing.T) {
 	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	snapshot := duanxianxia.Snapshot{
 		ID: "snapshot-current", TradeDate: "2026-08-07", FetchedAt: now,
 		Themes: []duanxianxia.Theme{
-			{Code: "1", Name: "通信", Rank: 1},
-			{Code: "2", Name: "芯片", Rank: 2},
-			{Code: "3", Name: "AI应用", Rank: 3},
+			{Code: "1", Name: "并购重组", Rank: 1, Strength: 9000},
+			{Code: "2", Name: "低空经济", Rank: 2, Strength: 8000},
+			{Code: "3", Name: "数据要素", Rank: 3, Strength: 7000},
 		},
 	}
+	industry := fakeIndustryMomentumSource{items: []foundation.MarketIndustryMomentum{
+		{Code: "BK1", Name: "农业", ChangePercent: 4, FiveDayChangePercent: 8, TwentyDayChange: 10, Score: 90},
+		{Code: "BK2", Name: "煤炭开采", ChangePercent: 3, FiveDayChangePercent: 6, TwentyDayChange: 8, Score: 82},
+		{Code: "BK3", Name: "房地产服务", ChangePercent: 2, FiveDayChangePercent: 5, TwentyDayChange: 7, Score: 76},
+	}, meta: foundation.SourceMeta{Source: "test:industry", FetchedAt: now}}
 	provider := NewRadarProvider(
 		fakeRadarSource{snapshot: snapshot},
 		fakeRadarFallback{items: []foundation.ThemeOverview{
-			{Theme: "local-communication", Name: "通信技术", TrendScore: 95, TradeDate: "2026-08-07"},
-			{Theme: "local-west", Name: "西部大开发", TrendScore: 80, TradeDate: "2026-08-07"},
-			{Theme: "local-pcb", Name: "PCB", TrendScore: 75, TradeDate: "2026-08-07"},
-			{Theme: "local-harmony", Name: "华为鸿蒙", TrendScore: 70, TradeDate: "2026-08-07"},
+			{Theme: "local-west", Name: "西部大开发", TrendScore: 99, TradeDate: "2026-08-07"},
 		}},
 		nil,
-		RadarProviderConfig{Now: func() time.Time { return now }, FallbackFillLimit: 6},
+		RadarProviderConfig{Now: func() time.Time { return now }, IndustryMomentum: industry, FallbackFillLimit: 6},
 	)
 	items, _, err := provider.Overviews(context.Background())
 	if err != nil {
@@ -334,16 +387,30 @@ func TestRadarProviderShowsAllKaipanlaThemesBeforeFallbackFill(t *testing.T) {
 	if len(items) != 6 {
 		t.Fatalf("items=%+v", items)
 	}
-	got := []string{items[0].Name, items[1].Name, items[2].Name, items[3].Name, items[4].Name, items[5].Name}
-	want := []string{"通信", "芯片", "AI应用", "西部大开发", "PCB", "华为鸿蒙"}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("order=%v want=%v", got, want)
+	industryCount := 0
+	kaipanlaCount := 0
+	for _, item := range items[:4] {
+		if item.Source == radarIndustrySource {
+			industryCount++
+		} else if item.Source == duanxianxia.SourceID {
+			kaipanlaCount++
 		}
 	}
-	if items[3].Source != "local-fallback" || items[3].SourceRank != 4 {
-		t.Fatalf("unexpected fallback metadata: %+v", items[3])
+	if absRadar(industryCount-kaipanlaCount) > 1 {
+		t.Fatalf("sources were not interleaved: %+v", items)
 	}
+	if _, found := findRadarOverview(items, "西部大开发"); found {
+		t.Fatalf("local trend leaked into interleaved candidates: %+v", items)
+	}
+}
+
+func findRadarOverview(items []foundation.ThemeOverview, name string) (foundation.ThemeOverview, bool) {
+	for _, item := range items {
+		if item.Name == name {
+			return item, true
+		}
+	}
+	return foundation.ThemeOverview{}, false
 }
 
 func TestRadarProviderBuildsLeaderMapFromSnapshot(t *testing.T) {
@@ -399,6 +466,70 @@ func TestRadarProviderMapsKaipanlaThemeAndMergesFallbackStocks(t *testing.T) {
 	if stock := sectorMap.Groups[1].Nodes[0].Stocks[0]; stock.Symbol != "688001.SH" {
 		t.Fatalf("fallback stock missing: %+v", stock)
 	}
+}
+
+func TestRadarProviderFusedScreenMergesLeaderMappedAndIndustryStocks(t *testing.T) {
+	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	snapshot := duanxianxia.Snapshot{
+		ID: "snapshot-current", TradeDate: "2026-08-07", FetchedAt: now,
+		Themes: []duanxianxia.Theme{{
+			Code: "801660", Name: "通信", Rank: 1, LeadersLoaded: true,
+			Leaders: []duanxianxia.Leader{{Rank: 1, Role: "龙一", Symbol: "002792.SZ", Name: "通宇通讯"}},
+		}},
+	}
+	industry := radarIndustryThemeRef{Code: "pt01801047", Name: "通信"}
+	industryID := radarIndustryThemeID(industry.Code, industry.Name)
+	builtThemeIDs := []string{}
+	fallback := fakeRadarFallback{
+		sectorMaps: map[string]foundation.SectorMap{
+			"eastmoney-map:801660": {
+				Name: "通信技术", Groups: []foundation.SectorMapGroup{{
+					ID: "mapped", Name: "通信技术", Nodes: []foundation.SectorMapNode{{
+						ID: "mapped_core", Name: "通信技术", Stocks: []foundation.BoardStock{{Symbol: "600050.SH", Name: "中国联通"}},
+					}},
+				}},
+			},
+			industryID: {
+				Name: "通信", Groups: []foundation.SectorMapGroup{{
+					ID: "industry_members", Name: "通信", Nodes: []foundation.SectorMapNode{{
+						ID: "industry_core", Name: "通信", Stocks: []foundation.BoardStock{{Symbol: "000063.SZ", Name: "中兴通讯"}},
+					}},
+				}},
+			},
+		},
+		builtThemeIDs: &builtThemeIDs,
+	}
+	provider := NewRadarProvider(fakeRadarSource{snapshot: snapshot}, fallback, nil, RadarProviderConfig{Now: func() time.Time { return now }})
+	fusionID := radarFusionThemeID("801660", industry)
+
+	sectorMap, err := provider.BuildSnapshot(context.Background(), fusionID, snapshot.ID)
+	if err != nil {
+		t.Fatalf("BuildSnapshot fused theme: %v", err)
+	}
+	stocks := sectorMapStockSymbols(sectorMap)
+	for _, symbol := range []string{"002792.SZ", "600050.SH", "000063.SZ"} {
+		if _, exists := stocks[symbol]; !exists {
+			t.Fatalf("fused stock pool missing %s: %+v", symbol, stocks)
+		}
+	}
+	if len(builtThemeIDs) != 2 || builtThemeIDs[0] != "eastmoney-map:801660" || builtThemeIDs[1] != industryID {
+		t.Fatalf("unexpected fused fallback requests: %v", builtThemeIDs)
+	}
+	if sectorMap.Theme != fusionID || sectorMap.Meta.Source != radarFusionSource {
+		t.Fatalf("unexpected fused sector map identity: %+v", sectorMap)
+	}
+}
+
+func sectorMapStockSymbols(sectorMap foundation.SectorMap) map[string]struct{} {
+	stocks := map[string]struct{}{}
+	for _, group := range sectorMap.Groups {
+		for _, node := range group.Nodes {
+			for _, stock := range node.Stocks {
+				stocks[stock.Symbol] = struct{}{}
+			}
+		}
+	}
+	return stocks
 }
 
 func TestMappedFallbackThemeIDUsesConfiguredEastMoneyMapping(t *testing.T) {

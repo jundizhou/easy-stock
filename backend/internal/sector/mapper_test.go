@@ -449,6 +449,58 @@ func TestMapperBuildsDynamicTradingNarrativeFromConcepts(t *testing.T) {
 	}
 }
 
+func TestMapperBuildsDynamicIndustryFromCatalogIndustry(t *testing.T) {
+	themeID := radarIndustryThemeID("pt01801183", "房地产服务")
+	mapper := NewMapper(
+		fakeBoardProvider{boards: []foundation.Board{{
+			Code: "BK1045", Name: "房地产服务", Meta: foundation.SourceMeta{Source: "test"},
+		}}},
+		WithStockCatalogProvider(fakeStockCatalogProvider{entries: []foundation.StockCatalogEntry{
+			{
+				BoardStock: foundation.BoardStock{Symbol: "600001.SH", Name: "房服股份", ChangePercent: 3.2},
+				Industry:   "房地产服务",
+				Concepts:   []string{"物业管理"},
+			},
+			{
+				BoardStock: foundation.BoardStock{Symbol: "600002.SH", Name: "概念股份", ChangePercent: 2.1},
+				Industry:   "软件开发",
+				Concepts:   []string{"房地产服务"},
+			},
+		}}),
+	)
+
+	got, err := mapper.Build(context.Background(), themeID)
+	if err != nil {
+		t.Fatalf("Build dynamic industry failed: %v", err)
+	}
+	node := findNode(got, "industry_core")
+	if node == nil || node.BoardCode != "BK1045" {
+		t.Fatalf("expected exact EastMoney industry board: %+v", node)
+	}
+	if findStock(node, "600001.SH") == nil || findStock(node, "600002.SH") != nil {
+		t.Fatalf("industry pool must use catalog industry membership only: %+v", node)
+	}
+}
+
+func TestMapperFallsBackToBoardStocksForDynamicIndustry(t *testing.T) {
+	themeID := radarIndustryThemeID("pt01801183", "房地产服务")
+	mapper := NewMapper(fakeBoardProvider{
+		boards: []foundation.Board{{Code: "BK1045", Name: "房地产服务", Meta: foundation.SourceMeta{Source: "test"}}},
+		stocks: map[string][]foundation.BoardStock{
+			"BK1045": {{Symbol: "000560.SZ", Name: "我爱我家"}},
+		},
+	})
+
+	got, err := mapper.Build(context.Background(), themeID)
+	if err != nil {
+		t.Fatalf("Build dynamic industry fallback failed: %v", err)
+	}
+	node := findNode(got, "industry_core")
+	if findStock(node, "000560.SZ") == nil || node.StockSource != "eastmoney:board-constituents" {
+		t.Fatalf("expected board constituent fallback: %+v", node)
+	}
+}
+
 func TestTrendOverviewsUseNarrativesInsteadOfIndustry(t *testing.T) {
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	current := time.Date(2026, 8, 6, 0, 0, 0, 0, location)

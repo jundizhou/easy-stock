@@ -231,8 +231,14 @@ type ThemeOverview struct {
 	Leaders              []string `json:"leaders,omitempty"`
 	Source               string   `json:"source,omitempty"`
 	SourceRank           int      `json:"source_rank,omitempty"`
+	DailyRank            int      `json:"daily_rank,omitempty"`
+	FiveDayRank          int      `json:"five_day_rank,omitempty"`
 	ProviderRank         int      `json:"provider_rank,omitempty"`
 	SourceStrength       float64  `json:"source_strength,omitempty"`
+	IndustryDailyScore   int      `json:"industry_daily_score,omitempty"`
+	IndustryFiveDayScore int      `json:"industry_five_day_score,omitempty"`
+	KaipanlaDailyScore   int      `json:"kaipanla_daily_score,omitempty"`
+	KaipanlaFiveDayScore int      `json:"kaipanla_five_day_score,omitempty"`
 	TradeDate            string   `json:"trade_date,omitempty"`
 	SnapshotID           string   `json:"snapshot_id,omitempty"`
 	CarryForward         bool     `json:"carry_forward,omitempty"`

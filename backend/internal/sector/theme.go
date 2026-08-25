@@ -1,6 +1,10 @@
 package sector
 
-import "easy-stock/backend/internal/narrative"
+import (
+	"strings"
+
+	"easy-stock/backend/internal/narrative"
+)
 
 var themeTabNames = []string{"半导体", "半导体材料", "人形机器人", "物理AI", "航天", "医疗/医药", "电力", "电网设备", "电池", "有色金属", "化工", "消费电子", "旅游", "影视", "消费", "光通信"}
 
@@ -24,6 +28,7 @@ type Node struct {
 	BoardCode     string
 	BoardKeywords []string
 	Narrative     string
+	Industry      string
 }
 
 func Themes() []Theme {
@@ -56,10 +61,37 @@ func FindTheme(id string) (Theme, bool) {
 	if theme, ok := findRadarMappedTheme(id); ok {
 		return theme, true
 	}
+	if industry, ok := parseRadarIndustryThemeID(id); ok {
+		return radarIndustryTheme(id, industry), true
+	}
 	if name, ok := narrative.ThemeName(id); ok {
 		return trendTheme(id, name), true
 	}
 	return Theme{}, false
+}
+
+func radarIndustryTheme(id string, industry radarIndustryThemeRef) Theme {
+	boardCode := ""
+	if strings.HasPrefix(industry.Code, "BK") {
+		boardCode = industry.Code
+	}
+	return Theme{
+		ID:   id,
+		Name: industry.Name,
+		Tabs: []string{industry.Name},
+		Groups: []Group{{
+			ID:   "industry_members",
+			Name: industry.Name,
+			Nodes: []Node{{
+				ID:            "industry_core",
+				Name:          industry.Name,
+				Description:   "依据行业趋势强度对应的行业归属筛选成分股。",
+				BoardCode:     boardCode,
+				BoardKeywords: []string{industry.Name},
+				Industry:      industry.Name,
+			}},
+		}},
+	}
 }
 
 func trendTheme(id string, name string) Theme {

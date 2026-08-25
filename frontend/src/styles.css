@@ -645,29 +645,6 @@ a:focus-visible {
 	min-width: 0;
 }
 
-.theme-name-line em {
-	flex: none;
-	padding: 1px 4px;
-	border: 1px solid rgba(111, 139, 169, 0.38);
-	border-radius: 4px;
-	color: #9eb5cc;
-	font-size: 8px;
-	font-style: normal;
-	font-weight: 600;
-	line-height: 1.4;
-}
-
-.theme-name-line em.provisional {
-	border-color: rgba(220, 157, 47, 0.55);
-	background: rgba(220, 157, 47, 0.12);
-	color: #e1b65f;
-}
-
-.theme-name-line em.carry {
-	border-color: rgba(115, 139, 164, 0.45);
-	color: #91a6ba;
-}
-
 .theme-copy strong,
 .theme-copy small {
 	overflow: hidden;
@@ -2144,11 +2121,13 @@ a:focus-visible {
 	.sidebar-brand > div:last-child,
 	.app-sidebar nav button span,
 	.sidebar-guidance,
+	.sidebar-settings span,
 	.sidebar-toggle span {
 		display: none;
 	}
 
 	.app-sidebar nav button,
+	.sidebar-settings,
 	.sidebar-toggle {
 		justify-content: center;
 		padding: 0;

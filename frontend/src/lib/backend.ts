@@ -943,8 +943,14 @@ export type ThemeOverview = {
 	leaders?: string[];
 	source?: string;
 	source_rank?: number;
+	daily_rank?: number;
+	five_day_rank?: number;
 	provider_rank?: number;
 	source_strength?: number;
+	industry_daily_score?: number;
+	industry_five_day_score?: number;
+	kaipanla_daily_score?: number;
+	kaipanla_five_day_score?: number;
 	trade_date?: string;
 	snapshot_id?: string;
 	carry_forward?: boolean;

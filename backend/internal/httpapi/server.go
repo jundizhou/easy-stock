@@ -129,15 +129,20 @@ func NewServer(config any) *Server {
 		)
 		var defaultSectorMap SectorMapProvider = mapper
 		var defaultThemeOverview ThemeOverviewProvider = mapper
-		if kaipanlaService != nil {
-			var radarFallback sector.RadarFallback = mapper
-			if cfg.ThemeRadarFallback != nil {
-				radarFallback = cfg.ThemeRadarFallback
-			}
-			radar := sector.NewRadarProvider(kaipanlaService, radarFallback, cfg.Realtime, sector.RadarProviderConfig{FallbackFillLimit: 16})
-			defaultSectorMap = radar
-			defaultThemeOverview = radar
+		var radarFallback sector.RadarFallback = mapper
+		if cfg.ThemeRadarFallback != nil {
+			radarFallback = cfg.ThemeRadarFallback
 		}
+		var radarSource sector.RadarSnapshotSource
+		if kaipanlaService != nil {
+			radarSource = kaipanlaService
+		}
+		radar := sector.NewRadarProvider(radarSource, radarFallback, cfg.Realtime, sector.RadarProviderConfig{
+			IndustryMomentum:  cfg.MarketOverview,
+			FallbackFillLimit: 16,
+		})
+		defaultSectorMap = radar
+		defaultThemeOverview = radar
 		cfg.SectorMap = defaultSectorMap
 		if cfg.ThemeOverview == nil {
 			cfg.ThemeOverview = defaultThemeOverview

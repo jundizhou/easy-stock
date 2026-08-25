@@ -13,7 +13,6 @@ import (
 
 type RadarFallback interface {
 	Build(ctx context.Context, themeID string) (foundation.SectorMap, error)
-	Overviews(ctx context.Context) ([]foundation.ThemeOverview, foundation.SourceMeta, error)
 }
 
 type RadarSnapshotSource interface {
@@ -21,18 +20,18 @@ type RadarSnapshotSource interface {
 	SnapshotByID(ctx context.Context, id string) (duanxianxia.Snapshot, bool, error)
 }
 
+type IndustryMomentumSource interface {
+	IndustryMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error)
+}
+
 type RadarProvider struct {
 	source            RadarSnapshotSource
+	industry          IndustryMomentumSource
 	fallback          RadarFallback
 	quotes            QuoteProvider
 	now               func() time.Time
 	fallbackFill      int
-	fallbackTTL       time.Duration
 	strengthTTL       time.Duration
-	fallbackMu        sync.Mutex
-	fallbackAt        time.Time
-	fallbackList      []foundation.ThemeOverview
-	fallbackMeta      foundation.SourceMeta
 	strengthMu        sync.Mutex
 	strengthAttemptAt time.Time
 	strengthCache     map[string]themeStrengthScore
@@ -40,8 +39,8 @@ type RadarProvider struct {
 
 type RadarProviderConfig struct {
 	Now                 func() time.Time
+	IndustryMomentum    IndustryMomentumSource
 	FallbackFillLimit   int
-	FallbackCacheTTL    time.Duration
 	RealtimeStrengthTTL time.Duration
 }
 
@@ -54,106 +53,50 @@ func NewRadarProvider(source RadarSnapshotSource, fallback RadarFallback, quotes
 	if fallbackFill <= 0 {
 		fallbackFill = 16
 	}
-	fallbackTTL := config.FallbackCacheTTL
-	if fallbackTTL <= 0 {
-		fallbackTTL = 30 * time.Second
-	}
 	strengthTTL := config.RealtimeStrengthTTL
 	if strengthTTL < 10*time.Minute {
 		strengthTTL = 10 * time.Minute
 	}
 	return &RadarProvider{
-		source: source, fallback: fallback, quotes: quotes, now: now,
-		fallbackFill: fallbackFill, fallbackTTL: fallbackTTL, strengthTTL: strengthTTL,
+		source: source, industry: config.IndustryMomentum, fallback: fallback, quotes: quotes, now: now,
+		fallbackFill: fallbackFill, strengthTTL: strengthTTL,
 		strengthCache: map[string]themeStrengthScore{},
 	}
 }
 
 func (p *RadarProvider) Overviews(ctx context.Context) ([]foundation.ThemeOverview, foundation.SourceMeta, error) {
 	start := time.Now()
-	snapshot, fetchMeta, err := p.source.Snapshot(ctx)
-	if err != nil || len(snapshot.Themes) == 0 {
-		items, meta, fallbackErr := p.fallbackOverviews(ctx)
-		if fallbackErr != nil {
-			if err != nil {
-				return nil, foundation.SourceMeta{}, fmt.Errorf("duanxianxia unavailable: %v; fallback unavailable: %w", err, fallbackErr)
-			}
-			return nil, foundation.SourceMeta{}, fallbackErr
-		}
-		if err != nil {
-			meta.FallbackReason = err.Error()
-		}
-		return items, meta, nil
-	}
+	var snapshot duanxianxia.Snapshot
+	var fetchMeta duanxianxia.FetchMeta
+	var snapshotErr error
+	var industries []foundation.MarketIndustryMomentum
+	var industryMeta foundation.SourceMeta
+	var industryErr error
+	var wg sync.WaitGroup
 
-	selectedThemes := append([]duanxianxia.Theme(nil), snapshot.Themes...)
-	quoteLookup := p.quoteLookup(ctx, selectedThemes)
-	strengthScores := p.realtimeStrengthScores(ctx, selectedThemes)
-	carryForward := snapshot.TradeDate != shanghaiDate(p.now())
-	items := make([]foundation.ThemeOverview, 0, max(p.fallbackFill, len(selectedThemes)+1))
-	for _, theme := range selectedThemes {
-		items = append(items, p.themeOverview(snapshot, theme, quoteLookup, carryForward, strengthScores[theme.Code]))
+	if p.source != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			snapshot, fetchMeta, snapshotErr = p.source.Snapshot(ctx)
+		}()
+	} else {
+		snapshotErr = fmt.Errorf("kaipanla radar source is unavailable")
 	}
+	if p.industry != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			industries, industryMeta, industryErr = p.industry.IndustryMomentum(ctx, max(24, p.fallbackFill))
+		}()
+	} else {
+		industryErr = fmt.Errorf("industry momentum source is unavailable")
+	}
+	wg.Wait()
 
-	today := shanghaiDate(p.now())
-	localItems := []foundation.ThemeOverview{}
-	if carryForward || len(items) < p.fallbackFill {
-		if values, _, localErr := p.fallbackOverviews(ctx); localErr == nil {
-			localItems = values
-		}
-	}
-	if carryForward && isWeekdayShanghai(p.now()) {
-		if len(localItems) > 0 && localItems[0].TradeDate == today && isNewLocalFirst(localItems[0], snapshot.Themes) {
-			provisional := localItems[0]
-			provisional.Source = "local-trend"
-			provisional.TradeDate = today
-			provisional.SnapshotID = snapshot.ID
-			provisional.Provisional = true
-			provisional.CarryForward = false
-			if len(items) == 0 {
-				items = append(items, provisional)
-			} else {
-				items = append(items, foundation.ThemeOverview{})
-				copy(items[2:], items[1:])
-				items[1] = provisional
-			}
-		}
-	}
-	for _, local := range localItems {
-		if len(items) >= p.fallbackFill {
-			break
-		}
-		if hasThemeOverview(items, local) {
-			continue
-		}
-		supplement := local
-		supplement.Source = "local-fallback"
-		supplement.SnapshotID = ""
-		supplement.CarryForward = false
-		supplement.Provisional = false
-		items = append(items, supplement)
-	}
-	for index := range items {
-		items[index].SourceRank = index + 1
-	}
-
-	fallbackReason := strings.TrimSpace(fetchMeta.RefreshError)
-	if fallbackReason == "" && carryForward {
-		fallbackReason = "开盘啦尚未更新，沿用上一交易日"
-	}
-	meta := foundation.SourceMeta{
-		Source:         duanxianxia.SourceID,
-		SourceURL:      duanxianxia.DefaultBaseURL + "/web/platerotat",
-		FetchedAt:      snapshot.FetchedAt,
-		LatencyMS:      time.Since(start).Milliseconds(),
-		Stale:          carryForward || fallbackReason != "",
-		TradeDate:      snapshot.TradeDate,
-		SnapshotID:     snapshot.ID,
-		NextRefreshAt:  timePointer(fetchMeta.NextAllowedAt),
-		FallbackReason: fallbackReason,
-		CarryForward:   carryForward,
-	}
-	return items, meta, nil
+	items, meta, err := p.fusedOverviews(ctx, snapshot, fetchMeta, snapshotErr, industries, industryMeta, industryErr)
+	meta.LatencyMS = time.Since(start).Milliseconds()
+	return items, meta, err
 }
 
 func (p *RadarProvider) Build(ctx context.Context, themeID string) (foundation.SectorMap, error) {
@@ -161,9 +104,54 @@ func (p *RadarProvider) Build(ctx context.Context, themeID string) (foundation.S
 }
 
 func (p *RadarProvider) BuildSnapshot(ctx context.Context, themeID string, snapshotID string) (foundation.SectorMap, error) {
+	themeID = strings.TrimSpace(themeID)
+	if fusion, ok := parseRadarFusionThemeID(themeID); ok {
+		return p.buildFusionSnapshot(ctx, themeID, fusion, snapshotID)
+	}
+	if strings.HasPrefix(themeID, radarFusionThemePrefix) {
+		return foundation.SectorMap{}, fmt.Errorf("invalid fused radar theme: %s", themeID)
+	}
 	if !strings.HasPrefix(themeID, "kpl:") {
+		if p.fallback == nil {
+			return foundation.SectorMap{}, fmt.Errorf("sector map fallback is unavailable")
+		}
 		return p.fallback.Build(ctx, themeID)
 	}
+	return p.buildKaipanlaSnapshot(ctx, themeID, snapshotID)
+}
+
+func (p *RadarProvider) buildFusionSnapshot(
+	ctx context.Context,
+	themeID string,
+	fusion radarFusionThemeRef,
+	snapshotID string,
+) (foundation.SectorMap, error) {
+	result, err := p.buildKaipanlaSnapshot(ctx, "kpl:"+fusion.KaipanlaCode, snapshotID)
+	if err != nil {
+		return foundation.SectorMap{}, err
+	}
+	result.Theme = themeID
+	result.ThemeTabs = []foundation.SectorMapTab{{ID: themeID, Name: result.Name}}
+	result.Meta.Source = radarFusionSource
+
+	if p.fallback == nil {
+		appendKaipanlaWarning(&result, "行业成分股映射暂不可用。")
+		return result, nil
+	}
+	industryID := radarIndustryThemeID(fusion.IndustryCode, fusion.IndustryName)
+	industryMap, industryErr := p.fallback.Build(ctx, industryID)
+	if industryErr != nil {
+		appendKaipanlaWarning(&result, fmt.Sprintf("行业“%s”成分股映射失败：%s", fusion.IndustryName, industryErr.Error()))
+		return result, nil
+	}
+	mergeFusionIndustryStocks(fusion.IndustryName, industryMap, &result)
+	if industryMap.Meta.FetchedAt.After(result.Meta.FetchedAt) {
+		result.Meta.FetchedAt = industryMap.Meta.FetchedAt
+	}
+	return result, nil
+}
+
+func (p *RadarProvider) buildKaipanlaSnapshot(ctx context.Context, themeID string, snapshotID string) (foundation.SectorMap, error) {
 	var snapshot duanxianxia.Snapshot
 	if snapshotID != "" {
 		stored, exists, err := p.source.SnapshotByID(ctx, snapshotID)
@@ -368,18 +356,6 @@ func (p *RadarProvider) quoteLookup(ctx context.Context, themes []duanxianxia.Th
 	return result
 }
 
-func isNewLocalFirst(candidate foundation.ThemeOverview, prior []duanxianxia.Theme) bool {
-	if normalizeThemeName(candidate.Name) == "" {
-		return false
-	}
-	for _, theme := range prior {
-		if kaipanlaThemeMatchesOverview(theme, candidate) {
-			return false
-		}
-	}
-	return true
-}
-
 func normalizeThemeName(name string) string {
 	value := strings.ToLower(strings.TrimSpace(name))
 	replacer := strings.NewReplacer(" ", "", "　", "", "-", "", "_", "", "概念", "", "板块", "")
@@ -450,13 +426,4 @@ func shanghaiDate(value time.Time) string {
 		location = time.FixedZone("CST", 8*60*60)
 	}
 	return value.In(location).Format("2006-01-02")
-}
-
-func isWeekdayShanghai(value time.Time) bool {
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		location = time.FixedZone("CST", 8*60*60)
-	}
-	weekday := value.In(location).Weekday()
-	return weekday != time.Saturday && weekday != time.Sunday
 }

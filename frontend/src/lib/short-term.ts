@@ -147,27 +147,14 @@ function normalizeTrendStage(value: ThemeOverview['trend_stage'], score: number)
 }
 
 export function rankThemeOverviews(items: ThemeOverview[], window: ThemeStrengthWindow = 'daily'): ThemeOverview[] {
-	if (items.some((item) => typeof item.source_rank === 'number' && item.source_rank > 0)) {
-		const compare = (a: ThemeOverview, b: ThemeOverview) => {
-			const aWindowScore = window === 'daily' ? a.daily_strength_score : a.five_day_strength_score;
-			const bWindowScore = window === 'daily' ? b.daily_strength_score : b.five_day_strength_score;
-			if (typeof aWindowScore === 'number' && typeof bWindowScore === 'number' && aWindowScore !== bWindowScore) {
-				return bWindowScore - aWindowScore;
-			}
-			const aRank = a.source_rank && a.source_rank > 0 ? a.source_rank : Number.MAX_SAFE_INTEGER;
-			const bRank = b.source_rank && b.source_rank > 0 ? b.source_rank : Number.MAX_SAFE_INTEGER;
-			return aRank - bRank || calculateThemeEmotion(b).score - calculateThemeEmotion(a).score;
-		};
-		const provisional = items.filter((item) => item.provisional).sort(compare);
-		const primary = items.filter((item) => !item.provisional && (item.source === 'duanxianxia:kaipanla' || item.theme.startsWith('kpl:'))).sort(compare);
-		const fallback = items.filter((item) => !item.provisional && !(item.source === 'duanxianxia:kaipanla' || item.theme.startsWith('kpl:'))).sort(compare);
-		const ranked = [...primary, ...fallback];
-		if (provisional.length > 0) {
-			ranked.splice(Math.min(1, ranked.length), 0, ...provisional);
+	return [...items].sort((a, b) => {
+		const aRank = window === 'daily' ? a.daily_rank ?? a.source_rank : a.five_day_rank;
+		const bRank = window === 'daily' ? b.daily_rank ?? b.source_rank : b.five_day_rank;
+		if (typeof aRank === 'number' && aRank > 0 && typeof bRank === 'number' && bRank > 0 && aRank !== bRank) {
+			return aRank - bRank;
 		}
-		return ranked;
-	}
-	return [...items].sort((a, b) => themeStrengthScore(b, window) - themeStrengthScore(a, window));
+		return themeStrengthScore(b, window) - themeStrengthScore(a, window);
+	});
 }
 
 export function buildThemeStocks(

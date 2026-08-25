@@ -502,6 +502,7 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 
 	server := NewServer(Config{
 		Realtime:           fakeThemeRealtimeProvider{},
+		MarketOverview:     &fakeMarketOverviewProvider{},
 		ThemeRadarDBPath:   filepath.Join(t.TempDir(), "theme-radar.db"),
 		DuanxianxiaBaseURL: remote.URL,
 		ThemeRadarFallback: fakeServerRadarFallback{},
@@ -519,22 +520,35 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 	if err := json.NewDecoder(overviewRecorder.Body).Decode(&overviewPayload); err != nil {
 		t.Fatalf("decode overview: %v", err)
 	}
-	if len(overviewPayload.Data) != 16 || overviewPayload.Data[0].Name != "通信" || overviewPayload.Data[2].Name != "AI应用" || overviewPayload.Data[3].Source != "local-fallback" || overviewPayload.Meta.Source != "duanxianxia:kaipanla" {
+	var communication foundation.ThemeOverview
+	for _, item := range overviewPayload.Data {
+		if item.Name == "通信" {
+			communication = item
+			break
+		}
+	}
+	if len(overviewPayload.Data) != 4 || !strings.HasPrefix(communication.Theme, "fusion:") || overviewPayload.Meta.Source != "theme-radar:fusion" {
 		t.Fatalf("unexpected overview payload: %+v meta=%+v", overviewPayload.Data, overviewPayload.Meta)
 	}
 
 	screenPath := fmt.Sprintf(
 		"/api/v1/themes/screen?theme=%s&snapshot_id=%s&page=1&page_size=5",
-		overviewPayload.Data[0].Theme,
-		overviewPayload.Data[0].SnapshotID,
+		communication.Theme,
+		communication.SnapshotID,
 	)
 	screen := requestThemeScreen(t, server, screenPath)
 	stocks := uniqueThemeScreenStocks(screen.Map)
+	if screen.Pagination.Total != 3 || len(stocks) != 3 {
+		t.Fatalf("fused screen must deduplicate overlapping stocks: total=%d stocks=%+v", screen.Pagination.Total, stocks)
+	}
 	if _, exists := stocks["002792.SZ"]; !exists {
 		t.Fatalf("kaipanla leader missing from screen: %+v", stocks)
 	}
 	if _, exists := stocks["600050.SH"]; !exists {
 		t.Fatalf("mapped eastmoney fallback stock missing from screen: %+v", stocks)
+	}
+	if _, exists := stocks["000063.SZ"]; !exists {
+		t.Fatalf("industry stock missing from fused screen: %+v", stocks)
 	}
 	if requestCount != 6 {
 		t.Fatalf("remote request count=%d, want one fixed refresh batch of 6", requestCount)
@@ -811,6 +825,24 @@ func (fakeServerRadarFallback) Overviews(ctx context.Context) ([]foundation.Them
 }
 
 func (fakeServerRadarFallback) Build(ctx context.Context, themeID string) (foundation.SectorMap, error) {
+	if strings.HasPrefix(themeID, "industry:") {
+		return foundation.SectorMap{
+			Theme: themeID,
+			Name:  "通信",
+			Tabs:  []string{"通信"},
+			Groups: []foundation.SectorMapGroup{{
+				ID: "industry", Name: "通信", Nodes: []foundation.SectorMapNode{{
+					ID: "industry_core", Name: "通信", MatchStatus: "matched",
+					StockSource: "eastmoney:stock-selection",
+					Stocks: []foundation.BoardStock{
+						{Symbol: "600050.SH", Name: "中国联通", Price: 10},
+						{Symbol: "000063.SZ", Name: "中兴通讯", Price: 10},
+					},
+				}},
+			}},
+			Meta: foundation.SourceMeta{Source: "sector-map:eastmoney", FetchedAt: time.Now()},
+		}, nil
+	}
 	return foundation.SectorMap{
 		Theme: themeID,
 		Name:  "通信技术",

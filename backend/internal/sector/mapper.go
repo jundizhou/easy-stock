@@ -88,7 +88,7 @@ func (m *Mapper) Build(ctx context.Context, themeID string) (foundation.SectorMa
 
 	tabs := themeTabs()
 	_, dynamic := narrative.ThemeName(theme.ID)
-	if dynamic || strings.HasPrefix(theme.ID, radarMappedThemePrefix) {
+	if dynamic || strings.HasPrefix(theme.ID, radarMappedThemePrefix) || strings.HasPrefix(theme.ID, radarIndustryThemePrefix) {
 		tabs = []foundation.SectorMapTab{{ID: theme.ID, Name: theme.Name}}
 	}
 	result := foundation.SectorMap{
@@ -407,6 +407,16 @@ func catalogStocksForNode(catalog catalogIndex, node Node, limit int) []foundati
 }
 
 func catalogNodeMembershipScore(entry indexedCatalogEntry, node Node, terms []normalizedCatalogTerm) int {
+	if node.Industry != "" {
+		score := membershipMatchScore(entry.industryKey, normalizedCatalogTerm{
+			raw:        node.Industry,
+			normalized: normalizeMembership(node.Industry),
+		})
+		if score > 0 {
+			return score + 10
+		}
+		return 0
+	}
 	if node.Narrative != "" {
 		if _, matched := narrative.Memberships(entry.stock.Concepts)[node.Narrative]; matched {
 			return 120
