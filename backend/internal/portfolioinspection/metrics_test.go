@@ -28,8 +28,50 @@ func TestCalculateMetricsIncludesCashConcentrationAndCorrelation(t *testing.T) {
 	if len(metrics.HighCorrelations) != 1 || metrics.HighCorrelations[0].Correlation < .99 {
 		t.Fatalf("expected highly correlated pair, got %+v", metrics.HighCorrelations)
 	}
-	if metrics.StyleMatchScore >= 100 || len(metrics.StyleBreaches) == 0 {
-		t.Fatalf("balanced profile should flag the 40%% single position: %+v", metrics)
+	if metrics.DiversificationScore >= 100 || metrics.StyleMatchScore != 100 || len(metrics.StyleBreaches) == 0 {
+		t.Fatalf("V2 should separate concentration from behavior fit: %+v", metrics)
+	}
+	if !metrics.HealthScoreAvailable || metrics.HealthScore < 75 || metrics.HealthScore > 90 {
+		t.Fatalf("V2 health score should remain useful without ignoring risk: %+v", metrics)
+	}
+}
+
+func TestPortfolioHealthV2IsGentlerForConcentratedQualityHolding(t *testing.T) {
+	holding := Holding{Symbol: "600519.SH", Weight: 100}
+	request := Request{TraderProfile: ProfileBalanced, Holdings: []Holding{holding}}
+	result := successfulHolding(holding, "贵州茅台", 70, 45, "白酒消费", 3, 100)
+	rules, _ := RulesFor(ProfileBalanced)
+	metrics := CalculateMetrics(request, []HoldingResult{result}, rules)
+	if metrics.HealthScore < 70 || metrics.HealthScore > 80 {
+		t.Fatalf("concentrated quality portfolio health = %d, metrics=%+v", metrics.HealthScore, metrics)
+	}
+	if metrics.DiversificationScore >= 70 || metrics.StyleMatchScore < 90 {
+		t.Fatalf("concentration and style components are not separated: %+v", metrics)
+	}
+}
+
+func TestPortfolioHealthV2KeepsExtremeRiskCap(t *testing.T) {
+	holding := Holding{Symbol: "300001.SZ", Weight: 100}
+	request := Request{TraderProfile: ProfileBalanced, Holdings: []Holding{holding}}
+	result := successfulHolding(holding, "高风险样本", 82, 90, "题材样本", 9, 100)
+	result.Analysis.RiskControl.StopPrice = 70
+	rules, _ := RulesFor(ProfileBalanced)
+	metrics := CalculateMetrics(request, []HoldingResult{result}, rules)
+	if metrics.HealthScore > 50 || !extremePortfolioRisk(metrics, rules) {
+		t.Fatalf("extreme risk cap was not applied: %+v", metrics)
+	}
+}
+
+func TestPortfolioHealthV2WithholdsScoreBelowCoverageThreshold(t *testing.T) {
+	request := Request{TraderProfile: ProfileBalanced, Holdings: []Holding{{Symbol: "600519.SH", Weight: 60}, {Symbol: "000858.SZ", Weight: 40}}}
+	results := []HoldingResult{
+		successfulHolding(request.Holdings[0], "贵州茅台", 72, 40, "白酒消费", 3, 100),
+		{Holding: request.Holdings[1], Status: "failed", Error: "数据不可用"},
+	}
+	rules, _ := RulesFor(ProfileBalanced)
+	metrics := CalculateMetrics(request, results, rules)
+	if metrics.CoveragePercent != 60 || metrics.HealthScoreAvailable || metrics.HealthScore != 0 {
+		t.Fatalf("low coverage should not produce final health score: %+v", metrics)
 	}
 }
 

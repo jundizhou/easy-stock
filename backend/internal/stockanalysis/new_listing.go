@@ -289,36 +289,27 @@ func buildNewListingSignals(trend TrendAnalysis, short ShortTermAnalysis, theme 
 		liquidityScore = 35
 	}
 	turnoverScore := int(clamp(40+trend.AverageTurnover*3, 25, 80))
-	marketScore := 50
-	marketDetail := "市场情绪数据不足"
-	if market != nil {
-		marketScore = int(clamp(market.Score, 0, 100))
-		marketDetail = market.Phase + " · " + market.Confidence
-	}
-	fundamentalScore := 45
-	fundamentalDetail := fundamental.Summary
-	if fundamental.Available {
-		fundamentalScore = fundamental.Score
-	}
-	researchScore := 45
-	if research.Available {
-		researchScore = research.Score
-	}
-	themeScore := 45
-	if theme.Resonance.Available {
-		themeScore = theme.Resonance.Score
-	}
-	return []Signal{
+	signals := []Signal{
 		{Key: "listing_period", Label: "价格发现", Tone: scoreTone(listingScore), Strength: listingScore, Detail: fmt.Sprintf("上市%d日，上市期收益%+.1f%%，区间位置%.0f%%", trend.HistoryDays, trend.ListingReturn, trend.ListingRangePosition)},
 		{Key: "liquidity", Label: "上市期流动性", Tone: scoreTone(liquidityScore), Strength: liquidityScore, Detail: fmt.Sprintf("平均成交额%.1f亿元", trend.AverageAmount/100_000_000)},
 		{Key: "turnover", Label: "换手与波动", Tone: scoreTone(turnoverScore), Strength: turnoverScore, Detail: fmt.Sprintf("平均换手%.1f%%，观测波动%.1f%%", trend.AverageTurnover, trend.ObservedVolatility)},
-		{Key: "theme", Label: "题材事实", Tone: scoreTone(themeScore), Strength: themeScore, Detail: firstNonEmpty(theme.Description, "暂无明确题材共振")},
-		{Key: "market", Label: "市场环境", Tone: scoreTone(marketScore), Strength: marketScore, Detail: marketDetail},
-		{Key: "fundamental", Label: "基本面", Tone: scoreTone(fundamentalScore), Strength: fundamentalScore, Detail: fundamentalDetail},
-		{Key: "research", Label: "机构研报", Tone: scoreTone(researchScore), Strength: researchScore, Detail: research.Summary},
 		{Key: "risk", Label: "新股风险", Tone: scoreTone(100 - risk.Score), Strength: 100 - risk.Score, Detail: fmt.Sprintf("高风险 · 观察仓上限%d%%", risk.SuggestedPositionMax)},
 		{Key: "short_term", Label: "短线状态", Tone: "neutral", Strength: 45, Detail: short.State},
 	}
+	if theme.Resonance.Available {
+		signals = append(signals, Signal{Key: "theme", Label: "题材事实", Tone: scoreTone(theme.Resonance.Score), Strength: theme.Resonance.Score, Detail: theme.Resonance.Detail})
+	}
+	if market != nil {
+		marketScore := int(clamp(market.Score, 0, 100))
+		signals = append(signals, Signal{Key: "market", Label: "市场环境", Tone: scoreTone(marketScore), Strength: marketScore, Detail: market.Phase + " · " + market.Confidence})
+	}
+	if fundamental != nil && fundamental.Available {
+		signals = append(signals, Signal{Key: "fundamental", Label: "基本面", Tone: scoreTone(fundamental.Score), Strength: fundamental.Score, Detail: fundamental.Summary})
+	}
+	if research != nil && research.Available {
+		signals = append(signals, Signal{Key: "research", Label: "机构研报", Tone: scoreTone(research.Score), Strength: research.Score, Detail: research.Summary})
+	}
+	return signals
 }
 
 func buildNewListingScorecard(profile Profile, signals []Signal) Scorecard {
@@ -326,6 +317,7 @@ func buildNewListingScorecard(profile Profile, signals []Signal) Scorecard {
 	dimensions := make([]DimensionScore, 0, len(signals))
 	positive, negative := make([]string, 0, 5), make([]string, 0, 5)
 	total, weightTotal := 0.0, 0.0
+	positiveDimensions := 0
 	for _, signal := range signals {
 		weight := weights[signal.Key]
 		if weight <= 0 {
@@ -333,14 +325,20 @@ func buildNewListingScorecard(profile Profile, signals []Signal) Scorecard {
 		}
 		total += float64(signal.Strength) * weight
 		weightTotal += weight
-		dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
 		if signal.Tone == "positive" {
 			positive = append(positive, signal.Label+"："+signal.Detail)
+			positiveDimensions++
 		} else if signal.Tone == "negative" {
 			negative = append(negative, signal.Label+"："+signal.Detail)
 		}
 	}
-	return Scorecard{Overall: int(math.Round(divide(total, weightTotal))), Grade: "观察", Direction: "观察", Conviction: "较低", Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
+	for _, signal := range signals {
+		if weight := weights[signal.Key]; weight > 0 {
+			dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight / weightTotal, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
+		}
+	}
+	overall := min(80, calibratedStockScore(divide(total, weightTotal), positiveDimensions))
+	return Scorecard{AlgorithmVersion: "stock-score-v2", Overall: overall, Grade: "观察", Direction: "观察", Conviction: "较低", Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
 }
 
 func buildNewListingRisks(trend TrendAnalysis, theme ThemeAnalysis, market *MarketContext) []string {

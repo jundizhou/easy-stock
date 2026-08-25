@@ -129,13 +129,14 @@ type TrendAnalysis struct {
 }
 
 type Scorecard struct {
-	Overall         int              `json:"overall"`
-	Grade           string           `json:"grade"`
-	Direction       string           `json:"direction"`
-	Conviction      string           `json:"conviction"`
-	Dimensions      []DimensionScore `json:"dimensions"`
-	PositiveSignals []string         `json:"positive_signals"`
-	NegativeSignals []string         `json:"negative_signals"`
+	AlgorithmVersion string           `json:"algorithm_version,omitempty"`
+	Overall          int              `json:"overall"`
+	Grade            string           `json:"grade"`
+	Direction        string           `json:"direction"`
+	Conviction       string           `json:"conviction"`
+	Dimensions       []DimensionScore `json:"dimensions"`
+	PositiveSignals  []string         `json:"positive_signals"`
+	NegativeSignals  []string         `json:"negative_signals"`
 }
 
 type DimensionScore struct {

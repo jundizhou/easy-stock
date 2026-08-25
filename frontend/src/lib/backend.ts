@@ -484,6 +484,7 @@ export type StockAIDimensionScore = {
 };
 
 export type StockAIScorecard = {
+	algorithm_version?: string;
 	overall: number;
 	grade: string;
 	direction: string;
@@ -918,6 +919,10 @@ export type PortfolioMetrics = {
 	short_term_percent: number;
 	new_listing_percent: number;
 	high_risk_percent: number;
+	health_score: number;
+	health_score_available: boolean;
+	risk_resilience_score: number;
+	diversification_score: number;
 	style_match_score: number;
 	style_breaches: string[];
 	theme_exposures: Array<{ theme: string; weight_percent: number; stock_count: number }>;
@@ -953,6 +958,7 @@ export type PortfolioAIReport = {
 export type PortfolioInspectionReport = {
 	id: string;
 	prompt_version: string;
+	algorithm_version?: string;
 	profile: PortfolioProfileRules;
 	holdings: PortfolioHoldingResult[];
 	metrics: PortfolioMetrics;

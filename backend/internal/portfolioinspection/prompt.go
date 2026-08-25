@@ -3,7 +3,6 @@ package portfolioinspection
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 )
 
@@ -74,6 +73,7 @@ func buildPrompt(request Request, results []HoldingResult, metrics Metrics, rule
 	payload := map[string]any{
 		"prompt_version": PromptVersion, "trader_profile": rules, "portfolio_metrics": metrics,
 		"holdings": stocks, "failed_holdings": failed, "cash_percent": 100 - metrics.TotalPositionPercent,
+		"deterministic_summary": map[string]any{"health_score": metrics.HealthScore, "risk_level": riskLevelForMetrics(metrics, rules), "style_match": styleMatchLabel(metrics.StyleMatchScore)},
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -92,7 +92,9 @@ func buildPrompt(request Request, results []HoldingResult, metrics Metrics, rule
 8. 个股数据缺失或过期时必须降低置信度，并列出缺口。
 9. 若有效分析覆盖仓位不足70%，不得给出完整调仓方案。
 10. risk_contribution必须使用输入中的确定性风险贡献比例，不得自行重算。
-11. 严格输出单个JSON对象，不输出Markdown或额外说明。
+11. health_score、risk_level和style_match必须原样复制deterministic_summary，不得自行重算或调整。
+12. 健康度由个股质量45%、风险韧性25%、分散程度20%、风格适配10%组成；风险之间已做递减合并，不得对同一风险重复扣分。
+13. 严格输出单个JSON对象，不输出Markdown或额外说明。
 
 输出格式：
 {"health_score":0,"risk_level":"低|中|高|极高","style_match":"匹配|部分偏离|明显偏离","executive_summary":"80至180字","primary_risks":["最多8条"],"concentration_findings":["最多8条"],"holdings":[{"symbol":"","portfolio_role":"核心|进攻|防守|观察|风险拖累","risk_contribution":0,"conclusion":"","action_priority":"观察|保持|优先处理","action":"条件化动作","confirmation":"确认条件","invalidation":"失效条件"}],"adjustment_order":["最多10条"],"scenarios":[{"name":"市场增强|震荡分化|风险退潮","condition":"","portfolio_action":""}],"next_checklist":["最多10条"],"data_limitations":["最多10条"],"confidence":0.0}
@@ -103,22 +105,9 @@ func buildPrompt(request Request, results []HoldingResult, metrics Metrics, rule
 }
 
 func localReport(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules) AIReport {
-	health := int(math.Round(float64(metrics.StyleMatchScore)*.45 + metrics.WeightedScore*.35 + (100-metrics.WeightedRisk)*.2))
-	health = max(0, min(100, health))
-	riskLevel := "低"
-	if metrics.WeightedRisk >= 75 || metrics.StopLossRiskPercent > rules.MaxStopLossRisk*1.5 {
-		riskLevel = "极高"
-	} else if metrics.WeightedRisk >= 60 || metrics.StopLossRiskPercent > rules.MaxStopLossRisk {
-		riskLevel = "高"
-	} else if metrics.WeightedRisk >= 40 {
-		riskLevel = "中"
-	}
-	styleMatch := "匹配"
-	if metrics.StyleMatchScore < 55 {
-		styleMatch = "明显偏离"
-	} else if metrics.StyleMatchScore < 80 {
-		styleMatch = "部分偏离"
-	}
+	health := metrics.HealthScore
+	riskLevel := riskLevelForMetrics(metrics, rules)
+	styleMatch := styleMatchLabel(metrics.StyleMatchScore)
 	primaryRisks := append([]string(nil), metrics.StyleBreaches...)
 	concentration := make([]string, 0)
 	for _, theme := range metrics.ThemeExposures {
@@ -143,9 +132,9 @@ func localReport(request Request, results []HoldingResult, metrics Metrics, rule
 		analysis := result.Analysis
 		priority := "保持"
 		role := "核心"
-		if analysis.RiskControl.Score >= 70 || byContribution[result.Holding.Symbol] >= 35 {
+		if analysis.RiskControl.Score >= 80 || byContribution[result.Holding.Symbol] >= 40 {
 			priority, role = "优先处理", "风险拖累"
-		} else if analysis.Scorecard.Overall < 50 {
+		} else if analysis.Scorecard.Overall < 45 {
 			priority, role = "观察", "观察"
 		} else if analysis.ActionPlan.DecisionMode == "short_term" {
 			role = "进攻"
@@ -178,4 +167,27 @@ func localReport(request Request, results []HoldingResult, metrics Metrics, rule
 		NextChecklist:   []string{"核对高风险贡献持仓是否触发失效条件", "检查同题材个股是否同时走弱", "复核现金仓位是否符合交易风格"},
 		DataLimitations: limitStrings(limitations, 10), Confidence: round(metrics.CoveragePercent/100*.75, 2), Source: "local-rules",
 	}
+}
+
+func riskLevelForMetrics(metrics Metrics, rules ProfileRules) string {
+	if extremePortfolioRisk(metrics, rules) {
+		return "极高"
+	}
+	if metrics.WeightedRisk >= 70 || metrics.StopLossRiskPercent > rules.MaxStopLossRisk*1.5 {
+		return "高"
+	}
+	if metrics.WeightedRisk >= 50 || metrics.StopLossRiskPercent > rules.MaxStopLossRisk+1 {
+		return "中"
+	}
+	return "低"
+}
+
+func styleMatchLabel(score int) string {
+	if score < 50 {
+		return "明显偏离"
+	}
+	if score < 75 {
+		return "部分偏离"
+	}
+	return "匹配"
 }

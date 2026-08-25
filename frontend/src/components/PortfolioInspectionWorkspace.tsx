@@ -5,6 +5,7 @@ import {
 	ChevronRight,
 	CircleAlert,
 	Clock3,
+	ExternalLink,
 	History,
 	LoaderCircle,
 	Plus,
@@ -20,6 +21,7 @@ import {
 	PortfolioInspectionJob,
 	PortfolioInspectionReport,
 	PortfolioTraderProfile,
+	StockAIAnalysis,
 	StockDirectoryData,
 	StockDirectoryEntry,
 	requestJSON,
@@ -30,6 +32,7 @@ type Props = {
 	config: BackendConfig | null;
 	refreshKey: number;
 	onOpenSettings: () => void;
+	onOpenStockAnalysis: (analysis: StockAIAnalysis) => void;
 };
 
 type DraftHolding = {
@@ -44,12 +47,12 @@ const draftStorageKey = 'easy-stock.portfolio-inspection-draft.v1';
 const maxHoldings = 10;
 
 const profiles: Array<{ id: PortfolioTraderProfile; label: string; description: string; constraint: string }> = [
-	{ id: 'aggressive', label: '激进', description: '短线机会与弹性优先', constraint: '单票参考上限 35%' },
-	{ id: 'balanced', label: '均衡', description: '收益与回撤保持平衡', constraint: '单票参考上限 25%' },
-	{ id: 'steady', label: '稳重', description: '本金保护与趋势确认优先', constraint: '单票参考上限 15%' },
+	{ id: 'aggressive', label: '激进', description: '短线机会与弹性优先', constraint: '单票参考上限 45%' },
+	{ id: 'balanced', label: '均衡', description: '收益与回撤保持平衡', constraint: '单票参考上限 35%' },
+	{ id: 'steady', label: '稳重', description: '本金保护与趋势确认优先', constraint: '单票参考上限 25%' },
 ];
 
-export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSettings }: Props) {
+export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSettings, onOpenStockAnalysis }: Props) {
 	const initialDraft = useMemo(loadDraft, []);
 	const [profile, setProfile] = useState<PortfolioTraderProfile>(initialDraft.profile);
 	const [holdings, setHoldings] = useState<DraftHolding[]>(initialDraft.holdings);
@@ -227,7 +230,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 			/>}
 
 			{job?.status === 'running' && <InspectionProgress job={job} />}
-			{job?.report && job.status !== 'running' && <PortfolioReportView report={job.report} status={job.status} onNew={() => setJob(null)} />}
+			{job?.report && job.status !== 'running' && <PortfolioReportView report={job.report} status={job.status} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} />}
 		</section>
 	</div>;
 }
@@ -280,18 +283,32 @@ function InspectionProgress({ job }: { job: PortfolioInspectionJob }) {
 	</section>;
 }
 
-function PortfolioReportView({ report, status, onNew }: { report: PortfolioInspectionReport; status: string; onNew: () => void }) {
+function PortfolioReportView({ report, status, onNew, onOpenStockAnalysis }: { report: PortfolioInspectionReport; status: string; onNew: () => void; onOpenStockAnalysis: (analysis: StockAIAnalysis) => void }) {
 	const { conclusion, metrics } = report;
+	const isV2 = report.algorithm_version === 'portfolio-health-v2';
 	const names = new Map(report.holdings.map((item) => [item.holding.symbol, item.analysis?.name || item.holding.name || item.holding.symbol]));
+	const analyses = new Map<string, StockAIAnalysis>();
+	report.holdings.forEach((item) => {
+		if (!item.analysis || item.status !== 'succeeded') return;
+		analyses.set(item.holding.symbol, item.analysis);
+		analyses.set(item.analysis.symbol, item.analysis);
+		analyses.set(item.holding.symbol.split('.')[0], item.analysis);
+		analyses.set(item.analysis.symbol.split('.')[0], item.analysis);
+	});
 	return <div className="portfolio-report">
 		<header className="portfolio-report-header"><div><span><WalletCards size={15} />持仓 AI 巡检报告</span><h2>{report.profile.label}型组合 · {conclusion.risk_level}风险</h2><p>{formatDate(report.generated_at)} · 覆盖 {metrics.coverage_percent}% · {conclusion.source === 'hermes-ai' ? 'AI 综合研判' : '本地规则研判'}</p></div><button type="button" onClick={onNew}><Plus size={15} />新建巡检</button></header>
 		{status === 'partial' && <div className="portfolio-report-warning"><CircleAlert size={15} />报告已生成，但部分个股或组合分析使用降级结果。</div>}
-		<section className="portfolio-report-overview">
-			<div className="portfolio-health-score"><span>组合健康度</span><strong>{conclusion.health_score}</strong><small>/ 100</small></div>
+		{isV2 ? <section className="portfolio-report-overview">
+			<div className="portfolio-health-score"><span>组合健康度</span><strong>{metrics.health_score_available ? conclusion.health_score : '—'}</strong><small>{metrics.health_score_available ? 'V2 确定性评分' : '覆盖不足，暂不评分'}</small></div>
+			<div><span>个股质量</span><strong>{metrics.weighted_stock_score.toFixed(1)}</strong><small>健康度权重 45%</small></div>
+			<div><span>风险韧性</span><strong>{metrics.risk_resilience_score}</strong><small>权重 25% · 止损风险 {metrics.stop_loss_risk_percent.toFixed(2)}%</small></div>
+			<div><span>分散 / 风格</span><strong>{metrics.diversification_score} / {metrics.style_match_score}</strong><small>{conclusion.style_match} · 持仓 {metrics.total_position_percent}% / 现金 {metrics.cash_percent}%</small></div>
+		</section> : <section className="portfolio-report-overview">
+			<div className="portfolio-health-score"><span>组合健康度</span><strong>{conclusion.health_score}</strong><small>历史评分</small></div>
 			<div><span>风格匹配</span><strong>{conclusion.style_match}</strong><small>{metrics.style_match_score} 分</small></div>
 			<div><span>持仓 / 现金</span><strong>{metrics.total_position_percent}% / {metrics.cash_percent}%</strong><small>当前配置</small></div>
 			<div><span>预估止损风险</span><strong>{metrics.stop_loss_risk_percent.toFixed(2)}%</strong><small>占组合资产</small></div>
-		</section>
+		</section>}
 		<section className="portfolio-executive"><h3>巡检结论</h3><p>{conclusion.executive_summary}</p></section>
 
 		<div className="portfolio-report-grid">
@@ -300,7 +317,10 @@ function PortfolioReportView({ report, status, onNew }: { report: PortfolioInspe
 		</div>
 
 		<section className="portfolio-holding-report"><header><strong>逐股巡检</strong><small>按组合风险贡献排序</small></header><div>
-			{conclusion.holdings.map((item) => <article key={item.symbol}><header><div><strong>{names.get(item.symbol) || item.symbol}</strong><span>{item.symbol} · {item.portfolio_role}</span></div><em className={priorityTone(item.action_priority)}>{item.action_priority}</em><b>{item.risk_contribution.toFixed(1)}% 风险贡献</b></header><p>{item.conclusion}</p><div><span><b>动作</b>{item.action}</span><span><b>确认</b>{item.confirmation}</span><span><b>失效</b>{item.invalidation}</span></div></article>)}
+			{conclusion.holdings.map((item) => {
+				const stockAnalysis = analyses.get(item.symbol) || analyses.get(item.symbol.split('.')[0]);
+				return <article key={item.symbol}><header><div><strong>{names.get(item.symbol) || item.symbol}</strong><span>{item.symbol} · {item.portfolio_role}</span></div><em className={priorityTone(item.action_priority)}>{item.action_priority}</em><b>{item.risk_contribution.toFixed(1)}% 风险贡献</b>{stockAnalysis && <button type="button" className="portfolio-open-stock" onClick={() => onOpenStockAnalysis(stockAnalysis)} aria-label={`查看${stockAnalysis.name}个股分析报告`} title="查看已生成的个股分析报告"><ExternalLink size={14} />查看个股报告</button>}</header><p>{item.conclusion}</p><div><span><b>动作</b>{item.action}</span><span><b>确认</b>{item.confirmation}</span><span><b>失效</b>{item.invalidation}</span></div></article>;
+			})}
 		</div></section>
 
 		<div className="portfolio-report-grid">

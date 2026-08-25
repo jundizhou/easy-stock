@@ -341,78 +341,129 @@ func buildSignals(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnaly
 	if theme.Resonance.Available {
 		signals = append(signals, Signal{Key: "theme", Label: "题材共振", Tone: scoreTone(theme.Resonance.Score), Strength: theme.Resonance.Score, Detail: theme.Resonance.Detail})
 	}
-	marketScore := 50
-	marketDetail := "市场情绪数据不足"
 	if market != nil {
-		marketScore = int(math.Round(market.Score))
-		marketDetail = market.Phase + " · " + market.Confidence
+		marketScore := int(math.Round(market.Score))
+		marketDetail := market.Phase + " · " + market.Confidence
+		signals = append(signals, Signal{Key: "market", Label: "市场环境", Tone: scoreTone(marketScore), Strength: marketScore, Detail: marketDetail})
 	}
-	signals = append(signals, Signal{Key: "market", Label: "市场环境", Tone: scoreTone(marketScore), Strength: marketScore, Detail: marketDetail})
 	consistent := timeframeConsistency(timeframes)
 	signals = append(signals, Signal{Key: "timeframe", Label: "周期一致性", Tone: scoreTone(consistent), Strength: consistent, Detail: timeframeSummary(timeframes)})
-	if fundamental != nil {
-		score := fundamental.Score
-		if !fundamental.Available {
-			score = 45
-		}
-		signals = append(signals, Signal{Key: "fundamental", Label: "基本面", Tone: scoreTone(score), Strength: score, Detail: fundamental.Summary})
+	if fundamental != nil && fundamental.Available {
+		signals = append(signals, Signal{Key: "fundamental", Label: "基本面", Tone: scoreTone(fundamental.Score), Strength: fundamental.Score, Detail: fundamental.Summary})
 	}
-	if research != nil {
-		score := research.Score
-		if !research.Available {
-			score = 45
-		}
-		signals = append(signals, Signal{Key: "research", Label: "机构研报", Tone: scoreTone(score), Strength: score, Detail: research.Summary})
+	if research != nil && research.Available {
+		signals = append(signals, Signal{Key: "research", Label: "机构研报", Tone: scoreTone(research.Score), Strength: research.Score, Detail: research.Summary})
 	}
 	signals = append(signals, Signal{Key: "risk", Label: "风险约束", Tone: scoreTone(100 - risk.Score), Strength: 100 - risk.Score, Detail: fmt.Sprintf("%s风险 · 止损距离%.1f%%", risk.Level, risk.StopPercent)})
 	return signals
 }
 
 func buildScorecard(profile Profile, signals []Signal) Scorecard {
-	weights := map[string]float64{"trend": .20, "momentum": .12, "volume": .10, "relative": .09, "theme": .08, "market": .09, "timeframe": .06, "fundamental": .15, "research": .05, "risk": .06}
+	type scoreGroup struct {
+		weight  float64
+		members map[string]float64
+	}
+	groups := []scoreGroup{
+		{weight: .30, members: map[string]float64{"trend": .70, "timeframe": .30}},
+		{weight: .15, members: map[string]float64{"momentum": .55, "volume": .45}},
+		{weight: .15, members: map[string]float64{"relative": 1}},
+		{weight: .15, members: map[string]float64{"theme": .60, "market": .40}},
+		{weight: .15, members: map[string]float64{"fundamental": .75, "research": .25}},
+		{weight: .10, members: map[string]float64{"risk": 1}},
+	}
 	if profile.PrimaryType == "emotion_leader" {
-		weights = map[string]float64{"trend": .14, "momentum": .22, "volume": .17, "relative": .06, "theme": .17, "market": .15, "timeframe": .04, "risk": .05}
+		groups[0].weight, groups[1].weight, groups[2].weight, groups[3].weight, groups[4].weight, groups[5].weight = .25, .25, .10, .25, .05, .10
 	} else if profile.PrimaryType == "weak_risk" {
-		weights = map[string]float64{"trend": .24, "momentum": .10, "volume": .08, "relative": .09, "theme": .05, "market": .09, "timeframe": .07, "fundamental": .14, "research": .04, "risk": .10}
+		groups[0].weight, groups[1].weight, groups[2].weight, groups[3].weight, groups[4].weight, groups[5].weight = .35, .10, .15, .10, .15, .15
+	}
+	signalByKey := make(map[string]Signal, len(signals))
+	for _, signal := range signals {
+		signalByKey[signal.Key] = signal
+	}
+	type activeGroup struct {
+		definition scoreGroup
+		score      float64
+		members    map[string]float64
+	}
+	active := make([]activeGroup, 0, len(groups))
+	activeWeight := 0.0
+	for _, group := range groups {
+		memberTotal, scoreTotal := 0.0, 0.0
+		available := map[string]float64{}
+		for key, memberWeight := range group.members {
+			if signal, ok := signalByKey[key]; ok {
+				available[key] = memberWeight
+				memberTotal += memberWeight
+				scoreTotal += float64(signal.Strength) * memberWeight
+			}
+		}
+		if memberTotal == 0 {
+			continue
+		}
+		active = append(active, activeGroup{definition: group, score: scoreTotal / memberTotal, members: available})
+		activeWeight += group.weight
 	}
 	dimensions := make([]DimensionScore, 0, len(signals))
 	positive := make([]string, 0, 5)
 	negative := make([]string, 0, 5)
-	weightedTotal := 0.0
-	weightTotal := 0.0
+	effectiveWeights := map[string]float64{}
+	baseScore := 0.0
+	positiveGroups := 0
+	var structureScore, riskResilience float64
 	for _, signal := range signals {
-		weight := weights[signal.Key]
-		if weight <= 0 {
-			continue
-		}
-		weightedTotal += float64(signal.Strength) * weight
-		weightTotal += weight
-		dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
 		if signal.Tone == "positive" {
 			positive = append(positive, signal.Label+"："+signal.Detail)
 		} else if signal.Tone == "negative" {
 			negative = append(negative, signal.Label+"："+signal.Detail)
 		}
 	}
-	overall := int(math.Round(divide(weightedTotal, weightTotal)))
+	for groupIndex, group := range active {
+		groupWeight := group.definition.weight / activeWeight
+		baseScore += group.score * groupWeight
+		if group.score >= 65 {
+			positiveGroups++
+		}
+		if groupIndex == 0 {
+			structureScore = group.score
+		}
+		for key, memberWeight := range group.members {
+			memberTotal := 0.0
+			for _, weight := range group.members {
+				memberTotal += weight
+			}
+			effectiveWeights[key] = groupWeight * memberWeight / memberTotal
+		}
+		if _, ok := group.members["risk"]; ok {
+			riskResilience = group.score
+		}
+	}
+	for _, signal := range signals {
+		if weight := effectiveWeights[signal.Key]; weight > 0 {
+			dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
+		}
+	}
+	overall := calibratedStockScore(baseScore, positiveGroups)
+	if structureScore < 30 && riskResilience <= 25 {
+		overall = min(overall, 49)
+	}
 	direction := "中性"
 	grade := "C"
 	switch {
-	case overall >= 78:
+	case overall >= 85:
 		direction, grade = "偏多", "A"
-	case overall >= 65:
+	case overall >= 75:
 		direction, grade = "谨慎偏多", "B+"
-	case overall >= 56:
+	case overall >= 65:
 		direction, grade = "略偏多", "B"
-	case overall < 32:
+	case overall < 45:
 		direction, grade = "偏空", "E"
-	case overall < 44:
+	case overall < 55:
 		direction, grade = "谨慎偏空", "D"
 	}
 	conviction := "中等"
-	if profile.Confidence >= .76 && math.Abs(float64(len(positive)-len(negative))) >= 2 {
+	if profile.Confidence >= .76 && activeWeight >= .75 && positiveGroups >= 3 {
 		conviction = "较高"
-	} else if profile.Confidence < .58 || len(positive) == len(negative) {
+	} else if profile.Confidence < .58 || activeWeight < .60 || len(positive) == len(negative) {
 		conviction = "较低"
 	}
 	if len(positive) == 0 {
@@ -421,7 +472,18 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 	if len(negative) == 0 {
 		negative = []string{"暂无突出负面共振，但仍必须执行结构失效条件"}
 	}
-	return Scorecard{Overall: overall, Grade: grade, Direction: direction, Conviction: conviction, Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
+	return Scorecard{AlgorithmVersion: "stock-score-v2", Overall: overall, Grade: grade, Direction: direction, Conviction: conviction, Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
+}
+
+func calibratedStockScore(base float64, positiveGroups int) int {
+	bonus := 0.0
+	if positiveGroups >= 3 {
+		bonus += 2
+	}
+	if positiveGroups >= 5 {
+		bonus += 2
+	}
+	return int(math.Round(clamp(58+.82*(base-50)+bonus, 20, 95)))
 }
 
 func closesOf(lines []foundation.KLine) []float64 {

@@ -14,7 +14,7 @@ import (
 func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 	gateway := &fakeHermesGateway{
 		status:       hermes.Status{Available: true, Configured: true},
-		promptResult: hermes.PromptResult{Content: `{"health_score":76,"risk_level":"中","style_match":"匹配","executive_summary":"组合结构总体可控，继续按确认与失效条件管理持仓。","primary_risks":[],"concentration_findings":[],"holdings":[{"symbol":"600519.SH","portfolio_role":"核心","risk_contribution":100,"conclusion":"趋势结构稳定","action_priority":"保持","action":"满足趋势条件时持有","confirmation":"趋势延续","invalidation":"跌破止损"}],"adjustment_order":[],"scenarios":[],"next_checklist":[],"data_limitations":[],"confidence":0.8}`},
+		promptResult: hermes.PromptResult{Content: `{"health_score":1,"risk_level":"极高","style_match":"明显偏离","executive_summary":"组合结构总体可控，继续按确认与失效条件管理持仓。","primary_risks":[],"concentration_findings":[],"holdings":[{"symbol":"600519.SH","portfolio_role":"核心","risk_contribution":100,"conclusion":"趋势结构稳定","action_priority":"保持","action":"满足趋势条件时持有","confirmation":"趋势延续","invalidation":"跌破止损"}],"adjustment_order":[],"scenarios":[],"next_checklist":[],"data_limitations":[],"confidence":0.8}`},
 	}
 	server := NewServer(Config{
 		Realtime: stockAnalysisRealtime{}, KLinePrimary: stockAnalysisKLines{}, KLineFallback: stockAnalysisKLines{},
@@ -49,10 +49,18 @@ func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 				Status          string `json:"status"`
 				ReportAvailable bool   `json:"report_available"`
 				Report          struct {
-					Metrics struct {
-						Total int `json:"total_position_percent"`
-						Cash  int `json:"cash_percent"`
+					AlgorithmVersion string `json:"algorithm_version"`
+					Metrics          struct {
+						Total           int  `json:"total_position_percent"`
+						Cash            int  `json:"cash_percent"`
+						Health          int  `json:"health_score"`
+						HealthAvailable bool `json:"health_score_available"`
 					} `json:"metrics"`
+					Conclusion struct {
+						Health     int    `json:"health_score"`
+						RiskLevel  string `json:"risk_level"`
+						StyleMatch string `json:"style_match"`
+					} `json:"conclusion"`
 				} `json:"report"`
 			} `json:"data"`
 		}
@@ -60,8 +68,11 @@ func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 			t.Fatal(err)
 		}
 		if payload.Data.Status != "running" {
-			if !payload.Data.ReportAvailable || payload.Data.Report.Metrics.Total != 60 || payload.Data.Report.Metrics.Cash != 40 {
+			if !payload.Data.ReportAvailable || payload.Data.Report.Metrics.Total != 60 || payload.Data.Report.Metrics.Cash != 40 || payload.Data.Report.AlgorithmVersion != "portfolio-health-v2" {
 				t.Fatalf("unexpected completed job: %+v", payload.Data)
+			}
+			if !payload.Data.Report.Metrics.HealthAvailable || payload.Data.Report.Conclusion.Health != payload.Data.Report.Metrics.Health || payload.Data.Report.Conclusion.Health == 1 || payload.Data.Report.Conclusion.RiskLevel == "极高" || payload.Data.Report.Conclusion.StyleMatch == "明显偏离" {
+				t.Fatalf("AI changed deterministic health score: %+v", payload.Data.Report)
 			}
 			return
 		}

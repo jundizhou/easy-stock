@@ -2,6 +2,7 @@ package stockanalysis
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,9 @@ func TestAnalyzeNewListingWithOneTradingDay(t *testing.T) {
 	}
 	if len(analysis.Timeframes) != 4 || analysis.Relative.Available || analysis.Scorecard.Conviction != "较低" {
 		t.Fatalf("limited-sample workspace is misleading: timeframes=%+v relative=%+v scorecard=%+v", analysis.Timeframes, analysis.Relative, analysis.Scorecard)
+	}
+	if analysis.Scorecard.AlgorithmVersion != "stock-score-v2" || analysis.Scorecard.Overall > 80 {
+		t.Fatalf("new-listing scorecard must use the capped V2 observation scale: %+v", analysis.Scorecard)
 	}
 	foundLimitedKLine := false
 	for _, item := range analysis.DataQuality {
@@ -222,8 +226,11 @@ func TestAnalyzeBuildsCompleteDecisionWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(analysis.Timeframes) != 5 || len(analysis.Signals) < 7 || len(analysis.Scorecard.Dimensions) < 7 {
+	if len(analysis.Timeframes) != 5 || len(analysis.Signals) < 6 || len(analysis.Scorecard.Dimensions) < 6 {
 		t.Fatalf("complete score workspace missing: timeframes=%d signals=%d dimensions=%d", len(analysis.Timeframes), len(analysis.Signals), len(analysis.Scorecard.Dimensions))
+	}
+	if analysis.Scorecard.AlgorithmVersion != "stock-score-v2" {
+		t.Fatalf("score algorithm version = %q", analysis.Scorecard.AlgorithmVersion)
 	}
 	if !analysis.Relative.Available || analysis.Relative.BenchmarkName != "创业板指" {
 		t.Fatalf("relative strength missing: %+v", analysis.Relative)
@@ -236,6 +243,46 @@ func TestAnalyzeBuildsCompleteDecisionWorkspace(t *testing.T) {
 	}
 	if last := analysis.Chart[len(analysis.Chart)-1]; last.MA120 == nil {
 		t.Fatalf("chart is missing MA120: %+v", last)
+	}
+}
+
+func TestScorecardV2CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t *testing.T) {
+	signals := []Signal{
+		{Key: "trend", Label: "趋势结构", Tone: "neutral", Strength: 50},
+		{Key: "timeframe", Label: "周期一致性", Tone: "neutral", Strength: 50},
+		{Key: "momentum", Label: "价格动能", Tone: "neutral", Strength: 50},
+		{Key: "volume", Label: "量价配合", Tone: "neutral", Strength: 50},
+		{Key: "risk", Label: "风险约束", Tone: "neutral", Strength: 50},
+	}
+	scorecard := buildScorecard(Profile{PrimaryType: "trend_capacity", Confidence: .7}, signals)
+	if scorecard.Overall != 58 || scorecard.AlgorithmVersion != "stock-score-v2" {
+		t.Fatalf("neutral V2 scorecard = %+v", scorecard)
+	}
+	weightTotal := 0.0
+	for _, dimension := range scorecard.Dimensions {
+		weightTotal += dimension.Weight
+		if dimension.Key == "fundamental" || dimension.Key == "research" || dimension.Key == "market" {
+			t.Fatalf("missing evidence was added to scorecard: %+v", scorecard.Dimensions)
+		}
+	}
+	if math.Abs(weightTotal-1) > .0001 {
+		t.Fatalf("effective weights sum to %.4f", weightTotal)
+	}
+}
+
+func TestStockScoreV2UsesGentleCalibration(t *testing.T) {
+	for _, item := range []struct {
+		base, want float64
+		positive   int
+	}{
+		{base: 40, positive: 0, want: 50},
+		{base: 50, positive: 0, want: 58},
+		{base: 70, positive: 3, want: 76},
+		{base: 80, positive: 5, want: 87},
+	} {
+		if got := calibratedStockScore(item.base, item.positive); got != int(item.want) {
+			t.Fatalf("calibratedStockScore(%.0f, %d) = %d, want %.0f", item.base, item.positive, got, item.want)
+		}
 	}
 }
 

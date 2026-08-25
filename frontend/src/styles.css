@@ -287,7 +287,7 @@
 .portfolio-holding-report > header small { color: #8996a0; font-size: 9px; }
 .portfolio-holding-report > div { display: grid; gap: 8px; }
 .portfolio-holding-report article { padding: 13px 15px; border: 1px solid #dce3e7; border-radius: 6px; background: #fff; }
-.portfolio-holding-report article > header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+.portfolio-holding-report article > header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; }
 .portfolio-holding-report article > header > div { display: grid; gap: 3px; }
 .portfolio-holding-report article > header strong { color: #243a4a; font-size: 11px; }
 .portfolio-holding-report article > header span { color: #82909a; font-size: 8px; }
@@ -296,6 +296,8 @@
 .portfolio-holding-report article > header em.positive { background: #e8f5ee; color: #25704e; }
 .portfolio-holding-report article > header em.neutral { background: #edf1f3; color: #667884; }
 .portfolio-holding-report article > header b { color: #87643a; font-size: 9px; }
+.portfolio-open-stock { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 5px 8px; border: 1px solid #b8ccd7; border-radius: 4px; background: #f6fafc; color: #315f77; font-size: 8px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.portfolio-open-stock:hover { border-color: #709bb0; background: #edf6f9; color: #214f67; }
 .portfolio-holding-report article > p { margin: 9px 0; color: #536876; font-size: 9px; line-height: 1.7; }
 .portfolio-holding-report article > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .portfolio-holding-report article > div span { padding: 8px; background: #f5f7f8; color: #647784; font-size: 8px; line-height: 1.55; overflow-wrap: anywhere; }
@@ -339,7 +341,8 @@
 	.portfolio-holding-report article > header,
 	.portfolio-holding-report article > div { grid-template-columns: 1fr; }
 	.portfolio-holding-report article > header em,
-	.portfolio-holding-report article > header b { justify-self: start; }
+	.portfolio-holding-report article > header b,
+	.portfolio-open-stock { justify-self: start; }
 }
 
 * {

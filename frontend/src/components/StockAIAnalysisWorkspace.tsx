@@ -72,6 +72,8 @@ type Props = {
 	config: BackendConfig | null;
 	refreshKey: number;
 	mode: StockAIWorkspaceMode;
+	initialAnalysis?: StockAIAnalysis | null;
+	onInitialAnalysisConsumed?: () => void;
 	onAskAI: (analysis: StockAIAnalysis) => void;
 	onOpenSettings: () => void;
 };
@@ -99,7 +101,7 @@ const examples = ['600519', '300750', '002594', '601138', '688981'];
 type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
 type HotRankState = 'idle' | 'loading' | 'ready' | 'error';
 
-export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, onOpenSettings }: Props) {
+export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnalysis, onInitialAnalysisConsumed, onAskAI, onOpenSettings }: Props) {
 	const [query, setQuery] = useState(() => window.localStorage.getItem(symbolStorageKey) || '');
 	const [analysis, setAnalysis] = useState<StockAIAnalysis | null>(null);
 	const [history, setHistory] = useState<AnalysisHistoryItem[]>(loadAnalysisHistory);
@@ -131,6 +133,17 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 			return next;
 		});
 	}, []);
+
+	useEffect(() => {
+		if (!initialAnalysis) return;
+		setAnalysis(initialAnalysis);
+		setQuery(initialAnalysis.symbol);
+		setError('');
+		setState('ready');
+		window.localStorage.setItem(symbolStorageKey, initialAnalysis.symbol);
+		saveAnalysis(initialAnalysis);
+		onInitialAnalysisConsumed?.();
+	}, [initialAnalysis, onInitialAnalysisConsumed, saveAnalysis]);
 
 	const runAnalysis = useCallback(async (rawSymbol: string) => {
 		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);

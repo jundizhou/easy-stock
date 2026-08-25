@@ -133,6 +133,7 @@ export function App() {
 	const [stockAIRefreshKey, setStockAIRefreshKey] = useState(0);
 	const [portfolioInspectionRefreshKey, setPortfolioInspectionRefreshKey] = useState(0);
 	const [stockAIWorkspaceMode, setStockAIWorkspaceMode] = useState<StockAIWorkspaceMode>('analysis');
+	const [stockAIInitialAnalysis, setStockAIInitialAnalysis] = useState<StockAIAnalysis | null>(null);
 	const [aiRefreshKey, setAIRefreshKey] = useState(0);
 	const [marketRefreshKey, setMarketRefreshKey] = useState(0);
 	const [aiPrefill, setAIPrefill] = useState('');
@@ -622,6 +623,12 @@ export function App() {
 		switchWorkspace('ai');
 	};
 
+	const openPortfolioStockAnalysis = (analysis: StockAIAnalysis) => {
+		setStockAIInitialAnalysis(analysis);
+		setStockAIWorkspaceMode('analysis');
+		switchWorkspace('stock-ai');
+	};
+
 	const askMarketAI = (prompt: string) => {
 		setAIPrefill(prompt);
 		switchWorkspace('ai');
@@ -938,7 +945,7 @@ export function App() {
 					</section>
 				</aside>
 			</div>
-			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} onInitialPromptConsumed={() => setAIPrefill('')} onOpenSettings={() => setSettingsOpen(true)} />}
+			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} onInitialPromptConsumed={() => setAIPrefill('')} onOpenSettings={() => setSettingsOpen(true)} />}
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>

@@ -201,7 +201,7 @@ func (s *Service) run(job Job) {
 		}
 	}
 	completedAt := time.Now().UTC()
-	job.Report = &Report{ID: job.ID, PromptVersion: PromptVersion, Profile: rules, Holdings: job.Results, Metrics: metrics, Conclusion: conclusion, GeneratedAt: completedAt}
+	job.Report = &Report{ID: job.ID, PromptVersion: PromptVersion, AlgorithmVersion: AlgorithmVersion, Profile: rules, Holdings: job.Results, Metrics: metrics, Conclusion: conclusion, GeneratedAt: completedAt}
 	job.ReportAvailable = true
 	job.Stage = "completed"
 	job.UpdatedAt = completedAt
@@ -238,7 +238,9 @@ func (s *Service) generateAIReport(ctx context.Context, request Request, results
 	if strings.TrimSpace(report.ExecutiveSummary) == "" || strings.TrimSpace(report.RiskLevel) == "" {
 		return AIReport{}, errors.New("持仓组合AI返回缺少必要字段")
 	}
-	report.HealthScore = max(0, min(100, report.HealthScore))
+	report.HealthScore = metrics.HealthScore
+	report.RiskLevel = riskLevelForMetrics(metrics, rules)
+	report.StyleMatch = styleMatchLabel(metrics.StyleMatchScore)
 	report.Confidence = math.Max(0, math.Min(1, report.Confidence))
 	report.Source = "hermes-ai"
 	report.PrimaryRisks = limitStrings(report.PrimaryRisks, 8)

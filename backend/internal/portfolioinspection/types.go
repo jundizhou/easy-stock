@@ -8,7 +8,8 @@ import (
 
 const (
 	MaxHoldings        = 10
-	PromptVersion      = "portfolio-inspection-v1"
+	PromptVersion      = "portfolio-inspection-v2"
+	AlgorithmVersion   = "portfolio-health-v2"
 	MinimumAICoverage  = 70
 	DefaultConcurrency = 2
 )
@@ -86,6 +87,10 @@ type Metrics struct {
 	ShortTermPercent     int                `json:"short_term_percent"`
 	NewListingPercent    int                `json:"new_listing_percent"`
 	HighRiskPercent      int                `json:"high_risk_percent"`
+	HealthScore          int                `json:"health_score"`
+	HealthScoreAvailable bool               `json:"health_score_available"`
+	RiskResilienceScore  int                `json:"risk_resilience_score"`
+	DiversificationScore int                `json:"diversification_score"`
 	StyleMatchScore      int                `json:"style_match_score"`
 	StyleBreaches        []string           `json:"style_breaches"`
 	ThemeExposures       []ThemeExposure    `json:"theme_exposures"`
@@ -127,13 +132,14 @@ type AIReport struct {
 }
 
 type Report struct {
-	ID            string          `json:"id"`
-	PromptVersion string          `json:"prompt_version"`
-	Profile       ProfileRules    `json:"profile"`
-	Holdings      []HoldingResult `json:"holdings"`
-	Metrics       Metrics         `json:"metrics"`
-	Conclusion    AIReport        `json:"conclusion"`
-	GeneratedAt   time.Time       `json:"generated_at"`
+	ID               string          `json:"id"`
+	PromptVersion    string          `json:"prompt_version"`
+	AlgorithmVersion string          `json:"algorithm_version,omitempty"`
+	Profile          ProfileRules    `json:"profile"`
+	Holdings         []HoldingResult `json:"holdings"`
+	Metrics          Metrics         `json:"metrics"`
+	Conclusion       AIReport        `json:"conclusion"`
+	GeneratedAt      time.Time       `json:"generated_at"`
 }
 
 type Job struct {
@@ -158,11 +164,11 @@ type Job struct {
 func RulesFor(profile TraderProfile) (ProfileRules, bool) {
 	switch profile {
 	case ProfileAggressive:
-		return ProfileRules{ID: profile, Label: "激进", Description: "短线机会与弹性优先，可接受较高波动", MaxSinglePercent: 35, MaxTopThreePercent: 80, MinimumCashPercent: 0, MaxHighRiskPercent: 65, MaxStopLossRisk: 6, PreferredShortTermMax: 70}, true
+		return ProfileRules{ID: profile, Label: "激进", Description: "短线机会与弹性优先，可接受较高波动", MaxSinglePercent: 45, MaxTopThreePercent: 90, MinimumCashPercent: 0, MaxHighRiskPercent: 75, MaxStopLossRisk: 8, PreferredShortTermMax: 80}, true
 	case ProfileBalanced:
-		return ProfileRules{ID: profile, Label: "均衡", Description: "兼顾收益与回撤，控制单票和同题材集中", MaxSinglePercent: 25, MaxTopThreePercent: 65, MinimumCashPercent: 10, MaxHighRiskPercent: 40, MaxStopLossRisk: 4, PreferredShortTermMax: 45}, true
+		return ProfileRules{ID: profile, Label: "均衡", Description: "兼顾收益与回撤，控制单票和同题材集中", MaxSinglePercent: 35, MaxTopThreePercent: 75, MinimumCashPercent: 5, MaxHighRiskPercent: 55, MaxStopLossRisk: 6, PreferredShortTermMax: 60}, true
 	case ProfileSteady:
-		return ProfileRules{ID: profile, Label: "稳重", Description: "本金保护与趋势确认优先，保留现金缓冲", MaxSinglePercent: 15, MaxTopThreePercent: 45, MinimumCashPercent: 20, MaxHighRiskPercent: 20, MaxStopLossRisk: 2.5, PreferredShortTermMax: 20}, true
+		return ProfileRules{ID: profile, Label: "稳重", Description: "本金保护与趋势确认优先，保留现金缓冲", MaxSinglePercent: 25, MaxTopThreePercent: 60, MinimumCashPercent: 10, MaxHighRiskPercent: 35, MaxStopLossRisk: 4, PreferredShortTermMax: 35}, true
 	default:
 		return ProfileRules{}, false
 	}

@@ -84,12 +84,24 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 
 	metrics.HighCorrelations = calculateCorrelations(analyses)
 	metrics.RiskContributions = calculateRiskContributions(results, metrics.HighCorrelations)
-	metrics.StyleMatchScore, metrics.StyleBreaches = styleMatch(metrics, rules)
 	metrics.HHI = round(metrics.HHI, 1)
 	metrics.CoveragePercent = round(metrics.CoveragePercent, 1)
 	metrics.WeightedScore = round(metrics.WeightedScore, 1)
 	metrics.WeightedRisk = round(metrics.WeightedRisk, 1)
 	metrics.StopLossRiskPercent = round(metrics.StopLossRiskPercent, 2)
+	riskWarnings, diversificationWarnings, styleWarnings := []string{}, []string{}, []string{}
+	metrics.RiskResilienceScore, riskWarnings = riskResilience(metrics, rules)
+	metrics.DiversificationScore, diversificationWarnings = diversification(metrics, rules, request)
+	metrics.StyleMatchScore, styleWarnings = styleMatch(metrics, rules)
+	metrics.StyleBreaches = uniqueWarnings(append(append(riskWarnings, diversificationWarnings...), styleWarnings...))
+	metrics.HealthScoreAvailable = metrics.CoveragePercent >= MinimumAICoverage
+	if metrics.HealthScoreAvailable {
+		health := metrics.WeightedScore*.45 + float64(metrics.RiskResilienceScore)*.25 + float64(metrics.DiversificationScore)*.20 + float64(metrics.StyleMatchScore)*.10
+		metrics.HealthScore = int(math.Round(math.Max(0, math.Min(100, health))))
+		if extremePortfolioRisk(metrics, rules) {
+			metrics.HealthScore = min(metrics.HealthScore, 50)
+		}
+	}
 	return metrics
 }
 
@@ -198,40 +210,125 @@ func calculateRiskContributions(results []HoldingResult, correlations []Correlat
 	return items
 }
 
-func styleMatch(metrics Metrics, rules ProfileRules) (int, []string) {
-	score := 100.0
-	breaches := make([]string, 0, 6)
-	if metrics.MaxSinglePercent > rules.MaxSinglePercent {
-		delta := metrics.MaxSinglePercent - rules.MaxSinglePercent
-		score -= float64(delta * 2)
-		breaches = append(breaches, "单只股票仓位超过该风格参考上限")
+func riskResilience(metrics Metrics, rules ProfileRules) (int, []string) {
+	warnings := make([]string, 0, 3)
+	penalties := []float64{
+		math.Min(35, math.Max(0, metrics.WeightedRisk-45)*1.1),
+		math.Min(20, math.Max(0, metrics.StopLossRiskPercent-rules.MaxStopLossRisk-1)*2),
+		math.Min(15, math.Max(0, float64(metrics.HighRiskPercent-rules.MaxHighRiskPercent-5))*.25),
 	}
-	if metrics.TopThreePercent > rules.MaxTopThreePercent {
-		delta := metrics.TopThreePercent - rules.MaxTopThreePercent
-		score -= float64(delta)
-		breaches = append(breaches, "前三大持仓集中度偏高")
-	}
-	if metrics.CashPercent < rules.MinimumCashPercent {
-		delta := rules.MinimumCashPercent - metrics.CashPercent
-		score -= float64(delta * 2)
-		breaches = append(breaches, "现金缓冲低于该风格参考值")
-	}
-	if metrics.HighRiskPercent > rules.MaxHighRiskPercent {
-		delta := metrics.HighRiskPercent - rules.MaxHighRiskPercent
-		score -= float64(delta)
-		breaches = append(breaches, "高风险个股仓位偏高")
-	}
-	if metrics.ShortTermPercent > rules.PreferredShortTermMax {
-		delta := metrics.ShortTermPercent - rules.PreferredShortTermMax
-		score -= float64(delta) * .7
-		breaches = append(breaches, "短线仓位超过该风格偏好")
+	if metrics.WeightedRisk >= 70 {
+		warnings = append(warnings, "持仓个股的加权风险水平偏高")
 	}
 	if metrics.StopLossRiskPercent > rules.MaxStopLossRisk {
-		delta := metrics.StopLossRiskPercent - rules.MaxStopLossRisk
-		score -= delta * 6
-		breaches = append(breaches, "组合止损风险预算偏高")
+		warnings = append(warnings, "组合止损风险预算偏高")
 	}
-	return int(math.Round(math.Max(0, math.Min(100, score)))), breaches
+	if metrics.HighRiskPercent > rules.MaxHighRiskPercent {
+		warnings = append(warnings, "高风险个股仓位偏高")
+	}
+	return int(math.Round(100 - diminishingPenalty(penalties, 55))), warnings
+}
+
+func diversification(metrics Metrics, rules ProfileRules, request Request) (int, []string) {
+	warnings := make([]string, 0, 4)
+	penalties := make([]float64, 0, 4)
+	if metrics.MaxSinglePercent > rules.MaxSinglePercent {
+		warnings = append(warnings, "单只股票仓位超过该风格参考上限")
+	}
+	penalties = append(penalties, math.Min(50, math.Max(0, float64(metrics.MaxSinglePercent-rules.MaxSinglePercent-5))*.8))
+	if len(request.Holdings) >= 4 {
+		if metrics.TopThreePercent > rules.MaxTopThreePercent {
+			warnings = append(warnings, "前三大持仓集中度偏高")
+		}
+		penalties = append(penalties, math.Min(15, math.Max(0, float64(metrics.TopThreePercent-rules.MaxTopThreePercent-5))*.35))
+	}
+	themePenalty := 0.0
+	themeLimit := themeConcentrationLimit(rules.ID)
+	for _, exposure := range metrics.ThemeExposures {
+		if exposure.Symbols < 2 || exposure.Weight <= themeLimit {
+			continue
+		}
+		warnings = append(warnings, exposure.Theme+"题材持仓集中度偏高")
+		themePenalty = math.Max(themePenalty, math.Min(20, math.Max(0, float64(exposure.Weight-themeLimit-5))*.6))
+	}
+	penalties = append(penalties, themePenalty)
+	weights := map[string]int{}
+	for _, holding := range request.Holdings {
+		weights[holding.Symbol] = holding.Weight
+	}
+	correlationPenalty := 0.0
+	for _, pair := range metrics.HighCorrelations {
+		combinedWeight := weights[pair.LeftSymbol] + weights[pair.RightSymbol]
+		if pair.Correlation < .8 || combinedWeight < 35 {
+			continue
+		}
+		warnings = append(warnings, "高相关持仓合计仓位偏高")
+		penalty := (pair.Correlation-.8)*50 + float64(combinedWeight-35)*.15
+		correlationPenalty = math.Max(correlationPenalty, math.Min(15, penalty))
+	}
+	penalties = append(penalties, correlationPenalty)
+	return int(math.Round(100 - diminishingPenalty(penalties, 65))), warnings
+}
+
+func styleMatch(metrics Metrics, rules ProfileRules) (int, []string) {
+	penalties := make([]float64, 0, 2)
+	breaches := make([]string, 0, 2)
+	if metrics.CashPercent < rules.MinimumCashPercent {
+		breaches = append(breaches, "现金缓冲低于该风格参考值")
+	}
+	penalties = append(penalties, math.Min(20, math.Max(0, float64(rules.MinimumCashPercent-metrics.CashPercent-3))))
+	if metrics.ShortTermPercent > rules.PreferredShortTermMax {
+		breaches = append(breaches, "短线仓位超过该风格偏好")
+	}
+	penalties = append(penalties, math.Min(20, math.Max(0, float64(metrics.ShortTermPercent-rules.PreferredShortTermMax-5))*.25))
+	return int(math.Round(100 - diminishingPenalty(penalties, 40))), breaches
+}
+
+func themeConcentrationLimit(profile TraderProfile) int {
+	switch profile {
+	case ProfileAggressive:
+		return 65
+	case ProfileSteady:
+		return 40
+	default:
+		return 50
+	}
+}
+
+func diminishingPenalty(penalties []float64, limit float64) float64 {
+	sort.Sort(sort.Reverse(sort.Float64Slice(penalties)))
+	total := 0.0
+	for index, penalty := range penalties {
+		multiplier := .25
+		if index == 0 {
+			multiplier = 1
+		} else if index == 1 {
+			multiplier = .5
+		}
+		total += penalty * multiplier
+	}
+	return math.Min(limit, total)
+}
+
+func extremePortfolioRisk(metrics Metrics, rules ProfileRules) bool {
+	return metrics.StopLossRiskPercent > rules.MaxStopLossRisk*2 || (metrics.WeightedRisk >= 80 && metrics.HighRiskPercent >= 70)
+}
+
+func uniqueWarnings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func average(values []float64) float64 {
