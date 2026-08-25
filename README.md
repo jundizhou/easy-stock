@@ -41,8 +41,8 @@
 </p>
 
 <p align="center">
-  <a href="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png">
-    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png" width="1280" alt="easy-stock A股 AI 智能投研工作台，覆盖行情分析、题材主线、股票分析与市场复盘" />
+  <a href="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-product-overview.png">
+    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-product-overview.png" width="1280" alt="easy-stock A股 AI 智能投研工作台产品全景图，展示趋势题材、主线梯队、个股日 K 与龙头分析" />
   </a>
 </p>
 
