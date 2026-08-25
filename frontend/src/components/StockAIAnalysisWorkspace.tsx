@@ -284,9 +284,9 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onAskAI, on
 					{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
 
 					{state === 'loading' && (
-						<div className="stock-ai-loading">
+						<div className="stock-ai-loading" role="status" aria-live="polite">
 							<LoaderCircle className="spin" size={30} />
-							<div><strong>正在建立完整决策画像</strong><span>同步300日趋势、基准指数、涨停结构、题材、市场情绪，并生成多周期评分、隔日情景与风控参数。</span></div>
+							<div><strong>正在建立完整决策画像</strong><span>为了保证分析的全面性和准确性，easy-stock 将获取行情、题材、公告、研报等完整数据，并进行多轮 AI 分析，预计耗时 5–10 分钟，请耐心等待。</span></div>
 						</div>
 					)}
 
