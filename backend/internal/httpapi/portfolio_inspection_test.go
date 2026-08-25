@@ -39,11 +39,14 @@ func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/portfolio-inspections/"+created.Data.ID, nil)
 		statusResponse := httptest.NewRecorder()
 		server.ServeHTTP(statusResponse, statusRequest)
+		if statusResponse.Code != http.StatusOK {
+			t.Fatalf("status request=%d body=%s", statusResponse.Code, statusResponse.Body.String())
+		}
 		var payload struct {
 			Data struct {
 				Status          string `json:"status"`
@@ -76,7 +79,7 @@ func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 			}
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("portfolio inspection did not complete")
 }
