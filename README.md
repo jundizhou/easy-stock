@@ -37,12 +37,6 @@
 </p>
 
 <p align="center">
-  <a href="https://qm.qq.com/q/lizlauc32U">
-    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-qq-group.png" width="360" alt="easy-stock QQ 交流群 422158208 加群二维码" />
-  </a>
-</p>
-
-<p align="center">
   <a href="#为什么要做-easy-stock">为什么</a> ·
   <a href="#核心产品能力">核心能力</a> ·
   <a href="#ai-如何赋能-a-股研究">AI 研究方式</a> ·
