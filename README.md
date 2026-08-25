@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><strong>下载最新版</strong></a> ·
+  <a href="https://qm.qq.com/q/lizlauc32U"><strong>加入 QQ 群</strong></a> ·
   <a href="#核心产品能力">查看核心能力</a> ·
   <a href="https://github.com/jundizhou/easy-stock/issues/new/choose">反馈问题</a> ·
   <a href="./ROADMAP.md">产品路线图</a>
@@ -27,6 +28,18 @@
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
   <a href="https://github.com/jundizhou/easy-stock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jundizhou/easy-stock?style=flat" /></a>
+</p>
+
+<h3 align="center">easy-stock QQ 交流群</h3>
+
+<p align="center">
+  <a href="https://qm.qq.com/q/lizlauc32U"><strong>点击加入群聊：422158208</strong></a>
+</p>
+
+<p align="center">
+  <a href="https://qm.qq.com/q/lizlauc32U">
+    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-qq-group.png" width="360" alt="easy-stock QQ 交流群 422158208 加群二维码" />
+  </a>
 </p>
 
 <p align="center">
