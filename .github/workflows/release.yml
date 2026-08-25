@@ -213,7 +213,7 @@ jobs:
 
       - name: Generate SHA-256 checksums for user downloads
         working-directory: publish-assets/github
-        run: find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+        run: find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
 
       - name: Publish or update release
         env:
