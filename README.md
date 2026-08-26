@@ -242,6 +242,8 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 
 无需安装 Node.js、Go 或 Python。前往 [GitHub Releases](https://github.com/jundizhou/easy-stock/releases/latest) 下载适合当前系统的桌面安装包或压缩包。
 
+首次使用请阅读 [使用帮助：配置大模型与雪球、淘股吧登录](./docs/user-guide.md)，其中包含 DeepSeek、Kimi 从购买 API 额度、创建 API Key 到连接测试的完整步骤。
+
 ### 2. 开发者
 
 需要从源码运行、调试、测试或打包，请阅读 [开发者文档](./docs/development.md)。
