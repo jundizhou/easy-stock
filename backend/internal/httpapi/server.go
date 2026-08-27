@@ -59,6 +59,7 @@ type Server struct {
 	reviewStore           *review.Store
 	portfolioStore        *portfolioinspection.Store
 	portfolioInspection   *portfolioinspection.Service
+	portfolioExpectation  *portfolioinspection.ExpectationService
 	reviewImporter        ReviewImporter
 	wechatAPIURL          string
 	settingsStore         *appsettings.Store
@@ -294,6 +295,7 @@ func NewServer(config any) *Server {
 		s.stockConcepts,
 	)
 	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
+	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
 	s.routes()
 	return s
 }
@@ -441,6 +443,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)
+	s.mux.HandleFunc("POST /api/v1/reviews/portfolio-expectations", s.portfolioExpectationCreate)
+	s.mux.HandleFunc("GET /api/v1/reviews/portfolio-expectations/latest", s.portfolioExpectationLatest)
+	s.mux.HandleFunc("GET /api/v1/reviews/portfolio-expectations/{id}", s.portfolioExpectationGet)
 	s.mux.HandleFunc("GET /api/v1/reviews/sources", s.reviewSources)
 	s.mux.HandleFunc("GET /api/v1/reviews/authors", s.reviewAuthors)
 	s.mux.HandleFunc("DELETE /api/v1/reviews/authors/{id}", s.reviewAuthorDelete)

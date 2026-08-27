@@ -1,6 +1,5 @@
 import {
 	Activity,
-	BrainCircuit,
 	CheckCircle2,
 	ChevronRight,
 	CircleAlert,
@@ -10,12 +9,10 @@ import {
 	LoaderCircle,
 	Plus,
 	RefreshCw,
-	Search,
 	ShieldCheck,
-	Trash2,
 	WalletCards,
 } from 'lucide-react';
-import { KeyboardEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
 	BackendConfig,
 	PortfolioInspectionJob,
@@ -26,7 +23,8 @@ import {
 	StockDirectoryEntry,
 	requestJSON,
 } from '../lib/backend';
-import { resolveStockDirectorySymbol, searchStockDirectory } from '../lib/stock-analysis';
+import { portfolioDraftToHoldings, portfolioProfiles, readPortfolioDraft, writePortfolioDraft } from '../lib/portfolio-draft';
+import { PortfolioSetupForm } from './PortfolioSetupForm';
 
 type Props = {
 	config: BackendConfig | null;
@@ -35,31 +33,11 @@ type Props = {
 	onOpenStockAnalysis: (analysis: StockAIAnalysis) => void;
 };
 
-type DraftHolding = {
-	symbol: string;
-	name: string;
-	weight: number;
-	costPrice: string;
-};
-
 const directoryStorageKey = 'easy-stock.stock-directory.v1';
-const draftStorageKey = 'easy-stock.portfolio-inspection-draft.v1';
-const maxHoldings = 10;
-
-const profiles: Array<{ id: PortfolioTraderProfile; label: string; description: string; constraint: string }> = [
-	{ id: 'aggressive', label: '激进', description: '短线机会与弹性优先', constraint: '单票参考上限 45%' },
-	{ id: 'balanced', label: '均衡', description: '收益与回撤保持平衡', constraint: '单票参考上限 35%' },
-	{ id: 'steady', label: '稳重', description: '本金保护与趋势确认优先', constraint: '单票参考上限 25%' },
-];
 
 export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSettings, onOpenStockAnalysis }: Props) {
-	const initialDraft = useMemo(loadDraft, []);
-	const [profile, setProfile] = useState<PortfolioTraderProfile>(initialDraft.profile);
-	const [holdings, setHoldings] = useState<DraftHolding[]>(initialDraft.holdings);
+	const [draft, setDraft] = useState(readPortfolioDraft);
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedDirectory);
-	const [query, setQuery] = useState('');
-	const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-	const [activeSuggestion, setActiveSuggestion] = useState(0);
 	const [history, setHistory] = useState<PortfolioInspectionJob[]>([]);
 	const [job, setJob] = useState<PortfolioInspectionJob | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -67,9 +45,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	const [error, setError] = useState('');
 	const [notice, setNotice] = useState('');
 
-	const totalWeight = useMemo(() => holdings.reduce((total, item) => total + item.weight, 0), [holdings]);
-	const remainingWeight = 100 - totalWeight;
-	const suggestions = useMemo(() => searchStockDirectory(directory, query).filter((item) => !holdings.some((holding) => holding.symbol === item.symbol)), [directory, holdings, query]);
+	const totalWeight = useMemo(() => draft.holdings.reduce((total, item) => total + item.weight, 0), [draft.holdings]);
 	const running = job?.status === 'running';
 
 	const loadWorkspace = useCallback(async () => {
@@ -98,8 +74,8 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	}, [loadWorkspace, refreshKey]);
 
 	useEffect(() => {
-		window.localStorage.setItem(draftStorageKey, JSON.stringify({ profile, holdings }));
-	}, [holdings, profile]);
+		writePortfolioDraft(draft);
+	}, [draft]);
 
 	useEffect(() => {
 		if (!config || !job || job.status !== 'running') return;
@@ -121,63 +97,8 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		return () => { active = false; window.clearInterval(timer); };
 	}, [config, job?.id, job?.status]);
 
-	const addHolding = (entry?: StockDirectoryEntry) => {
-		const symbol = entry?.symbol || resolveStockDirectorySymbol(query, directory);
-		const stock = entry || directory.find((item) => item.symbol === symbol);
-		if (!symbol || !stock) {
-			setError('未找到唯一匹配的股票，请从搜索结果中选择');
-			return;
-		}
-		if (holdings.some((item) => item.symbol === symbol)) {
-			setError('这只股票已经在持仓中');
-			return;
-		}
-		if (holdings.length >= maxHoldings) {
-			setError(`最多添加 ${maxHoldings} 只持仓股票`);
-			return;
-		}
-		if (remainingWeight <= 0) {
-			setError('当前仓位已达到 100%，请先调低已有持仓');
-			return;
-		}
-		setHoldings((current) => [...current, { symbol, name: stock.name, weight: Math.min(10, remainingWeight), costPrice: '' }]);
-		setQuery('');
-		setSuggestionsOpen(false);
-		setError('');
-	};
-
-	const updateHolding = (symbol: string, update: Partial<DraftHolding>) => {
-		setHoldings((current) => current.map((item) => item.symbol === symbol ? { ...item, ...update } : item));
-	};
-
-	const updateWeight = (symbol: string, requested: number) => {
-		const current = holdings.find((item) => item.symbol === symbol);
-		if (!current) return;
-		const available = current.weight + remainingWeight;
-		updateHolding(symbol, { weight: Math.max(1, Math.min(available, Math.round(requested || 1))) });
-	};
-
-	const handleSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
-		if (!suggestionsOpen || suggestions.length === 0) {
-			if (event.key === 'Enter') { event.preventDefault(); addHolding(); }
-			return;
-		}
-		if (event.key === 'ArrowDown') {
-			event.preventDefault();
-			setActiveSuggestion((current) => (current + 1) % suggestions.length);
-		} else if (event.key === 'ArrowUp') {
-			event.preventDefault();
-			setActiveSuggestion((current) => (current - 1 + suggestions.length) % suggestions.length);
-		} else if (event.key === 'Enter') {
-			event.preventDefault();
-			addHolding(suggestions[activeSuggestion] || suggestions[0]);
-		} else if (event.key === 'Escape') {
-			setSuggestionsOpen(false);
-		}
-	};
-
 	const startInspection = async () => {
-		if (!config || holdings.length === 0 || totalWeight > 100) return;
+		if (!config || draft.holdings.length === 0 || totalWeight > 100) return;
 		setStarting(true);
 		setError('');
 		setNotice('');
@@ -186,8 +107,8 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					trader_profile: profile,
-					holdings: holdings.map((item) => ({ symbol: item.symbol, name: item.name, weight_percent: item.weight, ...(Number(item.costPrice) > 0 ? { cost_price: Number(item.costPrice) } : {}) })),
+					trader_profile: draft.profile,
+					holdings: portfolioDraftToHoldings(draft.holdings),
 				}),
 			});
 			setJob(payload.data);
@@ -218,58 +139,11 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 			{notice && <div className="portfolio-notice"><CheckCircle2 size={16} /><span>{notice}</span></div>}
 			{error && <div className="portfolio-error"><CircleAlert size={16} /><span>{error}</span>{error.includes('模型') && <button type="button" onClick={onOpenSettings}>配置模型</button>}</div>}
 
-			{(!job?.report || job.status === 'running') && <PortfolioBuilder
-				profile={profile} holdings={holdings} totalWeight={totalWeight} remainingWeight={remainingWeight}
-				query={query} suggestions={suggestions} suggestionsOpen={suggestionsOpen} activeSuggestion={activeSuggestion}
-				running={Boolean(running)} starting={starting} directoryReady={directory.length > 0}
-				onProfile={setProfile} onQuery={(value) => { setQuery(value); setSuggestionsOpen(true); setActiveSuggestion(0); }}
-				onSearchFocus={() => setSuggestionsOpen(true)} onSearchKey={handleSearchKey} onAdd={addHolding}
-				onUpdateWeight={updateWeight} onUpdateCost={(symbol, costPrice) => updateHolding(symbol, { costPrice })}
-				onRemove={(symbol) => setHoldings((current) => current.filter((item) => item.symbol !== symbol))}
-				onStart={() => void startInspection()}
-			/>}
+			{(!job?.report || job.status === 'running') && <PortfolioSetupForm draft={draft} directory={directory} disabled={Boolean(running)} busy={starting || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={setDraft} onSubmit={() => void startInspection()} />}
 
 			{job?.status === 'running' && <InspectionProgress job={job} />}
 			{job?.report && job.status !== 'running' && <PortfolioReportView report={job.report} status={job.status} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} />}
 		</section>
-	</div>;
-}
-
-function PortfolioBuilder({ profile, holdings, totalWeight, remainingWeight, query, suggestions, suggestionsOpen, activeSuggestion, running, starting, directoryReady, onProfile, onQuery, onSearchFocus, onSearchKey, onAdd, onUpdateWeight, onUpdateCost, onRemove, onStart }: {
-	profile: PortfolioTraderProfile; holdings: DraftHolding[]; totalWeight: number; remainingWeight: number; query: string; suggestions: StockDirectoryEntry[]; suggestionsOpen: boolean; activeSuggestion: number; running: boolean; starting: boolean; directoryReady: boolean;
-	onProfile: (profile: PortfolioTraderProfile) => void; onQuery: (value: string) => void; onSearchFocus: () => void; onSearchKey: (event: KeyboardEvent<HTMLInputElement>) => void; onAdd: (entry?: StockDirectoryEntry) => void; onUpdateWeight: (symbol: string, weight: number) => void; onUpdateCost: (symbol: string, value: string) => void; onRemove: (symbol: string) => void; onStart: () => void;
-}) {
-	return <div className="portfolio-builder">
-		<section className="portfolio-profile-section">
-			<header><span>01</span><div><strong>交易风格</strong><small>作为组合风险与集中度的判断标准</small></div></header>
-			<div className="portfolio-profile-options">
-				{profiles.map((item) => <button type="button" className={profile === item.id ? 'active' : ''} onClick={() => onProfile(item.id)} disabled={running} aria-pressed={profile === item.id} key={item.id}>
-					<ShieldCheck size={17} /><strong>{item.label}</strong><span>{item.description}</span><small>{item.constraint}</small>
-				</button>)}
-			</div>
-		</section>
-
-		<section className="portfolio-holdings-section">
-			<header><span>02</span><div><strong>当前持仓</strong><small>{holdings.length}/{maxHoldings} 只股票</small></div><div className="portfolio-allocation"><span>持仓 <b>{totalWeight}%</b></span><span>现金 <b>{remainingWeight}%</b></span></div></header>
-			<div className="portfolio-stock-search">
-				<label><Search size={16} /><input value={query} disabled={running || !directoryReady || holdings.length >= maxHoldings || remainingWeight <= 0} onChange={(event) => onQuery(event.target.value)} onFocus={onSearchFocus} onKeyDown={onSearchKey} placeholder="输入股票名称或代码" aria-label="搜索持仓股票" aria-autocomplete="list" /></label>
-				<button type="button" onClick={() => onAdd()} disabled={running || !query.trim() || remainingWeight <= 0} aria-label="添加持仓" title="添加持仓"><Plus size={18} /></button>
-				{suggestionsOpen && query.trim() && suggestions.length > 0 && <div className="portfolio-stock-suggestions" role="listbox">
-					{suggestions.map((stock, index) => <button type="button" className={index === activeSuggestion ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdd(stock)} role="option" aria-selected={index === activeSuggestion} key={stock.symbol}><strong>{stock.name}</strong><span>{stock.code}</span><small>{marketLabel(stock.symbol)}</small></button>)}
-				</div>}
-			</div>
-			<div className="portfolio-holding-list">
-				{holdings.length === 0 && <div className="portfolio-empty-holdings"><WalletCards size={24} /><strong>尚未录入持仓</strong></div>}
-				{holdings.map((holding, index) => <article key={holding.symbol}>
-					<div className="portfolio-holding-identity"><i>{String(index + 1).padStart(2, '0')}</i><div><strong>{holding.name}</strong><span>{holding.symbol}</span></div></div>
-					<div className="portfolio-weight-control"><input type="range" min="1" max={holding.weight + remainingWeight} value={holding.weight} disabled={running} onChange={(event) => onUpdateWeight(holding.symbol, Number(event.target.value))} aria-label={`${holding.name}持仓占比`} /><label><input type="number" min="1" max={holding.weight + remainingWeight} value={holding.weight} disabled={running} onChange={(event) => onUpdateWeight(holding.symbol, Number(event.target.value))} /><span>%</span></label></div>
-					<label className="portfolio-cost-input"><span>持仓成本</span><input inputMode="decimal" value={holding.costPrice} disabled={running} onChange={(event) => onUpdateCost(holding.symbol, event.target.value)} placeholder="选填" /></label>
-					<button type="button" className="portfolio-remove" onClick={() => onRemove(holding.symbol)} disabled={running} aria-label={`删除${holding.name}`} title="删除"><Trash2 size={16} /></button>
-				</article>)}
-			</div>
-		</section>
-
-		<footer className="portfolio-builder-footer"><div><Activity size={17} /><span>总仓位 {totalWeight}%</span><strong>现金 {remainingWeight}%</strong></div><button type="button" onClick={onStart} disabled={running || starting || holdings.length === 0 || totalWeight > 100}>{starting || running ? <LoaderCircle className="spin" size={17} /> : <BrainCircuit size={17} />}{running ? '巡检进行中' : '开始 AI 巡检'}</button></footer>
 	</div>;
 }
 
@@ -338,17 +212,6 @@ function ListItems({ items, empty, ordered = false }: { items: string[]; empty: 
 	return items.length ? <Tag>{items.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</Tag> : <p className="portfolio-list-empty">{empty}</p>;
 }
 
-function loadDraft(): { profile: PortfolioTraderProfile; holdings: DraftHolding[] } {
-	try {
-		const parsed = JSON.parse(window.localStorage.getItem(draftStorageKey) || '{}');
-		const profile = profiles.some((item) => item.id === parsed.profile) ? parsed.profile as PortfolioTraderProfile : 'balanced';
-		const holdings = Array.isArray(parsed.holdings) ? parsed.holdings.filter((item: DraftHolding) => item?.symbol && item.weight > 0).slice(0, maxHoldings) : [];
-		return { profile, holdings };
-	} catch {
-		return { profile: 'balanced', holdings: [] };
-	}
-}
-
 function loadCachedDirectory(): StockDirectoryEntry[] {
 	try {
 		const parsed = JSON.parse(window.localStorage.getItem(directoryStorageKey) || '{}');
@@ -370,14 +233,7 @@ function stageLabel(stage: string) {
 }
 
 function profileLabel(profile: PortfolioTraderProfile) {
-	return profiles.find((item) => item.id === profile)?.label || '均衡';
-}
-
-function marketLabel(symbol: string) {
-	if (symbol.endsWith('.SH')) return '沪市';
-	if (symbol.endsWith('.SZ')) return '深市';
-	if (symbol.endsWith('.BJ')) return '北交所';
-	return 'A股';
+	return portfolioProfiles.find((item) => item.id === profile)?.label || '均衡';
 }
 
 function formatDate(value?: string) {

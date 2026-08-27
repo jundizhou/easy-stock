@@ -53,9 +53,105 @@ func (s *Store) migrate(ctx context.Context) error {
 			completed_at TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS portfolio_inspection_jobs_updated ON portfolio_inspection_jobs(updated_at DESC);
+		CREATE TABLE IF NOT EXISTS portfolio_expectation_jobs (
+			id TEXT PRIMARY KEY,
+			trade_date TEXT NOT NULL,
+			portfolio_hash TEXT NOT NULL,
+			summary_hash TEXT NOT NULL,
+			prompt_version TEXT NOT NULL,
+			status TEXT NOT NULL,
+			content_json TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS portfolio_expectation_jobs_lookup ON portfolio_expectation_jobs(trade_date, updated_at DESC);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate portfolio inspection database: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SaveExpectation(ctx context.Context, job ExpectationJob) (ExpectationJob, error) {
+	if job.UpdatedAt.IsZero() {
+		job.UpdatedAt = time.Now().UTC()
+	}
+	content, err := json.Marshal(job)
+	if err != nil {
+		return ExpectationJob{}, fmt.Errorf("encode portfolio expectation job: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO portfolio_expectation_jobs (id,trade_date,portfolio_hash,summary_hash,prompt_version,status,content_json,updated_at)
+		VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,content_json=excluded.content_json,updated_at=excluded.updated_at`,
+		job.ID, job.Request.SummaryDate, job.PortfolioHash, job.SummaryHash, job.PromptVersion, job.Status, string(content), formatTime(job.UpdatedAt))
+	if err != nil {
+		return ExpectationJob{}, fmt.Errorf("save portfolio expectation job: %w", err)
+	}
+	return job, nil
+}
+
+func (s *Store) GetExpectation(ctx context.Context, id string) (ExpectationJob, error) {
+	var content string
+	if err := s.db.QueryRowContext(ctx, `SELECT content_json FROM portfolio_expectation_jobs WHERE id=?`, strings.TrimSpace(id)).Scan(&content); err != nil {
+		return ExpectationJob{}, err
+	}
+	var job ExpectationJob
+	if err := json.Unmarshal([]byte(content), &job); err != nil {
+		return ExpectationJob{}, fmt.Errorf("decode portfolio expectation job: %w", err)
+	}
+	return job, nil
+}
+
+func (s *Store) LatestExpectation(ctx context.Context, tradeDate string) (ExpectationJob, error) {
+	var content string
+	if err := s.db.QueryRowContext(ctx, `SELECT content_json FROM portfolio_expectation_jobs WHERE trade_date=? ORDER BY updated_at DESC LIMIT 1`, strings.TrimSpace(tradeDate)).Scan(&content); err != nil {
+		return ExpectationJob{}, err
+	}
+	var job ExpectationJob
+	if err := json.Unmarshal([]byte(content), &job); err != nil {
+		return ExpectationJob{}, fmt.Errorf("decode portfolio expectation job: %w", err)
+	}
+	return job, nil
+}
+
+func (s *Store) FindExpectation(ctx context.Context, tradeDate, portfolioHash, summaryHash, promptVersion string) (ExpectationJob, error) {
+	var content string
+	if err := s.db.QueryRowContext(ctx, `SELECT content_json FROM portfolio_expectation_jobs WHERE trade_date=? AND portfolio_hash=? AND summary_hash=? AND prompt_version=? ORDER BY updated_at DESC LIMIT 1`,
+		strings.TrimSpace(tradeDate), portfolioHash, summaryHash, promptVersion).Scan(&content); err != nil {
+		return ExpectationJob{}, err
+	}
+	var job ExpectationJob
+	if err := json.Unmarshal([]byte(content), &job); err != nil {
+		return ExpectationJob{}, fmt.Errorf("decode portfolio expectation job: %w", err)
+	}
+	return job, nil
+}
+
+func (s *Store) MarkExpectationsInterrupted(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT content_json FROM portfolio_expectation_jobs WHERE status='running'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var jobs []ExpectationJob
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			return err
+		}
+		var job ExpectationJob
+		if json.Unmarshal([]byte(content), &job) == nil {
+			jobs = append(jobs, job)
+		}
+	}
+	for _, job := range jobs {
+		job.Status = "interrupted"
+		job.Stage = "interrupted"
+		job.Error = "应用或后台服务曾重启，本次持仓明日预期已中断，可重新开始"
+		job.Message = job.Error
+		job.UpdatedAt = time.Now().UTC()
+		job.CompletedAt = job.UpdatedAt
+		if _, err := s.SaveExpectation(ctx, job); err != nil {
+			return err
+		}
 	}
 	return nil
 }

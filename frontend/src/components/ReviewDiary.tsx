@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
+import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
 
 type Props = {
 	config: BackendConfig | null;
@@ -716,7 +717,7 @@ function DailyViewpointSummary({ config, summary, regenerating, onRegenerate, on
 		<ReviewSummaryExportBrand summary={summary} />
 		<header className="daily-summary-heading">
 			<div><span><BrainCircuit size={15} />AI DAILY REVIEW</span><h2>{summary.trade_date} 市场复盘与次日剧本</h2><small>{summary.author_count} 位作者 / {summary.article_count} 篇有效文章 · {formatDateTime(summary.generated_at)} 生成</small>{summary.window_start && <small className="daily-summary-window">有效窗口 {formatSummaryWindow(summary.window_start, summary.window_end)} · {summary.freshness_rule}</small>}</div>
-			<div className="daily-summary-heading-actions"><div className="daily-summary-export-control"><button type="button" className="daily-summary-export-button" onClick={() => setExportOptionsOpen(true)} disabled={exporting} aria-haspopup="dialog" aria-expanded={exportOptionsOpen}>{exporting ? <RefreshCw className="spin" size={14} /> : <Download size={14} />}{exporting ? '正在生成…' : '导出长图'}</button></div><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
+			<div className="daily-summary-heading-actions"><PortfolioTomorrowExpectation config={config} summaryDate={summary.trade_date} /><div className="daily-summary-export-control"><button type="button" className="daily-summary-export-button" onClick={() => setExportOptionsOpen(true)} disabled={exporting} aria-haspopup="dialog" aria-expanded={exportOptionsOpen}>{exporting ? <RefreshCw className="spin" size={14} /> : <Download size={14} />}{exporting ? '正在生成…' : '导出长图'}</button></div><button type="button" onClick={onShowAuthors}><Users size={14} />查看作者观点</button><button type="button" onClick={onRegenerate} disabled={regenerating}>{regenerating ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}重新生成</button></div>
 		</header>
 		<div className="daily-summary-anonymous-note">作者已脱敏：使用圆桌成员 A/B/C… 代替真实作者名</div>
 		<section className="daily-summary-block daily-summary-lead"><span>{summary.market_regime || '样本不足'}</span><div><small>一句话市场结论 · 跨作者综合</small><p>{summary.executive_summary}</p></div></section>
@@ -762,7 +763,7 @@ function ReviewSummaryExportBrand({ summary }: { summary: ReviewDailySummary }) 
 function ReviewSummaryExportFooter({ summary }: { summary: ReviewDailySummary }) {
 	return <footer className="review-summary-export-footer">
 		<div><strong>easy-stock</strong><span>AI 时代的 A 股行情分析软件</span></div>
-		<div className="review-summary-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
+		<div className="review-summary-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><b>微信公众号：easy只吃番茄</b><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>{formatDateTime(summary.generated_at)} 生成</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;
 }

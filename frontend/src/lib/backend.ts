@@ -985,6 +985,77 @@ export type PortfolioInspectionJob = {
 	report?: PortfolioInspectionReport;
 };
 
+export type PortfolioExpectationConclusion = {
+	headline: string;
+	portfolio_bias: '有利' | '中性' | '承压' | string;
+	core_conflict: string;
+	review_exposure: Array<{
+		symbol: string;
+		alignment: '共振' | '部分共振' | '背离' | '无直接关联' | string;
+		review_evidence: string[];
+		structure_evidence: string[];
+	}>;
+	scenarios: Array<{
+		key: 'strong' | 'base' | 'weak' | string;
+		name: string;
+		market_triggers: string[];
+		portfolio_impact: string;
+		total_position_response: string;
+		holding_responses: Array<{ symbol: string; expected_behavior: string; action: string; confirmation: string; invalidation: string }>;
+	}>;
+	holdings: Array<{
+		symbol: string;
+		priority: string;
+		opening_expectation: string;
+		intraday_expectation: string;
+		close_expectation: string;
+		cost_context: string;
+		before_trigger: string;
+		positive_trigger: string;
+		negative_trigger: string;
+		invalidation: string;
+	}>;
+	timeline: { pre_open: string[]; opening_30m: string[]; intraday: string[]; close: string[] };
+	risk_alerts: string[];
+	data_limitations: string[];
+	confidence: number;
+	source: string;
+};
+
+export type PortfolioExpectationReport = {
+	id: string;
+	trade_date: string;
+	prompt_version: string;
+	profile: PortfolioProfileRules;
+	holdings: PortfolioHoldingResult[];
+	metrics: PortfolioMetrics;
+	conclusion: PortfolioExpectationConclusion;
+	generated_at: string;
+};
+
+export type PortfolioExpectationJob = {
+	id: string;
+	status: 'running' | 'succeeded' | 'partial' | 'failed' | 'interrupted' | string;
+	stage: string;
+	prompt_version: string;
+	portfolio_hash: string;
+	summary_hash: string;
+	request: { summary_date: string; trader_profile: PortfolioTraderProfile; holdings: PortfolioHolding[]; force?: boolean };
+	results: PortfolioHoldingResult[];
+	completed_stocks: number;
+	total_stocks: number;
+	coverage_percent: number;
+	current_symbols: string[];
+	message: string;
+	error?: string;
+	started_at?: string;
+	updated_at?: string;
+	completed_at?: string;
+	report_available: boolean;
+	cached?: boolean;
+	report?: PortfolioExpectationReport;
+};
+
 export type NewsItem = {
 	id?: string;
 	title: string;
