@@ -78,6 +78,27 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	}
 }
 
+func TestEmbeddedModelResponseErrorMapsProviderFailures(t *testing.T) {
+	tests := []struct {
+		content string
+		want    string
+	}{
+		{content: "HTTP 401: Invalid API key", want: "更新 API Key"},
+		{content: `{"code":"INVALID_API_KEY","message":"Invalid API key"}`, want: "更新 API Key"},
+		{content: "HTTP 403: access denied", want: "模型权限"},
+		{content: "HTTP 429: rate limit exceeded", want: "额度"},
+	}
+	for _, test := range tests {
+		err := embeddedModelResponseError(test.content)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("embeddedModelResponseError(%q) = %v, want %q", test.content, err, test.want)
+		}
+	}
+	if err := embeddedModelResponseError(`{"core_view":"正常观点"}`); err != nil {
+		t.Fatalf("valid model content was rejected: %v", err)
+	}
+}
+
 func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

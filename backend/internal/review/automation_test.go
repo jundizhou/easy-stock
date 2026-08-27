@@ -249,6 +249,129 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 	}
 }
 
+func TestParseAuthorViewpointModelSkipsUnrelatedJSONObject(t *testing.T) {
+	content := `Hermes status: {"status":"working","detail":"checking {nested} braces"}
+Final answer:
+{"core_view":"有效核心观点","market_interpretation":"修复","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`
+	model, err := parseAuthorViewpointModel(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.CoreView != "有效核心观点" {
+		t.Fatalf("parsed model = %+v", model)
+	}
+}
+
+func TestAutomationRepairsInvalidAuthorSummaryJSON(t *testing.T) {
+	prompter := &queuedSummaryPrompter{responses: []queuedPromptResponse{
+		{content: "Hermes is still analyzing the articles."},
+		{content: validAuthorSummaryJSON("自动纠错后的观点")},
+	}}
+	automation := NewAutomation(nil, nil, nil, http.DefaultClient, "", prompter)
+	post := newPost("taoguba", "https://www.tgb.cn/a/repair-author", "作者甲", "收盘复盘", "核心承接仍需观察。", "", time.Now())
+	group := dailySummaryAuthorGroup{Author: "作者甲", Source: "taoguba", Posts: []Post{post}, LatestAt: post.PublishedAt}
+
+	view, articles, sources, fallbackReason, err := automation.summarizeDailyAuthor(context.Background(), group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.CoreView != "自动纠错后的观点" || fallbackReason != "" || len(articles) != 1 || len(sources) != 1 {
+		t.Fatalf("view=%+v articles=%d sources=%d fallback=%q", view, len(articles), len(sources), fallbackReason)
+	}
+	prompts := prompter.Prompts()
+	if len(prompts) != 2 || !strings.Contains(prompts[1], "上一次输出无法解析") || !strings.Contains(prompts[1], "[原始任务]") {
+		t.Fatalf("repair prompts = %#v", prompts)
+	}
+}
+
+func TestAutomationRetainsAuthorFallbackWhenJSONRepairFails(t *testing.T) {
+	store, err := OpenStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	window := effectiveReviewWindow(time.Now())
+	post := newPost("taoguba", "https://www.tgb.cn/a/fallback-author", "作者甲", "收盘复盘", "原文证据：核心容量承接仍强，但后排扩散不足。", "", window.Start.Add(12*time.Hour))
+	if _, err := store.UpsertPost(context.Background(), post); err != nil {
+		t.Fatal(err)
+	}
+	prompter := &queuedSummaryPrompter{responses: []queuedPromptResponse{
+		{content: "Hermes is still analyzing the articles."},
+		{content: "The response cannot be rendered as JSON."},
+		{content: validDailySummaryJSON("保底作者卡已进入跨作者总结")},
+	}}
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+
+	summary, err := automation.SummarizeToday(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitations := strings.Join(summary.Limitations, "；")
+	if summary.AuthorCount != 1 || summary.ArticleCount != 1 || len(summary.AuthorViews) != 1 || summary.AuthorViews[0].Confidence != "低" {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if !strings.Contains(summary.AuthorViews[0].CoreView, "原文证据") || len(summary.AuthorViews[0].Sources) != 1 || !strings.Contains(limitations, "原文摘要作为低置信度观点卡") {
+		t.Fatalf("fallback author view=%+v limitations=%q", summary.AuthorViews[0], limitations)
+	}
+	if len(prompter.Prompts()) != 3 {
+		t.Fatalf("prompt count = %d, want author + repair + final", len(prompter.Prompts()))
+	}
+}
+
+func TestAutomationRepairsInvalidFinalSummaryJSON(t *testing.T) {
+	store, err := OpenStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	window := effectiveReviewWindow(time.Now())
+	post := newPost("taoguba", "https://www.tgb.cn/a/repair-final", "作者甲", "收盘复盘", "市场处于分歧修复阶段。", "", window.Start.Add(12*time.Hour))
+	if _, err := store.UpsertPost(context.Background(), post); err != nil {
+		t.Fatal(err)
+	}
+	prompter := &queuedSummaryPrompter{responses: []queuedPromptResponse{
+		{content: validAuthorSummaryJSON("作者有效观点")},
+		{content: "Hermes final analysis follows later."},
+		{content: validDailySummaryJSON("自动纠错后的跨作者结论")},
+	}}
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+
+	summary, err := automation.SummarizeToday(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.ExecutiveSummary != "自动纠错后的跨作者结论" || len(prompter.Prompts()) != 3 {
+		t.Fatalf("summary=%+v prompts=%#v", summary, prompter.Prompts())
+	}
+}
+
+func TestAutomationRetainsLocalFallbackWhenFinalJSONRepairFails(t *testing.T) {
+	store, err := OpenStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	window := effectiveReviewWindow(time.Now())
+	post := newPost("taoguba", "https://www.tgb.cn/a/fallback-final", "作者甲", "收盘复盘", "市场处于分歧修复阶段。", "", window.Start.Add(12*time.Hour))
+	if _, err := store.UpsertPost(context.Background(), post); err != nil {
+		t.Fatal(err)
+	}
+	prompter := &queuedSummaryPrompter{responses: []queuedPromptResponse{
+		{content: validAuthorSummaryJSON("作者有效观点")},
+		{content: "Hermes final analysis follows later."},
+		{content: "The repaired response is still not JSON."},
+	}}
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+
+	summary, err := automation.SummarizeToday(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.MarketRegime != "待复核" || !strings.Contains(summary.ExecutiveSummary, "已保存1位作者观点卡") || !strings.Contains(strings.Join(summary.Limitations, "；"), "本地保底结果") {
+		t.Fatalf("fallback summary = %+v", summary)
+	}
+}
+
 func TestEffectiveReviewWindowExcludesSecondPreviousTradingDay(t *testing.T) {
 	location := shanghaiLocation()
 	tests := []struct {
@@ -658,6 +781,44 @@ type stagedSummaryPrompter struct {
 	authorContent map[string]string
 	authorErrors  map[string]error
 	finalContent  string
+}
+
+type queuedPromptResponse struct {
+	content string
+	err     error
+}
+
+type queuedSummaryPrompter struct {
+	mu        sync.Mutex
+	responses []queuedPromptResponse
+	prompts   []string
+	next      int
+}
+
+func (p *queuedSummaryPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prompts = append(p.prompts, prompt)
+	if p.next >= len(p.responses) {
+		return hermes.PromptResult{}, errors.New("missing queued prompt response")
+	}
+	response := p.responses[p.next]
+	p.next++
+	return hermes.PromptResult{Content: response.content}, response.err
+}
+
+func (p *queuedSummaryPrompter) Prompts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.prompts...)
+}
+
+func validAuthorSummaryJSON(coreView string) string {
+	return fmt.Sprintf(`{"core_view":%q,"market_interpretation":"修复","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`, coreView)
+}
+
+func validDailySummaryJSON(executiveSummary string) string {
+	return fmt.Sprintf(`{"executive_summary":%q,"market_regime":"修复","market_analysis":"观点等待确认","market_framework":{"cycle":"修复","capital_pricing":"等待确认","direction_competition":"等待确认","trading_method":"观察验证"},"consensus":[],"disagreements":[],"scenarios":[],"directions":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, executiveSummary)
 }
 
 type blockingSummaryPrompter struct {

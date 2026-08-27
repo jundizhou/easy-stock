@@ -10,10 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"easy-stock/backend/internal/hermes"
 )
 
 const (
-	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v5"
+	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v7"
 	maxDailySummaryAuthors       = 30
 	maxDailySummaryPosts         = 1000
 	maxAuthorSummaryConcurrency  = 3
@@ -71,11 +73,20 @@ type authorViewpointModel struct {
 }
 
 type authorSummaryResult struct {
-	Group    dailySummaryAuthorGroup
-	View     DailyAuthorView
-	Articles []dailySummaryArticle
-	Sources  []DailySummarySource
-	Err      error
+	Group          dailySummaryAuthorGroup
+	View           DailyAuthorView
+	Articles       []dailySummaryArticle
+	Sources        []DailySummarySource
+	FallbackReason string
+	Err            error
+}
+
+type invalidDailySummaryJSONError struct {
+	message string
+}
+
+func (e *invalidDailySummaryJSONError) Error() string {
+	return e.message
 }
 
 type dailySummaryModel struct {
@@ -399,6 +410,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	sources := []DailySummarySource{}
 	articleCount := 0
 	failedAuthors := []string{}
+	fallbackAuthors := []string{}
 	truncatedAuthors := 0
 	for _, result := range results {
 		if result.Err != nil {
@@ -409,6 +421,9 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		authors = append(authors, result.View.Author)
 		sources = append(sources, result.Sources...)
 		articleCount += len(result.Articles)
+		if result.FallbackReason != "" {
+			fallbackAuthors = append(fallbackAuthors, result.View.Author)
+		}
 		if result.View.AvailableArticleCount > result.View.ArticleCount {
 			truncatedAuthors++
 		}
@@ -427,13 +442,16 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	if err != nil {
 		return DailySummary{}, err
 	}
-	response, err := a.prompter.Prompt(ctx, prompt)
+	model, err := promptDailySummaryJSON(ctx, a.prompter, prompt, "今日观点总归纳", parseDailySummaryModel)
 	if err != nil {
-		return DailySummary{}, fmt.Errorf("Hermes 今日观点总归纳失败: %w", err)
-	}
-	model, err := parseDailySummaryModel(response.Content)
-	if err != nil {
-		return DailySummary{}, err
+		if ctx.Err() != nil {
+			return DailySummary{}, ctx.Err()
+		}
+		var invalidJSON *invalidDailySummaryJSONError
+		if !errors.As(err, &invalidJSON) {
+			return DailySummary{}, err
+		}
+		model = fallbackDailySummaryModel(viewpoints)
 	}
 	normalizeDailySummaryModel(&model, viewpoints)
 	if len(allGroups) > len(selectedGroups) {
@@ -441,6 +459,9 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	}
 	if len(failedAuthors) > 0 {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者的单作者归纳失败并已跳过：%s", len(failedAuthors), strings.Join(failedAuthors, "、")))
+	}
+	if len(fallbackAuthors) > 0 {
+		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者的JSON归纳在自动纠错后仍无效，已保留原文摘要作为低置信度观点卡：%s", len(fallbackAuthors), strings.Join(fallbackAuthors, "、")))
 	}
 	if truncatedAuthors > 0 {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者文章较多，作者归纳阶段优先保留较新的文章并按上下文上限截取", truncatedAuthors))
@@ -674,8 +695,8 @@ func (a *Automation) summarizeDailyAuthors(ctx context.Context, groups []dailySu
 			defer workers.Done()
 			for index := range jobs {
 				group := groups[index]
-				view, articles, sources, err := a.summarizeDailyAuthor(ctx, group)
-				results[index] = authorSummaryResult{Group: group, View: view, Articles: articles, Sources: sources, Err: err}
+				view, articles, sources, fallbackReason, err := a.summarizeDailyAuthor(ctx, group)
+				results[index] = authorSummaryResult{Group: group, View: view, Articles: articles, Sources: sources, FallbackReason: fallbackReason, Err: err}
 				progressMu.Lock()
 				completed++
 				if onProgress != nil {
@@ -689,22 +710,25 @@ func (a *Automation) summarizeDailyAuthors(ctx context.Context, groups []dailySu
 	return results
 }
 
-func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummaryAuthorGroup) (DailyAuthorView, []dailySummaryArticle, []DailySummarySource, error) {
+func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummaryAuthorGroup) (DailyAuthorView, []dailySummaryArticle, []DailySummarySource, string, error) {
 	articles, sources := authorSummaryInputs(group)
 	if len(articles) == 0 {
-		return DailyAuthorView{}, nil, nil, errors.New("作者文章正文不足")
+		return DailyAuthorView{}, nil, nil, "", errors.New("作者文章正文不足")
 	}
 	prompt, err := buildAuthorSummaryPrompt(group.Author, articles)
 	if err != nil {
-		return DailyAuthorView{}, nil, nil, err
+		return DailyAuthorView{}, nil, nil, "", err
 	}
-	response, err := a.prompter.Prompt(ctx, prompt)
+	model, err := promptDailySummaryJSON(ctx, a.prompter, prompt, "作者观点归纳", parseAuthorViewpointModel)
 	if err != nil {
-		return DailyAuthorView{}, nil, nil, fmt.Errorf("归纳作者%s: %w", group.Author, err)
-	}
-	model, err := parseAuthorViewpointModel(response.Content)
-	if err != nil {
-		return DailyAuthorView{}, nil, nil, fmt.Errorf("归纳作者%s: %w", group.Author, err)
+		if ctx.Err() != nil {
+			return DailyAuthorView{}, nil, nil, "", ctx.Err()
+		}
+		var invalidJSON *invalidDailySummaryJSONError
+		if errors.As(err, &invalidJSON) {
+			return fallbackDailyAuthorView(group, articles, sources), articles, sources, invalidJSON.Error(), nil
+		}
+		return DailyAuthorView{}, nil, nil, "", fmt.Errorf("归纳作者%s: %w", group.Author, err)
 	}
 	view := DailyAuthorView{
 		Author:                group.Author,
@@ -725,7 +749,7 @@ func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummar
 		Evidence:              cleanStringList(model.Evidence),
 		Sources:               sources,
 	}
-	return view, articles, sources, nil
+	return view, articles, sources, "", nil
 }
 
 func authorSummaryInputs(group dailySummaryAuthorGroup) ([]dailySummaryArticle, []DailySummarySource) {
@@ -809,11 +833,18 @@ func buildAuthorSummaryPrompt(author string, articles []dailySummaryArticle) (st
 
 func parseAuthorViewpointModel(content string) (authorViewpointModel, error) {
 	var result authorViewpointModel
-	if err := json.Unmarshal([]byte(jsonObject(content)), &result); err != nil {
+	if err := decodeDailySummaryJSONObject(content, func(candidate []byte) error {
+		var parsed authorViewpointModel
+		if err := json.Unmarshal(candidate, &parsed); err != nil {
+			return err
+		}
+		if strings.TrimSpace(parsed.CoreView) == "" {
+			return errors.New("缺少核心观点")
+		}
+		result = parsed
+		return nil
+	}); err != nil {
 		return authorViewpointModel{}, fmt.Errorf("Hermes 作者观点归纳未返回有效 JSON: %w", err)
-	}
-	if strings.TrimSpace(result.CoreView) == "" {
-		return authorViewpointModel{}, errors.New("Hermes 作者观点归纳缺少核心观点")
 	}
 	return result, nil
 }
@@ -911,13 +942,104 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
 
 func parseDailySummaryModel(content string) (dailySummaryModel, error) {
 	var result dailySummaryModel
-	if err := json.Unmarshal([]byte(jsonObject(content)), &result); err != nil {
+	if err := decodeDailySummaryJSONObject(content, func(candidate []byte) error {
+		var parsed dailySummaryModel
+		if err := json.Unmarshal(candidate, &parsed); err != nil {
+			return err
+		}
+		if strings.TrimSpace(parsed.ExecutiveSummary) == "" || strings.TrimSpace(parsed.TomorrowOutlook) == "" {
+			return errors.New("缺少核心结论或明日预期")
+		}
+		result = parsed
+		return nil
+	}); err != nil {
 		return dailySummaryModel{}, fmt.Errorf("Hermes 今日观点总结未返回有效 JSON: %w", err)
 	}
-	if strings.TrimSpace(result.ExecutiveSummary) == "" || strings.TrimSpace(result.TomorrowOutlook) == "" {
-		return dailySummaryModel{}, errors.New("Hermes 今日观点总结缺少核心结论或明日预期")
+	return result, nil
+}
+
+func promptDailySummaryJSON[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string, parse func(string) (T, error)) (T, error) {
+	var empty T
+	response, err := prompter.Prompt(ctx, prompt)
+	if err != nil {
+		return empty, fmt.Errorf("Hermes %s失败: %w", label, err)
+	}
+	result, firstErr := parse(response.Content)
+	if firstErr == nil {
+		return result, nil
+	}
+
+	repairPrompt := `上一次输出无法解析为任务要求的JSON。请重新完成下面的原始任务，并只返回一个合法JSON对象：
+- 使用英文半角双引号；
+- 不要Markdown代码块、解释、思考过程或前后缀；
+- 所有字段严格遵循原始任务给出的结构；
+- 无法确定的数组返回[]，不要用自然语言拒答。
+
+[原始任务]
+` + prompt + "\n\n[上一次无效输出，仅用于纠错]\n" + truncateRunes(response.Content, 4000)
+	repaired, retryErr := prompter.Prompt(ctx, repairPrompt)
+	if retryErr != nil {
+		return empty, fmt.Errorf("Hermes %s首次未返回有效JSON，且自动纠错请求失败：%v: %w", label, firstErr, retryErr)
+	}
+	result, retryErr = parse(repaired.Content)
+	if retryErr != nil {
+		return empty, &invalidDailySummaryJSONError{message: fmt.Sprintf("Hermes %s未返回有效JSON：首次解析失败：%v；自动纠错后仍失败：%v", label, firstErr, retryErr)}
 	}
 	return result, nil
+}
+
+func decodeDailySummaryJSONObject(content string, decode func([]byte) error) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return errors.New("回复为空")
+	}
+	var encoded string
+	if strings.HasPrefix(content, `"`) && json.Unmarshal([]byte(content), &encoded) == nil {
+		content = strings.TrimSpace(encoded)
+	}
+	var lastErr error
+	for start := strings.IndexByte(content, '{'); start >= 0; {
+		if end := balancedDailySummaryJSONObjectEnd(content, start); end > start {
+			if err := decode([]byte(content[start:end])); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
+		}
+		next := strings.IndexByte(content[start+1:], '{')
+		if next < 0 {
+			break
+		}
+		start += next + 1
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return errors.New("未找到JSON对象")
+}
+
+func balancedDailySummaryJSONObjectEnd(content string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for index := start; index < len(content); index++ {
+		switch current := content[index]; {
+		case inString && escaped:
+			escaped = false
+		case inString && current == '\\':
+			escaped = true
+		case current == '"':
+			inString = !inString
+		case !inString && current == '{':
+			depth++
+		case !inString && current == '}':
+			depth--
+			if depth == 0 {
+				return index + 1
+			}
+		}
+	}
+	return -1
 }
 
 func jsonObject(content string) string {
@@ -926,6 +1048,50 @@ func jsonObject(content string) string {
 		return content[start : end+1]
 	}
 	return content
+}
+
+func fallbackDailyAuthorView(group dailySummaryAuthorGroup, articles []dailySummaryArticle, sources []DailySummarySource) DailyAuthorView {
+	latest := articles[len(articles)-1]
+	latestTitle := strings.TrimSpace(latest.Title)
+	if latestTitle == "" {
+		latestTitle = "未命名文章"
+	}
+	evidence := make([]string, 0, min(8, len(articles)))
+	for index := len(articles) - 1; index >= 0 && len(evidence) < 8; index-- {
+		article := articles[index]
+		evidence = append(evidence, fmt.Sprintf("[%s/%s] %s", article.PublishedAt, firstNonEmpty(article.Title, "未命名文章"), truncateRunes(article.Content, 180)))
+	}
+	return DailyAuthorView{
+		Author:                group.Author,
+		Source:                sourceName(group.Source),
+		ArticleCount:          len(articles),
+		AvailableArticleCount: len(group.Posts),
+		TimeRange:             authorArticleTimeRange(articles),
+		CoreView:              fmt.Sprintf("自动归纳未完成，保留最新原文摘要供复核：《%s》%s", latestTitle, truncateRunes(latest.Content, 260)),
+		MarketInterpretation:  "自动归纳未完成，请以原文证据为准",
+		TomorrowOutlook:       "未明确",
+		Risks:                 []string{"该作者观点卡由原文摘要保底生成，未完成结构化语义归纳"},
+		Confidence:            "低",
+		Evidence:              evidence,
+		Sources:               sources,
+	}
+}
+
+func fallbackDailySummaryModel(viewpoints []DailyAuthorView) dailySummaryModel {
+	return dailySummaryModel{
+		ExecutiveSummary: fmt.Sprintf("跨作者综合模型输出异常，已保存%d位作者观点卡与原文证据；综合结论待重新生成。", len(viewpoints)),
+		MarketRegime:     "待复核",
+		MarketAnalysis:   "跨作者共识归纳未完成，请直接查看作者观点卡和原文证据。",
+		MarketFramework: DailyMarketFramework{
+			Cycle:                "跨作者综合未完成",
+			CapitalPricing:       "跨作者综合未完成",
+			DirectionCompetition: "跨作者综合未完成",
+			TradingMethod:        "先核对作者观点卡与原文证据，再形成判断",
+		},
+		TomorrowOutlook: "跨作者明日预期未完成，请以作者观点卡中的明日预期和验证条件为准。",
+		Risks:           []string{"跨作者共识尚未完成，不能将单一作者观点视为市场事实"},
+		Limitations:     []string{"Hermes 跨作者综合在自动纠错后仍未返回有效JSON，当前仅保存本地保底结果"},
+	}
 }
 
 func normalizeDailySummaryModel(model *dailySummaryModel, viewpoints []DailyAuthorView) {

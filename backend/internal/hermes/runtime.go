@@ -693,11 +693,28 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 				if result.Content == "" {
 					return PromptResult{}, errors.New("Hermes 没有返回有效内容")
 				}
+				if err := embeddedModelResponseError(result.Content); err != nil {
+					return PromptResult{}, err
+				}
 				return result, nil
 			case "message.error", "session.error", "run.error":
 				return PromptResult{}, r.hermesFailure(firstNonEmpty(eventText(frame, "message"), "Hermes 执行失败"), diagnostics.String())
 			}
 		}
+	}
+}
+
+func embeddedModelResponseError(content string) error {
+	value := strings.ToLower(strings.TrimSpace(content))
+	switch {
+	case strings.HasPrefix(value, "http 401"), strings.Contains(value, "invalid_api_key"), strings.Contains(value, "invalid api key"):
+		return errors.New("Hermes 模型鉴权失败，请在系统设置中更新 API Key")
+	case strings.HasPrefix(value, "http 403"):
+		return errors.New("Hermes 模型接口拒绝访问，请检查 API Key 权限和模型权限")
+	case strings.HasPrefix(value, "http 429"), strings.Contains(value, "rate limit exceeded"):
+		return errors.New("Hermes 模型接口请求过于频繁或额度不足，请稍后重试并检查账户额度")
+	default:
+		return nil
 	}
 }
 

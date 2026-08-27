@@ -165,6 +165,8 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 					if (!active) return;
 					setDailySummary(summaryPayload.data || null);
 					setNotice('今日大V观点总结已完成并缓存，可随时查看结果');
+				} else if (payload.data.status === 'failed') {
+					setNotice('');
 				}
 				setDailySummaryJob(payload.data);
 			} catch {
