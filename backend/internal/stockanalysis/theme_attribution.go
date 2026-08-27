@@ -17,6 +17,7 @@ type themeEvidenceBucket struct {
 	name        string
 	evidence    []ThemeEvidence
 	confirmed   bool
+	mappingOK   bool
 	speculative bool
 	market      foundation.ThemeOverview
 	marketOK    bool
@@ -65,6 +66,11 @@ var themeReferenceOnlyKeywords = []string{
 	"文献", "书目", "课程", "培训材料", "研究报告", "行业报告",
 }
 
+var themeNegativeFactKeywords = []string{
+	"不涉及", "未涉及", "不从事", "未从事", "无相关业务", "没有相关业务", "不存在相关业务",
+	"未开展", "尚未开展", "未形成收入", "尚未形成收入", "无相关收入", "终止", "取消", "澄清",
+}
+
 func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) ThemeAnalysis {
 	buckets := map[string]*themeEvidenceBucket{}
 	ensure := func(name string) *themeEvidenceBucket {
@@ -79,14 +85,15 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 		buckets[name] = bucket
 		return bucket
 	}
-	add := func(name string, evidence ThemeEvidence, confirmed, speculative bool) {
+	add := func(name string, evidence ThemeEvidence, confirmed, speculative bool) *themeEvidenceBucket {
 		bucket := ensure(name)
 		if bucket == nil {
-			return
+			return nil
 		}
 		bucket.evidence = append(bucket.evidence, evidence)
 		bucket.confirmed = bucket.confirmed || confirmed
 		bucket.speculative = bucket.speculative || speculative
+		return bucket
 	}
 
 	// Existing attribution is a strong market signal, but it remains separate
@@ -101,6 +108,9 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	}
 	for _, item := range input.Announcements {
 		for _, group := range themeKeywordGroups {
+			if announcementReducesThemeExposure(item.Title) {
+				continue
+			}
 			if snippet, ok := companyThemeFactSnippet(item.Title+"。"+item.Category+"。"+item.Content, append([]string{group.name}, group.keywords...)); ok {
 				add(group.name, ThemeEvidence{Theme: group.name, Type: "announcement", Source: firstNonEmpty(item.Meta.Source, "eastmoney:announcement"), Title: item.Title, URL: item.URL, PublishedAt: item.PublishedAt, Snippet: truncateText(snippet, 220), Strength: .95, Freshness: freshnessForTime(item.PublishedAt)}, true, false)
 			}
@@ -123,21 +133,38 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 			continue
 		}
 		item.Theme = canonicalTheme(item.Theme)
+		item.Type = normalizeThemeEvidenceType(item.Type)
+		item.Relation = normalizeThemeEvidenceRelation(item.Relation)
+		item.Direction = normalizeThemeEvidenceDirection(item.Direction)
+		if item.Direction == "negative" || item.Relation == "disposed_asset" {
+			continue
+		}
 		if item.Strength <= 0 {
 			item.Strength = .62
 		}
-		confirmed := false
-		if item.Type == "announcement" || item.Type == "fact" {
-			confirmed = inputConfirmsThemeFact(input, item.Theme)
+		confirmed, mappingOK := false, false
+		if item.Type == "fact" {
+			confirmed = modelRelationCanConfirmFact(item.Relation) && inputConfirmsThemeFact(input, item.Theme)
 			if !confirmed {
 				item.Type = "inference"
 				item.Strength = math.Min(item.Strength, .55)
+			}
+		} else if item.Type == "market_mapping" {
+			mappingOK = modelMappingSupportedByInput(input, item)
+			if mappingOK {
+				item.Strength = math.Min(item.Strength, .78)
+			} else {
+				item.Type = "inference"
+				item.Strength = math.Min(item.Strength, .5)
 			}
 		}
 		if item.Freshness <= 0 {
 			item.Freshness = freshnessForTime(item.PublishedAt)
 		}
-		add(item.Theme, item, confirmed, item.Type == "inference" || item.Type == "market_mapping")
+		bucket := add(item.Theme, item, confirmed, item.Type == "inference" || item.Type == "market_mapping")
+		if bucket != nil {
+			bucket.mappingOK = bucket.mappingOK || mappingOK
+		}
 	}
 	if base.HotTheme != "" {
 		for _, group := range themeKeywordGroups {
@@ -169,7 +196,15 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	rejected := (*themeEvidenceBucket)(nil)
 	rejectedPrice := themePriceConfirmation{}
 	for _, candidate := range ordered {
-		if candidate.score < 55 || (!candidate.confirmed && !hasExplicitMarketAttribution(candidate.evidence)) {
+		explicitMarket := hasExplicitMarketAttribution(candidate.evidence)
+		minimumScore := 55
+		if !candidate.confirmed && !explicitMarket {
+			if !candidate.mappingOK || !candidate.marketOK {
+				continue
+			}
+			minimumScore = 62
+		}
+		if candidate.score < minimumScore {
 			continue
 		}
 		price := confirmThemePrice(input, short, *candidate)
@@ -252,7 +287,11 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	}
 	base.ConfirmedThemes = base.ConfirmedThemes[:min(len(base.ConfirmedThemes), 4)]
 	base.SpeculativeThemes = base.SpeculativeThemes[:min(len(base.SpeculativeThemes), 4)]
-	base.Description = fmt.Sprintf("当前主炒作题材为%s，证据置信度%s；公司主业为%s", best.name, base.Confidence, firstNonEmpty(base.Business, "未取得"))
+	attributionKind := "公司事实或市场明确归因"
+	if best.mappingOK && !best.confirmed && !hasExplicitMarketAttribution(best.evidence) {
+		attributionKind = "经原文核验的市场映射"
+	}
+	base.Description = fmt.Sprintf("当前主炒作题材为%s，依据为%s，证据置信度%s；公司主业为%s", best.name, attributionKind, base.Confidence, firstNonEmpty(base.Business, "未取得"))
 	if best.marketOK {
 		base.Description += fmt.Sprintf("；题材趋势%d分、上涨广度%d/%d、涨停%d家", best.market.TrendScore, best.market.RisingNodes, max(best.market.MatchedNodes, best.market.TotalNodes), best.market.LimitUpCount)
 	}
@@ -270,22 +309,116 @@ func companyThemeFactSnippet(text string, keywords []string) (string, bool) {
 		}
 	}) {
 		clause = strings.TrimSpace(clause)
-		if clause == "" || !containsAnyFold(clause, keywords...) {
+		if clause == "" {
 			continue
 		}
-		if containsAnyFold(clause, themeReferenceOnlyKeywords...) {
-			continue
-		}
-		if containsAnyFold(clause, themeCompanyFactKeywords...) {
-			return clause, true
+		for _, window := range themeFactWindows(clause, keywords) {
+			if containsAnyFold(window, themeReferenceOnlyKeywords...) {
+				continue
+			}
+			if containsAnyFold(window, themeNegativeFactKeywords...) {
+				continue
+			}
+			if containsAnyFold(window, themeCompanyFactKeywords...) {
+				return window, true
+			}
 		}
 	}
 	return "", false
 }
 
+func themeFactWindows(clause string, keywords []string) []string {
+	runes := []rune(strings.TrimSpace(clause))
+	if len(runes) == 0 {
+		return nil
+	}
+	windows := make([]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		keywordRunes := []rune(strings.TrimSpace(keyword))
+		if len(keywordRunes) == 0 {
+			continue
+		}
+		for start := 0; start+len(keywordRunes) <= len(runes); start++ {
+			if !strings.EqualFold(string(runes[start:start+len(keywordRunes)]), string(keywordRunes)) {
+				continue
+			}
+			entityEnd := min(start+len(keywordRunes)+16, len(runes))
+			if containsAnyFold(string(runes[start:entityEnd]),
+				"有限公司", "股份公司", "股份有限公司", "有限合伙", "集团公司", "研究院", "研究所",
+			) {
+				continue
+			}
+			windowStart := max(start-60, 0)
+			windowEnd := min(start+len(keywordRunes)+100, len(runes))
+			windows = append(windows, strings.TrimSpace(string(runes[windowStart:windowEnd])))
+		}
+	}
+	return uniqueStrings(windows, 8)
+}
+
+func announcementReducesThemeExposure(title string) bool {
+	return containsAnyFold(title,
+		"拟转让", "转让所持", "转让参股公司股权", "转让子公司股权", "拟出售", "出售股权", "出售资产",
+		"出售所持", "拟处置", "处置股权", "资产处置", "股权处置", "挂牌转让", "减持参股", "退出投资",
+		"终止投资", "不再持有", "清算注销", "注销子公司",
+	)
+}
+
+func modelRelationCanConfirmFact(relation string) bool {
+	switch normalizeThemeEvidenceRelation(relation) {
+	case "own_business", "subsidiary", "equity_investment":
+		return true
+	default:
+		return false
+	}
+}
+
+func modelMappingSupportedByInput(input Input, item ThemeEvidence) bool {
+	relation := normalizeThemeEvidenceRelation(item.Relation)
+	if relation != "market_mapping" && relation != "customer_supplier" && relation != "own_business" && relation != "subsidiary" && relation != "equity_investment" {
+		return false
+	}
+	needle := normalizeEvidenceText(item.Snippet)
+	if len([]rune(needle)) < 6 {
+		return false
+	}
+	haystacks := []string{input.Business, input.BusinessDetail, input.Industry}
+	for _, source := range input.Announcements {
+		if announcementReducesThemeExposure(source.Title) {
+			continue
+		}
+		haystacks = append(haystacks, source.Title, source.Content)
+	}
+	for _, source := range input.News {
+		text := source.Title + " " + source.Content
+		if containsAnyFold(text, input.Quote.Name, strings.Split(input.Symbol, ".")[0]) {
+			haystacks = append(haystacks, text)
+		}
+	}
+	for _, candidate := range haystacks {
+		if strings.Contains(normalizeEvidenceText(candidate), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeEvidenceText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		" ", "", "\t", "", "\n", "", "\r", "",
+		"，", "", ",", "", "。", "", ".", "", "；", "", ";", "", "：", "", ":", "",
+		"“", "", "”", "", "‘", "", "’", "", `"`, "", "（", "", "）", "", "(", "", ")", "",
+	)
+	return replacer.Replace(value)
+}
+
 func inputConfirmsThemeFact(input Input, theme string) bool {
 	keywords := append([]string{theme}, themeAliases(theme)...)
 	for _, item := range input.Announcements {
+		if announcementReducesThemeExposure(item.Title) {
+			continue
+		}
 		if _, ok := companyThemeFactSnippet(item.Title+"。"+item.Category+"。"+item.Content, keywords); ok {
 			return true
 		}
@@ -732,6 +865,12 @@ func themeEvidenceStrings(items []ThemeEvidence, limit int) []string {
 	return uniqueStrings(out, limit)
 }
 func themeTagDetail(bucket *themeEvidenceBucket) string {
+	if bucket.mappingOK && !bucket.confirmed {
+		if bucket.marketOK {
+			return fmt.Sprintf("原文映射已核验，题材趋势%d分，证据%d条", bucket.market.TrendScore, len(bucket.evidence))
+		}
+		return fmt.Sprintf("原文映射已核验，证据%d条，等待盘面确认", len(bucket.evidence))
+	}
 	if bucket.marketOK {
 		return fmt.Sprintf("题材趋势%d分，证据%d条", bucket.market.TrendScore, len(bucket.evidence))
 	}

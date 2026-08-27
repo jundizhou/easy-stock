@@ -37,6 +37,25 @@ func TestClientRealtimeParsesSinaResponse(t *testing.T) {
 	}
 }
 
+func TestClientRealtimeHonorsGB18030EvenWhenBytesAreValidUTF8(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=GB18030")
+		body := append([]byte(`var hq_str_sz300377="`), []byte{0xd3, 0xae, 0xca, 0xb1, 0xca, 0xa4}...)
+		body = append(body, []byte(`,14.34,14.51,15.60,15.76,14.34,15.59,15.60,98575264,1509805385.46,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2026-08-27,15:35:45,00";`)...)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL))
+	got, err := client.Realtime(context.Background(), []string{"300377.SZ"})
+	if err != nil {
+		t.Fatalf("Realtime returned error: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "赢时胜" {
+		t.Fatalf("GB18030 name decoded incorrectly: %+v", got)
+	}
+}
+
 func TestParseKLineSupportsIntradayTime(t *testing.T) {
 	body := `callback([{"day":"2026-08-12 14:35","open":"11.000","high":"11.250","low":"10.880","close":"11.240","volume":"203235546"}]);`
 	got, err := parseKLineJSONP(body, "000001.SZ", foundation.SourceMeta{})

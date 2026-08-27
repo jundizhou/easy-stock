@@ -184,7 +184,7 @@ func (s *Server) analyzeStock(ctx context.Context, canonicalSymbol string) (stoc
 		}
 		concepts = append(concepts, item.Concepts...)
 		industry = strings.TrimSpace(item.Industry)
-		if strings.TrimSpace(quote.Name) == "" {
+		if strings.TrimSpace(item.Name) != "" {
 			quote.Name = item.Name
 		}
 		break

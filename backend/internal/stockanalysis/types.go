@@ -277,6 +277,8 @@ type ThemeAnalysis struct {
 type ThemeEvidence struct {
 	Theme       string    `json:"theme"`
 	Type        string    `json:"type"`
+	Relation    string    `json:"relation,omitempty"`
+	Direction   string    `json:"direction,omitempty"`
 	Source      string    `json:"source"`
 	Title       string    `json:"title"`
 	URL         string    `json:"url,omitempty"`

@@ -135,7 +135,7 @@ func normalizeBusinessText(value string) string {
 
 func extractMainBusiness(profile string) string {
 	profile = normalizeBusinessText(profile)
-	for _, prefix := range []string{"主要从事于", "主要从事", "主营业务为", "主营业务是", "主营"} {
+	for _, prefix := range []string{"核心业务主要是", "核心业务为", "主要从事于", "主要从事", "主营业务为", "主营业务是", "主营"} {
 		start := strings.Index(profile, prefix)
 		if start < 0 {
 			continue

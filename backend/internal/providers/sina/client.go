@@ -116,7 +116,7 @@ func (c *Client) KLine(ctx context.Context, symbol string, period string, limit 
 		FetchedAt: time.Now(),
 		LatencyMS: time.Since(start).Milliseconds(),
 	}
-	return parseKLineJSONP(decodeSinaBody(bodyBytes), normalized.Canonical, meta)
+	return parseKLineJSONP(decodeSinaBody(bodyBytes, resp.Header.Get("Content-Type")), normalized.Canonical, meta)
 }
 
 func (c *Client) Realtime(ctx context.Context, symbols []string) ([]foundation.Quote, error) {
@@ -159,7 +159,7 @@ func (c *Client) Realtime(ctx context.Context, symbols []string) ([]foundation.Q
 	if err != nil {
 		return nil, err
 	}
-	body := decodeSinaBody(bodyBytes)
+	body := decodeSinaBody(bodyBytes, resp.Header.Get("Content-Type"))
 	meta := foundation.SourceMeta{
 		Source:    "sina",
 		SourceURL: requestURL,
@@ -253,7 +253,14 @@ func parseKLineTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid kline time %q", value)
 }
 
-func decodeSinaBody(body []byte) string {
+func decodeSinaBody(body []byte, contentTypes ...string) string {
+	contentType := strings.ToLower(strings.Join(contentTypes, " "))
+	if strings.Contains(contentType, "gb18030") || strings.Contains(contentType, "gbk") || strings.Contains(contentType, "gb2312") {
+		decoded, err := simplifiedchinese.GB18030.NewDecoder().Bytes(body)
+		if err == nil {
+			return string(decoded)
+		}
+	}
 	if utf8.Valid(body) {
 		return string(body)
 	}

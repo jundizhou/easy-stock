@@ -437,6 +437,25 @@ func TestAnalyzeThemeIgnoresPublicationTitleKeyword(t *testing.T) {
 	}
 }
 
+func TestAnalyzeThemeDoesNotTreatTransferredCompanyBusinessAsStockTheme(t *testing.T) {
+	lines := syntheticTrendLines("300377.SZ", 80, 10, 0.28, 1_000_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "300377.SZ", Quote: foundation.Quote{Symbol: "300377.SZ", Name: "赢时胜", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business: "金融机构资产管理和托管业务系统", BusinessDetail: "公司是金融IT解决方案综合服务商", Industry: "行业应用软件",
+		Announcements: []foundation.MarketResearchItem{
+			{Title: "2026年半年度报告", Content: "图灵机器人 指 深圳市图灵机器人有限公司。公司专注于金融行业IT系统。", PublishedAt: time.Now(), Meta: foundation.SourceMeta{Source: "eastmoney:announcement"}},
+			{Title: "关于拟转让参股公司股权暨签署股权转让意向书的公告", Content: "标的公司经营范围包括智能机器人的研发、智能机器人销售。", PublishedAt: time.Now(), Meta: foundation.SourceMeta{Source: "eastmoney:announcement"}},
+		},
+		Themes: []foundation.ThemeOverview{{Name: "机器人概念", TrendScore: 96, RisingNodes: 30, MatchedNodes: 32, LimitUpCount: 8, ActiveDays: 9}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.HotTheme != "" || analysis.Theme.Primary != "金融机构资产管理和托管业务系统" {
+		t.Fatalf("transferred company business was incorrectly promoted: %+v", analysis.Theme)
+	}
+}
+
 func TestAnalyzeThemeDoesNotPromoteModelMappingFromStrongMarketAlone(t *testing.T) {
 	lines := syntheticTrendLines("601858.SH", 80, 18, 0.08, 650_000_000)
 	analysis, err := Analyze(Input{
@@ -450,6 +469,44 @@ func TestAnalyzeThemeDoesNotPromoteModelMappingFromStrongMarketAlone(t *testing.
 	}
 	if analysis.Theme.IsHot || analysis.Theme.HotTheme != "" || analysis.Theme.Primary != "科技出版、期刊出版与知识服务" {
 		t.Fatalf("market strength alone promoted a model mapping: %+v", analysis.Theme)
+	}
+}
+
+func TestAnalyzeThemePromotesVerifiedModelMarketMapping(t *testing.T) {
+	lines := syntheticTrendLines("300900.SZ", 80, 10, .28, 900_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "300900.SZ", Quote: foundation.Quote{Symbol: "300900.SZ", Name: "样本金融科技", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business:       "金融软件",
+		BusinessDetail: "公司金融IT系统可为机器人产业客户提供资产管理和结算接口",
+		ModelThemeEvidence: []ThemeEvidence{{
+			Theme: "机器人", Type: "market_mapping", Relation: "market_mapping", Direction: "positive", Source: "hermes-ai",
+			Snippet: "机器人产业客户提供资产管理和结算接口", Strength: .95,
+		}},
+		Themes: []foundation.ThemeOverview{{Name: "机器人概念", TrendScore: 99, RisingNodes: 30, MatchedNodes: 32, LimitUpCount: 8, ActiveDays: 9}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !analysis.Theme.IsHot || analysis.Theme.HotTheme != "机器人" || !strings.Contains(analysis.Theme.Description, "经原文核验的市场映射") {
+		t.Fatalf("verified market mapping was not promoted: %+v", analysis.Theme)
+	}
+}
+
+func TestAnalyzeThemeIgnoresExplicitBusinessDenial(t *testing.T) {
+	lines := syntheticTrendLines("300901.SZ", 80, 10, .2, 800_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "300901.SZ", Quote: foundation.Quote{Symbol: "300901.SZ", Name: "样本软件", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business: "行业软件", BusinessDetail: "公司主营行业应用软件",
+		Announcements: []foundation.MarketResearchItem{{
+			Title: "关于市场传闻的澄清公告", Content: "公司目前不存在机器人相关业务，未开展机器人研发和销售。", PublishedAt: time.Now(), Meta: foundation.SourceMeta{Source: "eastmoney:announcement"},
+		}},
+		Themes: []foundation.ThemeOverview{{Name: "机器人概念", TrendScore: 98, RisingNodes: 28, MatchedNodes: 30, LimitUpCount: 7, ActiveDays: 8}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.Primary != "行业软件" {
+		t.Fatalf("explicit denial was promoted as a theme fact: %+v", analysis.Theme)
 	}
 }
 
@@ -486,7 +543,7 @@ func TestAnalyzeNonShortStockIncludesFundamentalsAndResearch(t *testing.T) {
 	}
 }
 
-func TestAnalyzeIncludesStockAndThemeNews(t *testing.T) {
+func TestAnalyzeIncludesStockNewsButRejectsUnvalidatedThemeNews(t *testing.T) {
 	lines := syntheticTrendLines("600519.SH", 180, 10, 0.08, 1_500_000_000)
 	now := time.Now()
 	analysis, err := Analyze(Input{
@@ -511,8 +568,8 @@ func TestAnalyzeIncludesStockAndThemeNews(t *testing.T) {
 	if analysis.StockNews == nil || !analysis.StockNews.Available || analysis.StockNews.ArticleCount != 2 {
 		t.Fatalf("stock news analysis missing: %+v", analysis.StockNews)
 	}
-	if analysis.ThemeNews == nil || !analysis.ThemeNews.Available || analysis.ThemeNews.ArticleCount != 1 {
-		t.Fatalf("theme news analysis missing: %+v", analysis.ThemeNews)
+	if analysis.ThemeNews == nil || analysis.ThemeNews.Available || analysis.ThemeNews.ArticleCount != 0 {
+		t.Fatalf("catalog-only concept must not produce theme news: %+v", analysis.ThemeNews)
 	}
 	if len(analysis.StockNews.Catalysts) == 0 || analysis.StockNews.AnalysisSource != "local-rules" {
 		t.Fatalf("stock news catalysts missing: %+v", analysis.StockNews)
@@ -521,8 +578,26 @@ func TestAnalyzeIncludesStockAndThemeNews(t *testing.T) {
 	for _, item := range analysis.DataQuality {
 		quality[item.Key] = item.Status
 	}
-	if quality["stock_news"] != "ready" || quality["theme_news"] != "ready" {
+	if quality["stock_news"] != "ready" || quality["theme_news"] != "limited" {
 		t.Fatalf("news data quality missing: %+v", quality)
+	}
+}
+
+func TestAnalyzeRecentNewsIncludesValidatedHotThemeNews(t *testing.T) {
+	now := time.Now()
+	stockNews, themeNews := analyzeRecentNews(Input{
+		Symbol: "300377.SZ",
+		Quote:  foundation.Quote{Symbol: "300377.SZ", Name: "赢时胜"},
+		News: []foundation.NewsItem{
+			{ID: "n1", Title: "机器人产业链订单增长", PublishedAt: now, Meta: foundation.SourceMeta{Source: "cls"}},
+			{ID: "n2", Title: "无关市场新闻", PublishedAt: now, Meta: foundation.SourceMeta{Source: "cls"}},
+		},
+	}, ThemeAnalysis{Primary: "机器人", HotTheme: "机器人", IsHot: true})
+	if stockNews.Available {
+		t.Fatalf("unmatched stock news must remain unavailable: %+v", stockNews)
+	}
+	if !themeNews.Available || themeNews.ArticleCount != 1 || len(themeNews.Keywords) == 0 || themeNews.Keywords[0] != "机器人" {
+		t.Fatalf("validated hot-theme news missing: %+v", themeNews)
 	}
 }
 
@@ -642,6 +717,48 @@ func TestEnrichWithAIReplacesOnlyNarrativeConclusion(t *testing.T) {
 	}
 }
 
+func TestEnrichWithAIRetriesMalformedJSON(t *testing.T) {
+	analysis := Analysis{Symbol: "600519.SH", Name: "测试股", Conclusion: Conclusion{BestPath: "原路径", MainRisk: "原风险"}}
+	prompter := &stagedStockPrompter{contents: []string{
+		"我先解释一下分析思路，稍后再给结果。",
+		`{"headline":"等待证据确认","summary":"当前证据不足以支持追高，继续观察题材和价格能否形成共振。","action":"等待确认","best_path":"价格与题材同步转强","main_risk":"映射逻辑不能被市场验证"}`,
+	}}
+	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(prompter.prompts) != 2 || analysis.AI.Status != "ready" || analysis.Conclusion.Headline != "等待证据确认" {
+		t.Fatalf("AI synthesis JSON repair was not applied: prompts=%d analysis=%+v", len(prompter.prompts), analysis)
+	}
+}
+
+func TestExtractThemeEvidenceRetriesMalformedJSON(t *testing.T) {
+	now := time.Now()
+	prompter := &stagedStockPrompter{contents: []string{
+		"题材证据如下，但暂时无法输出结构化结果。",
+		`{"items":[{"theme":"机器人","type":"market_mapping","relation":"market_mapping","direction":"positive","source":"eastmoney:announcement","title":"关于产业客户合作的公告","snippet":"为机器人产业客户提供结算接口","strength":0.82}]}`,
+	}}
+	items, err := ExtractThemeEvidence(context.Background(), prompter, Input{
+		Symbol: "300900.SZ", Quote: foundation.Quote{Name: "样本金融科技"}, Business: "金融软件",
+		Announcements: []foundation.MarketResearchItem{{Title: "关于产业客户合作的公告", Content: "公司为机器人产业客户提供结算接口。", PublishedAt: now, Meta: foundation.SourceMeta{Source: "eastmoney:announcement"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prompter.prompts) != 2 || !strings.Contains(prompter.prompts[1], "上一次输出无法解析") {
+		t.Fatalf("malformed JSON was not retried: %+v", prompter.prompts)
+	}
+	if len(items) != 1 || items[0].Relation != "market_mapping" || items[0].PublishedAt.IsZero() || items[0].Source != "eastmoney:announcement" {
+		t.Fatalf("repaired theme evidence was not normalized: %+v", items)
+	}
+}
+
+func TestDecodeJSONObjectSkipsInvalidBraceBlock(t *testing.T) {
+	var decoded aiThemeEvidenceResponse
+	if err := decodeJSONObject(`前置说明 {不是JSON} 后续结果 {"items":[]}`, &decoded); err != nil {
+		t.Fatalf("valid JSON object after invalid braces was not decoded: %v", err)
+	}
+}
+
 func TestEnrichWithAIAppliesGlobalNonShortPricePlan(t *testing.T) {
 	lines := syntheticTrendLines("600519.SH", 180, 10, .08, 1_500_000_000)
 	analysis, err := Analyze(Input{Symbol: "600519.SH", KLines: lines})
@@ -742,6 +859,22 @@ func syntheticTrendLines(symbol string, count int, start, step, amount float64) 
 type fakeStockPrompter struct {
 	content string
 	prompt  *string
+}
+
+type stagedStockPrompter struct {
+	contents []string
+	prompts  []string
+	index    int
+}
+
+func (p *stagedStockPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
+	p.prompts = append(p.prompts, prompt)
+	if p.index >= len(p.contents) {
+		return hermes.PromptResult{Content: `{}`}, nil
+	}
+	content := p.contents[p.index]
+	p.index++
+	return hermes.PromptResult{Content: content}, nil
 }
 
 func (p fakeStockPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {

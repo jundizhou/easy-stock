@@ -58,11 +58,10 @@ type aiThemeEvidenceResponse struct {
 	Items []ThemeEvidence `json:"items"`
 }
 
-// ExtractThemeEvidence asks Hermes to normalize facts that are difficult to
-// recover from short announcement titles (for example an investment in a
-// compound-semiconductor subsidiary). The response is only a candidate-evidence
-// layer; enrichTheme still requires deterministic market confirmation before it
-// promotes a theme to the primary hot label.
+// ExtractThemeEvidence asks Hermes to normalize facts and market mappings that
+// are difficult to recover from short announcement titles. The response is only
+// a candidate-evidence layer; enrichTheme still verifies the quoted source,
+// market strength and price response before it promotes a theme.
 func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input Input) ([]ThemeEvidence, error) {
 	if prompter == nil {
 		return nil, errors.New("AI分析底座不可用")
@@ -74,6 +73,35 @@ func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input I
 	source.WriteString("股票：" + input.Quote.Name + "（" + input.Symbol + "）\n")
 	source.WriteString("主营：" + firstNonEmpty(input.Business, input.Industry) + "\n")
 	source.WriteString("概念目录：" + strings.Join(input.Concepts, "、") + "\n")
+	lines := normalizeKLines(input.KLines)
+	if len(lines) > 0 {
+		daily, five := stockRecentReturns(lines)
+		twenty := windowReturn(closesOf(lines), min(len(lines), 20))
+		source.WriteString(fmt.Sprintf("价格反馈：当日%+.1f%%，5日%+.1f%%，20日%+.1f%%\n", daily, five, twenty))
+	}
+	source.WriteString("近期市场题材：\n")
+	for index, item := range input.Themes {
+		if index >= 30 {
+			break
+		}
+		name := firstNonEmpty(item.Name, item.Theme)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		source.WriteString(fmt.Sprintf("- %s | 趋势%d | 阶段%s | 当日%+.1f%% | 5日强度%d | 涨停%d\n", name, item.TrendScore, firstNonEmpty(item.TrendStage, "待确认"), item.ChangePercent, item.FiveDayStrengthScore, item.LimitUpCount))
+	}
+	source.WriteString("开盘啦个股归因：\n")
+	for _, item := range input.CachedThemes {
+		if item.Symbol == input.Symbol && strings.TrimSpace(item.Theme) != "" {
+			source.WriteString(fmt.Sprintf("- %s | %s | %s | %s\n", item.TradeDate, item.Theme, item.Role, item.Source))
+		}
+	}
+	source.WriteString("近期涨停题材：\n")
+	for _, item := range input.LimitUps {
+		if item.Symbol == input.Symbol {
+			source.WriteString(fmt.Sprintf("- %s | %s | %s | 连板%d\n", item.Date.Format("2006-01-02"), item.PrimaryTheme, strings.Join(item.Concepts, "、"), item.Streak))
+		}
+	}
 	source.WriteString("公告：\n")
 	for _, item := range input.Announcements {
 		source.WriteString("- " + item.PublishedAt.Format("2006-01-02") + " | " + item.Title + " | " + item.Category + " | " + truncateText(item.Content, 900) + "\n")
@@ -84,23 +112,22 @@ func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input I
 			source.WriteString("- " + item.PublishedAt.Format("2006-01-02 15:04") + " | " + item.Title + " | " + truncateText(item.Content, 240) + "\n")
 		}
 	}
-	prompt := `你是A股题材归因器。请仅基于输入事实，提取可能影响当前炒作的具体题材。
+	prompt := `你是A股题材证据调查器。请比较公司事实、近期市场题材和个股价格反馈，输出最多8个可能解释当前涨幅的具体题材，按可信度从高到低排序。
 规则：
-1. 区分 fact（公告或公司明确事实）、market_mapping（产业链/市场映射）、inference（弱推断）。
-2. 不要把主营行业、宽泛概念目录直接当成热点；不要编造公告未出现的公司事实。
-3. 公司出版、引用或获奖的图书、丛书、教材、论文标题即使包含题材词，也不代表公司经营该产业，不得据此输出题材。
-4. 题材名称使用短而具体的中文，例如“化合物半导体”“砷化镓”“光电子器件”“CPO”。
-5. 每项必须给出原文标题或摘要作为snippet，strength为0到1。
-6. 只输出JSON：{"items":[{"theme":"...","type":"fact|market_mapping|inference","source":"...","title":"...","snippet":"...","strength":0.0}]}
+1. type区分fact（可核验的公司事实）、market_mapping（产业链/资金叙事映射）、inference（弱推断）。
+2. relation必须是own_business、subsidiary、equity_investment、customer_supplier、disposed_asset、market_mapping、unknown之一；direction必须是positive、negative、neutral之一。
+3. 必须识别事实主语：上市公司、子公司、参股公司、客户、交易标的不是一回事。其他公司名称、行业报告、图书论文中的题材词不能当作上市公司业务。
+4. 转让、出售、处置、退出投资、注销和明确否认相关业务属于negative，不得包装成当前正向题材。
+5. 不要因为题材市场很强就输出该题材。每个候选必须存在该股票自身的关联原文；market_mapping的snippet必须逐字引用输入中的关联依据，不能写模型总结。
+6. 概念目录只能作为线索，不能单独证明当前炒作；同时比较公告日期、市场热度与当日/5日/20日价格反馈。
+7. 题材名称使用短而具体的中文；不确定时输出inference或不输出，禁止为了凑数编造。
+8. source和title必须对应输入中的实际来源；snippet使用可回查的原文，strength为0到1。
+9. 只输出JSON：{"items":[{"theme":"...","type":"fact|market_mapping|inference","relation":"own_business|subsidiary|equity_investment|customer_supplier|disposed_asset|market_mapping|unknown","direction":"positive|negative|neutral","source":"...","title":"...","snippet":"逐字原文","strength":0.0}]}
 
 [输入]
 ` + source.String()
-	result, err := prompter.Prompt(ctx, prompt)
+	decoded, err := promptJSONObject[aiThemeEvidenceResponse](ctx, prompter, prompt, "题材证据")
 	if err != nil {
-		return nil, err
-	}
-	var decoded aiThemeEvidenceResponse
-	if err := decodeJSONObject(result.Content, &decoded); err != nil {
 		return nil, err
 	}
 	out := make([]ThemeEvidence, 0, min(len(decoded.Items), 12))
@@ -109,7 +136,14 @@ func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input I
 		if item.Theme == "" {
 			continue
 		}
+		item.Type = normalizeThemeEvidenceType(item.Type)
+		item.Relation = normalizeThemeEvidenceRelation(item.Relation)
+		item.Direction = normalizeThemeEvidenceDirection(item.Direction)
 		item.Strength = clamp(item.Strength, .15, .98)
+		hydrateModelThemeEvidence(input, &item)
+		if strings.TrimSpace(item.Source) == "" {
+			item.Source = "hermes-ai"
+		}
 		item.Freshness = freshnessForTime(item.PublishedAt)
 		out = append(out, item)
 		if len(out) >= 12 {
@@ -186,13 +220,9 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 	if strings.TrimSpace(methodologyContext) != "" {
 		prompt += "\n\n[本地游资心法的相关历史经验，仅作为短线风险与执行约束，不代表真人观点]\n" + methodologyContext
 	}
-	response, err := prompter.Prompt(ctx, prompt)
+	result, err := promptJSONObject[aiConclusion](ctx, prompter, prompt, "个股分析")
 	if err != nil {
-		return fmt.Errorf("Hermes个股分析失败: %w", err)
-	}
-	var result aiConclusion
-	if err := decodeJSONObject(response.Content, &result); err != nil {
-		return fmt.Errorf("Hermes未返回有效个股分析JSON: %w", err)
+		return err
 	}
 	if strings.TrimSpace(result.Headline) == "" || strings.TrimSpace(result.Summary) == "" || strings.TrimSpace(result.Action) == "" {
 		return errors.New("Hermes个股分析缺少必要字段")
@@ -393,24 +423,146 @@ func applyAINewsConclusion(target *NewsAnalysis, result aiNewsConclusion) {
 	target.AnalysisSource = "hermes-ai"
 }
 
+func normalizeThemeEvidenceType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "fact", "announcement":
+		return "fact"
+	case "market_mapping", "mapping":
+		return "market_mapping"
+	default:
+		return "inference"
+	}
+}
+
+func normalizeThemeEvidenceRelation(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "own_business", "subsidiary", "equity_investment", "customer_supplier", "disposed_asset", "market_mapping":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeThemeEvidenceDirection(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "positive", "negative":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "neutral"
+	}
+}
+
+func hydrateModelThemeEvidence(input Input, item *ThemeEvidence) {
+	if item == nil || strings.TrimSpace(item.Title) == "" {
+		return
+	}
+	matchTitle := func(candidate string) bool {
+		left := normalizeEvidenceText(item.Title)
+		right := normalizeEvidenceText(candidate)
+		return left != "" && right != "" && (left == right || strings.Contains(left, right) || strings.Contains(right, left))
+	}
+	for _, source := range input.Announcements {
+		if !matchTitle(source.Title) {
+			continue
+		}
+		item.PublishedAt = source.PublishedAt
+		item.URL = firstNonEmpty(item.URL, source.URL)
+		item.Source = firstNonEmpty(source.Meta.Source, item.Source, "eastmoney:announcement")
+		return
+	}
+	for _, source := range input.News {
+		if !matchTitle(source.Title) {
+			continue
+		}
+		item.PublishedAt = source.PublishedAt
+		item.URL = firstNonEmpty(item.URL, source.URL)
+		item.Source = firstNonEmpty(source.Meta.Source, item.Source, "market-news")
+		return
+	}
+}
+
+func promptJSONObject[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string) (T, error) {
+	var decoded T
+	result, err := prompter.Prompt(ctx, prompt)
+	if err != nil {
+		return decoded, fmt.Errorf("Hermes%s失败: %w", label, err)
+	}
+	firstErr := decodeJSONObject(result.Content, &decoded)
+	if firstErr == nil {
+		return decoded, nil
+	}
+
+	repairPrompt := `上一次输出无法解析为任务要求的JSON。请重新完成下面的原始任务，并只返回一个合法JSON对象：
+- 使用英文半角双引号；
+- 不要Markdown代码块、解释、思考过程或前后缀；
+- 所有字段严格遵循原始任务给出的结构；
+- 无法确定的数组返回[]，不要用自然语言拒答。
+
+[原始任务]
+` + prompt + "\n\n[上一次无效输出，仅用于纠错]\n" + truncateText(result.Content, 4_000)
+	repaired, retryErr := prompter.Prompt(ctx, repairPrompt)
+	if retryErr != nil {
+		return decoded, fmt.Errorf("Hermes未返回有效%sJSON: %v；自动纠错失败: %w", label, firstErr, retryErr)
+	}
+	decoded = *new(T)
+	if err := decodeJSONObject(repaired.Content, &decoded); err != nil {
+		return decoded, fmt.Errorf("Hermes未返回有效%sJSON: 首次%v；自动纠错后%w", label, firstErr, err)
+	}
+	return decoded, nil
+}
+
 func decodeJSONObject(content string, target any) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return errors.New("empty response")
 	}
-	if strings.HasPrefix(content, "```") {
-		content = strings.TrimSpace(strings.TrimPrefix(content, "```json"))
-		content = strings.TrimSpace(strings.TrimPrefix(content, "```"))
-		content = strings.TrimSpace(strings.TrimSuffix(content, "```"))
+	var encoded string
+	if strings.HasPrefix(content, `"`) && json.Unmarshal([]byte(content), &encoded) == nil {
+		content = strings.TrimSpace(encoded)
 	}
-	start := strings.Index(content, "{")
-	end := strings.LastIndex(content, "}")
-	if start < 0 || end <= start {
-		return errors.New("JSON object not found")
+	var lastErr error
+	for start := strings.IndexByte(content, '{'); start >= 0; {
+		end := balancedJSONObjectEnd(content, start)
+		if end > start {
+			decoder := json.NewDecoder(strings.NewReader(content[start:end]))
+			if err := decoder.Decode(target); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
+		}
+		next := strings.IndexByte(content[start+1:], '{')
+		if next < 0 {
+			break
+		}
+		start += next + 1
 	}
-	decoder := json.NewDecoder(strings.NewReader(content[start : end+1]))
-	if err := decoder.Decode(target); err != nil {
-		return err
+	if lastErr != nil {
+		return lastErr
 	}
-	return nil
+	return errors.New("JSON object not found")
+}
+
+func balancedJSONObjectEnd(content string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for index := start; index < len(content); index++ {
+		switch current := content[index]; {
+		case inString && escaped:
+			escaped = false
+		case inString && current == '\\':
+			escaped = true
+		case current == '"':
+			inString = !inString
+		case !inString && current == '{':
+			depth++
+		case !inString && current == '}':
+			depth--
+			if depth == 0 {
+				return index + 1
+			}
+		}
+	}
+	return -1
 }

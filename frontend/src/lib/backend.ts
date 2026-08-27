@@ -629,6 +629,8 @@ export type StockAIThemeTag = {
 export type StockAIThemeEvidence = {
 	theme: string;
 	type: string;
+	relation?: string;
+	direction?: string;
 	source: string;
 	title: string;
 	url?: string;

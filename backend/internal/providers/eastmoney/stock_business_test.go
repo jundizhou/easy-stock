@@ -27,6 +27,13 @@ func TestStockBusinessProfileExtractsMainBusiness(t *testing.T) {
 	}
 }
 
+func TestExtractMainBusinessSupportsCoreBusinessWording(t *testing.T) {
+	profile := "公司专注于金融行业IT系统的研究、开发及服务，核心业务主要是金融机构资产管理和托管业务系统的应用软件及服务，服务银行、证券、保险等金融客户。"
+	if got := extractMainBusiness(profile); got != "金融机构资产管理和托管业务系统的应用软件及服务" {
+		t.Fatalf("extractMainBusiness()=%q", got)
+	}
+}
+
 func TestStockFundamentalsReturnsLatestReport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("reportName") != "RPT_F10_FINANCE_MAINFINADATA" || r.URL.Query().Get("sortColumns") != "REPORT_DATE" {

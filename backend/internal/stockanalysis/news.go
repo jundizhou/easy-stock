@@ -23,9 +23,7 @@ var negativeNewsKeywords = []string{
 
 func analyzeRecentNews(input Input, theme ThemeAnalysis) (NewsAnalysis, NewsAnalysis) {
 	stockTerms := uniqueNewsTerms([]string{input.Quote.Name, strings.Split(input.Symbol, ".")[0]}, 4)
-	themeTerms := []string{theme.HotTheme, theme.Primary, theme.BusinessTheme, input.Industry}
-	themeTerms = append(themeTerms, theme.Concepts...)
-	themeTerms = uniqueNewsTerms(themeTerms, 8)
+	themeTerms := validatedThemeNewsTerms(theme)
 
 	stockCandidates := make([]foundation.NewsItem, 0, len(input.News)+len(input.Announcements))
 	for _, item := range input.Announcements {
@@ -45,6 +43,15 @@ func analyzeRecentNews(input Input, theme ThemeAnalysis) (NewsAnalysis, NewsAnal
 
 	return buildNewsAnalysis("个股", stockItems, matchedNewsTerms(stockItems, stockTerms)),
 		buildNewsAnalysis("题材", themeItems, matchedNewsTerms(themeItems, themeTerms))
+}
+
+func validatedThemeNewsTerms(theme ThemeAnalysis) []string {
+	if !theme.IsHot || strings.TrimSpace(theme.HotTheme) == "" {
+		return nil
+	}
+	terms := []string{theme.HotTheme, theme.Primary}
+	terms = append(terms, themeAliases(canonicalTheme(theme.HotTheme))...)
+	return uniqueNewsTerms(terms, 8)
 }
 
 func buildNewsAnalysis(scope string, items []foundation.NewsItem, keywords []string) NewsAnalysis {
