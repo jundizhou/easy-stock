@@ -16,6 +16,12 @@ type radarIndustryThemeRef struct {
 	Name string `json:"n"`
 }
 
+type radarIndustryLeader struct {
+	Symbol        string
+	Name          string
+	ChangePercent float64
+}
+
 type radarFusionThemeRef struct {
 	KaipanlaCode string `json:"k"`
 	IndustryCode string `json:"c,omitempty"`

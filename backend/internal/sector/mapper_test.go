@@ -482,6 +482,26 @@ func TestMapperBuildsDynamicIndustryFromCatalogIndustry(t *testing.T) {
 	}
 }
 
+func TestMapperNormalizesDynamicIndustryLevelSuffix(t *testing.T) {
+	themeID := radarIndustryThemeID("pt01801039", "非金属材料Ⅱ")
+	mapper := NewMapper(
+		fakeBoardProvider{},
+		WithStockCatalogProvider(fakeStockCatalogProvider{entries: []foundation.StockCatalogEntry{{
+			BoardStock: foundation.BoardStock{Symbol: "688300.SH", Name: "联瑞新材", ChangePercent: 20},
+			Industry:   "非金属材料",
+		}}}),
+	)
+
+	got, err := mapper.Build(context.Background(), themeID)
+	if err != nil {
+		t.Fatalf("Build dynamic industry with level suffix failed: %v", err)
+	}
+	node := findNode(got, "industry_core")
+	if findStock(node, "688300.SH") == nil {
+		t.Fatalf("industry level suffix should not prevent catalog matching: %+v", node)
+	}
+}
+
 func TestMapperFallsBackToBoardStocksForDynamicIndustry(t *testing.T) {
 	themeID := radarIndustryThemeID("pt01801183", "房地产服务")
 	mapper := NewMapper(fakeBoardProvider{

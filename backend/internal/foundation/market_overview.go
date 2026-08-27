@@ -34,6 +34,7 @@ type MarketIndustryMomentum struct {
 	RisingCount          int        `json:"rising_count"`
 	FallingCount         int        `json:"falling_count"`
 	MainNetInflow        float64    `json:"main_net_inflow"`
+	LeaderSymbol         string     `json:"leader_symbol,omitempty"`
 	LeaderName           string     `json:"leader_name,omitempty"`
 	LeaderChangePercent  float64    `json:"leader_change_percent"`
 	Score                float64    `json:"score"`

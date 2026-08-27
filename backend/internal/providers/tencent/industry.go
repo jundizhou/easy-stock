@@ -63,9 +63,13 @@ func (c *Client) IndustryMomentum(ctx context.Context, limit int) ([]foundation.
 		change := parseFloat(raw.ChangePercent)
 		fiveDay := parseFloat(raw.FiveDay)
 		twentyDay := parseFloat(raw.TwentyDay)
+		leaderSymbol := ""
+		if normalized, err := foundation.NormalizeSymbol(raw.LeaderCode); err == nil {
+			leaderSymbol = normalized.Canonical
+		}
 		items = append(items, foundation.MarketIndustryMomentum{
 			Code: raw.Code, Name: raw.Name, ChangePercent: change, FiveDayChangePercent: fiveDay,
-			TwentyDayChange: twentyDay, LeaderName: raw.LeaderName, LeaderChangePercent: parseFloat(raw.LeaderChange),
+			TwentyDayChange: twentyDay, LeaderSymbol: leaderSymbol, LeaderName: raw.LeaderName, LeaderChangePercent: parseFloat(raw.LeaderChange),
 			Score: tencentIndustryScore(change, fiveDay, twentyDay), Meta: meta,
 		})
 	}

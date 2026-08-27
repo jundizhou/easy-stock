@@ -293,7 +293,7 @@ func (m *Mapper) buildNode(
 		}
 	}
 	if len(out.Stocks) == 0 && boardMatched && len(catalog) > 0 {
-		if stocks, err := m.provider.BoardStocks(ctx, board.Code, 30); err == nil && len(stocks) > 0 {
+		if stocks, err := m.provider.BoardStocks(ctx, board.Code, 200); err == nil && len(stocks) > 0 {
 			out.Stocks = append([]foundation.BoardStock(nil), stocks...)
 			out.StockSource = "eastmoney:board-constituents"
 			out.MatchStatus = "matched"
@@ -343,6 +343,8 @@ var membershipNormalizer = strings.NewReplacer(
 	" ", "",
 	"/", "",
 )
+
+var membershipLevelSuffixes = []string{"ⅰ", "ⅱ", "ⅲ"}
 
 func newCatalogIndex(catalog []foundation.StockCatalogEntry) catalogIndex {
 	index := make(catalogIndex, 0, len(catalog))
@@ -459,6 +461,9 @@ func membershipMatchScore(membership string, term normalizedCatalogTerm) int {
 
 func normalizeMembership(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
+	for _, suffix := range membershipLevelSuffixes {
+		value = strings.TrimSpace(strings.TrimSuffix(value, suffix))
+	}
 	return membershipNormalizer.Replace(value)
 }
 

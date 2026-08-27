@@ -17,6 +17,7 @@ import (
 type Client struct {
 	baseURL             string
 	quoteBaseURL        string
+	quoteFallbackURLs   []string
 	dataBaseURL         string
 	topicBaseURL        string
 	datacenterBaseURL   string
@@ -43,6 +44,18 @@ func WithBaseURL(baseURL string) Option {
 func WithQuoteBaseURL(baseURL string) Option {
 	return func(c *Client) {
 		c.quoteBaseURL = strings.TrimRight(baseURL, "/")
+		c.quoteFallbackURLs = nil
+	}
+}
+
+func WithQuoteFallbackBaseURLs(baseURLs ...string) Option {
+	return func(c *Client) {
+		c.quoteFallbackURLs = c.quoteFallbackURLs[:0]
+		for _, baseURL := range baseURLs {
+			if normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/"); normalized != "" {
+				c.quoteFallbackURLs = append(c.quoteFallbackURLs, normalized)
+			}
+		}
 	}
 }
 
@@ -102,6 +115,7 @@ func NewClient(opts ...Option) *Client {
 	c := &Client{
 		baseURL:             "https://push2his.eastmoney.com",
 		quoteBaseURL:        "https://push2.eastmoney.com",
+		quoteFallbackURLs:   []string{"https://82.push2.eastmoney.com", "https://90.push2.eastmoney.com"},
 		dataBaseURL:         "https://data.eastmoney.com",
 		topicBaseURL:        "https://push2ex.eastmoney.com",
 		datacenterBaseURL:   "https://datacenter-web.eastmoney.com",

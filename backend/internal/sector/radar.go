@@ -35,6 +35,8 @@ type RadarProvider struct {
 	strengthMu        sync.Mutex
 	strengthAttemptAt time.Time
 	strengthCache     map[string]themeStrengthScore
+	industryLeaderMu  sync.RWMutex
+	industryLeaders   map[string]radarIndustryLeader
 }
 
 type RadarProviderConfig struct {
@@ -60,7 +62,7 @@ func NewRadarProvider(source RadarSnapshotSource, fallback RadarFallback, quotes
 	return &RadarProvider{
 		source: source, industry: config.IndustryMomentum, fallback: fallback, quotes: quotes, now: now,
 		fallbackFill: fallbackFill, strengthTTL: strengthTTL,
-		strengthCache: map[string]themeStrengthScore{},
+		strengthCache: map[string]themeStrengthScore{}, industryLeaders: map[string]radarIndustryLeader{},
 	}
 }
 
@@ -111,6 +113,9 @@ func (p *RadarProvider) BuildSnapshot(ctx context.Context, themeID string, snaps
 	if strings.HasPrefix(themeID, radarFusionThemePrefix) {
 		return foundation.SectorMap{}, fmt.Errorf("invalid fused radar theme: %s", themeID)
 	}
+	if industry, ok := parseRadarIndustryThemeID(themeID); ok {
+		return p.buildIndustrySnapshot(ctx, themeID, industry, p.industryLeader(themeID))
+	}
 	if !strings.HasPrefix(themeID, "kpl:") {
 		if p.fallback == nil {
 			return foundation.SectorMap{}, fmt.Errorf("sector map fallback is unavailable")
@@ -118,6 +123,105 @@ func (p *RadarProvider) BuildSnapshot(ctx context.Context, themeID string, snaps
 		return p.fallback.Build(ctx, themeID)
 	}
 	return p.buildKaipanlaSnapshot(ctx, themeID, snapshotID)
+}
+
+func (p *RadarProvider) buildIndustrySnapshot(ctx context.Context, themeID string, industry radarIndustryThemeRef, leader radarIndustryLeader) (foundation.SectorMap, error) {
+	if p.fallback != nil {
+		result, err := p.fallback.Build(ctx, themeID)
+		if err == nil {
+			if sectorMapStockCount(result) == 0 {
+				p.addIndustryLeaderFallback(ctx, leader, &result, "行业成分股暂不可用，已保留行业领涨股。")
+			}
+			return result, nil
+		} else if leader.Symbol == "" {
+			return foundation.SectorMap{}, err
+		} else {
+			result = emptyIndustrySectorMap(themeID, industry, p.now())
+			p.addIndustryLeaderFallback(ctx, leader, &result, fmt.Sprintf("行业成分映射失败，已保留行业领涨股：%s", err.Error()))
+			return result, nil
+		}
+	}
+	if leader.Symbol == "" {
+		return foundation.SectorMap{}, fmt.Errorf("sector map fallback is unavailable")
+	}
+	result := emptyIndustrySectorMap(themeID, industry, p.now())
+	p.addIndustryLeaderFallback(ctx, leader, &result, "行业成分映射暂不可用，已保留行业领涨股。")
+	return result, nil
+}
+
+func (p *RadarProvider) addIndustryLeaderFallback(ctx context.Context, leader radarIndustryLeader, result *foundation.SectorMap, warning string) {
+	if result == nil || leader.Symbol == "" || len(result.Groups) == 0 || len(result.Groups[0].Nodes) == 0 {
+		return
+	}
+	stock := foundation.BoardStock{
+		Symbol:        leader.Symbol,
+		Name:          leader.Name,
+		ChangePercent: leader.ChangePercent,
+		RankScore:     100,
+		RankRole:      "行业领涨",
+		Meta:          foundation.SourceMeta{Source: radarIndustrySource, FetchedAt: p.now()},
+	}
+	if p.quotes != nil {
+		if quotes, err := p.quotes.Realtime(ctx, []string{leader.Symbol}); err == nil && len(quotes) > 0 {
+			quote := quotes[0]
+			stock.Name = firstNonEmptyRadar(quote.Name, stock.Name)
+			stock.Price = quote.Price
+			stock.Change = quote.Change
+			stock.ChangePercent = quote.ChangePercent
+			stock.Meta = quote.Meta
+		}
+	}
+	node := &result.Groups[0].Nodes[0]
+	node.Stocks = mergeBoardStock(node.Stocks, stock)
+	node.StockSource = firstNonEmptyRadar(node.StockSource, radarIndustrySource+":leader")
+	node.MatchStatus = "matched"
+	node.MatchedBy = append(node.MatchedBy, "industry-leader")
+	node.Warnings = append(node.Warnings, warning)
+}
+
+func (p *RadarProvider) rememberIndustryLeaders(items []foundation.MarketIndustryMomentum) {
+	leaders := make(map[string]radarIndustryLeader, len(items))
+	for _, item := range items {
+		if item.LeaderSymbol == "" {
+			continue
+		}
+		leaders[radarIndustryThemeID(item.Code, item.Name)] = radarIndustryLeader{
+			Symbol: item.LeaderSymbol, Name: item.LeaderName, ChangePercent: item.LeaderChangePercent,
+		}
+	}
+	p.industryLeaderMu.Lock()
+	defer p.industryLeaderMu.Unlock()
+	p.industryLeaders = leaders
+}
+
+func (p *RadarProvider) industryLeader(themeID string) radarIndustryLeader {
+	p.industryLeaderMu.RLock()
+	defer p.industryLeaderMu.RUnlock()
+	return p.industryLeaders[themeID]
+}
+
+func emptyIndustrySectorMap(themeID string, industry radarIndustryThemeRef, now time.Time) foundation.SectorMap {
+	return foundation.SectorMap{
+		Theme:     themeID,
+		Name:      industry.Name,
+		Tabs:      []string{industry.Name},
+		ThemeTabs: []foundation.SectorMapTab{{ID: themeID, Name: industry.Name}},
+		Groups: []foundation.SectorMapGroup{{
+			ID: "industry_members", Name: industry.Name,
+			Nodes: []foundation.SectorMapNode{{ID: "industry_core", Name: industry.Name, Description: "依据行业趋势强度对应的行业归属筛选成分股。", Stocks: []foundation.BoardStock{}}},
+		}},
+		Meta: foundation.SourceMeta{Source: radarIndustrySource, FetchedAt: now, FallbackReason: "行业成分映射暂不可用"},
+	}
+}
+
+func sectorMapStockCount(sectorMap foundation.SectorMap) int {
+	count := 0
+	for _, group := range sectorMap.Groups {
+		for _, node := range group.Nodes {
+			count += len(node.Stocks)
+		}
+	}
+	return count
 }
 
 func (p *RadarProvider) buildFusionSnapshot(

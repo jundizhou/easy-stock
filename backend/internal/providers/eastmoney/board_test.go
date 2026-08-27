@@ -116,3 +116,44 @@ func TestClientBoardStocksParsesEastMoneyConstituents(t *testing.T) {
 		t.Fatalf("missing source evidence: %+v", stocks[0].Meta)
 	}
 }
+
+func TestClientBoardStocksFallsBackToQuoteMirrorAndParsesMissingValues(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "temporary upstream failure", http.StatusBadGateway)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("fs"); got != "b:BK1020" {
+			t.Fatalf("fs = %s, want b:BK1020", got)
+		}
+		_, _ = w.Write([]byte(`{
+			"rc": 0,
+			"data": {
+				"total": 2,
+				"diff": [
+					{"f12":"688300","f14":"联瑞新材","f2":186.24,"f3":20,"f4":31.04,"f5":217057,"f6":3744740435,"f20":44971221946,"f21":44971221946,"f62":515804800},
+					{"f12":"920971","f14":"天马新材","f2":"-","f3":"-","f4":"-","f5":"-","f6":"-","f20":"-","f21":"-","f62":"-"}
+				]
+			}
+		}`))
+	}))
+	defer fallback.Close()
+
+	client := NewClient(
+		WithQuoteBaseURL(primary.URL),
+		WithQuoteFallbackBaseURLs(fallback.URL),
+	)
+	stocks, err := client.BoardStocks(context.Background(), "BK1020", 200)
+	if err != nil {
+		t.Fatalf("BoardStocks fallback failed: %v", err)
+	}
+	if len(stocks) != 2 || stocks[0].Symbol != "688300.SH" || stocks[1].Symbol != "920971.BJ" {
+		t.Fatalf("unexpected fallback stocks: %+v", stocks)
+	}
+	if stocks[1].Price != 0 || stocks[1].ChangePercent != 0 {
+		t.Fatalf("missing numeric fields should degrade to zero: %+v", stocks[1])
+	}
+	if stocks[0].Meta.FallbackReason == "" || stocks[0].Meta.SourceURL == primary.URL {
+		t.Fatalf("missing quote mirror evidence: %+v", stocks[0].Meta)
+	}
+}

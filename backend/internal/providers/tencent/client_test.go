@@ -46,7 +46,7 @@ func TestClientParsesIndustryMomentum(t *testing.T) {
 		t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
 	}
 	item := items[0]
-	if item.Name != "光伏设备" || item.ChangePercent != 1.76 || item.FiveDayChangePercent != 5.48 || item.TwentyDayChange != 2.35 || item.LeaderName != "琏升科技" || item.Score <= 50 || meta.Source != "tencent:industry-rank" {
+	if item.Name != "光伏设备" || item.ChangePercent != 1.76 || item.FiveDayChangePercent != 5.48 || item.TwentyDayChange != 2.35 || item.LeaderSymbol != "300051.SZ" || item.LeaderName != "琏升科技" || item.Score <= 50 || meta.Source != "tencent:industry-rank" {
 		t.Fatalf("item=%+v meta=%+v", item, meta)
 	}
 }

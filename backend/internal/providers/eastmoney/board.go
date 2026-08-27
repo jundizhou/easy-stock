@@ -43,16 +43,16 @@ type boardStocksPayload struct {
 	Data struct {
 		Total int `json:"total"`
 		Diff  []struct {
-			Code           string  `json:"f12"`
-			Name           string  `json:"f14"`
-			Price          float64 `json:"f2"`
-			ChangePercent  float64 `json:"f3"`
-			Change         float64 `json:"f4"`
-			Volume         float64 `json:"f5"`
-			Amount         float64 `json:"f6"`
-			TotalMarketCap float64 `json:"f20"`
-			FloatMarketCap float64 `json:"f21"`
-			MainNetInflow  float64 `json:"f62"`
+			Code           string        `json:"f12"`
+			Name           string        `json:"f14"`
+			Price          flexibleFloat `json:"f2"`
+			ChangePercent  flexibleFloat `json:"f3"`
+			Change         flexibleFloat `json:"f4"`
+			Volume         flexibleFloat `json:"f5"`
+			Amount         flexibleFloat `json:"f6"`
+			TotalMarketCap flexibleFloat `json:"f20"`
+			FloatMarketCap flexibleFloat `json:"f21"`
+			MainNetInflow  flexibleFloat `json:"f62"`
 		} `json:"diff"`
 	} `json:"data"`
 }
@@ -188,7 +188,25 @@ func (c *Client) BoardStocks(ctx context.Context, boardCode string, limit int) (
 	if limit <= 0 {
 		limit = 20
 	}
-	endpoint := c.quoteBaseURL + "/api/qt/clist/get"
+	baseURLs := append([]string{c.quoteBaseURL}, c.quoteFallbackURLs...)
+	var lastErr error
+	for index, baseURL := range baseURLs {
+		attemptCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		stocks, err := c.boardStocksFromBaseURL(attemptCtx, baseURL, boardCode, limit, index > 0)
+		cancel()
+		if err == nil {
+			return stocks, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("eastmoney board stocks unavailable: %w", lastErr)
+}
+
+func (c *Client) boardStocksFromBaseURL(ctx context.Context, baseURL string, boardCode string, limit int, fallback bool) ([]foundation.BoardStock, error) {
+	endpoint := baseURL + "/api/qt/clist/get"
 	params := url.Values{}
 	params.Set("pn", "1")
 	params.Set("pz", strconv.Itoa(limit))
@@ -218,6 +236,9 @@ func (c *Client) BoardStocks(ctx context.Context, boardCode string, limit int) (
 		FetchedAt: time.Now(),
 		LatencyMS: time.Since(start).Milliseconds(),
 	}
+	if fallback {
+		meta.FallbackReason = "东方财富主行情节点暂不可用，已切换备用节点"
+	}
 	stocks := make([]foundation.BoardStock, 0, len(payload.Data.Diff))
 	for _, raw := range payload.Data.Diff {
 		symbol, err := normalizeEastMoneyStockCode(raw.Code)
@@ -227,14 +248,14 @@ func (c *Client) BoardStocks(ctx context.Context, boardCode string, limit int) (
 		stocks = append(stocks, foundation.BoardStock{
 			Symbol:         symbol,
 			Name:           raw.Name,
-			Price:          raw.Price,
-			Change:         raw.Change,
-			ChangePercent:  raw.ChangePercent,
-			Volume:         raw.Volume,
-			Amount:         raw.Amount,
-			TotalMarketCap: raw.TotalMarketCap,
-			FloatMarketCap: raw.FloatMarketCap,
-			MainNetInflow:  raw.MainNetInflow,
+			Price:          float64(raw.Price),
+			Change:         float64(raw.Change),
+			ChangePercent:  float64(raw.ChangePercent),
+			Volume:         float64(raw.Volume),
+			Amount:         float64(raw.Amount),
+			TotalMarketCap: float64(raw.TotalMarketCap),
+			FloatMarketCap: float64(raw.FloatMarketCap),
+			MainNetInflow:  float64(raw.MainNetInflow),
 			Meta:           meta,
 		})
 	}

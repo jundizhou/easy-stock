@@ -49,6 +49,7 @@ func (p *RadarProvider) fusedOverviews(
 	industryItems := []foundation.ThemeOverview{}
 	if industryErr == nil {
 		industryItems = buildIndustryRadarOverviews(industries, industryMeta, p.now())
+		p.rememberIndustryLeaders(industries)
 	}
 
 	kaipanlaItems := []foundation.ThemeOverview{}

@@ -168,6 +168,33 @@ func TestRadarProviderUsesIndustryWhenKaipanlaIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestRadarProviderKeepsIndustryLeaderWhenConstituentsAreEmpty(t *testing.T) {
+	now := time.Date(2026, 8, 27, 14, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	themeID := radarIndustryThemeID("pt01801039", "非金属材料Ⅱ")
+	fallback := fakeRadarFallback{sectorMap: foundation.SectorMap{
+		Name: "非金属材料Ⅱ",
+		Groups: []foundation.SectorMapGroup{{ID: "industry_members", Name: "非金属材料Ⅱ", Nodes: []foundation.SectorMapNode{{
+			ID: "industry_core", Name: "非金属材料Ⅱ", Stocks: []foundation.BoardStock{},
+		}}}},
+	}}
+	quotes := &fakeRadarStrengthQuotes{quotes: map[string]foundation.Quote{
+		"688300.SH": {Symbol: "688300.SH", Name: "联瑞新材", Price: 186.24, ChangePercent: 20, Meta: foundation.SourceMeta{Source: "test"}},
+	}}
+	provider := NewRadarProvider(nil, fallback, quotes, RadarProviderConfig{Now: func() time.Time { return now }})
+	provider.rememberIndustryLeaders([]foundation.MarketIndustryMomentum{{
+		Code: "pt01801039", Name: "非金属材料Ⅱ", LeaderSymbol: "688300.SH", LeaderName: "联瑞新材", LeaderChangePercent: 20,
+	}})
+
+	sectorMap, err := provider.Build(context.Background(), themeID)
+	if err != nil {
+		t.Fatalf("Build industry leader fallback failed: %v", err)
+	}
+	stock := sectorMap.Groups[0].Nodes[0].Stocks[0]
+	if stock.Symbol != "688300.SH" || stock.RankRole != "行业领涨" || stock.Price != 186.24 {
+		t.Fatalf("unexpected industry leader fallback: %+v", stock)
+	}
+}
+
 func TestCalculateRealtimeThemeStrengthUsesConstituentBreadthAndLimitActivity(t *testing.T) {
 	stocks := []foundation.BoardStock{
 		{Symbol: "600001.SH", Name: "主题龙头", Price: 10, ChangePercent: 1},
