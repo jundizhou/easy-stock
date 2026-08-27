@@ -149,6 +149,7 @@ func NewServer(config any) *Server {
 		}
 		radar := sector.NewRadarProvider(radarSource, radarFallback, cfg.Realtime, sector.RadarProviderConfig{
 			IndustryMomentum:  cfg.MarketOverview,
+			IndustryStocks:    tencentClient,
 			FallbackFillLimit: 16,
 		})
 		defaultSectorMap = radar

@@ -41,6 +41,16 @@ func (f fakeIndustryMomentumSource) IndustryMomentum(context.Context, int) ([]fo
 	return append([]foundation.MarketIndustryMomentum(nil), f.items...), f.meta, f.err
 }
 
+type fakeIndustryConstituentSource struct {
+	stocks []foundation.BoardStock
+	meta   foundation.SourceMeta
+	err    error
+}
+
+func (f fakeIndustryConstituentSource) IndustryStocks(context.Context, string, int) ([]foundation.BoardStock, foundation.SourceMeta, error) {
+	return append([]foundation.BoardStock(nil), f.stocks...), f.meta, f.err
+}
+
 type fakeRadarStrengthFallback struct {
 	fakeRadarFallback
 	calls  int
@@ -192,6 +202,40 @@ func TestRadarProviderKeepsIndustryLeaderWhenConstituentsAreEmpty(t *testing.T) 
 	stock := sectorMap.Groups[0].Nodes[0].Stocks[0]
 	if stock.Symbol != "688300.SH" || stock.RankRole != "行业领涨" || stock.Price != 186.24 {
 		t.Fatalf("unexpected industry leader fallback: %+v", stock)
+	}
+}
+
+func TestRadarProviderUsesTencentIndustryConstituentsWhenEastMoneyIsEmpty(t *testing.T) {
+	themeID := radarIndustryThemeID("pt01801039", "非金属材料Ⅱ")
+	fallback := fakeRadarFallback{sectorMap: foundation.SectorMap{
+		Name: "非金属材料Ⅱ", Meta: foundation.SourceMeta{Source: "sector-map:eastmoney"},
+		Groups: []foundation.SectorMapGroup{{ID: "industry_members", Nodes: []foundation.SectorMapNode{{
+			ID: "industry_core", Name: "非金属材料Ⅱ", StockSource: "eastmoney:recent-limit-up",
+			Stocks: []foundation.BoardStock{{Symbol: "600001.SH", Name: "概念误匹配"}}, Warnings: []string{"未获取到股票行情"},
+		}}}},
+	}}
+	constituents := fakeIndustryConstituentSource{
+		stocks: []foundation.BoardStock{
+			{Symbol: "688300.SH", Name: "联瑞新材", ChangePercent: 20},
+			{Symbol: "603688.SH", Name: "石英股份", ChangePercent: 10.01},
+		},
+		meta: foundation.SourceMeta{Source: "tencent:industry-constituents"},
+	}
+	provider := NewRadarProvider(nil, fallback, nil, RadarProviderConfig{IndustryStocks: constituents})
+
+	sectorMap, err := provider.Build(context.Background(), themeID)
+	if err != nil {
+		t.Fatalf("Build Tencent industry fallback failed: %v", err)
+	}
+	node := sectorMap.Groups[0].Nodes[0]
+	if len(node.Stocks) != 2 || findStock(&node, "688300.SH") == nil || findStock(&node, "600001.SH") != nil {
+		t.Fatalf("Tencent constituents should replace inferred-only candidates: %+v", node)
+	}
+	if node.StockSource != "tencent:industry-constituents" || !radarContainsString(node.MatchedBy, "tencent-code:pt01801039") {
+		t.Fatalf("unexpected Tencent constituent metadata: %+v", node)
+	}
+	if len(node.Warnings) != 1 || !strings.Contains(node.Warnings[0], "已使用腾讯行业成分") {
+		t.Fatalf("unexpected fallback warning: %+v", node.Warnings)
 	}
 }
 

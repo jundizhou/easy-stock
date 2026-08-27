@@ -16,10 +16,11 @@ import (
 )
 
 type Client struct {
-	quoteBaseURL    string
-	klineBaseURL    string
-	industryBaseURL string
-	httpClient      *http.Client
+	quoteBaseURL          string
+	klineBaseURL          string
+	industryBaseURL       string
+	industryStocksBaseURL string
+	httpClient            *http.Client
 }
 
 type Option func(*Client)
@@ -36,6 +37,10 @@ func WithIndustryBaseURL(value string) Option {
 	return func(c *Client) { c.industryBaseURL = strings.TrimRight(value, "/") }
 }
 
+func WithIndustryStocksBaseURL(value string) Option {
+	return func(c *Client) { c.industryStocksBaseURL = strings.TrimRight(value, "/") }
+}
+
 func WithHTTPClient(value *http.Client) Option {
 	return func(c *Client) {
 		if value != nil {
@@ -46,10 +51,11 @@ func WithHTTPClient(value *http.Client) Option {
 
 func NewClient(options ...Option) *Client {
 	client := &Client{
-		quoteBaseURL:    "https://qt.gtimg.cn",
-		klineBaseURL:    "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-		industryBaseURL: "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/mktHs/rank",
-		httpClient:      &http.Client{Timeout: 12 * time.Second},
+		quoteBaseURL:          "https://qt.gtimg.cn",
+		klineBaseURL:          "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+		industryBaseURL:       "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/mktHs/rank",
+		industryStocksBaseURL: "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList",
+		httpClient:            &http.Client{Timeout: 12 * time.Second},
 	}
 	for _, option := range options {
 		option(client)

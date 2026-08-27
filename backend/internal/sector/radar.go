@@ -24,9 +24,14 @@ type IndustryMomentumSource interface {
 	IndustryMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error)
 }
 
+type IndustryConstituentSource interface {
+	IndustryStocks(ctx context.Context, industryCode string, limit int) ([]foundation.BoardStock, foundation.SourceMeta, error)
+}
+
 type RadarProvider struct {
 	source            RadarSnapshotSource
 	industry          IndustryMomentumSource
+	industryStocks    IndustryConstituentSource
 	fallback          RadarFallback
 	quotes            QuoteProvider
 	now               func() time.Time
@@ -42,6 +47,7 @@ type RadarProvider struct {
 type RadarProviderConfig struct {
 	Now                 func() time.Time
 	IndustryMomentum    IndustryMomentumSource
+	IndustryStocks      IndustryConstituentSource
 	FallbackFillLimit   int
 	RealtimeStrengthTTL time.Duration
 }
@@ -60,7 +66,7 @@ func NewRadarProvider(source RadarSnapshotSource, fallback RadarFallback, quotes
 		strengthTTL = 10 * time.Minute
 	}
 	return &RadarProvider{
-		source: source, industry: config.IndustryMomentum, fallback: fallback, quotes: quotes, now: now,
+		source: source, industry: config.IndustryMomentum, industryStocks: config.IndustryStocks, fallback: fallback, quotes: quotes, now: now,
 		fallbackFill: fallbackFill, strengthTTL: strengthTTL,
 		strengthCache: map[string]themeStrengthScore{}, industryLeaders: map[string]radarIndustryLeader{},
 	}
@@ -126,27 +132,98 @@ func (p *RadarProvider) BuildSnapshot(ctx context.Context, themeID string, snaps
 }
 
 func (p *RadarProvider) buildIndustrySnapshot(ctx context.Context, themeID string, industry radarIndustryThemeRef, leader radarIndustryLeader) (foundation.SectorMap, error) {
+	result := emptyIndustrySectorMap(themeID, industry, p.now())
+	var fallbackErr error
+	var industryStocks []foundation.BoardStock
+	var industryStockMeta foundation.SourceMeta
+	var industryStockErr error
+	var wg sync.WaitGroup
 	if p.fallback != nil {
-		result, err := p.fallback.Build(ctx, themeID)
-		if err == nil {
-			if sectorMapStockCount(result) == 0 {
-				p.addIndustryLeaderFallback(ctx, leader, &result, "行业成分股暂不可用，已保留行业领涨股。")
-			}
-			return result, nil
-		} else if leader.Symbol == "" {
-			return foundation.SectorMap{}, err
-		} else {
-			result = emptyIndustrySectorMap(themeID, industry, p.now())
-			p.addIndustryLeaderFallback(ctx, leader, &result, fmt.Sprintf("行业成分映射失败，已保留行业领涨股：%s", err.Error()))
-			return result, nil
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, fallbackErr = p.fallback.Build(ctx, themeID)
+		}()
+	} else {
+		fallbackErr = fmt.Errorf("sector map fallback is unavailable")
+	}
+	if p.industryStocks != nil && industry.Code != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			industryStocks, industryStockMeta, industryStockErr = p.industryStocks.IndustryStocks(ctx, industry.Code, 500)
+		}()
+	} else {
+		industryStockErr = fmt.Errorf("industry constituent source is unavailable")
+	}
+	wg.Wait()
+
+	if fallbackErr != nil {
+		result = emptyIndustrySectorMap(themeID, industry, p.now())
+	}
+	if industryStockErr == nil && len(industryStocks) > 0 {
+		mergeIndustryConstituents(industry.Code, industryStocks, industryStockMeta, fallbackErr != nil, &result)
+	}
+	if sectorMapStockCount(result) > 0 {
+		return result, nil
+	}
+	if leader.Symbol != "" {
+		warning := "行业成分股暂不可用，已保留行业领涨股。"
+		if fallbackErr != nil {
+			warning = fmt.Sprintf("行业成分映射失败，已保留行业领涨股：%s", fallbackErr.Error())
+		}
+		p.addIndustryLeaderFallback(ctx, leader, &result, warning)
+		return result, nil
+	}
+	if fallbackErr != nil {
+		return foundation.SectorMap{}, fmt.Errorf("industry constituents unavailable: eastmoney=%v; tencent=%w", fallbackErr, industryStockErr)
+	}
+	return result, nil
+}
+
+func mergeIndustryConstituents(industryCode string, stocks []foundation.BoardStock, meta foundation.SourceMeta, fallbackOnly bool, result *foundation.SectorMap) {
+	if result == nil || len(result.Groups) == 0 || len(result.Groups[0].Nodes) == 0 || len(stocks) == 0 {
+		return
+	}
+	node := &result.Groups[0].Nodes[0]
+	authoritativeExisting := strings.Contains(node.StockSource, "board-constituents") || strings.Contains(node.StockSource, "stock-selection")
+	merged := make([]foundation.BoardStock, 0, len(stocks)+len(node.Stocks))
+	exactSymbols := make(map[string]struct{}, len(stocks))
+	for _, stock := range stocks {
+		exactSymbols[stock.Symbol] = struct{}{}
+		merged = mergeBoardStock(merged, stock)
+	}
+	for _, stock := range node.Stocks {
+		_, exact := exactSymbols[stock.Symbol]
+		if authoritativeExisting || exact {
+			merged = mergeBoardStock(merged, stock)
 		}
 	}
-	if leader.Symbol == "" {
-		return foundation.SectorMap{}, fmt.Errorf("sector map fallback is unavailable")
+	node.Stocks = merged
+	if authoritativeExisting {
+		if !strings.Contains(node.StockSource, meta.Source) {
+			node.StockSource += "+" + meta.Source
+		}
+	} else {
+		node.StockSource = meta.Source
 	}
-	result := emptyIndustrySectorMap(themeID, industry, p.now())
-	p.addIndustryLeaderFallback(ctx, leader, &result, "行业成分映射暂不可用，已保留行业领涨股。")
-	return result, nil
+	node.MatchStatus = "matched"
+	node.MatchedBy = append(node.MatchedBy, "tencent-code:"+industryCode)
+	warnings := node.Warnings[:0]
+	for _, warning := range node.Warnings {
+		if warning == "未获取到股票行情" || strings.Contains(warning, "行业成分股暂不可用") {
+			continue
+		}
+		warnings = append(warnings, warning)
+	}
+	node.Warnings = warnings
+	if fallbackOnly || !authoritativeExisting {
+		node.Warnings = append(node.Warnings, "东方财富行业成分暂不可用，已使用腾讯行业成分。")
+		result.Meta.FallbackReason = "东方财富行业成分暂不可用，已使用腾讯行业成分"
+		result.Meta.Source = meta.Source
+	} else if meta.Source != "" && !strings.Contains(result.Meta.Source, meta.Source) {
+		result.Meta.Source = strings.Trim(strings.TrimSpace(result.Meta.Source)+"+"+meta.Source, "+")
+	}
 }
 
 func (p *RadarProvider) addIndustryLeaderFallback(ctx context.Context, leader radarIndustryLeader, result *foundation.SectorMap, warning string) {

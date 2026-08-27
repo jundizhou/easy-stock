@@ -50,3 +50,30 @@ func TestClientParsesIndustryMomentum(t *testing.T) {
 		t.Fatalf("item=%+v meta=%+v", item, meta)
 	}
 }
+
+func TestClientParsesIndustryStocks(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("board_code") != "pt01801039" || r.URL.Query().Get("count") != "200" || r.URL.Query().Get("offset") != "0" {
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"msg":"ok","data":{"total":2,"rank_list":[
+			{"code":"sh688300","name":"联瑞新材","zxj":"186.24","zd":"31.04","zdf":"20.00","turnover":"376979","volume":"218402.46","zsz":"449.71","ltsz":"449.71"},
+			{"code":"sz301071","name":"力量钻石","zxj":"61.77","zd":"4.77","zdf":"8.37","turnover":"97585","volume":"162237.00","zsz":"157.17","ltsz":"115.54"}
+		]}}`))
+	}))
+	defer upstream.Close()
+	client := NewClient(WithIndustryStocksBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+
+	stocks, meta, err := client.IndustryStocks(context.Background(), "pt01801039", 500)
+	if err != nil || len(stocks) != 2 {
+		t.Fatalf("stocks=%+v meta=%+v err=%v", stocks, meta, err)
+	}
+	if stocks[0].Symbol != "688300.SH" || stocks[0].Name != "联瑞新材" || stocks[0].ChangePercent != 20 || stocks[0].Amount != 2_184_024_600 || stocks[1].Symbol != "301071.SZ" {
+		t.Fatalf("unexpected industry stocks: %+v", stocks)
+	}
+	if meta.Source != "tencent:industry-constituents" {
+		t.Fatalf("unexpected meta: %+v", meta)
+	}
+}

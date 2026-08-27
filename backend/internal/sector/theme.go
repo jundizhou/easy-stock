@@ -72,8 +72,14 @@ func FindTheme(id string) (Theme, bool) {
 
 func radarIndustryTheme(id string, industry radarIndustryThemeRef) Theme {
 	boardCode := ""
+	boardKeywords := []string{industry.Name}
 	if strings.HasPrefix(industry.Code, "BK") {
 		boardCode = industry.Code
+	} else if mapping, ok := lookupRadarIndustryMapping(industry.Code, industry.Name); ok {
+		boardCode = mapping.EastMoneyBoardCode
+		if mapping.EastMoneyBoardName != "" && mapping.EastMoneyBoardName != industry.Name {
+			boardKeywords = append(boardKeywords, mapping.EastMoneyBoardName)
+		}
 	}
 	return Theme{
 		ID:   id,
@@ -87,7 +93,7 @@ func radarIndustryTheme(id string, industry radarIndustryThemeRef) Theme {
 				Name:          industry.Name,
 				Description:   "依据行业趋势强度对应的行业归属筛选成分股。",
 				BoardCode:     boardCode,
-				BoardKeywords: []string{industry.Name},
+				BoardKeywords: boardKeywords,
 				Industry:      industry.Name,
 			}},
 		}},
