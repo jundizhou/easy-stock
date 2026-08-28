@@ -47,6 +47,13 @@ test('macOS builds use a complete ad-hoc signature without release credentials',
 	assert.match(script, /delete process\.env\.CSC_LINK/);
 });
 
+test('Windows installer keeps the current per-user path by default and lets users change it', () => {
+	const script = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'electron-builder.mjs'), 'utf8');
+	assert.match(script, /nsis:\s*{[\s\S]*?oneClick: false,/);
+	assert.match(script, /nsis:\s*{[\s\S]*?perMachine: false,/);
+	assert.match(script, /nsis:\s*{[\s\S]*?allowToChangeInstallationDirectory: true,/);
+});
+
 test('merges macOS updater metadata without installed npm dependencies', () => {
   const releaseRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-mac-metadata-'));
   const scriptPath = path.resolve(__dirname, '..', 'scripts', 'merge-mac-updater-metadata.mjs');

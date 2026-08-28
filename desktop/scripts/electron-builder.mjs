@@ -90,9 +90,10 @@ const config = {
     ...(signingCertificate ? {} : { signAndEditExecutable: false }),
   },
   nsis: {
-    oneClick: true,
+    oneClick: false,
     perMachine: false,
     allowElevation: true,
+    allowToChangeInstallationDirectory: true,
     deleteAppDataOnUninstall: false,
     artifactName: `easy-stock-v${packageManifest.version}-windows-${arch}-setup.exe`,
   },
