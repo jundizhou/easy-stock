@@ -7,6 +7,7 @@ import {
 	Download,
 	ExternalLink,
 	FileInput,
+	Globe2,
 	GitCompareArrows,
 	Github,
 	ListChecks,
@@ -159,12 +160,12 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 				const statusPath = summaryWindowQuery(dailySummaryJob?.window_start, dailySummaryJob?.window_end, '/api/v1/reviews/daily-summary/status');
 				const payload = await requestJSON<{ data: ReviewDailySummaryJob }>(config, statusPath);
 				if (!active) return;
-				if (payload.data.status === 'succeeded' && payload.data.summary_available) {
+				if ((payload.data.status === 'succeeded' || payload.data.status === 'partial') && payload.data.summary_available) {
 					const summaryPath = summaryWindowQuery(payload.data.window_start, payload.data.window_end, '/api/v1/reviews/daily-summary');
 					const summaryPayload = await requestJSON<{ data: ReviewDailySummary | null }>(config, summaryPath);
 					if (!active) return;
 					setDailySummary(summaryPayload.data || null);
-					setNotice('今日大V观点总结已完成并缓存，可随时查看结果');
+					setNotice(payload.data.status === 'partial' ? '总结已部分完成，成功生成的内容已保留，可查看结果或重新生成' : '今日大V观点总结已完成并缓存，可随时查看结果');
 				} else if (payload.data.status === 'failed') {
 					setNotice('');
 				}
@@ -562,12 +563,13 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 function DailySummaryJobPanel({ job, onView, onRetry }: { job: ReviewDailySummaryJob; onView: () => void; onRetry: () => void }) {
 	const running = job.status === 'running';
 	const succeeded = job.status === 'succeeded';
-	const progress = succeeded ? 100 : job.stage === 'finalizing' ? 92 : job.stage === 'authors' && job.total_authors > 0 ? Math.min(85, 10 + Math.round((job.completed_authors / job.total_authors) * 75)) : job.stage === 'preparing' ? 6 : 0;
-	const stageLabel = job.stage === 'preparing' ? '筛选有效文章' : job.stage === 'authors' ? '归纳作者观点' : job.stage === 'finalizing' ? '生成跨作者共识' : succeeded ? '总结已完成' : '任务未完成';
+	const partial = job.status === 'partial';
+	const progress = succeeded || partial ? 100 : job.stage === 'finalizing' ? 92 : job.stage === 'authors' && job.total_authors > 0 ? Math.min(85, 10 + Math.round((job.completed_authors / job.total_authors) * 75)) : job.stage === 'preparing' ? 6 : 0;
+	const stageLabel = job.stage === 'preparing' ? '筛选有效文章' : job.stage === 'authors' ? '归纳作者观点' : job.stage === 'finalizing' ? '生成跨作者共识' : partial ? '总结部分完成' : succeeded ? '总结已完成' : '任务未完成';
 	return <section className={`daily-summary-job ${job.status}`} id="daily-summary-job">
 		<div className="daily-summary-job-icon">{running ? <RefreshCw className="spin" size={22} /> : succeeded ? <Sparkles size={22} /> : <ShieldAlert size={22} />}</div>
-		<div className="daily-summary-job-copy"><span>AI 总结任务 · {stageLabel}</span><strong>{running ? '总结耗时较长，可以先去浏览其他内容' : succeeded ? '结果已生成并缓存在本机' : '本次总结已停止'}</strong><p>{job.error || job.message}</p>{running && <div className="daily-summary-job-progress"><i style={{ width: `${progress}%` }} /><small>{job.total_authors > 0 ? `${job.completed_authors}/${job.total_authors} 位作者` : '正在准备文章'} · {progress}%</small></div>}</div>
-		<div className="daily-summary-job-actions">{job.summary_available && <button type="button" onClick={onView}>查看缓存结果</button>}{!running && !succeeded && <button type="button" onClick={onRetry}>重新生成</button>}{running && <small>离开此页面不会中断</small>}</div>
+		<div className="daily-summary-job-copy"><span>AI 总结任务 · {stageLabel}</span><strong>{running ? '总结耗时较长，可以先去浏览其他内容' : partial ? '成功内容已保留，失败阶段可重新生成' : succeeded ? '结果已生成并缓存在本机' : '本次总结已停止'}</strong><p>{job.error || job.message}</p>{running && <div className="daily-summary-job-progress"><i style={{ width: `${progress}%` }} /><small>{job.total_authors > 0 ? `${job.completed_authors}/${job.total_authors} 位作者` : '正在准备文章'} · {progress}%</small></div>}</div>
+		<div className="daily-summary-job-actions">{job.summary_available && <button type="button" onClick={onView}>查看结果</button>}{!running && !succeeded && <button type="button" onClick={onRetry}>重新生成</button>}{running && <small>离开此页面不会中断</small>}</div>
 	</section>;
 }
 
@@ -723,10 +725,11 @@ function DailyViewpointSummary({ config, summary, regenerating, onRegenerate, on
 		</header>
 		<div className="daily-summary-anonymous-note">作者已脱敏：使用圆桌成员 A/B/C… 代替真实作者名</div>
 		<section className="daily-summary-block daily-summary-lead"><span>{summary.market_regime || '样本不足'}</span><div><small>一句话市场结论 · 跨作者综合</small><p>{summary.executive_summary}</p></div></section>
+		<USMarketSnapshot market={summary.us_market} summary={summary.us_market_summary} />
 		<section className="daily-summary-block market-framework-block"><header><TrendingUp size={16} /><div><strong>市场四层框架</strong><small>综合所有有效观点，直接归纳周期、资金、方向与执行</small></div></header><div className="market-framework-grid"><FrameworkItem label="周期位置" content={framework.cycle} /><FrameworkItem label="资金定价" content={framework.capital_pricing} /><FrameworkItem label="方向竞争" content={framework.direction_competition} /><FrameworkItem label="交易方法" content={framework.trading_method} /></div></section>
 		<div className="daily-summary-two-column">
 			<SummaryTextCard icon={<TrendingUp size={16} />} title="今日盘面分析" subtitle="跨作者综合盘面结论" content={summary.market_analysis} />
-			<SummaryTextCard icon={<Target size={16} />} title="明日预期" subtitle="跨作者综合次日推演" content={summary.tomorrow_outlook} />
+			<SummaryTextCard icon={<Target size={16} />} title="明日预期" subtitle="跨作者综合次日推演 · 已结合美股隔夜影响" content={summary.tomorrow_outlook} />
 		</div>
 		{authorViews.length > 0 && <section className="daily-summary-block author-preview-block"><header><Users size={16} /><div><strong>主要作者观点</strong><small>先看各自最终判断，避免用跨作者结论抹平差异</small></div><button type="button" onClick={onShowAuthors}>查看全部 {authorViews.length} 位</button></header><div className="author-preview-grid">{authorViews.slice(0, 6).map((view) => <article key={`${view.source}-${view.author}`}><div><span className={`author-avatar ${sourceClass(view.source)}`} data-review-author={view.author}>{view.author.slice(0, 1)}</span><div><strong data-review-author={view.author}>{view.author}</strong><small>{view.source} · {view.confidence || '未评级'}置信度</small></div></div><p>{view.core_view}</p><div>{(view.themes || []).slice(0, 3).map((theme) => <span key={theme}>{theme}</span>)}</div></article>)}</div></section>}
 		<section className="daily-summary-block consensus-block">
@@ -753,6 +756,26 @@ function DailyViewpointSummary({ config, summary, regenerating, onRegenerate, on
 	</section>
 	{exportOptionsOpen && <ExportAuthorDialog onClose={() => setExportOptionsOpen(false)} onChoose={(anonymize) => void exportSummaryImage(anonymize)} />}
 	</>;
+}
+
+function USMarketSnapshot({ market, summary }: { market?: ReviewDailySummary['us_market']; summary?: string }) {
+	if (!market && !summary) return null;
+	const indexes = market?.indexes || [];
+	const leaders = market?.leading_sectors || [];
+	const laggards = market?.lagging_sectors || [];
+	const changeLabel = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+	const changeClass = (value: number) => value >= 0 ? 'positive' : 'negative';
+	return <section className="daily-summary-block daily-us-market-block">
+		<header><Globe2 size={16} /><div><strong>美股隔夜摘要</strong><small>复盘发起时抓取 · 板块采用 SPDR 行业 ETF 代理</small></div>{market?.as_of && <em>{market.as_of}</em>}</header>
+		{summary && <p className="daily-us-market-summary">{summary}</p>}
+		{indexes.length > 0 && <div className="daily-us-index-grid">{indexes.map((item) => <article key={item.id}><span>{item.name}</span><strong className={changeClass(item.change_percent)}>{changeLabel(item.change_percent)}</strong>{item.price > 0 && <small>{item.price.toFixed(2)}</small>}</article>)}</div>}
+		{(leaders.length > 0 || laggards.length > 0) && <div className="daily-us-sector-grid"><USMarketSectorList title="领涨板块" items={leaders} tone="positive" changeLabel={changeLabel} /><USMarketSectorList title="领跌板块" items={laggards} tone="negative" changeLabel={changeLabel} /></div>}
+		{market?.data_quality?.length ? <footer className="daily-us-market-quality">{market.data_quality.join('；')}</footer> : null}
+	</section>;
+}
+
+function USMarketSectorList({ title, items, tone, changeLabel }: { title: string; items: NonNullable<ReviewDailySummary['us_market']>['leading_sectors']; tone: 'positive' | 'negative'; changeLabel: (value: number) => string }) {
+	return <div className={`daily-us-sector-list ${tone}`}><strong>{title}</strong>{items.map((item) => <div key={item.proxy_symbol}><span>{item.name}<small>{item.proxy_symbol}</small></span><b>{changeLabel(item.change_percent)}</b></div>)}</div>;
 }
 
 function ReviewSummaryExportBrand({ summary }: { summary: ReviewDailySummary }) {

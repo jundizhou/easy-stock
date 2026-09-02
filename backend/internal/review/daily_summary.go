@@ -6,16 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"easy-stock/backend/internal/hermes"
+	"easy-stock/backend/internal/runtimelog"
 )
 
 const (
-	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v7"
+	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v9"
 	maxDailySummaryAuthors       = 30
 	maxDailySummaryPosts         = 1000
 	maxAuthorSummaryConcurrency  = 3
@@ -23,6 +25,12 @@ const (
 	maxAuthorSummaryArticleRunes = 2800
 	maxAuthorSummaryTotalRunes   = 42000
 )
+
+var dailySummaryPromptOptions = hermes.PromptOptions{
+	Sandbox:     true,
+	AutoApprove: true,
+	Toolsets:    []string{"code_execution", "web"},
+}
 
 type reviewFreshnessWindow struct {
 	TradeDate string
@@ -94,6 +102,7 @@ type dailySummaryModel struct {
 	MarketRegime          string               `json:"market_regime"`
 	MarketAnalysis        string               `json:"market_analysis"`
 	MarketFramework       DailyMarketFramework `json:"market_framework"`
+	USMarketSummary       string               `json:"us_market_summary"`
 	Consensus             []DailyConsensus     `json:"consensus"`
 	Disagreements         []DailyDisagreement  `json:"disagreements"`
 	Scenarios             []DailyScenario      `json:"scenarios"`
@@ -106,6 +115,35 @@ type dailySummaryModel struct {
 	Risks                 []string             `json:"risks"`
 	VerificationChecklist []string             `json:"verification_checklist"`
 	Limitations           []string             `json:"limitations"`
+}
+
+type dailyMarketSynthesisModel struct {
+	ExecutiveSummary string               `json:"executive_summary"`
+	MarketRegime     string               `json:"market_regime"`
+	MarketAnalysis   string               `json:"market_analysis"`
+	MarketFramework  DailyMarketFramework `json:"market_framework"`
+	USMarketSummary  string               `json:"us_market_summary"`
+	Consensus        []DailyConsensus     `json:"consensus"`
+	Disagreements    []DailyDisagreement  `json:"disagreements"`
+	Directions       []DailyDirectionView `json:"directions"`
+	Limitations      []string             `json:"limitations"`
+}
+
+type dailyTomorrowPlanModel struct {
+	Scenarios             []DailyScenario  `json:"scenarios"`
+	TodaySurprises        []DailyStockView `json:"today_surprises"`
+	TomorrowFocus         []DailyStockView `json:"tomorrow_focus"`
+	TomorrowOutlook       string           `json:"tomorrow_outlook"`
+	TomorrowPlaybook      DailyPlaybook    `json:"tomorrow_playbook"`
+	Catalysts             []string         `json:"catalysts"`
+	Risks                 []string         `json:"risks"`
+	VerificationChecklist []string         `json:"verification_checklist"`
+	Limitations           []string         `json:"limitations"`
+}
+
+type dailyFinalPhaseResult[T any] struct {
+	Model T
+	Err   error
 }
 
 type dailySummaryProgress func(stage string, completedAuthors, totalAuthors, articleCount int, message string)
@@ -277,17 +315,28 @@ func (a *Automation) startTodaySummary(ctx context.Context, force bool, window r
 }
 
 func cachedDailySummaryJob(summary DailySummary) DailySummaryJob {
+	status := "succeeded"
+	stage := "completed"
+	message := "今日总结已完成，结果已缓存在本机"
+	errorMessage := ""
+	if summary.Partial {
+		status = "partial"
+		stage = "partial"
+		message = "今日总结部分完成，已保留成功生成的内容"
+		errorMessage = strings.Join(summary.GenerationErrors, "；")
+	}
 	return DailySummaryJob{
 		TradeDate:        summary.TradeDate,
 		WindowStart:      summary.WindowStart,
 		WindowEnd:        summary.WindowEnd,
 		FreshnessRule:    summary.FreshnessRule,
-		Status:           "succeeded",
-		Stage:            "completed",
+		Status:           status,
+		Stage:            stage,
 		CompletedAuthors: summary.AuthorCount,
 		TotalAuthors:     summary.AuthorCount,
 		ArticleCount:     summary.ArticleCount,
-		Message:          "今日总结已完成，结果已缓存在本机",
+		Message:          message,
+		Error:            errorMessage,
 		StartedAt:        summary.GeneratedAt,
 		UpdatedAt:        summary.GeneratedAt,
 		CompletedAt:      summary.GeneratedAt,
@@ -348,6 +397,12 @@ func (a *Automation) runDailySummaryJob(job DailySummaryJob, window reviewFreshn
 		job.Message = "今日总结已完成，结果已缓存在本机"
 		job.Error = ""
 		job.SummaryAvailable = true
+		if summary.Partial {
+			job.Status = "partial"
+			job.Stage = "partial"
+			job.Message = "今日总结部分完成，已保留成功生成的内容；可查看结果或重新生成"
+			job.Error = strings.Join(summary.GenerationErrors, "；")
+		}
 	}
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
@@ -382,8 +437,27 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 
 	now := time.Now()
 	if progress != nil {
-		progress("preparing", 0, 0, 0, "正在筛选具有时效性的文章并按作者分组")
+		progress("preparing", 0, 0, 0, "正在抓取美股隔夜快照并筛选有效文章")
 	}
+	dailyMarket := DailyUSMarket{
+		CapturedAt: now.UTC(), Indexes: []DailyUSMarketIndex{}, LeadingSectors: []DailyUSMarketSector{},
+		LaggingSectors: []DailyUSMarketSector{}, DataQuality: []string{},
+	}
+	if a.dailyMarketProvider != nil {
+		captured, marketErr := a.dailyMarketProvider.Snapshot(ctx, now.UTC())
+		if captured.CapturedAt.IsZero() {
+			captured.CapturedAt = now.UTC()
+		}
+		if marketErr != nil {
+			dailyMarket = captured
+			dailyMarket.DataQuality = append(dailyMarket.DataQuality, "美股隔夜数据获取失败："+marketErr.Error())
+		} else {
+			dailyMarket = captured
+		}
+	} else {
+		dailyMarket.DataQuality = append(dailyMarket.DataQuality, "美股隔夜数据服务未配置")
+	}
+	dailyMarket.DataQuality = cleanStringList(dailyMarket.DataQuality)
 	posts, err := a.store.ListPostsBetween(ctx, window.Start, window.End, maxDailySummaryPosts)
 	if err != nil {
 		return DailySummary{}, err
@@ -438,20 +512,49 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		progress("finalizing", len(selectedGroups), len(selectedGroups), articleCount, "作者观点卡已完成，正在生成跨作者共识与明日预期")
 	}
 
-	prompt, err := buildDailySummaryPrompt(window, viewpoints)
+	marketPrompt, tomorrowPrompt, err := buildDailySummaryPhasePrompts(window, viewpoints, dailyMarket)
 	if err != nil {
 		return DailySummary{}, err
 	}
-	model, err := promptDailySummaryJSON(ctx, a.prompter, prompt, "今日观点总归纳", parseDailySummaryModel)
-	if err != nil {
-		if ctx.Err() != nil {
-			return DailySummary{}, ctx.Err()
+	marketResult := make(chan dailyFinalPhaseResult[dailyMarketSynthesisModel], 1)
+	tomorrowResult := make(chan dailyFinalPhaseResult[dailyTomorrowPlanModel], 1)
+	go func() {
+		model, promptErr := promptDailySummaryJSON(ctx, a.prompter, marketPrompt, "市场结构归纳", parseDailyMarketSynthesisModel)
+		marketResult <- dailyFinalPhaseResult[dailyMarketSynthesisModel]{Model: model, Err: promptErr}
+	}()
+	go func() {
+		model, promptErr := promptDailySummaryJSON(ctx, a.prompter, tomorrowPrompt, "明日计划归纳", parseDailyTomorrowPlanModel)
+		tomorrowResult <- dailyFinalPhaseResult[dailyTomorrowPlanModel]{Model: model, Err: promptErr}
+	}()
+	marketPhase := <-marketResult
+	tomorrowPhase := <-tomorrowResult
+	if ctx.Err() != nil {
+		return DailySummary{}, ctx.Err()
+	}
+	model := mergeDailySummaryPhases(marketPhase.Model, tomorrowPhase.Model)
+	generationErrors := []string{}
+	if marketPhase.Err != nil {
+		generationErrors = append(generationErrors, "市场结构归纳："+marketPhase.Err.Error())
+		marketFallback := fallbackDailyMarketSynthesisModel(viewpoints)
+		model = mergeDailySummaryPhases(marketFallback, tomorrowPhase.Model)
+	}
+	if tomorrowPhase.Err != nil {
+		generationErrors = append(generationErrors, "明日计划归纳："+tomorrowPhase.Err.Error())
+		tomorrowFallback := fallbackDailyTomorrowPlanModel(viewpoints)
+		if marketPhase.Err != nil {
+			model = mergeDailySummaryPhases(fallbackDailyMarketSynthesisModel(viewpoints), tomorrowFallback)
+		} else {
+			model = mergeDailySummaryPhases(marketPhase.Model, tomorrowFallback)
 		}
-		var invalidJSON *invalidDailySummaryJSONError
-		if !errors.As(err, &invalidJSON) {
-			return DailySummary{}, err
-		}
-		model = fallbackDailySummaryModel(viewpoints)
+	}
+	factualUSMarketSummary := summarizeDailyUSMarket(dailyMarket)
+	if modelSummary := strings.TrimSpace(model.USMarketSummary); modelSummary == "" {
+		model.USMarketSummary = factualUSMarketSummary
+	} else if modelSummary != factualUSMarketSummary {
+		model.USMarketSummary = factualUSMarketSummary + "；影响解读：" + modelSummary
+	}
+	if !strings.Contains(model.TomorrowOutlook, factualUSMarketSummary) {
+		model.TomorrowOutlook = "隔夜美股事实：" + factualUSMarketSummary + "；" + strings.TrimSpace(model.TomorrowOutlook)
 	}
 	normalizeDailySummaryModel(&model, viewpoints)
 	if len(allGroups) > len(selectedGroups) {
@@ -465,6 +568,9 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	}
 	if truncatedAuthors > 0 {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者文章较多，作者归纳阶段优先保留较新的文章并按上下文上限截取", truncatedAuthors))
+	}
+	if len(dailyMarket.DataQuality) > 0 {
+		model.Limitations = append(model.Limitations, "美股数据限制："+strings.Join(dailyMarket.DataQuality, "；"))
 	}
 	model.Limitations = cleanStringList(model.Limitations)
 
@@ -484,6 +590,8 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		MarketRegime:          model.MarketRegime,
 		MarketAnalysis:        model.MarketAnalysis,
 		MarketFramework:       model.MarketFramework,
+		USMarketSummary:       model.USMarketSummary,
+		USMarket:              dailyMarket,
 		Consensus:             model.Consensus,
 		Disagreements:         model.Disagreements,
 		Scenarios:             model.Scenarios,
@@ -496,6 +604,8 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		Risks:                 model.Risks,
 		VerificationChecklist: model.VerificationChecklist,
 		Limitations:           model.Limitations,
+		Partial:               len(generationErrors) > 0,
+		GenerationErrors:      generationErrors,
 	}
 	return a.store.SaveDailySummary(ctx, summary)
 }
@@ -813,6 +923,8 @@ func buildAuthorSummaryPrompt(author string, articles []dailySummaryArticle) (st
 6. 明日关注个股必须写清逻辑、确认条件、失效条件和风险，不得给买卖指令。股票代码只在原文明确提供时填写。
 7. evidence 使用“[时间/标题] 观点摘要”的短句，不得伪造原文引语。confidence 只能为“高”“中”“低”，依据作者观点是否完整、一致且有明确验证条件判断。
 
+工具规则：输入较多时可以调用 execute_code 做纯计算、去重、计数和结构整理，也可以使用只读 Web 工具核验公开背景；工具运行在临时沙箱中。工具结果只是中间材料，最终仍必须直接返回下述严格 JSON，不得把答案停留在工具调用中。
+
 只返回严格JSON，不要Markdown，不要解释，字段必须完整：
 {
   "core_view":"该作者当前最终核心观点，去重后100至250字",
@@ -880,10 +992,14 @@ func authorArticleTimeRange(articles []dailySummaryArticle) string {
 	return articles[0].PublishedAt + " 至 " + articles[len(articles)-1].PublishedAt
 }
 
-func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAuthorView) (string, error) {
+func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAuthorView, dailyMarket DailyUSMarket) (string, error) {
 	data, err := json.Marshal(viewpoints)
 	if err != nil {
 		return "", fmt.Errorf("整理作者观点卡: %w", err)
+	}
+	marketData, err := json.Marshal(dailyMarket)
+	if err != nil {
+		return "", fmt.Errorf("整理美股隔夜数据: %w", err)
 	}
 	prompt := `任务阶段：跨作者总归纳。
 你是资深A股短线复盘研究员和“多源观点共识分析器”。输入不是原始文章，而是最多30位作者各自独立归纳后的“作者观点卡”。请生成当日跨作者观点总结。
@@ -908,6 +1024,9 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
 15. 语言应简洁、专业、可复盘。避免空泛表述，避免“建议买入/卖出”，避免把大V共识当作事实真相。
 16. executive_summary、market_framework、market_analysis、tomorrow_outlook 是四个独立的跨作者综合结论板块。必须先消化全部有效作者观点，再直接输出统一、客观、简洁的归纳结果；不得按作者逐人解释，不得出现“作者甲认为”“某作者指出”“A和B都认为”等串联作者的表达，不得罗列作者姓名或票数。作者归属和证据只放在 consensus、disagreements、directions、个股观点及 evidence 字段中。
 17. 上述四个综合字段仍须区分盘面事实、作者共同解释与次日推演；“客观”指不按作者复述和不带个人口吻，不代表可以把作者共识写成未经验证的市场事实。内容以简明总结为主，避免重复同一结论。
+18. 美股隔夜数据是本次复盘发起时抓取的外部证据。必须先概括指数涨跌和板块强弱，再说明它对明日A股预期的可能影响；只允许使用输入快照中的数字。若数据质量有限或缺失，明确写“美股数据不可用/部分不可用”，不得补造行情。
+
+工具规则：输入较多时可以调用 execute_code 对作者卡进行纯计算、主题归并、去重和按作者计票，也可以使用只读 Web 工具核验公开背景；工具运行在临时沙箱中。任何工具结果都只是中间材料，完成计算后必须继续生成下述严格 JSON，不得把答案停留在工具调用中。
 
 只返回严格JSON，不要Markdown，不要解释，字段必须完整：
 {
@@ -915,6 +1034,7 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
   "market_regime":"用一个短语概括情绪/周期阶段，例如修复、分歧、加速、退潮或混沌；证据不足写样本不足",
   "market_analysis":"跨作者综合后的今日盘面结构结论，简洁说明主线、支线、情绪、核心与后排关系，不按作者解释",
   "market_framework":{"cycle":"综合归纳的周期位置与依据","capital_pricing":"综合归纳的资金奖励与惩罚特征","direction_competition":"综合归纳的主线、支线和切换关系","trading_method":"综合归纳的观察与执行方法"},
+  "us_market_summary":"基于下方美股隔夜快照的指数、板块强弱和对明日A股预期影响；必须区分事实与推演",
   "consensus":[{"topic":"共识主题","conclusion":"跨作者共同结论","support_count":2,"authors":["作者"],"evidence":["[作者] 观点摘要"]}],
   "disagreements":[{"topic":"分歧主题","views":["观点A","观点B"],"authors":["作者"],"positions":[{"author":"作者","stance":"看强/中性/谨慎等作者真实立场","view":"该作者的具体判断","evidence":"[作者] 证据摘要"}]}],
   "scenarios":[
@@ -936,8 +1056,138 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
 统计日期：` + window.TradeDate + `（Asia/Shanghai）
 有效文章窗口：` + window.Start.Format("2006-01-02 15:04") + ` 至 ` + window.End.Format("2006-01-02 15:04") + `
 时效规则：` + window.Rule + `
+本次发起时抓取的美股隔夜快照JSON：` + string(marketData) + `
 输入作者观点卡JSON：` + string(data)
 	return prompt, nil
+}
+
+func buildDailySummaryPhasePrompts(window reviewFreshnessWindow, viewpoints []DailyAuthorView, dailyMarket DailyUSMarket) (string, string, error) {
+	viewpointData, err := json.Marshal(viewpoints)
+	if err != nil {
+		return "", "", fmt.Errorf("整理作者观点卡: %w", err)
+	}
+	marketData, err := json.Marshal(dailyMarket)
+	if err != nil {
+		return "", "", fmt.Errorf("整理美股隔夜数据: %w", err)
+	}
+	contextBlock := `
+统计日期：` + window.TradeDate + `（Asia/Shanghai）
+有效文章窗口：` + window.Start.Format("2006-01-02 15:04") + ` 至 ` + window.End.Format("2006-01-02 15:04") + `
+时效规则：` + window.Rule + `
+本次发起时抓取的美股隔夜快照JSON：` + string(marketData) + `
+输入作者观点卡JSON：` + string(viewpointData)
+
+	marketPrompt := `任务阶段：跨作者市场结构归纳。
+你是资深A股短线复盘研究员。输入是逐位作者独立归纳后的观点卡和本次复盘发起时抓取的美股快照。只完成“市场结构、共识分歧、方向优先级”归纳，不生成明日三情景、个股计划或检查清单。
+
+规则：
+1. 每位作者只算一票，support_count 按不同作者计数；共识至少需要2位作者支持。
+2. 只能使用输入数据，不得编造指数、成交额、公告、股票代码或盘中事实；预测必须与事实分开。
+3. executive_summary、market_analysis、market_framework 是统一归纳，不逐位复述作者；作者姓名只放在证据型字段。
+4. disagreements 保留不同作者的真实立场，不强行求同。directions 只保留观点卡有依据的方向和个股。
+5. 美股部分先写输入快照事实，再写对A股的可能影响；数据缺失时明确说明，不补造行情。
+6. 输入较多时可调用 execute_code 做主题归并、去重和按作者计票，也可用只读Web工具核验公开背景。工具结果只是中间材料，最终必须继续返回严格JSON。
+
+只返回一个合法JSON对象，不要Markdown、解释或思考过程。字段必须完整：
+{
+  "executive_summary":"跨作者统一市场结论",
+  "market_regime":"修复/分歧/加速/退潮/混沌或样本不足",
+  "market_analysis":"主线、支线、情绪、核心与后排关系",
+  "market_framework":{"cycle":"周期位置与依据","capital_pricing":"资金奖励和惩罚特征","direction_competition":"方向竞争关系","trading_method":"观察与执行方法"},
+  "us_market_summary":"美股指数和板块事实，以及对A股的条件式影响",
+  "consensus":[{"topic":"主题","conclusion":"共同结论","support_count":2,"authors":["作者"],"evidence":["[作者] 观点摘要"]}],
+  "disagreements":[{"topic":"主题","views":["立场"],"authors":["作者"],"positions":[{"author":"作者","stance":"立场","view":"判断","evidence":"[作者] 证据摘要"}]}],
+  "directions":[{"name":"方向","stance":"优先观察/等待证明/谨慎追高/事件博弈/回避","summary":"定位与竞争关系","supporting_authors":["作者"],"opposing_authors":["作者"],"stocks":["观点卡明确提到的个股"],"trigger":"确认条件","invalidation":"失效条件","risks":["风险"]}],
+  "limitations":["样本和结论局限"]
+}` + contextBlock
+
+	tomorrowPrompt := `任务阶段：跨作者明日计划归纳。
+你是资深A股短线复盘研究员。输入是逐位作者独立归纳后的观点卡和本次复盘发起时抓取的美股快照。只完成“明日情景、个股关注、行动剧本和验证清单”，不重复生成市场共识、分歧和方向总表。
+
+规则：
+1. 只能使用输入数据，不得编造行情、公告、股票代码或确定性预测。美股只作为条件式外部变量。
+2. scenarios 必须恰好覆盖 base、strong、weak 三种可区分情景，并写清触发、确认和失效条件。
+3. today_surprises 必须有观点卡中的明确超预期证据；tomorrow_focus 只保留有逻辑、触发、失效和风险的个股。
+4. 个股 support_count 按不同作者计数，symbol 仅在观点卡明确提供时填写，不得猜测。
+5. 明日剧本覆盖竞价/盘前、开盘前30分钟、盘中确认和收盘验证；不得给出直接买卖指令。
+6. verification_checklist 给出5至10条可逐项核对的信号。识别拥挤、利好兑现、缩量加速、后排掉队和负反馈扩散风险。
+7. 输入较多时可调用 execute_code 做去重、按作者计票和条件归类，也可用只读Web工具核验公开背景。工具结果只是中间材料，最终必须继续返回严格JSON。
+
+只返回一个合法JSON对象，不要Markdown、解释或思考过程。字段必须完整：
+{
+  "scenarios":[
+    {"key":"base","name":"基础情景","summary":"最大概率路径","trigger":"触发","confirmation":"确认","invalidation":"失效","focus":["关注变量"]},
+    {"key":"strong","name":"偏强情景","summary":"超预期路径","trigger":"触发","confirmation":"确认","invalidation":"失效","focus":["关注变量"]},
+    {"key":"weak","name":"偏弱情景","summary":"负反馈路径","trigger":"触发","confirmation":"确认","invalidation":"失效","focus":["关注变量"]}
+  ],
+  "today_surprises":[{"name":"个股","symbol":"仅明确提供时填写","logic":"超预期原因","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"已确认信号","invalidation":"后续失效条件","risk":"风险"}],
+  "tomorrow_focus":[{"name":"个股","symbol":"仅明确提供时填写","logic":"关注逻辑","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"明日确认信号","invalidation":"明日失效条件","risk":"风险"}],
+  "tomorrow_outlook":"基础路径和最关键验证变量",
+  "tomorrow_playbook":{"pre_open":["竞价/盘前观察"],"opening":["开盘前30分钟观察"],"intraday":["盘中确认"],"close":["收盘验证"]},
+  "catalysts":["输入可支持的催化"],
+  "risks":["主要风险"],
+  "verification_checklist":["明日可核对信号"],
+  "limitations":["样本和结论局限"]
+}` + contextBlock
+	return marketPrompt, tomorrowPrompt, nil
+}
+
+func parseDailyMarketSynthesisModel(content string) (dailyMarketSynthesisModel, error) {
+	var result dailyMarketSynthesisModel
+	if err := decodeDailySummaryJSONObject(content, func(candidate []byte) error {
+		var parsed dailyMarketSynthesisModel
+		if err := json.Unmarshal(candidate, &parsed); err != nil {
+			return err
+		}
+		if strings.TrimSpace(parsed.ExecutiveSummary) == "" || strings.TrimSpace(parsed.MarketAnalysis) == "" {
+			return errors.New("缺少市场核心结论")
+		}
+		result = parsed
+		return nil
+	}); err != nil {
+		return dailyMarketSynthesisModel{}, fmt.Errorf("Hermes 市场结构归纳未返回有效 JSON: %w", err)
+	}
+	return result, nil
+}
+
+func parseDailyTomorrowPlanModel(content string) (dailyTomorrowPlanModel, error) {
+	var result dailyTomorrowPlanModel
+	if err := decodeDailySummaryJSONObject(content, func(candidate []byte) error {
+		var parsed dailyTomorrowPlanModel
+		if err := json.Unmarshal(candidate, &parsed); err != nil {
+			return err
+		}
+		if strings.TrimSpace(parsed.TomorrowOutlook) == "" {
+			return errors.New("缺少明日预期")
+		}
+		result = parsed
+		return nil
+	}); err != nil {
+		return dailyTomorrowPlanModel{}, fmt.Errorf("Hermes 明日计划归纳未返回有效 JSON: %w", err)
+	}
+	return result, nil
+}
+
+func mergeDailySummaryPhases(market dailyMarketSynthesisModel, tomorrow dailyTomorrowPlanModel) dailySummaryModel {
+	return dailySummaryModel{
+		ExecutiveSummary:      market.ExecutiveSummary,
+		MarketRegime:          market.MarketRegime,
+		MarketAnalysis:        market.MarketAnalysis,
+		MarketFramework:       market.MarketFramework,
+		USMarketSummary:       market.USMarketSummary,
+		Consensus:             market.Consensus,
+		Disagreements:         market.Disagreements,
+		Directions:            market.Directions,
+		Scenarios:             tomorrow.Scenarios,
+		TodaySurprises:        tomorrow.TodaySurprises,
+		TomorrowFocus:         tomorrow.TomorrowFocus,
+		TomorrowOutlook:       tomorrow.TomorrowOutlook,
+		TomorrowPlaybook:      tomorrow.TomorrowPlaybook,
+		Catalysts:             tomorrow.Catalysts,
+		Risks:                 tomorrow.Risks,
+		VerificationChecklist: tomorrow.VerificationChecklist,
+		Limitations:           cleanStringList(append(append([]string{}, market.Limitations...), tomorrow.Limitations...)),
+	}
 }
 
 func parseDailySummaryModel(content string) (dailySummaryModel, error) {
@@ -960,7 +1210,7 @@ func parseDailySummaryModel(content string) (dailySummaryModel, error) {
 
 func promptDailySummaryJSON[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string, parse func(string) (T, error)) (T, error) {
 	var empty T
-	response, err := prompter.Prompt(ctx, prompt)
+	response, err := hermes.PromptUsingOptions(ctx, prompter, prompt, dailySummaryPromptOptions)
 	if err != nil {
 		return empty, fmt.Errorf("Hermes %s失败: %w", label, err)
 	}
@@ -968,6 +1218,7 @@ func promptDailySummaryJSON[T any](ctx context.Context, prompter hermes.Prompter
 	if firstErr == nil {
 		return result, nil
 	}
+	logInvalidDailySummaryOutput(label, "initial", response.Content, firstErr)
 
 	repairPrompt := `上一次输出无法解析为任务要求的JSON。请重新完成下面的原始任务，并只返回一个合法JSON对象：
 - 使用英文半角双引号；
@@ -977,15 +1228,21 @@ func promptDailySummaryJSON[T any](ctx context.Context, prompter hermes.Prompter
 
 [原始任务]
 ` + prompt + "\n\n[上一次无效输出，仅用于纠错]\n" + truncateRunes(response.Content, 4000)
-	repaired, retryErr := prompter.Prompt(ctx, repairPrompt)
+	repaired, retryErr := hermes.PromptUsingOptions(ctx, prompter, repairPrompt, dailySummaryPromptOptions)
 	if retryErr != nil {
-		return empty, fmt.Errorf("Hermes %s首次未返回有效JSON，且自动纠错请求失败：%v: %w", label, firstErr, retryErr)
+		return empty, fmt.Errorf("Hermes %s首次未返回有效JSON（输出%d字符），且自动纠错请求失败：%v: %w", label, len([]rune(response.Content)), firstErr, retryErr)
 	}
 	result, retryErr = parse(repaired.Content)
 	if retryErr != nil {
-		return empty, &invalidDailySummaryJSONError{message: fmt.Sprintf("Hermes %s未返回有效JSON：首次解析失败：%v；自动纠错后仍失败：%v", label, firstErr, retryErr)}
+		logInvalidDailySummaryOutput(label, "repair", repaired.Content, retryErr)
+		return empty, &invalidDailySummaryJSONError{message: fmt.Sprintf("Hermes %s未返回有效JSON：首次输出%d字符，解析失败：%v；纠错输出%d字符，解析仍失败：%v", label, len([]rune(response.Content)), firstErr, len([]rune(repaired.Content)), retryErr)}
 	}
 	return result, nil
+}
+
+func logInvalidDailySummaryOutput(label, attempt, content string, parseErr error) {
+	preview := strings.ReplaceAll(truncateRunes(strings.TrimSpace(content), 800), "\x00", "")
+	log.Printf("level=warn event=daily_summary_invalid_json feature=reviews phase=%q attempt=%q output_runes=%d parse_error=%q output_preview=%q", label, attempt, len([]rune(content)), runtimelog.Redact(parseErr.Error()), runtimelog.Redact(preview))
 }
 
 func decodeDailySummaryJSONObject(content string, decode func([]byte) error) error {
@@ -1094,6 +1351,106 @@ func fallbackDailySummaryModel(viewpoints []DailyAuthorView) dailySummaryModel {
 	}
 }
 
+func fallbackDailyMarketSynthesisModel(viewpoints []DailyAuthorView) dailyMarketSynthesisModel {
+	coreViews := make([]string, 0, min(len(viewpoints), 4))
+	marketViews := make([]string, 0, min(len(viewpoints), 4))
+	for _, viewpoint := range viewpoints {
+		if value := strings.TrimSpace(viewpoint.CoreView); value != "" && len(coreViews) < 4 {
+			coreViews = append(coreViews, fmt.Sprintf("[%s] %s", viewpoint.Author, value))
+		}
+		if value := strings.TrimSpace(viewpoint.MarketInterpretation); value != "" && len(marketViews) < 4 {
+			marketViews = append(marketViews, fmt.Sprintf("[%s] %s", viewpoint.Author, value))
+		}
+	}
+	executiveSummary := fmt.Sprintf("已保留%d位作者观点卡，市场结构综合需要复核。", len(viewpoints))
+	if len(coreViews) > 0 {
+		executiveSummary = "作者观点卡摘要：" + strings.Join(coreViews, "；")
+	}
+	marketAnalysis := "请结合作者观点卡和原文证据复核市场结构。"
+	if len(marketViews) > 0 {
+		marketAnalysis = "作者对盘面的解释：" + strings.Join(marketViews, "；")
+	}
+	return dailyMarketSynthesisModel{
+		ExecutiveSummary: executiveSummary,
+		MarketRegime:     "样本待综合",
+		MarketAnalysis:   marketAnalysis,
+		MarketFramework: DailyMarketFramework{
+			Cycle:                "依据作者观点卡复核",
+			CapitalPricing:       "依据作者观点卡复核",
+			DirectionCompetition: "依据作者观点卡复核",
+			TradingMethod:        "先核对作者观点卡与原文证据，再形成判断",
+		},
+		Limitations: []string{"市场结构AI归纳未生成有效结构，当前展示作者观点卡的本地聚合结果"},
+	}
+}
+
+func fallbackDailyTomorrowPlanModel(viewpoints []DailyAuthorView) dailyTomorrowPlanModel {
+	outlooks := make([]string, 0, min(len(viewpoints), 5))
+	todaySurprises := []DailyStockView{}
+	tomorrowFocus := []DailyStockView{}
+	catalysts := []string{}
+	risks := []string{}
+	for _, viewpoint := range viewpoints {
+		if value := strings.TrimSpace(viewpoint.TomorrowOutlook); value != "" && len(outlooks) < 5 {
+			outlooks = append(outlooks, fmt.Sprintf("[%s] %s", viewpoint.Author, value))
+		}
+		todaySurprises = append(todaySurprises, viewpoint.TodaySurprises...)
+		tomorrowFocus = append(tomorrowFocus, viewpoint.TomorrowFocus...)
+		catalysts = append(catalysts, viewpoint.Catalysts...)
+		risks = append(risks, viewpoint.Risks...)
+	}
+	outlook := "作者观点卡未提供可聚合的明日预期，请查看原文证据。"
+	if len(outlooks) > 0 {
+		outlook = "作者观点卡中的明日预期：" + strings.Join(outlooks, "；")
+	}
+	return dailyTomorrowPlanModel{
+		TodaySurprises:  todaySurprises,
+		TomorrowFocus:   tomorrowFocus,
+		TomorrowOutlook: outlook,
+		Catalysts:       cleanStringList(catalysts),
+		Risks:           cleanStringList(append(risks, "明日计划AI归纳未生成有效结构，需逐项核对作者观点卡")),
+		Limitations:     []string{"明日计划AI归纳未生成有效结构，当前展示作者观点卡的本地聚合结果"},
+	}
+}
+
+func summarizeDailyUSMarket(data DailyUSMarket) string {
+	if len(data.Indexes) == 0 && len(data.LeadingSectors) == 0 && len(data.LaggingSectors) == 0 {
+		if len(data.DataQuality) > 0 {
+			return "美股隔夜数据不可用：" + strings.Join(data.DataQuality, "；")
+		}
+		return "美股隔夜数据不可用，明日预期不纳入美股方向判断。"
+	}
+	indexes := make([]string, 0, len(data.Indexes))
+	for _, item := range data.Indexes {
+		indexes = append(indexes, fmt.Sprintf("%s %+.2f%%", item.Name, item.ChangePercent))
+	}
+	leaders := make([]string, 0, len(data.LeadingSectors))
+	for _, item := range data.LeadingSectors {
+		leaders = append(leaders, fmt.Sprintf("%s(%s) %+.2f%%", item.Name, item.ProxySymbol, item.ChangePercent))
+	}
+	laggards := make([]string, 0, len(data.LaggingSectors))
+	for _, item := range data.LaggingSectors {
+		laggards = append(laggards, fmt.Sprintf("%s(%s) %+.2f%%", item.Name, item.ProxySymbol, item.ChangePercent))
+	}
+	parts := []string{}
+	if len(indexes) > 0 {
+		parts = append(parts, "指数："+strings.Join(indexes, "、"))
+	}
+	if len(leaders) > 0 {
+		parts = append(parts, "领涨板块ETF："+strings.Join(leaders, "、"))
+	}
+	if len(laggards) > 0 {
+		parts = append(parts, "领跌板块ETF："+strings.Join(laggards, "、"))
+	}
+	if data.AsOf != "" {
+		parts = append(parts, "数据时间："+data.AsOf)
+	}
+	if len(data.DataQuality) > 0 {
+		parts = append(parts, "数据质量："+strings.Join(data.DataQuality, "；"))
+	}
+	return strings.Join(parts, "；")
+}
+
 func normalizeDailySummaryModel(model *dailySummaryModel, viewpoints []DailyAuthorView) {
 	knownAuthors := make(map[string]bool, len(viewpoints))
 	knownStocks := map[string]bool{}
@@ -1118,6 +1475,7 @@ func normalizeDailySummaryModel(model *dailySummaryModel, viewpoints []DailyAuth
 	model.ExecutiveSummary = strings.TrimSpace(model.ExecutiveSummary)
 	model.MarketRegime = strings.TrimSpace(model.MarketRegime)
 	model.MarketAnalysis = strings.TrimSpace(model.MarketAnalysis)
+	model.USMarketSummary = strings.TrimSpace(model.USMarketSummary)
 	model.TomorrowOutlook = strings.TrimSpace(model.TomorrowOutlook)
 	model.MarketFramework.Cycle = strings.TrimSpace(model.MarketFramework.Cycle)
 	model.MarketFramework.CapitalPricing = strings.TrimSpace(model.MarketFramework.CapitalPricing)

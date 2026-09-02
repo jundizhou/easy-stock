@@ -24,6 +24,18 @@ type MarketIndexSeries struct {
 	Meta  SourceMeta          `json:"meta"`
 }
 
+// MarketUSSectorMomentum is a quote for a US sector ETF used as a transparent
+// proxy for the corresponding sector. It is intentionally separate from the
+// mainland industry ranking because the two datasets are not interchangeable.
+type MarketUSSectorMomentum struct {
+	ProxySymbol   string     `json:"proxy_symbol"`
+	Name          string     `json:"name"`
+	Price         float64    `json:"price"`
+	ChangePercent float64    `json:"change_percent"`
+	TradeTime     time.Time  `json:"trade_time,omitempty"`
+	Meta          SourceMeta `json:"meta"`
+}
+
 type MarketIndustryMomentum struct {
 	Code                 string     `json:"code"`
 	Name                 string     `json:"name"`

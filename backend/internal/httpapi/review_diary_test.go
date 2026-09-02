@@ -147,7 +147,12 @@ func TestReviewDailySummaryWindowEndpoints(t *testing.T) {
 	}
 	defer store.Close()
 	automation := review.NewAutomation(store, fakeReviewImporter{}, nil, http.DefaultClient, "", fakeReviewSummaryPrompter{})
-	server := NewServer(Config{ReviewStore: store, ReviewImporter: fakeReviewImporter{}, ReviewAutomation: automation})
+	server := NewServer(Config{
+		ReviewStore:      store,
+		ReviewImporter:   fakeReviewImporter{},
+		ReviewAutomation: automation,
+		MarketOverview:   fakeUSMarketOverview{},
+	})
 
 	windowRequest := httptest.NewRequest(http.MethodGet, "/api/v1/reviews/daily-summary/window", nil)
 	windowRecorder := httptest.NewRecorder()

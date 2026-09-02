@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +49,34 @@ func TestClientParsesIndustryMomentum(t *testing.T) {
 	item := items[0]
 	if item.Name != "光伏设备" || item.ChangePercent != 1.76 || item.FiveDayChangePercent != 5.48 || item.TwentyDayChange != 2.35 || item.LeaderSymbol != "300051.SZ" || item.LeaderName != "琏升科技" || item.Score <= 50 || meta.Source != "tencent:industry-rank" {
 		t.Fatalf("item=%+v meta=%+v", item, meta)
+	}
+}
+
+func TestClientParsesUSSectorETFQuotes(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Query().Get("q"), "usXLK") || !strings.Contains(r.URL.Query().Get("q"), "usXLF") {
+			http.Error(w, "missing US sector ETF query", http.StatusBadRequest)
+			return
+		}
+		technology := make([]string, 33)
+		technology[3] = "185.69"
+		technology[30] = "2026/08/28 16:00:01"
+		technology[32] = "-1.55"
+		financial := make([]string, 33)
+		financial[3] = "58.10"
+		financial[30] = "2026/08/28 16:00:01"
+		financial[32] = "0.38"
+		_, _ = w.Write([]byte("v_usXLK=\"" + strings.Join(technology, "~") + "\";v_usXLF=\"" + strings.Join(financial, "~") + "\";"))
+	}))
+	defer upstream.Close()
+	client := NewClient(WithQuoteBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+
+	items, meta, err := client.USSectorMomentum(context.Background(), 11)
+	if err != nil || len(items) != 2 || items[0].ProxySymbol != "XLF" || items[0].ChangePercent != 0.38 || items[1].ProxySymbol != "XLK" || items[1].ChangePercent != -1.55 {
+		t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+	}
+	if meta.Source != "tencent:us-sector-etf" || items[0].TradeTime.IsZero() {
+		t.Fatalf("unexpected US sector metadata: %+v %+v", items, meta)
 	}
 }
 

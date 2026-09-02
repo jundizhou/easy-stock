@@ -242,6 +242,9 @@ func NewServer(config any) *Server {
 	if cfg.ReviewAutomation == nil {
 		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, cfg.WeChatAPIURL, cfg.HermesGateway)
 	}
+	if dailyMarketProvider := newReviewDailyMarketProvider(cfg.MarketOverview); dailyMarketProvider != nil {
+		cfg.ReviewAutomation.SetDailyMarketProvider(dailyMarketProvider)
+	}
 	if cfg.RemoteDailySync == nil {
 		cfg.RemoteDailySync = review.NewRemoteDailySync(cfg.ReviewStore, review.RemoteDailySyncConfig{
 			BaseURL: cfg.RemoteDailyReviewURL,

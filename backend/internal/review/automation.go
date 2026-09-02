@@ -47,8 +47,16 @@ type Automation struct {
 	dailySummaryMu         sync.Mutex
 	dailySummaryJobMu      sync.Mutex
 	dailySummaryRunning    bool
+	dailyMarketProvider    DailyMarketProvider
 	dailyValidationMu      sync.Mutex
 	dailyValidationRunning map[string]bool
+}
+
+// SetDailyMarketProvider wires the optional overnight market snapshot into the
+// review pipeline. It is kept separate from the constructor so existing
+// callers and tests that do not configure market data remain compatible.
+func (a *Automation) SetDailyMarketProvider(provider DailyMarketProvider) {
+	a.dailyMarketProvider = provider
 }
 
 func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Store, httpClient *http.Client, fallbackWechat string, prompters ...hermes.Prompter) *Automation {

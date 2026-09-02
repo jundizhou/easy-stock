@@ -27,6 +27,10 @@ type FundFlowProvider interface {
 	MarketFundFlows(ctx context.Context, dimension string, sortKey string, limit int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error)
 }
 
+type USSectorMomentumProvider interface {
+	USSectorMomentum(ctx context.Context, limit int) ([]foundation.MarketUSSectorMomentum, foundation.SourceMeta, error)
+}
+
 type IndexFallback interface {
 	MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
 	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
@@ -112,6 +116,24 @@ func (p *Provider) MarketFundFlows(ctx context.Context, dimension string, sortKe
 		fallbackItems[index].Meta = fallbackMeta
 	}
 	return fallbackItems, fallbackMeta, nil
+}
+
+func (p *Provider) USSectorMomentum(ctx context.Context, limit int) ([]foundation.MarketUSSectorMomentum, foundation.SourceMeta, error) {
+	if provider, ok := p.primary.(USSectorMomentumProvider); ok {
+		return provider.USSectorMomentum(ctx, limit)
+	}
+	if provider, ok := p.indexFallback.(USSectorMomentumProvider); ok {
+		items, meta, err := provider.USSectorMomentum(ctx, limit)
+		if err != nil {
+			return nil, foundation.SourceMeta{}, err
+		}
+		meta.FallbackReason = joinFallbackReason("主行情源不提供美股板块ETF，已切换腾讯行情", meta.FallbackReason)
+		for index := range items {
+			items[index].Meta = meta
+		}
+		return items, meta, nil
+	}
+	return nil, foundation.SourceMeta{}, fmt.Errorf("US sector momentum provider unavailable")
 }
 
 func (p *Provider) MarketMarginSeries(ctx context.Context, limit int) ([]foundation.MarketMarginPoint, foundation.SourceMeta, error) {

@@ -65,6 +65,11 @@ func (indexFallback) MarketIndexSeries(context.Context, string, string, int) (fo
 	return foundation.MarketIndexSeries{Index: foundation.MarketIndexSnapshot{ID: "sse", Meta: meta}, Lines: []foundation.KLine{{Symbol: "sse", Close: 3934.09, Meta: meta}}, Meta: meta}, nil
 }
 
+func (indexFallback) USSectorMomentum(context.Context, int) ([]foundation.MarketUSSectorMomentum, foundation.SourceMeta, error) {
+	meta := foundation.SourceMeta{Source: "tencent:us-sector-etf"}
+	return []foundation.MarketUSSectorMomentum{{ProxySymbol: "XLK", Name: "信息技术", ChangePercent: 1.5, Meta: meta}}, meta, nil
+}
+
 func TestProviderUsesSinaFundFlowsForEveryDimension(t *testing.T) {
 	provider := New(failingPrimary{}, nil, nil, fundFlowProvider{})
 	items, meta, err := provider.MarketFundFlows(context.Background(), "stock", "net", 20)
@@ -94,5 +99,13 @@ func TestProviderFallsBackForIndexes(t *testing.T) {
 	series, err := provider.MarketIndexSeries(context.Background(), "sse", "day", 20)
 	if err != nil || len(series.Lines) != 1 || !strings.Contains(series.Meta.FallbackReason, "腾讯") {
 		t.Fatalf("series=%+v err=%v", series, err)
+	}
+}
+
+func TestProviderFallsBackForUSSectorMomentum(t *testing.T) {
+	provider := New(failingPrimary{}, indexFallback{}, nil, nil)
+	items, meta, err := provider.USSectorMomentum(context.Background(), 11)
+	if err != nil || len(items) != 1 || items[0].ProxySymbol != "XLK" || !strings.Contains(meta.FallbackReason, "腾讯") {
+		t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
 	}
 }

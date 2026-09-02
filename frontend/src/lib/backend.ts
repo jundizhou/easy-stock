@@ -1558,6 +1558,37 @@ export type ReviewDailyAuthorView = {
 	sources: ReviewDailySummarySource[];
 };
 
+export type ReviewDailyUSMarket = {
+	captured_at?: string;
+	as_of?: string;
+	indexes: Array<{
+		id: string;
+		name: string;
+		price: number;
+		change_percent: number;
+		trade_time?: string;
+		status?: string;
+		source?: string;
+	}>;
+	leading_sectors: Array<{
+		proxy_symbol: string;
+		name: string;
+		price: number;
+		change_percent: number;
+		trade_time?: string;
+		source?: string;
+	}>;
+	lagging_sectors: Array<{
+		proxy_symbol: string;
+		name: string;
+		price: number;
+		change_percent: number;
+		trade_time?: string;
+		source?: string;
+	}>;
+	data_quality: string[];
+};
+
 export type ReviewDailySummary = {
 	trade_date: string;
 	generated_at: string;
@@ -1573,6 +1604,8 @@ export type ReviewDailySummary = {
 	executive_summary: string;
 	market_regime: string;
 	market_analysis: string;
+	us_market_summary?: string;
+	us_market?: ReviewDailyUSMarket;
 	market_framework: {
 		cycle: string;
 		capital_pricing: string;
@@ -1614,6 +1647,8 @@ export type ReviewDailySummary = {
 	risks: string[];
 	verification_checklist: string[];
 	limitations: string[];
+	partial?: boolean;
+	generation_errors?: string[];
 };
 
 export type ReviewDailySummaryJob = {
@@ -1621,8 +1656,8 @@ export type ReviewDailySummaryJob = {
 	window_start?: string;
 	window_end?: string;
 	freshness_rule?: string;
-	status: 'idle' | 'running' | 'succeeded' | 'failed';
-	stage: 'idle' | 'preparing' | 'authors' | 'finalizing' | 'completed' | 'failed' | 'interrupted';
+	status: 'idle' | 'running' | 'succeeded' | 'partial' | 'failed';
+	stage: 'idle' | 'preparing' | 'authors' | 'finalizing' | 'completed' | 'partial' | 'failed' | 'interrupted';
 	completed_authors: number;
 	total_authors: number;
 	article_count: number;

@@ -1,6 +1,9 @@
 package review
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type Post struct {
 	ID            string    `json:"id"`
@@ -182,6 +185,41 @@ type DailyDirectionView struct {
 	Risks             []string `json:"risks"`
 }
 
+type DailyUSMarketIndex struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Price         float64   `json:"price"`
+	ChangePercent float64   `json:"change_percent"`
+	TradeTime     time.Time `json:"trade_time,omitempty"`
+	Status        string    `json:"status,omitempty"`
+	Source        string    `json:"source,omitempty"`
+}
+
+type DailyUSMarketSector struct {
+	ProxySymbol   string    `json:"proxy_symbol"`
+	Name          string    `json:"name"`
+	Price         float64   `json:"price"`
+	ChangePercent float64   `json:"change_percent"`
+	TradeTime     time.Time `json:"trade_time,omitempty"`
+	Source        string    `json:"source,omitempty"`
+}
+
+// DailyUSMarket is the immutable overnight US-market context captured when a
+// review run starts. Sector values are ETF proxies, not claims about every
+// stock in the sector.
+type DailyUSMarket struct {
+	CapturedAt     time.Time             `json:"captured_at,omitempty"`
+	AsOf           string                `json:"as_of,omitempty"`
+	Indexes        []DailyUSMarketIndex  `json:"indexes"`
+	LeadingSectors []DailyUSMarketSector `json:"leading_sectors"`
+	LaggingSectors []DailyUSMarketSector `json:"lagging_sectors"`
+	DataQuality    []string              `json:"data_quality"`
+}
+
+type DailyMarketProvider interface {
+	Snapshot(ctx context.Context, capturedAt time.Time) (DailyUSMarket, error)
+}
+
 type DailySummary struct {
 	TradeDate             string               `json:"trade_date"`
 	GeneratedAt           time.Time            `json:"generated_at"`
@@ -198,6 +236,8 @@ type DailySummary struct {
 	MarketRegime          string               `json:"market_regime"`
 	MarketAnalysis        string               `json:"market_analysis"`
 	MarketFramework       DailyMarketFramework `json:"market_framework"`
+	USMarketSummary       string               `json:"us_market_summary"`
+	USMarket              DailyUSMarket        `json:"us_market"`
 	Consensus             []DailyConsensus     `json:"consensus"`
 	Disagreements         []DailyDisagreement  `json:"disagreements"`
 	Scenarios             []DailyScenario      `json:"scenarios"`
@@ -210,6 +250,8 @@ type DailySummary struct {
 	Risks                 []string             `json:"risks"`
 	VerificationChecklist []string             `json:"verification_checklist"`
 	Limitations           []string             `json:"limitations"`
+	Partial               bool                 `json:"partial,omitempty"`
+	GenerationErrors      []string             `json:"generation_errors,omitempty"`
 }
 
 type DailySummaryJob struct {

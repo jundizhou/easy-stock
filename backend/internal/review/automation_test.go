@@ -222,11 +222,11 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 		t.Fatalf("freshness metadata = %+v", summary)
 	}
 	prompts := prompter.Prompts()
-	if len(prompts) != 3 {
-		t.Fatalf("prompt count = %d, want 2 author summaries + 1 final summary", len(prompts))
+	if len(prompts) != 4 {
+		t.Fatalf("prompt count = %d, want 2 author summaries + 2 final phases", len(prompts))
 	}
 	authorPromptCount := 0
-	finalPrompt := ""
+	finalPrompts := []string{}
 	for _, prompt := range prompts {
 		if strings.Contains(prompt, "任务阶段：单作者观点归纳") {
 			authorPromptCount++
@@ -234,18 +234,67 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 				t.Fatalf("作者甲的多篇文章未在同一次归纳中：%q", prompt)
 			}
 		} else {
-			finalPrompt = prompt
+			finalPrompts = append(finalPrompts, prompt)
 		}
 		if strings.Contains(prompt, "过期复盘独有标记") {
 			t.Fatalf("过期文章进入模型提示词：%q", prompt)
 		}
 	}
-	if authorPromptCount != 2 || !strings.Contains(finalPrompt, "输入作者观点卡JSON") || !strings.Contains(finalPrompt, "\"scenarios\"") || !strings.Contains(finalPrompt, "\"directions\"") || !strings.Contains(finalPrompt, "算力分歧回流但后排扩散不足") || strings.Contains(finalPrompt, "甲作者早文独有标记") {
+	finalPrompt := strings.Join(finalPrompts, "\n")
+	if authorPromptCount != 2 || len(finalPrompts) != 2 || !strings.Contains(finalPrompt, "输入作者观点卡JSON") || !strings.Contains(finalPrompt, "任务阶段：跨作者市场结构归纳") || !strings.Contains(finalPrompt, "任务阶段：跨作者明日计划归纳") || !strings.Contains(finalPrompt, "\"scenarios\"") || !strings.Contains(finalPrompt, "\"directions\"") || !strings.Contains(finalPrompt, "算力分歧回流但后排扩散不足") || strings.Contains(finalPrompt, "甲作者早文独有标记") {
 		t.Fatalf("staged prompts = %#v", prompts)
 	}
 	stored, err := automation.GetTodaySummary(context.Background())
 	if err != nil || stored == nil || stored.ExecutiveSummary != summary.ExecutiveSummary || len(stored.AuthorViews) != 2 || len(stored.Scenarios) != 3 {
 		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
+type fakeDailyMarketProvider struct{}
+
+func (fakeDailyMarketProvider) Snapshot(_ context.Context, capturedAt time.Time) (DailyUSMarket, error) {
+	return DailyUSMarket{
+		CapturedAt:     capturedAt,
+		AsOf:           "2026-08-28 05:00",
+		Indexes:        []DailyUSMarketIndex{{ID: "nasdaq", Name: "纳斯达克", ChangePercent: 1.25, Price: 21000, Source: "test"}},
+		LeadingSectors: []DailyUSMarketSector{{ProxySymbol: "XLK", Name: "信息技术", ChangePercent: 2.1, Source: "test"}},
+		LaggingSectors: []DailyUSMarketSector{{ProxySymbol: "XLE", Name: "能源", ChangePercent: -0.8, Source: "test"}},
+		DataQuality:    []string{},
+	}, nil
+}
+
+func TestAutomationCapturesUSMarketAtSummaryStartAndIncludesItInFinalPrompt(t *testing.T) {
+	store, err := OpenStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	window := effectiveReviewWindow(time.Now())
+	if _, err := store.UpsertPost(context.Background(), newPost("taoguba", "https://www.tgb.cn/a/us-market", "作者甲", "收盘复盘", "市场等待明日确认。", "", window.Start.Add(12*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	prompter := &stagedSummaryPrompter{
+		authorContent: map[string]string{"作者甲": `{"core_view":"市场等待明日确认","market_interpretation":"分歧","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`},
+		finalContent:  validDailySummaryJSON("综合结论"),
+	}
+	automation := NewAutomation(store, nil, nil, nil, "", prompter)
+	automation.SetDailyMarketProvider(fakeDailyMarketProvider{})
+	summary, err := automation.SummarizeToday(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.USMarket.Indexes[0].ID != "nasdaq" || summary.USMarket.LeadingSectors[0].ProxySymbol != "XLK" || summary.USMarketSummary == "" || !strings.Contains(summary.TomorrowOutlook, "隔夜美股事实") || !strings.Contains(summary.TomorrowOutlook, "纳斯达克") {
+		t.Fatalf("US market snapshot was not persisted: %+v", summary.USMarket)
+	}
+	finalPrompts := []string{}
+	for _, prompt := range prompter.Prompts() {
+		if !strings.Contains(prompt, "任务阶段：单作者观点归纳") {
+			finalPrompts = append(finalPrompts, prompt)
+		}
+	}
+	finalPrompt := strings.Join(finalPrompts, "\n")
+	if !strings.Contains(finalPrompt, "本次发起时抓取的美股隔夜快照JSON") || !strings.Contains(finalPrompt, "纳斯达克") || !strings.Contains(finalPrompt, "XLK") {
+		t.Fatalf("final prompt did not include US market context: %q", finalPrompt)
 	}
 }
 
@@ -299,6 +348,7 @@ func TestAutomationRetainsAuthorFallbackWhenJSONRepairFails(t *testing.T) {
 		{content: "Hermes is still analyzing the articles."},
 		{content: "The response cannot be rendered as JSON."},
 		{content: validDailySummaryJSON("保底作者卡已进入跨作者总结")},
+		{content: validDailySummaryJSON("保底作者卡已进入跨作者总结")},
 	}}
 	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
 
@@ -313,8 +363,8 @@ func TestAutomationRetainsAuthorFallbackWhenJSONRepairFails(t *testing.T) {
 	if !strings.Contains(summary.AuthorViews[0].CoreView, "原文证据") || len(summary.AuthorViews[0].Sources) != 1 || !strings.Contains(limitations, "原文摘要作为低置信度观点卡") {
 		t.Fatalf("fallback author view=%+v limitations=%q", summary.AuthorViews[0], limitations)
 	}
-	if len(prompter.Prompts()) != 3 {
-		t.Fatalf("prompt count = %d, want author + repair + final", len(prompter.Prompts()))
+	if len(prompter.Prompts()) != 4 {
+		t.Fatalf("prompt count = %d, want author + repair + 2 final phases", len(prompter.Prompts()))
 	}
 }
 
@@ -329,18 +379,18 @@ func TestAutomationRepairsInvalidFinalSummaryJSON(t *testing.T) {
 	if _, err := store.UpsertPost(context.Background(), post); err != nil {
 		t.Fatal(err)
 	}
-	prompter := &queuedSummaryPrompter{responses: []queuedPromptResponse{
-		{content: validAuthorSummaryJSON("作者有效观点")},
-		{content: "Hermes final analysis follows later."},
-		{content: validDailySummaryJSON("自动纠错后的跨作者结论")},
-	}}
+	prompter := &routedSummaryPrompter{
+		author:   []queuedPromptResponse{{content: validAuthorSummaryJSON("作者有效观点")}},
+		market:   []queuedPromptResponse{{content: "Hermes final analysis follows later."}, {content: validDailySummaryJSON("自动纠错后的跨作者结论")}},
+		tomorrow: []queuedPromptResponse{{content: validDailySummaryJSON("明日阶段结论")}},
+	}
 	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
 
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.ExecutiveSummary != "自动纠错后的跨作者结论" || len(prompter.Prompts()) != 3 {
+	if summary.ExecutiveSummary != "自动纠错后的跨作者结论" || summary.Partial || len(prompter.Prompts()) != 4 {
 		t.Fatalf("summary=%+v prompts=%#v", summary, prompter.Prompts())
 	}
 }
@@ -356,19 +406,81 @@ func TestAutomationRetainsLocalFallbackWhenFinalJSONRepairFails(t *testing.T) {
 	if _, err := store.UpsertPost(context.Background(), post); err != nil {
 		t.Fatal(err)
 	}
-	prompter := &queuedSummaryPrompter{responses: []queuedPromptResponse{
-		{content: validAuthorSummaryJSON("作者有效观点")},
-		{content: "Hermes final analysis follows later."},
-		{content: "The repaired response is still not JSON."},
-	}}
+	prompter := &routedSummaryPrompter{
+		author:   []queuedPromptResponse{{content: validAuthorSummaryJSON("作者有效观点")}},
+		market:   []queuedPromptResponse{{content: "Hermes final analysis follows later."}, {content: "The repaired response is still not JSON."}},
+		tomorrow: []queuedPromptResponse{{content: "Hermes final analysis follows later."}, {content: "The repaired response is still not JSON."}},
+	}
 	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
 
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.MarketRegime != "待复核" || !strings.Contains(summary.ExecutiveSummary, "已保存1位作者观点卡") || !strings.Contains(strings.Join(summary.Limitations, "；"), "本地保底结果") {
+	if !summary.Partial || len(summary.GenerationErrors) != 2 || summary.MarketRegime != "样本待综合" || !strings.Contains(summary.ExecutiveSummary, "作者观点卡摘要") || !strings.Contains(strings.Join(summary.Limitations, "；"), "本地聚合结果") {
 		t.Fatalf("fallback summary = %+v", summary)
+	}
+}
+
+func TestAutomationPreservesSuccessfulFinalPhaseWhenOtherPhaseFails(t *testing.T) {
+	tests := []struct {
+		name                 string
+		market               []queuedPromptResponse
+		tomorrow             []queuedPromptResponse
+		wantExecutive        string
+		wantTomorrow         string
+		wantGenerationPrefix string
+	}{
+		{
+			name:                 "market phase fails",
+			market:               []queuedPromptResponse{{content: "bad"}, {content: "still bad"}},
+			tomorrow:             []queuedPromptResponse{{content: validTomorrowPlanJSON("明日阶段成功保留")}},
+			wantExecutive:        "作者观点卡摘要",
+			wantTomorrow:         "明日阶段成功保留",
+			wantGenerationPrefix: "市场结构归纳：",
+		},
+		{
+			name:                 "tomorrow phase fails",
+			market:               []queuedPromptResponse{{content: validMarketSynthesisJSON("市场阶段成功保留")}},
+			tomorrow:             []queuedPromptResponse{{content: "bad"}, {content: "still bad"}},
+			wantExecutive:        "市场阶段成功保留",
+			wantTomorrow:         "作者观点卡中的明日预期",
+			wantGenerationPrefix: "明日计划归纳：",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := OpenStore(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			window := effectiveReviewWindow(time.Now())
+			post := newPost("taoguba", "https://www.tgb.cn/a/partial-final", "作者甲", "收盘复盘", "市场处于分歧修复阶段。", "", window.Start.Add(12*time.Hour))
+			if _, err := store.UpsertPost(context.Background(), post); err != nil {
+				t.Fatal(err)
+			}
+			prompter := &routedSummaryPrompter{
+				author:   []queuedPromptResponse{{content: validAuthorSummaryJSON("作者有效观点")}},
+				market:   test.market,
+				tomorrow: test.tomorrow,
+			}
+			automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+			summary, err := automation.SummarizeToday(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !summary.Partial || len(summary.GenerationErrors) != 1 || !strings.HasPrefix(summary.GenerationErrors[0], test.wantGenerationPrefix) || !strings.Contains(summary.GenerationErrors[0], "首次输出3字符") {
+				t.Fatalf("partial diagnostics = %+v", summary.GenerationErrors)
+			}
+			if !strings.Contains(summary.ExecutiveSummary, test.wantExecutive) || !strings.Contains(summary.TomorrowOutlook, test.wantTomorrow) {
+				t.Fatalf("successful phase was not preserved: %+v", summary)
+			}
+			cached := cachedDailySummaryJob(summary)
+			if cached.Status != "partial" || cached.Stage != "partial" || !cached.SummaryAvailable || !strings.Contains(cached.Error, test.wantGenerationPrefix) {
+				t.Fatalf("partial cached job = %+v", cached)
+			}
+		})
 	}
 }
 
@@ -447,8 +559,8 @@ func TestAutomationSkipsFailedAuthorSummaryAndContinues(t *testing.T) {
 	if summary.AuthorCount != 2 || summary.ArticleCount != 2 || !strings.Contains(strings.Join(summary.Limitations, "；"), "作者乙") {
 		t.Fatalf("summary = %+v", summary)
 	}
-	if len(prompter.Prompts()) != 4 {
-		t.Fatalf("prompt count = %d, want 3 author attempts + final", len(prompter.Prompts()))
+	if len(prompter.Prompts()) != 5 {
+		t.Fatalf("prompt count = %d, want 3 author attempts + 2 final phases", len(prompter.Prompts()))
 	}
 }
 
@@ -795,6 +907,17 @@ type queuedSummaryPrompter struct {
 	next      int
 }
 
+type routedSummaryPrompter struct {
+	mu            sync.Mutex
+	author        []queuedPromptResponse
+	market        []queuedPromptResponse
+	tomorrow      []queuedPromptResponse
+	authorIndex   int
+	marketIndex   int
+	tomorrowIndex int
+	prompts       []string
+}
+
 func (p *queuedSummaryPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -813,12 +936,48 @@ func (p *queuedSummaryPrompter) Prompts() []string {
 	return append([]string(nil), p.prompts...)
 }
 
+func (p *routedSummaryPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prompts = append(p.prompts, prompt)
+	responses := &p.author
+	index := &p.authorIndex
+	switch {
+	case strings.Contains(prompt, "任务阶段：跨作者市场结构归纳"):
+		responses = &p.market
+		index = &p.marketIndex
+	case strings.Contains(prompt, "任务阶段：跨作者明日计划归纳"):
+		responses = &p.tomorrow
+		index = &p.tomorrowIndex
+	}
+	if *index >= len(*responses) {
+		return hermes.PromptResult{}, errors.New("missing routed prompt response")
+	}
+	response := (*responses)[*index]
+	*index++
+	return hermes.PromptResult{Content: response.content}, response.err
+}
+
+func (p *routedSummaryPrompter) Prompts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.prompts...)
+}
+
 func validAuthorSummaryJSON(coreView string) string {
 	return fmt.Sprintf(`{"core_view":%q,"market_interpretation":"修复","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`, coreView)
 }
 
 func validDailySummaryJSON(executiveSummary string) string {
 	return fmt.Sprintf(`{"executive_summary":%q,"market_regime":"修复","market_analysis":"观点等待确认","market_framework":{"cycle":"修复","capital_pricing":"等待确认","direction_competition":"等待确认","trading_method":"观察验证"},"consensus":[],"disagreements":[],"scenarios":[],"directions":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, executiveSummary)
+}
+
+func validMarketSynthesisJSON(executiveSummary string) string {
+	return fmt.Sprintf(`{"executive_summary":%q,"market_regime":"修复","market_analysis":"市场结构等待确认","market_framework":{"cycle":"修复","capital_pricing":"等待确认","direction_competition":"等待确认","trading_method":"观察验证"},"us_market_summary":"等待外部数据确认","consensus":[],"disagreements":[],"directions":[],"limitations":[]}`, executiveSummary)
+}
+
+func validTomorrowPlanJSON(outlook string) string {
+	return fmt.Sprintf(`{"scenarios":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":%q,"tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, outlook)
 }
 
 type blockingSummaryPrompter struct {
