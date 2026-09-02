@@ -211,7 +211,7 @@ func TestRuntimeProcessEnvironmentUsesHermesEnvInsteadOfAmbientKey(t *testing.T)
 	t.Setenv(modelAPIKeyEnvName, "ambient-shell-key")
 	runtime := NewRuntime(Config{Home: home, WorkDir: root, PythonPath: filepath.Join(root, "python")})
 
-	values, err := runtime.processEnvironment("")
+	values, err := runtime.processEnvironment("", promptProcessOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestRuntimeProcessEnvironmentUsesHermesEnvInsteadOfAmbientKey(t *testing.T)
 	if err := writeEnvValue(filepath.Join(home, ".env"), modelAPIKeyEnvName, ""); err != nil {
 		t.Fatal(err)
 	}
-	values, err = runtime.processEnvironment("")
+	values, err = runtime.processEnvironment("", promptProcessOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestRuntimeProcessEnvironmentUsesBrowserStateWithoutConflictingProfile(t *t
 	}
 	runtime := NewRuntime(Config{Home: home, WorkDir: root, PythonPath: filepath.Join(root, "python")})
 
-	values, err := runtime.processEnvironment(statePath)
+	values, err := runtime.processEnvironment(statePath, promptProcessOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

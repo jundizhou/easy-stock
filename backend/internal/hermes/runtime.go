@@ -183,6 +183,13 @@ func (r *Runtime) Status() Status {
 	return status
 }
 
+func (r *Runtime) responseTimeoutSeconds() int {
+	r.mu.RLock()
+	seconds := r.llm.ResponseTimeoutSeconds
+	r.mu.RUnlock()
+	return appsettings.NormalizeLLMResponseTimeoutSeconds(seconds)
+}
+
 // ModelAPIKey returns the protected provider key for backend-only operations
 // such as discovering models. Callers must never expose the returned value in
 // responses or logs.
@@ -498,10 +505,10 @@ func (r *Runtime) SyncAgentSettings(settings AgentSettings) error {
 }
 
 func (r *Runtime) Start(ctx context.Context) (Process, error) {
-	return r.start(ctx, "")
+	return r.start(ctx, "", promptProcessOptions{})
 }
 
-func (r *Runtime) start(ctx context.Context, browserStatePath string) (Process, error) {
+func (r *Runtime) start(ctx context.Context, browserStatePath string, options promptProcessOptions) (Process, error) {
 	status := r.Status()
 	if !status.Available {
 		return nil, errors.New(firstNonEmpty(status.Message, "Hermes 运行时不可用"))
@@ -509,13 +516,13 @@ func (r *Runtime) start(ctx context.Context, browserStatePath string) (Process, 
 	if strings.TrimSpace(r.home) == "" {
 		return nil, errors.New("Hermes 用户目录未配置")
 	}
-	processEnv, err := r.processEnvironment(browserStatePath)
+	processEnv, err := r.processEnvironment(browserStatePath, options)
 	if err != nil {
 		return nil, err
 	}
 
 	cmd := exec.CommandContext(ctx, r.pythonPath, "-m", "tui_gateway.entry")
-	cmd.Dir = firstExistingDirectory(r.workDir, r.home)
+	cmd.Dir = firstExistingDirectory(options.workDir, r.workDir, r.home)
 	cmd.Env = processEnv
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -541,7 +548,7 @@ func (r *Runtime) start(ctx context.Context, browserStatePath string) (Process, 
 	return &commandProcess{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr}, nil
 }
 
-func (r *Runtime) processEnvironment(browserStatePath string) ([]string, error) {
+func (r *Runtime) processEnvironment(browserStatePath string, options promptProcessOptions) ([]string, error) {
 	modelAPIKey, err := readEnvValue(filepath.Join(r.home, ".env"), modelAPIKeyEnvName)
 	if err != nil {
 		return nil, err
@@ -567,21 +574,34 @@ func (r *Runtime) processEnvironment(browserStatePath string) ([]string, error) 
 		// browser run must use only the explicitly selected storage state.
 		values = unsetEnv(values, "AGENT_BROWSER_PROFILE")
 	}
+	for _, key := range options.unset {
+		values = unsetEnv(values, key)
+	}
+	for key, value := range options.env {
+		values = setEnv(values, key, value)
+	}
 	return values, nil
 }
 
 func (r *Runtime) Prompt(ctx context.Context, prompt string) (PromptResult, error) {
-	return r.prompt(ctx, prompt, "")
+	return r.prompt(ctx, prompt, "", PromptOptions{})
+}
+
+func (r *Runtime) PromptWithOptions(ctx context.Context, prompt string, options PromptOptions) (PromptResult, error) {
+	if options.AutoApprove && !options.Sandbox {
+		return PromptResult{}, errors.New("Hermes 自动授权只能在隔离沙箱中启用")
+	}
+	return r.prompt(ctx, prompt, "", options)
 }
 
 func (r *Runtime) PromptWithBrowserState(ctx context.Context, prompt, storageStatePath string) (PromptResult, error) {
 	if strings.TrimSpace(storageStatePath) == "" {
 		return PromptResult{}, errors.New("浏览器登录态路径不能为空")
 	}
-	return r.prompt(ctx, prompt, strings.TrimSpace(storageStatePath))
+	return r.prompt(ctx, prompt, strings.TrimSpace(storageStatePath), PromptOptions{})
 }
 
-func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (PromptResult, error) {
+func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, options PromptOptions) (PromptResult, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return PromptResult{}, errors.New("Hermes 提示词不能为空")
 	}
@@ -593,7 +613,18 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 		return PromptResult{}, errors.New(firstNonEmpty(status.Message, "请先配置 Hermes 模型"))
 	}
 
-	process, err := r.start(ctx, browserStatePath)
+	processOptions := promptProcessOptions{}
+	var sandbox *promptSandbox
+	var err error
+	if options.Sandbox {
+		sandbox, err = r.preparePromptSandbox(options)
+		if err != nil {
+			return PromptResult{}, err
+		}
+		defer sandbox.close()
+		processOptions = sandbox.process
+	}
+	process, err := r.start(ctx, browserStatePath, processOptions)
 	if err != nil {
 		return PromptResult{}, err
 	}
@@ -646,6 +677,7 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 	submitted := false
 	result := PromptResult{}
 	var streamed strings.Builder
+	approvalSequence := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -668,7 +700,8 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 			}
 			if eventType(frame) == "gateway.ready" && !created {
 				created = true
-				if err := writeRPC("1", "session.create", map[string]any{"client": "easy-stock", "cwd": r.workDir}); err != nil {
+				sessionWorkDir := firstNonEmpty(processOptions.workDir, r.workDir)
+				if err := writeRPC("1", "session.create", map[string]any{"client": "easy-stock", "cwd": sessionWorkDir}); err != nil {
 					return PromptResult{}, err
 				}
 				continue
@@ -686,6 +719,21 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string) (
 				continue
 			}
 			switch eventType(frame) {
+			case "approval.request":
+				if !options.AutoApprove {
+					continue
+				}
+				approvalSequence++
+				sessionID := firstNonEmpty(stringValue(frame.Params["session_id"]), result.SessionID)
+				if sessionID == "" {
+					return PromptResult{}, errors.New("Hermes 自动授权请求缺少会话 ID")
+				}
+				if err := writeRPC(fmt.Sprintf("approval-%d", approvalSequence), "approval.respond", map[string]any{
+					"session_id": sessionID,
+					"choice":     "session",
+				}); err != nil {
+					return PromptResult{}, fmt.Errorf("Hermes 自动授权失败: %w", err)
+				}
 			case "message.delta":
 				streamed.WriteString(firstNonEmpty(eventText(frame, "delta"), eventText(frame, "text")))
 			case "message.complete":
