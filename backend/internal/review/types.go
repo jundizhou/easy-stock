@@ -245,6 +245,7 @@ type DailySummary struct {
 	TodaySurprises        []DailyStockView     `json:"today_surprises"`
 	TomorrowFocus         []DailyStockView     `json:"tomorrow_focus"`
 	TomorrowOutlook       string               `json:"tomorrow_outlook"`
+	TomorrowPlanDegraded  bool                 `json:"tomorrow_outlook_degraded,omitempty"`
 	TomorrowPlaybook      DailyPlaybook        `json:"tomorrow_playbook"`
 	Catalysts             []string             `json:"catalysts"`
 	Risks                 []string             `json:"risks"`

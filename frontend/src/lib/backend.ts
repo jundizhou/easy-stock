@@ -1637,6 +1637,7 @@ export type ReviewDailySummary = {
 	today_surprises: ReviewDailyStockView[];
 	tomorrow_focus: ReviewDailyStockView[];
 	tomorrow_outlook: string;
+	tomorrow_outlook_degraded?: boolean;
 	tomorrow_playbook: {
 		pre_open: string[];
 		opening: string[];

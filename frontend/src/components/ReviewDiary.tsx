@@ -729,7 +729,7 @@ function DailyViewpointSummary({ config, summary, regenerating, onRegenerate, on
 		<section className="daily-summary-block market-framework-block"><header><TrendingUp size={16} /><div><strong>市场四层框架</strong><small>综合所有有效观点，直接归纳周期、资金、方向与执行</small></div></header><div className="market-framework-grid"><FrameworkItem label="周期位置" content={framework.cycle} /><FrameworkItem label="资金定价" content={framework.capital_pricing} /><FrameworkItem label="方向竞争" content={framework.direction_competition} /><FrameworkItem label="交易方法" content={framework.trading_method} /></div></section>
 		<div className="daily-summary-two-column">
 			<SummaryTextCard icon={<TrendingUp size={16} />} title="今日盘面分析" subtitle="跨作者综合盘面结论" content={summary.market_analysis} />
-			<SummaryTextCard icon={<Target size={16} />} title="明日预期" subtitle="跨作者综合次日推演 · 已结合美股隔夜影响" content={summary.tomorrow_outlook} />
+			<SummaryTextCard icon={<Target size={16} />} title="明日预期" subtitle="跨作者综合次日推演 · 已结合美股隔夜影响" content={summary.tomorrow_outlook} degraded={isTomorrowOutlookDegraded(summary)} />
 		</div>
 		{authorViews.length > 0 && <section className="daily-summary-block author-preview-block"><header><Users size={16} /><div><strong>主要作者观点</strong><small>先看各自最终判断，避免用跨作者结论抹平差异</small></div><button type="button" onClick={onShowAuthors}>查看全部 {authorViews.length} 位</button></header><div className="author-preview-grid">{authorViews.slice(0, 6).map((view) => <article key={`${view.source}-${view.author}`}><div><span className={`author-avatar ${sourceClass(view.source)}`} data-review-author={view.author}>{view.author.slice(0, 1)}</span><div><strong data-review-author={view.author}>{view.author}</strong><small>{view.source} · {view.confidence || '未评级'}置信度</small></div></div><p>{view.core_view}</p><div>{(view.themes || []).slice(0, 3).map((theme) => <span key={theme}>{theme}</span>)}</div></article>)}</div></section>}
 		<section className="daily-summary-block consensus-block">
@@ -763,15 +763,24 @@ function USMarketSnapshot({ market, summary }: { market?: ReviewDailySummary['us
 	const indexes = market?.indexes || [];
 	const leaders = market?.leading_sectors || [];
 	const laggards = market?.lagging_sectors || [];
+	const visibleSummary = visibleUSMarketSummary(summary);
 	const changeLabel = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 	const changeClass = (value: number) => value >= 0 ? 'positive' : 'negative';
 	return <section className="daily-summary-block daily-us-market-block">
 		<header><Globe2 size={16} /><div><strong>美股隔夜摘要</strong><small>复盘发起时抓取 · 板块采用 SPDR 行业 ETF 代理</small></div>{market?.as_of && <em>{market.as_of}</em>}</header>
-		{summary && <p className="daily-us-market-summary">{summary}</p>}
+		{visibleSummary && <p className="daily-us-market-summary">{visibleSummary}</p>}
 		{indexes.length > 0 && <div className="daily-us-index-grid">{indexes.map((item) => <article key={item.id}><span>{item.name}</span><strong className={changeClass(item.change_percent)}>{changeLabel(item.change_percent)}</strong>{item.price > 0 && <small>{item.price.toFixed(2)}</small>}</article>)}</div>}
 		{(leaders.length > 0 || laggards.length > 0) && <div className="daily-us-sector-grid"><USMarketSectorList title="领涨板块" items={leaders} tone="positive" changeLabel={changeLabel} /><USMarketSectorList title="领跌板块" items={laggards} tone="negative" changeLabel={changeLabel} /></div>}
-		{market?.data_quality?.length ? <footer className="daily-us-market-quality">{market.data_quality.join('；')}</footer> : null}
 	</section>;
+}
+
+export function visibleUSMarketSummary(value?: string) {
+	const summary = (value || '').trim();
+	const cutAt = ['数据质量：', '影响解读：']
+		.map((marker) => summary.indexOf(marker))
+		.filter((index) => index >= 0)
+		.reduce((earliest, index) => Math.min(earliest, index), summary.length);
+	return summary.slice(0, cutAt).replace(/[；;\s]+$/, '');
 }
 
 function USMarketSectorList({ title, items, tone, changeLabel }: { title: string; items: NonNullable<ReviewDailySummary['us_market']>['leading_sectors']; tone: 'positive' | 'negative'; changeLabel: (value: number) => string }) {
@@ -890,8 +899,12 @@ function AuthorViewpointCard({ view }: { view: ReviewDailyAuthorView }) {
 	</article>;
 }
 
-function SummaryTextCard({ icon, title, subtitle, content }: { icon: ReactNode; title: string; subtitle: string; content: string }) {
-	return <section className="daily-summary-block summary-text-card"><header>{icon}<div><strong>{title}</strong><small>{subtitle}</small></div></header><p>{content || '文章未形成明确结论。'}</p></section>;
+function SummaryTextCard({ icon, title, subtitle, content, degraded = false }: { icon: ReactNode; title: string; subtitle: string; content: string; degraded?: boolean }) {
+	return <section className="daily-summary-block summary-text-card"><header>{icon}<div><strong>{title}</strong><small>{subtitle}</small></div>{degraded && <em className="daily-summary-degraded-badge" title="明日计划 AI 归纳失败，当前展示本地保底结果">降级</em>}</header><p>{content || '文章未形成明确结论。'}</p></section>;
+}
+
+export function isTomorrowOutlookDegraded(summary: Pick<ReviewDailySummary, 'tomorrow_outlook_degraded' | 'generation_errors'>) {
+	return summary.tomorrow_outlook_degraded === true || Boolean(summary.generation_errors?.some((item) => item.trim().startsWith('明日计划归纳：')));
 }
 
 function SummaryWindowDialog({ value, onChange, onClose, onConfirm, submitting }: { value: SummaryWindowDraft; onChange: (value: SummaryWindowDraft) => void; onClose: () => void; onConfirm: () => void; submitting: boolean }) {

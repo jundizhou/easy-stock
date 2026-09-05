@@ -3933,7 +3933,6 @@ a:focus-visible {
 .daily-us-sector-list > div > span { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
 .daily-us-sector-list > div > span small { color: #98a1b0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 7px; }
 .daily-us-sector-list b { font-size: 9px; white-space: nowrap; }
-.daily-us-market-quality { display: block; margin-top: 8px; padding-top: 7px; border-top: 1px dashed #dfe5ef; color: #7d8798; font-size: 8px; line-height: 1.5; }
 .daily-summary-two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .daily-summary-block { min-width: 0; padding: 12px; border: 1px solid #dfe4ee; border-radius: 9px; background: rgba(255, 255, 255, .92); }
 .daily-summary-block > header { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; color: #5366c6; }
@@ -3941,6 +3940,7 @@ a:focus-visible {
 .daily-summary-block > header strong,
 .summary-text-card > header strong { color: #27324d; font-size: 12px; }
 .daily-summary-block > header small { color: var(--muted); font-size: 8px; line-height: 1.4; }
+.daily-summary-degraded-badge { flex: 0 0 auto; margin-left: auto; padding: 2px 6px; border: 1px solid #e9b967; border-radius: 4px; background: #fff7e8; color: #9a5700; font-size: 8px; font-style: normal; font-weight: 700; line-height: 1.4; }
 .summary-text-card p { margin: 0; color: #465066; font-size: 12px; line-height: 1.75; white-space: pre-wrap; }
 .daily-consensus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 8px; }
 .daily-consensus-item { overflow: hidden; border: 1px solid #dce2f5; border-radius: 8px; background: #ffffff; transition: border-color 160ms ease, box-shadow 160ms ease; }

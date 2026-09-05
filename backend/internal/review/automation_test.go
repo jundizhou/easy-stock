@@ -195,7 +195,9 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 		"directions":[{"name":"算力","stance":"优先观察","summary":"共同关注但等待扩散","supporting_authors":["作者甲","作者乙","不存在的作者"],"opposing_authors":[],"stocks":["核心股","伪造个股"],"trigger":"核心承接并扩散","invalidation":"核心负反馈","risks":["拥挤"]}],
 		"today_surprises":[{"name":"核心股","symbol":"999999","logic":"弱转强超预期","support_count":1,"authors":["作者乙"],"evidence":["[作者乙] 弱转强超预期"],"trigger":"主动走强","invalidation":"次日无承接","risk":"单一来源"}],
 		"tomorrow_focus":[{"name":"核心容量股","symbol":"","logic":"观察量价承接和扩散","support_count":2,"authors":["作者甲","作者乙"],"evidence":[],"trigger":"竞价与开盘承接","invalidation":"核心负反馈","risk":"一致性过高"}],
-		"tomorrow_outlook":"基础情景为分歧中延续，偏强看板块扩散，偏弱看核心负反馈。",
+		"a_share_baseline":"A股内部基础情景为分歧中延续，等待核心承接和板块扩散确认。",
+		"us_market_impact":{"bias":"数据不可用","transmission":"美股数据不可用，不调整算力方向的A股内部基线。","scenario_adjustment":"基础、偏强和偏弱情景权重暂不因美股变化。","opening_verification":["观察算力核心竞价承接和板块扩散"]},
+		"tomorrow_outlook":"A股基础路径仍是分歧中延续，美股暂未提供可靠增量映射，不调整三情景排序；关键验证变量是核心承接与板块扩散。",
 		"tomorrow_playbook":{"pre_open":["观察竞价"],"opening":["观察核心承接"],"intraday":["观察扩散"],"close":["确认强弱"]},
 		"catalysts":["资金回流"],"risks":["共识拥挤"],"verification_checklist":["核心股是否承接"],"limitations":["仅两位作者"]
 	}`,
@@ -205,7 +207,7 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.ArticleCount != 3 || summary.AuthorCount != 2 || len(summary.AuthorViews) != 2 || len(summary.Consensus) != 1 || summary.Consensus[0].SupportCount != 2 {
+	if summary.ArticleCount != 3 || summary.AuthorCount != 2 || len(summary.AuthorViews) != 2 || len(summary.Consensus) != 1 || summary.Consensus[0].SupportCount != 2 || summary.TomorrowPlanDegraded {
 		t.Fatalf("summary = %+v", summary)
 	}
 	if summary.AuthorViews[0].Sources[0].URL == "" || summary.AuthorViews[0].Sources[0].PostID == "" {
@@ -259,7 +261,7 @@ func (fakeDailyMarketProvider) Snapshot(_ context.Context, capturedAt time.Time)
 		Indexes:        []DailyUSMarketIndex{{ID: "nasdaq", Name: "纳斯达克", ChangePercent: 1.25, Price: 21000, Source: "test"}},
 		LeadingSectors: []DailyUSMarketSector{{ProxySymbol: "XLK", Name: "信息技术", ChangePercent: 2.1, Source: "test"}},
 		LaggingSectors: []DailyUSMarketSector{{ProxySymbol: "XLE", Name: "能源", ChangePercent: -0.8, Source: "test"}},
-		DataQuality:    []string{},
+		DataQuality:    []string{"主行情源不提供美股板块ETF，已切换备用行情"},
 	}, nil
 }
 
@@ -275,7 +277,7 @@ func TestAutomationCapturesUSMarketAtSummaryStartAndIncludesItInFinalPrompt(t *t
 	}
 	prompter := &stagedSummaryPrompter{
 		authorContent: map[string]string{"作者甲": `{"core_view":"市场等待明日确认","market_interpretation":"分歧","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`},
-		finalContent:  validDailySummaryJSON("综合结论"),
+		finalContent:  validDailySummaryJSONWithUS("综合结论"),
 	}
 	automation := NewAutomation(store, nil, nil, nil, "", prompter)
 	automation.SetDailyMarketProvider(fakeDailyMarketProvider{})
@@ -283,8 +285,14 @@ func TestAutomationCapturesUSMarketAtSummaryStartAndIncludesItInFinalPrompt(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.USMarket.Indexes[0].ID != "nasdaq" || summary.USMarket.LeadingSectors[0].ProxySymbol != "XLK" || summary.USMarketSummary == "" || !strings.Contains(summary.TomorrowOutlook, "隔夜美股事实") || !strings.Contains(summary.TomorrowOutlook, "纳斯达克") {
+	if summary.USMarket.Indexes[0].ID != "nasdaq" || summary.USMarket.LeadingSectors[0].ProxySymbol != "XLK" || summary.USMarketSummary == "" || strings.Contains(summary.TomorrowOutlook, "隔夜美股事实") || summary.TomorrowPlanDegraded {
 		t.Fatalf("US market snapshot was not persisted: %+v", summary.USMarket)
+	}
+	if !strings.Contains(summary.TomorrowOutlook, "A股内部基线：") || !strings.Contains(summary.TomorrowOutlook, "美股影响（强化）") || !strings.Contains(summary.TomorrowOutlook, "情景调整：") || !strings.Contains(summary.TomorrowOutlook, "开盘验证：") || strings.Contains(summary.TomorrowOutlook, "+1.25%") {
+		t.Fatalf("tomorrow outlook was not synthesized from the US market impact: %q", summary.TomorrowOutlook)
+	}
+	if strings.Contains(summary.USMarketSummary, "数据质量") || strings.Contains(summary.USMarketSummary, "主行情源") || strings.Contains(summary.USMarketSummary, "等待外部数据确认") || strings.Contains(strings.Join(summary.Limitations, "；"), "主行情源") {
+		t.Fatalf("US market display summary contains internal diagnostics or duplicate interpretation: %q limitations=%v", summary.USMarketSummary, summary.Limitations)
 	}
 	finalPrompts := []string{}
 	for _, prompt := range prompter.Prompts() {
@@ -293,8 +301,19 @@ func TestAutomationCapturesUSMarketAtSummaryStartAndIncludesItInFinalPrompt(t *t
 		}
 	}
 	finalPrompt := strings.Join(finalPrompts, "\n")
-	if !strings.Contains(finalPrompt, "本次发起时抓取的美股隔夜快照JSON") || !strings.Contains(finalPrompt, "纳斯达克") || !strings.Contains(finalPrompt, "XLK") {
+	if !strings.Contains(finalPrompt, "本次发起时抓取的美股隔夜快照JSON") || !strings.Contains(finalPrompt, "纳斯达克") || !strings.Contains(finalPrompt, "XLK") || !strings.Contains(finalPrompt, "传导路径") || !strings.Contains(finalPrompt, "scenario_adjustment") || !strings.Contains(finalPrompt, "不要罗列美股指数和ETF涨跌幅") {
 		t.Fatalf("final prompt did not include US market context: %q", finalPrompt)
+	}
+}
+
+func TestParseDailyTomorrowPlanRequiresIntegratedUSMarketImpact(t *testing.T) {
+	_, err := parseDailyTomorrowPlanModel(`{"a_share_baseline":"A股修复","tomorrow_outlook":"等待确认"}`)
+	if err == nil || !strings.Contains(err.Error(), "美股影响方向") {
+		t.Fatalf("parse error = %v, want missing US market impact", err)
+	}
+	model, err := parseDailyTomorrowPlanModel(validTomorrowPlanJSONWithUS("美股科技强势强化A股已有科技线预期，仍以竞价共振为确认。"))
+	if err != nil || model.USMarketImpact.Bias != "强化" || len(model.USMarketImpact.OpeningVerification) == 0 || !strings.Contains(model.TomorrowOutlook, "A股内部基线：") || !strings.Contains(model.TomorrowOutlook, "情景调整：") || !strings.Contains(model.TomorrowOutlook, "开盘验证：") {
+		t.Fatalf("model=%+v err=%v", model, err)
 	}
 }
 
@@ -417,7 +436,7 @@ func TestAutomationRetainsLocalFallbackWhenFinalJSONRepairFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !summary.Partial || len(summary.GenerationErrors) != 2 || summary.MarketRegime != "样本待综合" || !strings.Contains(summary.ExecutiveSummary, "作者观点卡摘要") || !strings.Contains(strings.Join(summary.Limitations, "；"), "本地聚合结果") {
+	if !summary.Partial || !summary.TomorrowPlanDegraded || len(summary.GenerationErrors) != 2 || summary.MarketRegime != "样本待综合" || !strings.Contains(summary.ExecutiveSummary, "作者观点卡摘要") || !strings.Contains(strings.Join(summary.Limitations, "；"), "本地聚合结果") {
 		t.Fatalf("fallback summary = %+v", summary)
 	}
 }
@@ -430,14 +449,16 @@ func TestAutomationPreservesSuccessfulFinalPhaseWhenOtherPhaseFails(t *testing.T
 		wantExecutive        string
 		wantTomorrow         string
 		wantGenerationPrefix string
+		wantTomorrowDegraded bool
 	}{
 		{
 			name:                 "market phase fails",
 			market:               []queuedPromptResponse{{content: "bad"}, {content: "still bad"}},
 			tomorrow:             []queuedPromptResponse{{content: validTomorrowPlanJSON("明日阶段成功保留")}},
 			wantExecutive:        "作者观点卡摘要",
-			wantTomorrow:         "明日阶段成功保留",
+			wantTomorrow:         "A股内部基线",
 			wantGenerationPrefix: "市场结构归纳：",
+			wantTomorrowDegraded: false,
 		},
 		{
 			name:                 "tomorrow phase fails",
@@ -446,6 +467,7 @@ func TestAutomationPreservesSuccessfulFinalPhaseWhenOtherPhaseFails(t *testing.T
 			wantExecutive:        "市场阶段成功保留",
 			wantTomorrow:         "作者观点卡中的明日预期",
 			wantGenerationPrefix: "明日计划归纳：",
+			wantTomorrowDegraded: true,
 		},
 	}
 	for _, test := range tests {
@@ -475,6 +497,9 @@ func TestAutomationPreservesSuccessfulFinalPhaseWhenOtherPhaseFails(t *testing.T
 			}
 			if !strings.Contains(summary.ExecutiveSummary, test.wantExecutive) || !strings.Contains(summary.TomorrowOutlook, test.wantTomorrow) {
 				t.Fatalf("successful phase was not preserved: %+v", summary)
+			}
+			if summary.TomorrowPlanDegraded != test.wantTomorrowDegraded {
+				t.Fatalf("tomorrow outlook degraded=%v, want %v", summary.TomorrowPlanDegraded, test.wantTomorrowDegraded)
 			}
 			cached := cachedDailySummaryJob(summary)
 			if cached.Status != "partial" || cached.Stage != "partial" || !cached.SummaryAvailable || !strings.Contains(cached.Error, test.wantGenerationPrefix) {
@@ -549,7 +574,7 @@ func TestAutomationSkipsFailedAuthorSummaryAndContinues(t *testing.T) {
 			"作者丙": `{"core_view":"丙观点","market_interpretation":"分歧","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"丙预期","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`,
 		},
 		authorErrors: map[string]error{"作者乙": errors.New("上游模型暂时不可用")},
-		finalContent: `{"executive_summary":"两位成功作者的综合结论","market_regime":"混沌","market_analysis":"观点存在差异","consensus":[],"disagreements":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`,
+		finalContent: validDailySummaryJSON("两位成功作者的综合结论"),
 	}
 	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), nil, http.DefaultClient, "", prompter)
 	summary, err := automation.SummarizeToday(context.Background())
@@ -580,7 +605,7 @@ func TestAutomationRunsDailySummaryAsPersistentBackgroundJob(t *testing.T) {
 	prompter := &blockingSummaryPrompter{
 		started:      make(chan struct{}, 2),
 		release:      make(chan struct{}),
-		finalContent: `{"executive_summary":"后台综合结论","market_regime":"修复","market_analysis":"两位作者完成归纳","consensus":[],"disagreements":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`,
+		finalContent: validDailySummaryJSON("后台综合结论"),
 	}
 	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), nil, http.DefaultClient, "", prompter)
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
@@ -969,7 +994,11 @@ func validAuthorSummaryJSON(coreView string) string {
 }
 
 func validDailySummaryJSON(executiveSummary string) string {
-	return fmt.Sprintf(`{"executive_summary":%q,"market_regime":"修复","market_analysis":"观点等待确认","market_framework":{"cycle":"修复","capital_pricing":"等待确认","direction_competition":"等待确认","trading_method":"观察验证"},"consensus":[],"disagreements":[],"scenarios":[],"directions":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, executiveSummary)
+	return fmt.Sprintf(`{"executive_summary":%q,"market_regime":"修复","market_analysis":"观点等待确认","market_framework":{"cycle":"修复","capital_pricing":"等待确认","direction_competition":"等待确认","trading_method":"观察验证"},"consensus":[],"disagreements":[],"scenarios":[],"directions":[],"today_surprises":[],"tomorrow_focus":[],"a_share_baseline":"A股内部维持修复基线","us_market_impact":{"bias":"数据不可用","transmission":"美股数据不可用，不调整A股内部预期。","scenario_adjustment":"基础、偏强和偏弱情景仍由A股内部信号切换。","opening_verification":["竞价强度与核心承接是否共振"]},"tomorrow_outlook":"A股内部维持修复基线，美股数据不可用，仍需竞价强度与核心承接确认。","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, executiveSummary)
+}
+
+func validDailySummaryJSONWithUS(executiveSummary string) string {
+	return fmt.Sprintf(`{"executive_summary":%q,"market_regime":"修复","market_analysis":"观点等待确认","market_framework":{"cycle":"修复","capital_pricing":"等待确认","direction_competition":"等待确认","trading_method":"观察验证"},"consensus":[],"disagreements":[],"scenarios":[],"directions":[],"today_surprises":[],"tomorrow_focus":[],"a_share_baseline":"A股内部维持修复基线","us_market_impact":{"bias":"强化","transmission":"美股科技强势对输入已有科技方向形成正向外部验证，但不能替代A股内部确认。","scenario_adjustment":"偏强情景获得外部支持，基础与偏弱情景仍由A股内部信号切换。","opening_verification":["相关方向竞价强度与核心承接是否共振"]},"tomorrow_outlook":"A股内部维持修复基线，美股科技强势提供条件式支持，但仍需竞价强度与核心承接共振确认。","tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, executiveSummary)
 }
 
 func validMarketSynthesisJSON(executiveSummary string) string {
@@ -977,7 +1006,11 @@ func validMarketSynthesisJSON(executiveSummary string) string {
 }
 
 func validTomorrowPlanJSON(outlook string) string {
-	return fmt.Sprintf(`{"scenarios":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":%q,"tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, outlook)
+	return fmt.Sprintf(`{"scenarios":[],"today_surprises":[],"tomorrow_focus":[],"a_share_baseline":"A股内部维持修复基线","us_market_impact":{"bias":"数据不可用","transmission":"美股数据不可用，不调整A股内部预期。","scenario_adjustment":"基础、偏强和偏弱情景仍由A股内部信号切换。","opening_verification":["竞价强度与核心承接是否共振"]},"tomorrow_outlook":%q,"tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, outlook)
+}
+
+func validTomorrowPlanJSONWithUS(outlook string) string {
+	return fmt.Sprintf(`{"scenarios":[],"today_surprises":[],"tomorrow_focus":[],"a_share_baseline":"A股内部维持修复基线","us_market_impact":{"bias":"强化","transmission":"美股科技强势对输入已有科技方向形成正向外部验证，但不能替代A股内部确认。","scenario_adjustment":"偏强情景获得外部支持，基础与偏弱情景仍由A股内部信号切换。","opening_verification":["相关方向竞价强度与核心承接是否共振"]},"tomorrow_outlook":%q,"tomorrow_playbook":{"pre_open":[],"opening":[],"intraday":[],"close":[]},"catalysts":[],"risks":[],"verification_checklist":[],"limitations":[]}`, outlook)
 }
 
 type blockingSummaryPrompter struct {

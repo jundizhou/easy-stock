@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v9"
+	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v10"
 	maxDailySummaryAuthors       = 30
 	maxDailySummaryPosts         = 1000
 	maxAuthorSummaryConcurrency  = 3
@@ -130,15 +130,24 @@ type dailyMarketSynthesisModel struct {
 }
 
 type dailyTomorrowPlanModel struct {
-	Scenarios             []DailyScenario  `json:"scenarios"`
-	TodaySurprises        []DailyStockView `json:"today_surprises"`
-	TomorrowFocus         []DailyStockView `json:"tomorrow_focus"`
-	TomorrowOutlook       string           `json:"tomorrow_outlook"`
-	TomorrowPlaybook      DailyPlaybook    `json:"tomorrow_playbook"`
-	Catalysts             []string         `json:"catalysts"`
-	Risks                 []string         `json:"risks"`
-	VerificationChecklist []string         `json:"verification_checklist"`
-	Limitations           []string         `json:"limitations"`
+	Scenarios             []DailyScenario          `json:"scenarios"`
+	TodaySurprises        []DailyStockView         `json:"today_surprises"`
+	TomorrowFocus         []DailyStockView         `json:"tomorrow_focus"`
+	AShareBaseline        string                   `json:"a_share_baseline"`
+	USMarketImpact        dailyUSMarketImpactModel `json:"us_market_impact"`
+	TomorrowOutlook       string                   `json:"tomorrow_outlook"`
+	TomorrowPlaybook      DailyPlaybook            `json:"tomorrow_playbook"`
+	Catalysts             []string                 `json:"catalysts"`
+	Risks                 []string                 `json:"risks"`
+	VerificationChecklist []string                 `json:"verification_checklist"`
+	Limitations           []string                 `json:"limitations"`
+}
+
+type dailyUSMarketImpactModel struct {
+	Bias                string   `json:"bias"`
+	Transmission        string   `json:"transmission"`
+	ScenarioAdjustment  string   `json:"scenario_adjustment"`
+	OpeningVerification []string `json:"opening_verification"`
 }
 
 type dailyFinalPhaseResult[T any] struct {
@@ -523,7 +532,17 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		marketResult <- dailyFinalPhaseResult[dailyMarketSynthesisModel]{Model: model, Err: promptErr}
 	}()
 	go func() {
-		model, promptErr := promptDailySummaryJSON(ctx, a.prompter, tomorrowPrompt, "明日计划归纳", parseDailyTomorrowPlanModel)
+		parseForCapturedMarket := func(content string) (dailyTomorrowPlanModel, error) {
+			model, parseErr := parseDailyTomorrowPlanModel(content)
+			if parseErr != nil {
+				return dailyTomorrowPlanModel{}, parseErr
+			}
+			if !dailyUSMarketDataAvailable(dailyMarket) && model.USMarketImpact.Bias != "数据不可用" {
+				return dailyTomorrowPlanModel{}, errors.New("美股快照无有效行情，但模型仍调整了A股预期")
+			}
+			return model, nil
+		}
+		model, promptErr := promptDailySummaryJSON(ctx, a.prompter, tomorrowPrompt, "明日计划归纳", parseForCapturedMarket)
 		tomorrowResult <- dailyFinalPhaseResult[dailyTomorrowPlanModel]{Model: model, Err: promptErr}
 	}()
 	marketPhase := <-marketResult
@@ -540,7 +559,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	}
 	if tomorrowPhase.Err != nil {
 		generationErrors = append(generationErrors, "明日计划归纳："+tomorrowPhase.Err.Error())
-		tomorrowFallback := fallbackDailyTomorrowPlanModel(viewpoints)
+		tomorrowFallback := fallbackDailyTomorrowPlanModel(viewpoints, dailyMarket)
 		if marketPhase.Err != nil {
 			model = mergeDailySummaryPhases(fallbackDailyMarketSynthesisModel(viewpoints), tomorrowFallback)
 		} else {
@@ -548,14 +567,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		}
 	}
 	factualUSMarketSummary := summarizeDailyUSMarket(dailyMarket)
-	if modelSummary := strings.TrimSpace(model.USMarketSummary); modelSummary == "" {
-		model.USMarketSummary = factualUSMarketSummary
-	} else if modelSummary != factualUSMarketSummary {
-		model.USMarketSummary = factualUSMarketSummary + "；影响解读：" + modelSummary
-	}
-	if !strings.Contains(model.TomorrowOutlook, factualUSMarketSummary) {
-		model.TomorrowOutlook = "隔夜美股事实：" + factualUSMarketSummary + "；" + strings.TrimSpace(model.TomorrowOutlook)
-	}
+	model.USMarketSummary = factualUSMarketSummary
 	normalizeDailySummaryModel(&model, viewpoints)
 	if len(allGroups) > len(selectedGroups) {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("有效窗口内共有%d位作者，按最近更新时间选取最多%d位参与总结", len(allGroups), maxDailySummaryAuthors))
@@ -568,9 +580,6 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	}
 	if truncatedAuthors > 0 {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者文章较多，作者归纳阶段优先保留较新的文章并按上下文上限截取", truncatedAuthors))
-	}
-	if len(dailyMarket.DataQuality) > 0 {
-		model.Limitations = append(model.Limitations, "美股数据限制："+strings.Join(dailyMarket.DataQuality, "；"))
 	}
 	model.Limitations = cleanStringList(model.Limitations)
 
@@ -599,6 +608,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		TodaySurprises:        model.TodaySurprises,
 		TomorrowFocus:         model.TomorrowFocus,
 		TomorrowOutlook:       model.TomorrowOutlook,
+		TomorrowPlanDegraded:  tomorrowPhase.Err != nil,
 		TomorrowPlaybook:      model.TomorrowPlaybook,
 		Catalysts:             model.Catalysts,
 		Risks:                 model.Risks,
@@ -1070,23 +1080,21 @@ func buildDailySummaryPhasePrompts(window reviewFreshnessWindow, viewpoints []Da
 	if err != nil {
 		return "", "", fmt.Errorf("整理美股隔夜数据: %w", err)
 	}
-	contextBlock := `
+	viewpointContext := `
 统计日期：` + window.TradeDate + `（Asia/Shanghai）
 有效文章窗口：` + window.Start.Format("2006-01-02 15:04") + ` 至 ` + window.End.Format("2006-01-02 15:04") + `
 时效规则：` + window.Rule + `
-本次发起时抓取的美股隔夜快照JSON：` + string(marketData) + `
 输入作者观点卡JSON：` + string(viewpointData)
 
 	marketPrompt := `任务阶段：跨作者市场结构归纳。
-你是资深A股短线复盘研究员。输入是逐位作者独立归纳后的观点卡和本次复盘发起时抓取的美股快照。只完成“市场结构、共识分歧、方向优先级”归纳，不生成明日三情景、个股计划或检查清单。
+你是资深A股短线复盘研究员。输入是逐位作者独立归纳后的观点卡。只完成“市场结构、共识分歧、方向优先级”归纳，不生成明日三情景、个股计划或检查清单，也不使用收盘后才发生的美股行情解释当日A股盘面。
 
 规则：
 1. 每位作者只算一票，support_count 按不同作者计数；共识至少需要2位作者支持。
 2. 只能使用输入数据，不得编造指数、成交额、公告、股票代码或盘中事实；预测必须与事实分开。
 3. executive_summary、market_analysis、market_framework 是统一归纳，不逐位复述作者；作者姓名只放在证据型字段。
 4. disagreements 保留不同作者的真实立场，不强行求同。directions 只保留观点卡有依据的方向和个股。
-5. 美股部分先写输入快照事实，再写对A股的可能影响；数据缺失时明确说明，不补造行情。
-6. 输入较多时可调用 execute_code 做主题归并、去重和按作者计票，也可用只读Web工具核验公开背景。工具结果只是中间材料，最终必须继续返回严格JSON。
+5. 输入较多时可调用 execute_code 做主题归并、去重和按作者计票，也可用只读Web工具核验公开背景。工具结果只是中间材料，最终必须继续返回严格JSON。
 
 只返回一个合法JSON对象，不要Markdown、解释或思考过程。字段必须完整：
 {
@@ -1094,24 +1102,27 @@ func buildDailySummaryPhasePrompts(window reviewFreshnessWindow, viewpoints []Da
   "market_regime":"修复/分歧/加速/退潮/混沌或样本不足",
   "market_analysis":"主线、支线、情绪、核心与后排关系",
   "market_framework":{"cycle":"周期位置与依据","capital_pricing":"资金奖励和惩罚特征","direction_competition":"方向竞争关系","trading_method":"观察与执行方法"},
-  "us_market_summary":"美股指数和板块事实，以及对A股的条件式影响",
   "consensus":[{"topic":"主题","conclusion":"共同结论","support_count":2,"authors":["作者"],"evidence":["[作者] 观点摘要"]}],
   "disagreements":[{"topic":"主题","views":["立场"],"authors":["作者"],"positions":[{"author":"作者","stance":"立场","view":"判断","evidence":"[作者] 证据摘要"}]}],
   "directions":[{"name":"方向","stance":"优先观察/等待证明/谨慎追高/事件博弈/回避","summary":"定位与竞争关系","supporting_authors":["作者"],"opposing_authors":["作者"],"stocks":["观点卡明确提到的个股"],"trigger":"确认条件","invalidation":"失效条件","risks":["风险"]}],
   "limitations":["样本和结论局限"]
-}` + contextBlock
+}` + viewpointContext
 
 	tomorrowPrompt := `任务阶段：跨作者明日计划归纳。
-你是资深A股短线复盘研究员。输入是逐位作者独立归纳后的观点卡和本次复盘发起时抓取的美股快照。只完成“明日情景、个股关注、行动剧本和验证清单”，不重复生成市场共识、分歧和方向总表。
+	你是资深A股短线复盘研究员。输入是逐位作者独立归纳后的观点卡和本次复盘发起时抓取的美股快照。只完成“明日情景、个股关注、行动剧本和验证清单”，不重复生成市场共识、分歧和方向总表。
 
 规则：
-1. 只能使用输入数据，不得编造行情、公告、股票代码或确定性预测。美股只作为条件式外部变量。
-2. scenarios 必须恰好覆盖 base、strong、weak 三种可区分情景，并写清触发、确认和失效条件。
-3. today_surprises 必须有观点卡中的明确超预期证据；tomorrow_focus 只保留有逻辑、触发、失效和风险的个股。
-4. 个股 support_count 按不同作者计数，symbol 仅在观点卡明确提供时填写，不得猜测。
-5. 明日剧本覆盖竞价/盘前、开盘前30分钟、盘中确认和收盘验证；不得给出直接买卖指令。
-6. verification_checklist 给出5至10条可逐项核对的信号。识别拥挤、利好兑现、缩量加速、后排掉队和负反馈扩散风险。
-7. 输入较多时可调用 execute_code 做去重、按作者计票和条件归类，也可用只读Web工具核验公开背景。工具结果只是中间材料，最终必须继续返回严格JSON。
+	1. 先仅依据作者观点卡形成 a_share_baseline，再分析美股外部变量，最后形成综合明日预期；不得用美股涨跌替代A股内部结构判断。
+	2. 美股影响必须写清“传导路径”：哪些输入中已有的A股方向可能强化、削弱或分化，以及为什么。没有可验证映射时写中性，不得为了建立联系而补造题材、个股或因果关系。
+	3. us_market_impact.bias 只能是“强化”“削弱”“分化”“中性”或“数据不可用”；scenario_adjustment 必须说明美股信号如何调整基础、偏强、偏弱情景，而不是复述指数涨跌；opening_verification 必须给出A股竞价或开盘可验证信号。
+	4. tomorrow_outlook 必须综合 a_share_baseline 和 us_market_impact，明确最终基础路径、相对原A股预期的调整和最关键验证变量；不要罗列美股指数和ETF涨跌幅。
+	5. 只能使用输入数据，不得编造行情、公告、股票代码或确定性预测。美股只作为条件式外部变量；美股数据不可用时不得调整A股基线，并如实写明。
+	6. scenarios 必须恰好覆盖 base、strong、weak 三种可区分情景，并写清触发、确认和失效条件。
+	7. today_surprises 必须有观点卡中的明确超预期证据；tomorrow_focus 只保留有逻辑、触发、失效和风险的个股。
+	8. 个股 support_count 按不同作者计数，symbol 仅在观点卡明确提供时填写，不得猜测。
+	9. 明日剧本覆盖竞价/盘前、开盘前30分钟、盘中确认和收盘验证；不得给出直接买卖指令。
+	10. verification_checklist 给出5至10条可逐项核对的信号。识别拥挤、利好兑现、缩量加速、后排掉队和负反馈扩散风险。
+	11. 输入较多时可调用 execute_code 做去重、按作者计票和条件归类，也可用只读Web工具核验公开背景。工具结果只是中间材料，最终必须继续返回严格JSON。
 
 只返回一个合法JSON对象，不要Markdown、解释或思考过程。字段必须完整：
 {
@@ -1119,16 +1130,19 @@ func buildDailySummaryPhasePrompts(window reviewFreshnessWindow, viewpoints []Da
     {"key":"base","name":"基础情景","summary":"最大概率路径","trigger":"触发","confirmation":"确认","invalidation":"失效","focus":["关注变量"]},
     {"key":"strong","name":"偏强情景","summary":"超预期路径","trigger":"触发","confirmation":"确认","invalidation":"失效","focus":["关注变量"]},
     {"key":"weak","name":"偏弱情景","summary":"负反馈路径","trigger":"触发","confirmation":"确认","invalidation":"失效","focus":["关注变量"]}
-  ],
-  "today_surprises":[{"name":"个股","symbol":"仅明确提供时填写","logic":"超预期原因","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"已确认信号","invalidation":"后续失效条件","risk":"风险"}],
-  "tomorrow_focus":[{"name":"个股","symbol":"仅明确提供时填写","logic":"关注逻辑","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"明日确认信号","invalidation":"明日失效条件","risk":"风险"}],
-  "tomorrow_outlook":"基础路径和最关键验证变量",
-  "tomorrow_playbook":{"pre_open":["竞价/盘前观察"],"opening":["开盘前30分钟观察"],"intraday":["盘中确认"],"close":["收盘验证"]},
+	  ],
+	  "today_surprises":[{"name":"个股","symbol":"仅明确提供时填写","logic":"超预期原因","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"已确认信号","invalidation":"后续失效条件","risk":"风险"}],
+	  "tomorrow_focus":[{"name":"个股","symbol":"仅明确提供时填写","logic":"关注逻辑","support_count":1,"authors":["作者"],"evidence":["[作者] 观点摘要"],"trigger":"明日确认信号","invalidation":"明日失效条件","risk":"风险"}],
+	  "a_share_baseline":"不考虑美股时，由作者观点卡归纳出的A股内部基础路径",
+	  "us_market_impact":{"bias":"强化/削弱/分化/中性/数据不可用","transmission":"美股行业强弱如何传导到输入中已有的A股方向；无可靠映射时明确中性","scenario_adjustment":"对基础、偏强、偏弱情景的具体调整","opening_verification":["A股竞价或开盘确认信号"]},
+	  "tomorrow_outlook":"综合A股内部基线和美股条件式影响后的基础路径、调整与关键验证变量，不复述美股行情数字",
+	  "tomorrow_playbook":{"pre_open":["竞价/盘前观察"],"opening":["开盘前30分钟观察"],"intraday":["盘中确认"],"close":["收盘验证"]},
   "catalysts":["输入可支持的催化"],
   "risks":["主要风险"],
   "verification_checklist":["明日可核对信号"],
   "limitations":["样本和结论局限"]
-}` + contextBlock
+	}` + viewpointContext + `
+本次发起时抓取的美股隔夜快照JSON：` + string(marketData)
 	return marketPrompt, tomorrowPrompt, nil
 }
 
@@ -1160,12 +1174,52 @@ func parseDailyTomorrowPlanModel(content string) (dailyTomorrowPlanModel, error)
 		if strings.TrimSpace(parsed.TomorrowOutlook) == "" {
 			return errors.New("缺少明日预期")
 		}
+		if strings.TrimSpace(parsed.AShareBaseline) == "" {
+			return errors.New("缺少不受美股影响的A股内部基线")
+		}
+		parsed.USMarketImpact.Bias = strings.TrimSpace(parsed.USMarketImpact.Bias)
+		if !validUSMarketImpactBias(parsed.USMarketImpact.Bias) {
+			return errors.New("缺少有效的美股影响方向")
+		}
+		if strings.TrimSpace(parsed.USMarketImpact.Transmission) == "" || strings.TrimSpace(parsed.USMarketImpact.ScenarioAdjustment) == "" || len(cleanStringList(parsed.USMarketImpact.OpeningVerification)) == 0 {
+			return errors.New("美股传导、情景调整或开盘验证不完整")
+		}
+		parsed.USMarketImpact.OpeningVerification = cleanStringList(parsed.USMarketImpact.OpeningVerification)
+		parsed.TomorrowOutlook = formatIntegratedTomorrowOutlook(parsed)
 		result = parsed
 		return nil
 	}); err != nil {
 		return dailyTomorrowPlanModel{}, fmt.Errorf("Hermes 明日计划归纳未返回有效 JSON: %w", err)
 	}
 	return result, nil
+}
+
+func formatIntegratedTomorrowOutlook(model dailyTomorrowPlanModel) string {
+	return fmt.Sprintf(
+		"A股内部基线：%s；美股影响（%s）：%s；情景调整：%s；开盘验证：%s。",
+		trimDailySummaryClause(model.AShareBaseline),
+		strings.TrimSpace(model.USMarketImpact.Bias),
+		trimDailySummaryClause(model.USMarketImpact.Transmission),
+		trimDailySummaryClause(model.USMarketImpact.ScenarioAdjustment),
+		trimDailySummaryClause(strings.Join(model.USMarketImpact.OpeningVerification, "、")),
+	)
+}
+
+func trimDailySummaryClause(value string) string {
+	return strings.TrimRight(strings.TrimSpace(value), "；;。. \t\r\n")
+}
+
+func dailyUSMarketDataAvailable(data DailyUSMarket) bool {
+	return len(data.Indexes) > 0 || len(data.LeadingSectors) > 0 || len(data.LaggingSectors) > 0
+}
+
+func validUSMarketImpactBias(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "强化", "削弱", "分化", "中性", "数据不可用":
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeDailySummaryPhases(market dailyMarketSynthesisModel, tomorrow dailyTomorrowPlanModel) dailySummaryModel {
@@ -1384,7 +1438,7 @@ func fallbackDailyMarketSynthesisModel(viewpoints []DailyAuthorView) dailyMarket
 	}
 }
 
-func fallbackDailyTomorrowPlanModel(viewpoints []DailyAuthorView) dailyTomorrowPlanModel {
+func fallbackDailyTomorrowPlanModel(viewpoints []DailyAuthorView, dailyMarket DailyUSMarket) dailyTomorrowPlanModel {
 	outlooks := make([]string, 0, min(len(viewpoints), 5))
 	todaySurprises := []DailyStockView{}
 	tomorrowFocus := []DailyStockView{}
@@ -1403,6 +1457,11 @@ func fallbackDailyTomorrowPlanModel(viewpoints []DailyAuthorView) dailyTomorrowP
 	if len(outlooks) > 0 {
 		outlook = "作者观点卡中的明日预期：" + strings.Join(outlooks, "；")
 	}
+	if !dailyUSMarketDataAvailable(dailyMarket) {
+		outlook += "；美股隔夜数据不可用，本地保底结果未调整A股内部预期。"
+	} else {
+		outlook += "；美股隔夜快照已获取，但本地保底无法可靠完成行业传导映射，请以A股竞价和开盘共振为确认条件。"
+	}
 	return dailyTomorrowPlanModel{
 		TodaySurprises:  todaySurprises,
 		TomorrowFocus:   tomorrowFocus,
@@ -1415,9 +1474,6 @@ func fallbackDailyTomorrowPlanModel(viewpoints []DailyAuthorView) dailyTomorrowP
 
 func summarizeDailyUSMarket(data DailyUSMarket) string {
 	if len(data.Indexes) == 0 && len(data.LeadingSectors) == 0 && len(data.LaggingSectors) == 0 {
-		if len(data.DataQuality) > 0 {
-			return "美股隔夜数据不可用：" + strings.Join(data.DataQuality, "；")
-		}
 		return "美股隔夜数据不可用，明日预期不纳入美股方向判断。"
 	}
 	indexes := make([]string, 0, len(data.Indexes))
@@ -1444,9 +1500,6 @@ func summarizeDailyUSMarket(data DailyUSMarket) string {
 	}
 	if data.AsOf != "" {
 		parts = append(parts, "数据时间："+data.AsOf)
-	}
-	if len(data.DataQuality) > 0 {
-		parts = append(parts, "数据质量："+strings.Join(data.DataQuality, "；"))
 	}
 	return strings.Join(parts, "；")
 }
