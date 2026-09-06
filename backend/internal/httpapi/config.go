@@ -75,6 +75,12 @@ type HotStockProvider interface {
 	HotStockRanks(ctx context.Context, limit int) []foundation.HotStockRankList
 }
 
+type FuturesPositionProvider interface {
+	Trend(ctx context.Context, variety string, limit int) (foundation.MarketFuturesPositionSeries, error)
+	Members(ctx context.Context, contract string, tradeDate string) (foundation.MarketFuturesMembers, error)
+	Consensus(ctx context.Context, tradeDate string) (foundation.MarketFuturesConsensus, error)
+}
+
 type MarketOverviewProvider interface {
 	MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
 	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
@@ -110,6 +116,7 @@ type Config struct {
 	StockBusiness        StockBusinessProfileProvider
 	StockDirectory       StockDirectoryProvider
 	HotStocks            HotStockProvider
+	FuturesPosition      FuturesPositionProvider
 	MarketOverview       MarketOverviewProvider
 	Inflection           InflectionEvaluator
 	ReviewDBPath         string

@@ -5,6 +5,8 @@ import type {
 	MarketIndexSnapshot,
 	MarketIndustryMomentum,
 	MarketMarginPoint,
+	MarketFuturesPositionSeries,
+	MarketFuturesConsensus,
 	MarketResearchItem,
 	NewsItem,
 	SourceMeta,
@@ -12,6 +14,7 @@ import type {
 	LimitUpLadderData,
 } from './backend';
 import { BILLBOARD_SEAT_MAPPINGS } from '../data/billboard-seat-mappings';
+import { formatFuturesOpeningHands } from './futures-position';
 
 export type MarketOverviewView =
 	| 'pulse'
@@ -21,6 +24,7 @@ export type MarketOverviewView =
 	| 'theme-flow'
 	| 'stock-flow'
 	| 'margin-balance'
+	| 'futures-position'
 	| 'billboard'
 	| 'announcements'
 	| 'institution-reports'
@@ -57,6 +61,7 @@ export const marketOverviewGroups: MarketOverviewGroup[] = [
 			{ id: 'theme-flow', name: '题材概念', description: '题材概念资金强度与领涨结构', status: 'ready' },
 			{ id: 'stock-flow', name: '个股资金流入流出', description: '个股总资金、主力与散户流向排名', status: 'ready' },
 			{ id: 'margin-balance', name: '融资融券余额', description: '全市场两融余额与融资、融券趋势', status: 'ready' },
+			{ id: 'futures-position', name: '机构多空单', description: '股指期货前20会员多空单共识统计', status: 'ready' },
 			{ id: 'billboard', name: '龙虎榜', description: '机构席位、营业部和上榜原因', status: 'ready' },
 		],
 	},
@@ -112,6 +117,8 @@ export type MarketOverviewEvidence = {
 	industries?: MarketIndustryMomentum[];
 	flows?: MarketFundFlow[];
 	margins?: MarketMarginPoint[];
+	futures?: MarketFuturesPositionSeries | null;
+	futuresConsensus?: MarketFuturesConsensus | null;
 	billboard?: MarketBillboardItem[];
 	research?: MarketResearchItem[];
 	meta?: SourceMeta | null;
@@ -263,6 +270,15 @@ export function buildMarketModulePrompt(view: Exclude<MarketOverviewView, 'pulse
 	if (evidence.margins?.length) {
 		lines.push(...evidence.margins.slice(-30).map((item, index) => `${index + 1}. ${item.trade_date}：两融余额 ${formatLargeMoney(item.margin_balance)}，融资余额 ${formatLargeMoney(item.financing_balance)}，融券余额 ${formatLargeMoney(item.securities_lending_balance)}，两融余额日变动 ${formatLargeMoney(item.margin_balance_change)}，融资净买入 ${formatLargeMoney(item.financing_net_buy_amount)}`));
 	}
+	if (evidence.futures?.rows?.length) {
+		const latest = evidence.futures.rows.at(-1)!;
+		lines.push(`口径：股指期货${evidence.futures.variety_name}主力合约 ${evidence.futures.contract_code} 前20会员；指数 ${evidence.futures.index_code}；数据源 ${evidence.futures.meta.source}`);
+		if (evidence.futuresConsensus) {
+			const varietyLines = evidence.futuresConsensus.varieties.map((item) => `${item.variety} 前20多空单净值 ${formatFuturesOpeningHands(item.net_long_position, true)}，当日多空单变化 ${formatFuturesOpeningHands(item.net_long_change, true)}，中信 ${formatFuturesOpeningHands(item.citic_net_long_change, true)}`).join('；');
+			lines.push(`共识口径（+为多单，−为空单）：${evidence.futuresConsensus.trade_date} 全部合约前20会员多空单净值 ${formatFuturesOpeningHands(evidence.futuresConsensus.top20_net_long_position, true)}，当日多空单变化 ${formatFuturesOpeningHands(evidence.futuresConsensus.top20_net_long_change, true)}；中信期货(代客)当日多空单变化 ${formatFuturesOpeningHands(evidence.futuresConsensus.citic_net_long_change, true)}。分品种：${varietyLines || '未提供'}。`);
+		}
+		lines.push(...evidence.futures.rows.slice(-30).map((item, index) => `${index + 1}. ${item.trade_date}：多单 ${item.long_position}（${item.long_change == null ? '未提供' : formatSigned(item.long_change)}），空单 ${item.short_position}（${item.short_change == null ? '未提供' : formatSigned(item.short_change)}），净持仓 ${item.net_position}，结算价 ${item.settle_price ?? '未提供'}，现货指数 ${item.index_close ?? '未提供'}，基差 ${item.basis ?? '未提供'}`));
+	}
 	if (evidence.billboard?.length) {
 		lines.push(...evidence.billboard.slice(0, 20).map((item, index) => `${index + 1}. ${item.name}（${item.symbol}）：${item.trade_date} 上榜，净买额 ${formatMoney(item.net_amount)}，买入 ${formatMoney(item.buy_amount)}，卖出 ${formatMoney(item.sell_amount)}，机构买方 ${item.institution_buyers}，原因 ${item.reason}`));
 	}
@@ -275,6 +291,7 @@ export function buildMarketModulePrompt(view: Exclude<MarketOverviewView, 'pulse
 	return [
 		`请基于以下 easy-stock「${module.name}」证据，生成截至 ${asOf} 的分析。`,
 		'要求：严格区分事实与推断；给出核心结论、排序依据、反方证据、风险点和下一步验证条件；不得补造席位、价格、评级或实时状态。',
+		...(view === 'futures-position' ? ['特别要求：这里的“机构多空单”是股指期货前20会员持仓口径，不等于全部机构或个股资金；结合指数涨跌、基差和多空增减变化分析，明确说明数据不足时不能推断方向。'] : []),
 		`数据来源：${source}；抓取时间：${fetchedAt}${fallback}`,
 		'',
 		`【${module.name}证据】`,
@@ -287,6 +304,7 @@ function firstEvidenceSource(evidence: MarketOverviewEvidence) {
 		|| evidence.industries?.[0]?.meta.source
 		|| evidence.flows?.[0]?.meta.source
 		|| evidence.margins?.[0]?.meta.source
+		|| evidence.futures?.meta.source
 		|| evidence.billboard?.[0]?.meta.source
 		|| evidence.research?.[0]?.meta.source;
 }

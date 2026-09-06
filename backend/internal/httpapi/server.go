@@ -22,6 +22,7 @@ import (
 	"easy-stock/backend/internal/providers/cls"
 	"easy-stock/backend/internal/providers/duanxianxia"
 	"easy-stock/backend/internal/providers/eastmoney"
+	futurespositionprovider "easy-stock/backend/internal/providers/futuresposition"
 	"easy-stock/backend/internal/providers/hotstock"
 	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
 	"easy-stock/backend/internal/providers/sina"
@@ -47,6 +48,7 @@ type Server struct {
 	stockBusiness         StockBusinessProfileProvider
 	stockDirectory        StockDirectoryProvider
 	hotStockProvider      HotStockProvider
+	futuresPosition       FuturesPositionProvider
 	marketOverview        MarketOverviewProvider
 	inflection            InflectionEvaluator
 	themeSnapshots        *themeSnapshotCache
@@ -212,6 +214,9 @@ func NewServer(config any) *Server {
 	if cfg.HotStocks == nil {
 		cfg.HotStocks = hotstock.NewClient()
 	}
+	if cfg.FuturesPosition == nil {
+		cfg.FuturesPosition = futurespositionprovider.NewClient()
+	}
 	if cfg.HermesGateway != nil && (!cfg.StrictPersistence || len(startupErrors) == 0) {
 		values := cfg.SettingsStore.Snapshot()
 		var migratedKey *string
@@ -266,6 +271,7 @@ func NewServer(config any) *Server {
 		stockBusiness:         cfg.StockBusiness,
 		stockDirectory:        cfg.StockDirectory,
 		hotStockProvider:      cfg.HotStocks,
+		futuresPosition:       cfg.FuturesPosition,
 		marketOverview:        cfg.MarketOverview,
 		inflection:            cfg.Inflection,
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
@@ -430,6 +436,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/margin-balance", s.marketMarginBalanceHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard", s.marketBillboardHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard/detail", s.marketBillboardDetailHandler)
+	s.mux.HandleFunc("GET /api/v1/market/futures-position", s.marketFuturesPositionHandler)
+	s.mux.HandleFunc("GET /api/v1/market/futures-members", s.marketFuturesMembersHandler)
+	s.mux.HandleFunc("GET /api/v1/market/futures-consensus", s.marketFuturesConsensusHandler)
 	s.mux.HandleFunc("GET /api/v1/research/announcements", s.marketAnnouncementsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/institution-reports", s.marketInstitutionReportsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/industries", s.marketIndustryResearchHandler)

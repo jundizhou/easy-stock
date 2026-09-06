@@ -25,10 +25,14 @@ import type {
 	MarketIndexSnapshot,
 	MarketIndustryMomentum,
 	MarketMarginPoint,
+	MarketFuturesPositionSeries,
+	MarketFuturesMembers,
+	MarketFuturesConsensus,
 	MarketResearchItem,
 	SourceMeta,
 } from '../../lib/backend';
 import { classifyBillboardSeat } from '../../lib/billboard';
+import { formatFuturesOpeningHands } from '../../lib/futures-position';
 
 type DataState = 'idle' | 'loading' | 'ready' | 'error';
 type SortDirection = 'asc' | 'desc';
@@ -50,7 +54,7 @@ export function SourceNotice({ meta }: { meta: SourceMeta | null }) {
 	if (!meta) return null;
 	return <div className={`market-source-notice ${meta.stale ? 'stale' : ''}`}>
 		<span>来源 {meta.source} · 抓取 {formatDateTime(meta.fetched_at)}</span>
-		{meta.fallback_reason && <em>{meta.fallback_reason}</em>}
+		{(meta.stale || meta.fallback_reason) && <em>{meta.stale ? '缓存快照' : ''}{meta.stale && meta.fallback_reason ? ' · ' : ''}{meta.fallback_reason || ''}</em>}
 	</div>;
 }
 
@@ -178,6 +182,40 @@ export function MarginBalanceView({ items, limit, onLimit, meta }: {
 			<MarginBalanceChart items={items} />
 			<footer>单位：亿元 · 两融余额 = 融资余额 + 融券余额；数据为交易所汇总后的东方财富历史口径。</footer>
 		</section>
+	</div>;
+}
+
+export function FuturesPositionView({ series, members, consensus, variety, onVariety, meta }: {
+	series: MarketFuturesPositionSeries | null;
+	members: MarketFuturesMembers | null;
+	consensus: MarketFuturesConsensus | null;
+	variety: string;
+	onVariety: (variety: string) => void;
+	meta: SourceMeta | null;
+}) {
+	const rows = series?.variety === variety ? series.rows : [];
+	const latest = rows.at(-1);
+	const consensusVariety = consensus?.varieties.find((item) => item.variety === variety);
+	const memberMeta = members && members.contract_code === series?.contract_code && members.trade_date === latest?.trade_date ? (members.meta ?? null) : null;
+	const maxPosition = Math.max(1, ...rows.flatMap((row) => [row.long_position, row.short_position].map((value) => Math.abs(value))));
+	return <div className="market-data-view market-futures-view">
+		<SourceNotice meta={meta} />
+		<div className="market-margin-toolbar"><div><strong>股指期货前20会员多空持仓</strong><span>不是个股机构资金；多空单为会员持仓汇总，盘后更新</span></div><nav aria-label="股指期货品种">{['IF', 'IH', 'IC', 'IM'].map((item) => <button type="button" className={variety === item ? 'active' : ''} onClick={() => onVariety(item)} key={item}>{item}</button>)}</nav></div>
+		{latest ? <>
+			<section className="market-flow-summary market-futures-summary">
+					<SummaryMetric icon={<ArrowDown size={17} />} label="前20多空单净值" value={formatFuturesOpeningHands(consensusVariety?.net_long_position ?? null, true)} detail="+ 多单 · − 空单 · 全部合约" tone={toneClass(consensusVariety?.net_long_position || 0)} />
+					<SummaryMetric icon={<ArrowDownUp size={17} />} label="当日多空单变化" value={formatFuturesOpeningHands(consensusVariety?.net_long_change ?? null, true)} detail="持买单增减 − 持卖单增减" tone={toneClass(consensusVariety?.net_long_change || 0)} />
+					<SummaryMetric icon={<Activity size={17} />} label="中信期货多空单变化" value={formatFuturesOpeningHands(consensusVariety?.citic_net_long_change ?? null, true)} detail="+ 多单 · − 空单 · 全部合约" tone={toneClass(consensusVariety?.citic_net_long_change || 0)} />
+					<SummaryMetric icon={<Building2 size={17} />} label="统计范围" value={consensusVariety ? `${consensusVariety.contract_count} 个合约` : '--'} detail={`${consensus?.trade_date || latest.trade_date} · ${series?.index_code || '--'}`} tone="flat" />
+			</section>
+			{!consensus && <div className="market-module-empty market-futures-consensus-empty"><AlertTriangle size={20} /><strong>共识统计未获取</strong><span>全部合约前20会员多空单数据暂不可用，不以主力合约或持仓变化代替。</span></div>}
+			{consensus?.varieties?.length ? <section className="market-futures-consensus" aria-label="股指期货共识口径统计"><header><div><span>CFFEX CONSENSUS</span><h3>{consensus.trade_date} 四大期指多空单共识</h3></div><small>+ 多单 · − 空单 · 全部合约 · 前20会员 · 中信期货(代客)</small></header><div className="market-data-table"><header><span>品种</span><span>前20多空单净值</span><span>当日多空单变化</span><span>中信多空单变化</span><span>合约数</span></header>{consensus.varieties.map((item) => <article key={item.variety}><strong>{item.variety}</strong><span>{formatFuturesOpeningHands(item.net_long_position, true)}</span><span className={toneClass(item.net_long_change)}>{formatFuturesOpeningHands(item.net_long_change, true)}</span><span className={toneClass(item.citic_net_long_change)}>{formatFuturesOpeningHands(item.citic_net_long_change, true)}</span><span>{item.contract_count}</span></article>)}</div></section> : null}
+			<section className="market-futures-panel"><header><div><span>MAIN CONTRACT REFERENCE</span><h3>{series?.variety_name || variety} · 主力合约持仓趋势参考</h3></div><div className="market-margin-legend"><span className="total">多单</span><span className="lending">空单</span><span className="financing">净持仓</span></div></header>
+				<div className="market-futures-bars">{rows.slice(-30).map((row) => <article key={row.trade_date}><time>{formatMonthDay(row.trade_date)}</time><div><i className="long" style={{ width: `${Math.max(1, Math.abs(row.long_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.long_position)}</span></div><div><i className="short" style={{ width: `${Math.max(1, Math.abs(row.short_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.short_position)}</span></div><strong className={toneClass(row.net_position)}>{formatFuturesHands(row.net_position)}</strong></article>)}</div>
+				<footer>共识统计采用 {consensus?.trade_date || latest.trade_date} 全部合约前20会员多空单口径（+ 多单，− 空单）；此处图表为主力合约持仓趋势参考。结算价 {latest.settle_price == null ? '--' : latest.settle_price.toFixed(2)} · 现货指数 {latest.index_close == null ? '--' : latest.index_close.toFixed(2)} · 基差 {latest.basis == null ? '--' : latest.basis.toFixed(2)}。</footer>
+			</section>
+			{members?.members?.length ? <section className="market-futures-members"><SourceNotice meta={memberMeta} /><header><div><span>TOP 20 MEMBERS</span><h3>{members.trade_date} 会员多空明细</h3></div><small>中金所成交持仓排名 · 主力合约参考</small></header><div className="market-data-table"><header><span>排名</span><span>持买单会员</span><span>多单 / 增减</span><span>持卖单会员</span><span>空单 / 增减</span></header>{members.members.map((member) => <article key={`${member.contract}-${member.rank}`}><span>{member.rank}</span><strong>{member.long_name || '--'}</strong><span>{formatFuturesHands(member.long_position)} / {formatFuturesChangeShort(member.long_change)}</span><strong>{member.short_name || '--'}</strong><span>{formatFuturesHands(member.short_position)} / {formatFuturesChangeShort(member.short_change)}</span></article>)}</div></section> : null}
+		</> : <EmptyData title="暂无机构多空单" detail="期指持仓通常在交易日盘后更新，请稍后刷新。" />}
 	</div>;
 }
 
@@ -505,6 +543,15 @@ function formatMoney(value: number) {
 	if (absolute >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}亿`;
 	if (absolute >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
 	return value.toFixed(0);
+}
+
+function formatFuturesHands(value: number) {
+	if (!Number.isFinite(value)) return '--';
+	return `${value > 0 ? '+' : ''}${value.toLocaleString('zh-CN')} 手`;
+}
+
+function formatFuturesChangeShort(value?: number | null) {
+	return value == null ? '--' : `${value > 0 ? '+' : ''}${value.toLocaleString('zh-CN')}`;
 }
 
 function formatHundredMillion(value: number) {

@@ -323,6 +323,74 @@ export type MarketMarginPoint = {
 	meta: SourceMeta;
 };
 
+export type MarketFuturesPositionRow = {
+	trade_date: string;
+	long_position: number;
+	long_change?: number | null;
+	short_position: number;
+	short_change?: number | null;
+	net_position: number;
+	settle_price?: number | null;
+	index_close?: number | null;
+	index_change?: number | null;
+	basis?: number | null;
+};
+
+export type MarketFuturesPositionSeries = {
+	variety: string;
+	variety_name: string;
+	contract_code: string;
+	index_code: string;
+	rows: MarketFuturesPositionRow[];
+	meta: SourceMeta;
+};
+
+export type MarketFuturesMemberRank = {
+	contract: string;
+	rank: number;
+	long_name: string;
+	long_position: number;
+	long_change?: number | null;
+	short_name: string;
+	short_position: number;
+	short_change?: number | null;
+};
+
+export type MarketFuturesMembers = {
+	contract_code: string;
+	trade_date: string;
+	members: MarketFuturesMemberRank[];
+	meta: SourceMeta;
+};
+
+export type MarketFuturesConsensusVariety = {
+	variety: string;
+	trade_date: string;
+	contract_count: number;
+	long_position: number;
+	short_position: number;
+	net_short_position: number;
+	net_long_position: number;
+	long_change: number;
+	short_change: number;
+	net_short_change: number;
+	net_long_change: number;
+	citic_net_short_change: number;
+	citic_net_long_change: number;
+};
+
+export type MarketFuturesConsensus = {
+	trade_date: string;
+	varieties: MarketFuturesConsensusVariety[];
+	top20_net_short_position: number;
+	top20_net_long_position: number;
+	top20_net_short_change: number;
+	top20_net_long_change: number;
+	citic_net_short_change: number;
+	citic_net_long_change: number;
+	meta: SourceMeta;
+};
+
 export type MarketBillboardItem = {
 	trade_date: string;
 	symbol: string;

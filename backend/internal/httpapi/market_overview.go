@@ -200,6 +200,89 @@ func (s *Server) marketBillboardDetailHandler(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"data": detail, "meta": meta})
 }
 
+func (s *Server) marketFuturesPositionHandler(w http.ResponseWriter, r *http.Request) {
+	if s.futuresPosition == nil {
+		writeError(w, http.StatusServiceUnavailable, "futures position provider is unavailable")
+		return
+	}
+	variety := strings.ToUpper(firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("variety")), "IF"))
+	limit, err := marketLimitQuery(r, 60, 250)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	key := fmt.Sprintf("futures-position:%s:%d", variety, limit)
+	series, meta, err := loadMarketOverview(ctx, s.marketSnapshots, key, func(loadCtx context.Context) (foundation.MarketFuturesPositionSeries, foundation.SourceMeta, error) {
+		value, loadErr := s.futuresPosition.Trend(loadCtx, variety, limit)
+		return value, value.Meta, loadErr
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	series.Meta = meta
+	writeJSON(w, http.StatusOK, map[string]any{"data": series, "meta": meta})
+}
+
+func (s *Server) marketFuturesMembersHandler(w http.ResponseWriter, r *http.Request) {
+	if s.futuresPosition == nil {
+		writeError(w, http.StatusServiceUnavailable, "futures position provider is unavailable")
+		return
+	}
+	contract := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("contract")))
+	tradeDate := strings.TrimSpace(r.URL.Query().Get("trade_date"))
+	if contract == "" || tradeDate == "" {
+		writeError(w, http.StatusBadRequest, "contract and trade_date are required")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", tradeDate); err != nil {
+		writeError(w, http.StatusBadRequest, "trade_date must use YYYY-MM-DD")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	key := fmt.Sprintf("futures-members:%s:%s", contract, tradeDate)
+	data, meta, err := loadMarketOverview(ctx, s.marketSnapshots, key, func(loadCtx context.Context) (foundation.MarketFuturesMembers, foundation.SourceMeta, error) {
+		value, loadErr := s.futuresPosition.Members(loadCtx, contract, tradeDate)
+		return value, value.Meta, loadErr
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	data.Meta = meta
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
+}
+
+func (s *Server) marketFuturesConsensusHandler(w http.ResponseWriter, r *http.Request) {
+	if s.futuresPosition == nil {
+		writeError(w, http.StatusServiceUnavailable, "futures position provider is unavailable")
+		return
+	}
+	tradeDate := strings.TrimSpace(r.URL.Query().Get("trade_date"))
+	if tradeDate != "" {
+		if _, err := time.Parse("2006-01-02", tradeDate); err != nil {
+			writeError(w, http.StatusBadRequest, "trade_date must use YYYY-MM-DD")
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	key := "futures-consensus:" + tradeDate
+	data, meta, err := loadMarketOverview(ctx, s.marketSnapshots, key, func(loadCtx context.Context) (foundation.MarketFuturesConsensus, foundation.SourceMeta, error) {
+		value, loadErr := s.futuresPosition.Consensus(loadCtx, tradeDate)
+		return value, value.Meta, loadErr
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	data.Meta = meta
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
+}
+
 func (s *Server) marketAnnouncementsHandler(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))

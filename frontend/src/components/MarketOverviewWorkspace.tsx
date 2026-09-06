@@ -31,6 +31,9 @@ import type {
 	MarketIndexSnapshot,
 	MarketIndustryMomentum,
 	MarketMarginPoint,
+	MarketFuturesPositionSeries,
+	MarketFuturesMembers,
+	MarketFuturesConsensus,
 	MarketResearchItem,
 	NewsItem,
 	SourceHealth,
@@ -38,6 +41,7 @@ import type {
 	ThemeOverview,
 } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
+import { formatFuturesOpeningHands } from '../lib/futures-position';
 import {
 	type MarketOverviewView,
 	buildMarketBillboardPrompt,
@@ -54,6 +58,7 @@ import {
 	FundFlowView,
 	IndustryMomentumView,
 	MarginBalanceView,
+	FuturesPositionView,
 	ModuleState,
 	ResearchView,
 } from './market/MarketDataViews';
@@ -73,6 +78,7 @@ const moduleIcons = {
 	'theme-flow': Sparkles,
 	'stock-flow': Activity,
 	'margin-balance': ChartSpline,
+	'futures-position': ChartSpline,
 	billboard: Landmark,
 	announcements: Megaphone,
 	'institution-reports': FileSearch,
@@ -99,6 +105,10 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	const [flows, setFlows] = useState<MarketFundFlow[]>([]);
 	const [margins, setMargins] = useState<MarketMarginPoint[]>([]);
 	const [marginLimit, setMarginLimit] = useState(120);
+	const [futuresPosition, setFuturesPosition] = useState<MarketFuturesPositionSeries | null>(null);
+	const [futuresMembers, setFuturesMembers] = useState<MarketFuturesMembers | null>(null);
+	const [futuresVariety, setFuturesVariety] = useState('IF');
+	const [futuresConsensus, setFuturesConsensus] = useState<MarketFuturesConsensus | null>(null);
 	const [billboard, setBillboard] = useState<MarketBillboardItem[]>([]);
 	const [billboardDetails, setBillboardDetails] = useState<Record<string, BillboardDetailEntry>>({});
 	const [tradeDate, setTradeDate] = useState('');
@@ -166,6 +176,29 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				const payload = await requestJSON<{ data: MarketMarginPoint[]; meta: SourceMeta }>(config, `/api/v1/market/margin-balance?limit=${marginLimit}`);
 				setMargins(payload.data);
 				setModuleMeta(payload.meta);
+			} else if (activeView === 'futures-position') {
+				setFuturesConsensus(null);
+				setFuturesMembers(null);
+				const varieties = ['IF', 'IH', 'IC', 'IM'];
+				const [consensusPayload, positionResults] = await Promise.all([
+					requestJSON<{ data: MarketFuturesConsensus }>(config, '/api/v1/market/futures-consensus').catch(() => null),
+					Promise.allSettled(varieties.map((item) => requestJSON<{ data: MarketFuturesPositionSeries; meta: SourceMeta }>(config, `/api/v1/market/futures-position?variety=${item}&limit=60`))),
+				]);
+				setFuturesConsensus(consensusPayload?.data || null);
+				const selectedResult = positionResults[varieties.indexOf(futuresVariety)];
+				if (!selectedResult || selectedResult.status !== 'fulfilled') throw selectedResult?.reason || new Error(`${futuresVariety}期指持仓加载失败`);
+				const payload = selectedResult.value;
+				setFuturesPosition({ ...payload.data, meta: payload.meta });
+				setModuleMeta(payload.meta);
+				const seriesEntries = positionResults.flatMap((result) => result.status === 'fulfilled' && result.value.data.rows.length ? [result.value.data] : []);
+				const memberResults = await Promise.allSettled(seriesEntries.map(async (series) => {
+					const latest = series.rows.at(-1);
+					if (!latest || !series.contract_code) throw new Error(`${series.variety}会员明细不可用`);
+					const memberPayload = await requestJSON<{ data: MarketFuturesMembers }>(config, `/api/v1/market/futures-members?contract=${encodeURIComponent(series.contract_code)}&trade_date=${encodeURIComponent(latest.trade_date)}`);
+					return { series, members: memberPayload.data };
+				}));
+				const successfulMembers = memberResults.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+				setFuturesMembers(successfulMembers.find((entry) => entry.series.variety === futuresVariety)?.members || null);
 			} else if (activeView === 'billboard') {
 				const query = tradeDate ? `&trade_date=${encodeURIComponent(tradeDate)}` : '';
 				const payload = await requestJSON<{ data: MarketBillboardItem[]; meta: SourceMeta }>(config, `/api/v1/market/billboard?limit=100${query}`);
@@ -189,7 +222,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 			setModuleError(errorMessage(error, `${activeModule.name}加载失败`));
 			setModuleState('error');
 		}
-	}, [activeModule.name, activeView, announcementCategory, config, marginLimit, submittedQuery, tradeDate]);
+	}, [activeModule.name, activeView, announcementCategory, config, futuresVariety, marginLimit, submittedQuery, tradeDate]);
 
 	const requestBillboardDetail = useCallback(async (item: MarketBillboardItem) => {
 		if (!config) throw new Error('后端尚未连接');
@@ -250,14 +283,16 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		industries: activeView === 'industry-momentum' ? industries : undefined,
 		flows: isFlowView(activeView) ? flows : undefined,
 		margins: activeView === 'margin-balance' ? margins : undefined,
+		futures: activeView === 'futures-position' && futuresPosition?.variety === futuresVariety ? futuresPosition : undefined,
+		futuresConsensus: activeView === 'futures-position' ? futuresConsensus : undefined,
 		billboard: activeView === 'billboard' ? billboard : undefined,
 		research: isResearchView(activeView) ? research : undefined,
 		meta: moduleMeta,
-	}), [activeView, billboard, flows, indexes, industries, margins, moduleMeta, research]);
+	}), [activeView, billboard, flows, futuresConsensus, futuresPosition, futuresMembers, futuresVariety, indexes, industries, margins, moduleMeta, research]);
 
 	const hasEvidence = activeView === 'pulse'
 		? Boolean(news.length || themes.length)
-		: Boolean(activeEvidence.indexes?.length || activeEvidence.industries?.length || activeEvidence.flows?.length || activeEvidence.margins?.length || activeEvidence.billboard?.length || activeEvidence.research?.length);
+		: Boolean(activeEvidence.indexes?.length || activeEvidence.industries?.length || activeEvidence.flows?.length || activeEvidence.margins?.length || activeEvidence.futures?.rows?.length || activeEvidence.billboard?.length || activeEvidence.research?.length);
 
 	const askAI = async () => {
 		const asOf = formatDateTime(lastUpdated || new Date().toISOString());
@@ -320,6 +355,8 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		<div className="market-overview-main">
 			<header className="market-overview-hero">
 				<div><span>{marketOverviewGroups.find((group) => group.modules.some((module) => module.id === activeView))?.name}</span><h2>{activeModule.name}</h2><p>{activeModule.description}</p></div>
+				{activeView === 'futures-position' && <div className="market-futures-headline-stat" role="status"><span>当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : formatFuturesOpeningHands(futuresConsensus?.top20_net_long_change ?? null, true)}</strong><small>+ 多单 · − 空单 · 全部合约 · 前20会员{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus && moduleState !== 'loading' ? ' · 共识数据不可用' : ''}</small></div>}
+				{activeView === 'futures-position' && <div className="market-futures-headline-stat market-futures-citic-stat" role="status"><span>中信当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : formatFuturesOpeningHands(futuresConsensus?.citic_net_long_change ?? null, true)}</strong><small>+ 多单 · − 空单 · 中信期货(代客) · 全部合约{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus ? ' · 共识数据不可用' : ''}</small></div>}
 				<div><button type="button" className="market-ai-button" onClick={() => void askAI()} disabled={!hasEvidence || aiPreparing}>{aiPreparing ? <LoaderCircle className="spin" size={16} /> : <Bot size={16} />}{aiPreparing ? '正在聚合席位与连板证据' : '交给 AI 解读'}</button><button type="button" className="market-refresh-button" onClick={refresh} disabled={(activeView === 'pulse' ? pulseState : moduleState) === 'loading'}>{(activeView === 'pulse' ? pulseState : moduleState) === 'loading' ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
 			</header>
 
@@ -328,6 +365,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				{activeView === 'industry-momentum' && <IndustryMomentumView items={industries} meta={moduleMeta} />}
 				{isFlowView(activeView) && <FundFlowView key={activeView} items={flows} dimension={flowDimension(activeView)} meta={moduleMeta} />}
 				{activeView === 'margin-balance' && <MarginBalanceView items={margins} limit={marginLimit} onLimit={setMarginLimit} meta={moduleMeta} />}
+				{activeView === 'futures-position' && <FuturesPositionView series={futuresPosition} members={futuresMembers} consensus={futuresConsensus} variety={futuresVariety} onVariety={setFuturesVariety} meta={moduleMeta} />}
 				{activeView === 'billboard' && <BillboardView items={billboard} tradeDate={tradeDate} onTradeDate={setTradeDate} meta={moduleMeta} details={billboardDetails} onLoadDetail={loadBillboardDetail} />}
 				{isResearchView(activeView) && <ResearchView kind={researchKind(activeView)} items={research} queryDraft={searchDraft} onQueryDraft={setSearchDraft} onSearch={submitResearch} category={announcementCategory} onCategory={setAnnouncementCategory} meta={moduleMeta} />}
 			</ModuleState>}
