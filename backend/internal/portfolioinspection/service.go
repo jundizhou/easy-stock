@@ -227,7 +227,7 @@ func (s *Service) generateAIReport(ctx context.Context, request Request, results
 	if err != nil {
 		return AIReport{}, err
 	}
-	response, err := s.gateway.Prompt(ctx, prompt)
+	response, err := hermes.PromptFullyAuthorized(ctx, s.gateway, prompt)
 	if err != nil {
 		return AIReport{}, fmt.Errorf("持仓组合AI分析失败: %w", err)
 	}

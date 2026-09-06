@@ -10,6 +10,39 @@ import (
 	"easy-stock/backend/internal/hermes"
 )
 
+func TestGithubSkillArchiveURL(t *testing.T) {
+	got, prefix, err := githubSkillArchiveURL("https://github.com/openai/skills/tree/main/skills/.curated/pdf")
+	if err != nil || got != "https://codeload.github.com/openai/skills/zip/HEAD" {
+		t.Fatalf("unexpected archive URL: %q %v", got, err)
+	}
+	if prefix != "skills/.curated/pdf" {
+		t.Fatalf("unexpected prefix: %q", prefix)
+	}
+	if _, _, err := githubSkillArchiveURL("http://github.com/openai/skills"); err == nil {
+		t.Fatal("expected non-HTTPS URL to be rejected")
+	}
+}
+
+func TestSkillMarketCatalog(t *testing.T) {
+	server := NewServer(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/agent/skills/market", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "a-share-market-overview") {
+		t.Fatalf("unexpected market response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSkillMarketSources(t *testing.T) {
+	server := NewServer(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/agent/skills/market/sources", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "skillhub-cn") || !strings.Contains(rec.Body.String(), "skills.sh") {
+		t.Fatalf("unexpected market sources response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAgentSettingsAPIUpdatesSkillsAndMCPWithoutLeakingSecrets(t *testing.T) {
 	store, _ := appsettings.Open("")
 	gateway := &fakeHermesGateway{agentSettings: hermes.AgentSettings{

@@ -71,4 +71,34 @@ describe('Hermes TUI gateway client', () => {
 		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', payload: { content: '继续完成' } } });
 		await expect(promise).resolves.toEqual({ content: '继续完成', hermesSessionID: 'stored-2' });
 	});
+
+	it('surfaces approval requests and sends the selected choice', async () => {
+		vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
+		let approve: ((choice: 'once' | 'session' | 'deny') => void) | undefined;
+		const promise = streamHermesPrompt({
+			config: { backendUrl: 'http://127.0.0.1:20001', token: '' },
+			prompt: '安装技能',
+			onApproval: (_request, respond) => { approve = respond; },
+		});
+		const socket = FakeWebSocket.instances[0]; socket.open();
+		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: {} } });
+		const setup = JSON.parse(socket.sent[0]);
+		socket.receive({ jsonrpc: '2.0', id: setup.id, result: { session_id: 'live-3' } });
+		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'approval.request', session_id: 'live-3', payload: { pattern_key: 'execute_code', description: '执行命令' } } });
+		expect(approve).toBeTypeOf('function'); approve?.('once');
+		expect(JSON.parse(socket.sent[2])).toMatchObject({ method: 'approval.respond', params: { session_id: 'live-3', choice: 'once' } });
+		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', payload: { content: '已完成' } } });
+		await expect(promise).resolves.toMatchObject({ content: '已完成' });
+	});
+
+	it('turns an error completion into a rejected request', async () => {
+		vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
+		const promise = streamHermesPrompt({ config: { backendUrl: 'http://127.0.0.1:20001', token: '' }, prompt: '测试' });
+		const socket = FakeWebSocket.instances[0]; socket.open();
+		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: {} } });
+		const setup = JSON.parse(socket.sent[0]);
+		socket.receive({ jsonrpc: '2.0', id: setup.id, result: { session_id: 'live-4' } });
+		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', payload: { status: 'error', text: '模型暂时不可用' } } });
+		await expect(promise).rejects.toThrow('模型暂时不可用');
+	});
 });

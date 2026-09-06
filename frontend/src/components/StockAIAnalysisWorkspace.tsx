@@ -415,7 +415,7 @@ function AnalysisExportHeader({ analysis, mode }: { analysis: StockAIAnalysis; m
 function AnalysisExportFooter({ analysis }: { analysis: StockAIAnalysis }) {
 	return <footer className="stock-ai-export-footer">
 		<div><strong>easy-stock</strong><span>让数据、逻辑与 AI 一起服务于交易决策</span></div>
-		<div className="stock-ai-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><strong>github.com/jundizhou/easy-stock</strong></div>
+		<div className="stock-ai-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><b>微信公众号：easy只吃番茄</b><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>数据截至 {formatExportDate(analysis.generated_at)}</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;
 }

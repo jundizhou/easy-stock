@@ -462,7 +462,7 @@ func (a *Automation) normalizeBrowserBridgeCollection(ctx context.Context, sub S
 		return raw
 	}
 	prompt := "你是" + browserSourceLabel(sub.Source) + "文章整理代理。以下 JSON 来自用户已登录的内置 Electron 浏览器，字段均为实际页面读取结果。请挑选最近最多5篇文章，清理标题，把发布时间尽量转换为RFC3339；不得新增链接、不得编造正文、不得输出Cookie。只返回严格JSON，结构保持不变：" + string(data) + "\n目标主页：" + sub.HomepageURL
-	response, err := a.prompter.Prompt(ctx, prompt)
+	response, err := hermes.PromptFullyAuthorized(ctx, a.prompter, prompt)
 	if err != nil {
 		return raw
 	}
@@ -520,7 +520,7 @@ func (a *Automation) collectWithBrowserState(ctx context.Context, sub Subscripti
 	if !ok {
 		return nil, "", "", errors.New("当前 Hermes 运行时不支持复用浏览器登录态")
 	}
-	response, err := browserPrompter.PromptWithBrowserState(ctx, prompt, statePath)
+	response, err := hermes.PromptFullyAuthorizedWithBrowserState(ctx, browserPrompter, prompt, statePath)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -937,7 +937,7 @@ type llmAnalysis struct {
 
 func analyzeWithHermes(ctx context.Context, prompter hermes.Prompter, post Post) (llmAnalysis, error) {
 	prompt := "你是谨慎的A股复盘研究助手，只提炼原作者观点，不编造投资建议。请分析下面的A股复盘文章。只返回严格JSON：{\"summary\":\"200字内摘要\",\"key_points\":[\"要点\"],\"outlook\":\"作者对下一交易日或后市的预期；没有则写未明确\"}。不要添加markdown。\n标题：" + post.Title + "\n作者：" + post.AuthorName + "\n正文：" + truncateRunes(post.ContentText, 12000)
-	response, err := prompter.Prompt(ctx, prompt)
+	response, err := hermes.PromptFullyAuthorized(ctx, prompter, prompt)
 	if err != nil {
 		return llmAnalysis{}, fmt.Errorf("Hermes AI 提炼失败: %w", err)
 	}

@@ -147,6 +147,28 @@ export type HermesAgentSettings = {
   mcp_servers: HermesMCPServerSetting[];
 };
 
+export type HermesInstalledSkill = HermesSkillSetting & {
+	source: string;
+	path: string;
+};
+
+export type HermesSkillMarketEntry = {
+	id: string;
+	name: string;
+	description: string;
+	repository: string;
+	path: string;
+	category: string;
+};
+
+export type HermesSkillMarketSource = {
+	id: string;
+	name: string;
+	region: string;
+	url: string;
+	description: string;
+};
+
 export type LLMConnectionTestResult = {
 	ok: boolean;
 	provider: string;

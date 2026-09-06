@@ -1,11 +1,12 @@
 import { CheckCircle2, CircleAlert, LoaderCircle, Network, Plus, Puzzle, Save, Search, ShieldCheck, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import type { BackendConfig, HermesAgentSettings, HermesMCPServerSetting, HermesSkillSetting, SecretSettingStatus } from '../lib/backend';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { BackendConfig, HermesAgentSettings, HermesInstalledSkill, HermesMCPServerSetting, HermesSkillMarketEntry, HermesSkillMarketSource, HermesSkillSetting, SecretSettingStatus } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
 
 type Props = { config: BackendConfig | null; open: boolean };
 type SecretEntryDraft = { id: string; key: string; value: string; configured: boolean; masked?: string; remove: boolean };
 type MCPDraft = Omit<HermesMCPServerSetting, 'env' | 'headers' | 'args'> & { id: string; originalName: string; argsText: string; env: SecretEntryDraft[]; headers: SecretEntryDraft[] };
+
 
 let draftSequence = 0;
 const nextID = (prefix: string) => `${prefix}-${Date.now()}-${++draftSequence}`;
@@ -16,6 +17,11 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 	const [search, setSearch] = useState('');
 	const [state, setState] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('idle');
 	const [message, setMessage] = useState('');
+	const [gitURL, setGitURL] = useState('');
+	const [marketSkills, setMarketSkills] = useState<HermesSkillMarketEntry[]>([]);
+	const [marketSources, setMarketSources] = useState<HermesSkillMarketSource[]>([]);
+	const directoryInput = useRef<HTMLInputElement>(null);
+	const zipInput = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
 		if (!open || !config) return;
@@ -34,6 +40,12 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 				setState('error');
 				setMessage(error instanceof Error ? error.message : '读取 Skill/MCP 设置失败');
 			});
+		requestJSON<{ data: HermesSkillMarketEntry[] }>(config, '/api/v1/settings/agent/skills/market')
+			.then(({ data }) => { if (!cancelled) setMarketSkills(data || []); })
+			.catch(() => { if (!cancelled) setMarketSkills([]); });
+		requestJSON<{ data: HermesSkillMarketSource[] }>(config, '/api/v1/settings/agent/skills/market/sources')
+			.then(({ data }) => { if (!cancelled) setMarketSources(data || []); })
+			.catch(() => { if (!cancelled) setMarketSources([]); });
 		return () => { cancelled = true; };
 	}, [config, open]);
 
@@ -55,6 +67,60 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 	const addServer = () => setServers((current) => [...current, {
 		id: nextID('mcp'), name: '', originalName: '', enabled: true, transport: 'stdio', command: '', argsText: '', env: [], url: '', headers: [], timeout: 300, connect_timeout: 60, supports_parallel_tool_calls: false,
 	}]);
+
+	const importSkills = async (files: FileList | null) => {
+		if (!config || !files?.length) return;
+		setState('saving');
+		setMessage('正在导入 Skill…');
+		try {
+			const form = new FormData();
+			Array.from(files).forEach((file) => {
+				const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+				form.append('files', file, file.name);
+				form.append('paths', relativePath);
+			});
+			const payload = await requestJSON<{ data: HermesInstalledSkill[] }>(config, '/api/v1/settings/agent/skills/import', { method: 'POST', body: form });
+			const imported = payload.data || [];
+			const refreshed = await requestJSON<{ data: HermesAgentSettings }>(config, '/api/v1/settings/agent');
+			setSkills(refreshed.data.skills || []);
+			setState('saved');
+			setMessage(`已导入 ${imported.length} 个 Skill，请在列表中确认启用状态。`);
+		} catch (error) {
+			setState('error');
+			setMessage(error instanceof Error ? error.message : '导入 Skill 失败');
+		} finally {
+			if (directoryInput.current) directoryInput.current.value = '';
+			if (zipInput.current) zipInput.current.value = '';
+		}
+	};
+
+	const installGitSkill = async () => {
+		if (!config || !gitURL.trim()) return;
+		await installGitSkillURL(gitURL.trim());
+	};
+
+	const installGitSkillFromMarket = async (entry: HermesSkillMarketEntry) => {
+		await installGitSkillURL(entry.path);
+	};
+
+	const installGitSkillURL = async (url: string) => {
+		if (!config || !url.trim()) return;
+		setState('saving');
+		setMessage('正在下载 GitHub Skill…');
+		try {
+			const payload = await requestJSON<{ data: HermesInstalledSkill[] }>(config, '/api/v1/settings/agent/skills/install-git', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
+			const refreshed = await requestJSON<{ data: HermesAgentSettings }>(config, '/api/v1/settings/agent');
+			setSkills(refreshed.data.skills || []);
+			setGitURL('');
+			setState('saved');
+			setMessage(`已从 GitHub 安装 ${payload.data?.length || 0} 个 Skill。`);
+		} catch (error) {
+			setState('error');
+			setMessage(error instanceof Error ? error.message : '安装 GitHub Skill 失败');
+		}
+	};
+
+	const marketInstalled = (entry: HermesSkillMarketEntry) => skills.some((skill) => skill.name === entry.path.split('/').pop());
 
 	const save = async () => {
 		if (!config) return;
@@ -84,7 +150,10 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 			<div className="settings-section-title"><Puzzle size={18} /><div><h3>Skill 与 MCP</h3><p>控制 Hermes 可加载的本机技能，并连接 stdio、Streamable HTTP 或 SSE MCP Server。</p></div></div>
 			{state === 'loading' ? <div className="agent-settings-loading"><LoaderCircle className="spin" size={18} />读取 Hermes 能力配置</div> : <>
 				<div className="agent-settings-block">
-					<div className="agent-settings-heading"><div><strong>Skills</strong><span>{enabledSkillCount}/{skills.length} 个已启用</span></div><label><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill" /></label></div>
+					<div className="agent-settings-heading"><div><strong>Skills</strong><span>{enabledSkillCount}/{skills.length} 个已启用</span></div><div className="agent-settings-heading-actions"><label><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill" /></label><button type="button" onClick={() => directoryInput.current?.click()}><Plus size={14} />导入目录</button><button type="button" onClick={() => zipInput.current?.click()}><Plus size={14} />导入 ZIP</button><input ref={directoryInput} type="file" hidden multiple {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} onChange={(event) => void importSkills(event.target.files)} /><input ref={zipInput} type="file" hidden accept=".zip,application/zip" onChange={(event) => void importSkills(event.target.files)} /></div></div>
+					<div className="skill-git-import"><input value={gitURL} onChange={(event) => setGitURL(event.target.value)} placeholder="GitHub 仓库地址，例如 https://github.com/openai/skills" /><button type="button" disabled={!gitURL.trim() || state === 'saving'} onClick={() => void installGitSkill()}><Plus size={14} />从 GitHub 安装</button></div>
+					{marketSkills.length > 0 && <div className="skill-market"><div className="skill-market-title"><strong>A 股精选 Skill</strong><span>easy-stock 投研目录</span></div><div className="skill-market-grid">{marketSkills.map((entry) => <article className="skill-market-card" key={entry.id}><div><strong>{entry.name}</strong><small>{entry.category}</small></div><p>{entry.description}</p><button type="button" disabled={marketInstalled(entry) || state === 'saving'} onClick={() => void installGitSkillFromMarket(entry)}>{marketInstalled(entry) ? '已安装' : '安装'}</button></article>)}</div></div>}
+					{marketSources.length > 0 && <div className="skill-market-sources"><div className="skill-market-title"><strong>更多市场</strong><span>打开目录浏览后，可复制仓库地址或下载 ZIP 导入</span></div><div className="skill-market-source-list">{marketSources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}><span><strong>{source.name}</strong><small>{source.region}</small></span><em>{source.description}</em></a>)}</div></div>}
 					<div className="skill-settings-list">
 						{filteredSkills.map((skill) => <label className="skill-setting-item" key={skill.name}><span><strong>{skill.name}</strong><small>{skill.category} · {skill.description || '暂无描述'}</small></span><input type="checkbox" checked={skill.enabled} onChange={(event) => setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, enabled: event.target.checked } : item))} /></label>)}
 						{!filteredSkills.length && <div className="agent-settings-empty">没有匹配的本机 Skill</div>}

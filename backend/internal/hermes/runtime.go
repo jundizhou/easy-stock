@@ -32,7 +32,7 @@ const (
 
 var diagnosticSecretPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[_ -]?key|token)\s*[:=]\s*)[^\s,;]+`)
 
-const systemPrompt = `你是 easy-stock 的 AI 投研助手。easy-stock 是面向 A 股市场的 AI 原生行情分析与研究工作台。像 Codex 一样协作：先理解目标，再基于可追踪的数据和原文证据给出清晰、可执行、可验证的回答；主动区分事实、推断、市场预期与待验证条件，不编造实时数据，不承诺收益。涉及游资、心法、情绪周期、龙头战法、首板、打板、仓位或预期差时，优先使用本机的 a-stock-short-term-masters 技能核对原文，并说明这些内容属于历史经验与二次整理材料。默认使用中文，除非用户要求其他语言。`
+const systemPrompt = `你是 easy-stock 的 AI 投研助手。easy-stock 是面向 A 股市场的 AI 原生行情分析与研究工作台。像 Codex 一样协作：先理解目标，再基于可追踪的数据和原文证据给出清晰、可执行、可验证的回答；主动区分事实、推断、市场预期与待验证条件，不编造实时数据，不承诺收益。涉及游资、心法、情绪周期、龙头战法、首板、打板、仓位或预期差时，优先使用本机的 a-stock-short-term-masters 技能核对原文，并说明这些内容属于历史经验与二次整理材料。当前仅可调用系统列出的技能；不要猜测或调用 hermes-agent、trading 等不存在的技能名称，找不到技能时直接说明并继续用已有能力回答。默认使用中文，除非用户要求其他语言。`
 
 type Status struct {
 	Available        bool   `json:"available"`
@@ -594,6 +594,14 @@ func (r *Runtime) PromptWithOptions(ctx context.Context, prompt string, options 
 	return r.prompt(ctx, prompt, "", options)
 }
 
+func (r *Runtime) PromptWithOptionsAndBrowserState(ctx context.Context, prompt, storageStatePath string, options PromptOptions) (PromptResult, error) {
+	if strings.TrimSpace(storageStatePath) == "" {
+		return PromptResult{}, errors.New("浏览器登录态路径不能为空")
+	}
+	options.BrowserStatePath = strings.TrimSpace(storageStatePath)
+	return r.prompt(ctx, prompt, options.BrowserStatePath, options)
+}
+
 func (r *Runtime) PromptWithBrowserState(ctx context.Context, prompt, storageStatePath string) (PromptResult, error) {
 	if strings.TrimSpace(storageStatePath) == "" {
 		return PromptResult{}, errors.New("浏览器登录态路径不能为空")
@@ -616,6 +624,9 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, o
 	processOptions := promptProcessOptions{}
 	var sandbox *promptSandbox
 	var err error
+	if options.BrowserStatePath != "" {
+		browserStatePath = options.BrowserStatePath
+	}
 	if options.Sandbox {
 		sandbox, err = r.preparePromptSandbox(options)
 		if err != nil {

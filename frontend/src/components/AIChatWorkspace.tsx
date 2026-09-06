@@ -101,6 +101,8 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 	const [reasoningMessage, setReasoningMessage] = useState('');
 	const [copiedID, setCopiedID] = useState('');
 	const [pendingMessageID, setPendingMessageID] = useState('');
+	const [activityStatus, setActivityStatus] = useState('正在理解问题并组织答案…');
+	const [approvalRequest, setApprovalRequest] = useState<{ description?: string; command?: string; respond: (choice: 'once' | 'session' | 'deny') => void } | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const messageEndRef = useRef<HTMLDivElement | null>(null);
@@ -401,6 +403,11 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 				hermesSessionID: current.hermes_session_id,
 				seedMessages,
 				signal: controller.signal,
+				onStatus: (status) => setActivityStatus(status.text || (status.kind === 'process' ? '正在执行操作…' : '正在处理…')),
+				onApproval: (approval, respond) => {
+					setApprovalRequest({ description: approval.description, command: approval.command, respond });
+					setActivityStatus('等待你的授权后继续');
+				},
 				onSession: (hermesSessionID) => setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
 					? { ...conversation, hermes_session_id: hermesSessionID }
 					: conversation)),
@@ -425,6 +432,8 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 					: conversation));
 			}
 		} finally {
+			setApprovalRequest(null);
+			setActivityStatus('正在理解问题并组织答案…');
 			if (abortRef.current === controller) abortRef.current = null;
 			setSending(false);
 			setPendingMessageID('');
@@ -493,7 +502,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 									<div className="ai-message-body">
 										<header><strong>{message.role === 'user' ? '你' : 'AI 助手'}</strong><time>{formatMessageTime(message.created_at)}</time></header>
 										{message.content && <MessageContent content={message.content} markdown={message.role === 'assistant' && !message.error} />}
-										{pending && <div className="ai-answering" role="status" aria-live="polite"><span className="ai-answering-bars" aria-hidden="true"><i /><i /><i /><i /></span><strong>AI 正在回答</strong><small>{message.content ? '正在继续分析并生成后续内容…' : '正在理解问题并组织答案…'}</small></div>}
+										{pending && <div className="ai-answering" role="status" aria-live="polite"><span className="ai-answering-bars" aria-hidden="true"><i /><i /><i /><i /></span><strong>{approvalRequest ? '等待授权' : 'AI 正在回答'}</strong><small>{approvalRequest ? '执行此操作需要你的确认' : (message.content ? activityStatus : activityStatus)}</small></div>}
 										{!pending && <button type="button" className="ai-copy-message" onClick={() => void copyMessage(message)}>{copiedID === message.id ? <Check size={13} /> : <Copy size={13} />}{copiedID === message.id ? '已复制' : '复制'}</button>}
 									</div>
 								</article>
@@ -505,6 +514,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 				</div>
 
 				<form className="ai-composer-wrap" onSubmit={(event) => void sendMessage(event)}>
+					{sending && approvalRequest && <div className="ai-approval-card" role="alert"><strong>AI 请求执行外部操作</strong><p>{approvalRequest.description || '该操作可能修改本机文件或运行命令。'}</p>{approvalRequest.command && <code>{approvalRequest.command}</code>}<div><button type="button" onClick={() => { approvalRequest.respond('once'); setApprovalRequest(null); setActivityStatus('正在继续执行…'); }}>允许一次</button><button type="button" onClick={() => { approvalRequest.respond('session'); setApprovalRequest(null); setActivityStatus('本次会话已授权，继续执行…'); }}>本次会话允许</button><button type="button" className="deny" onClick={() => { approvalRequest.respond('deny'); setApprovalRequest(null); setActivityStatus('已拒绝操作，等待 AI 返回说明…'); }}>拒绝</button></div></div>}
 					<div className={`ai-composer ${sending ? 'sending' : ''}`}>
 						<textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={modelState === 'missing' ? '请先配置 Hermes 模型后开始对话' : modelState === 'error' ? 'Hermes 运行时不可用，请检查安装或设置' : '向 Hermes AI 描述任务，Enter 发送，Shift + Enter 换行'} disabled={!config || modelState !== 'ready'} rows={1} />
 						<div className="ai-composer-actions"><span>AI 可能会犯错，请核对关键事实与交易数据。</span>{sending ? <button type="button" className="stop" onClick={stop} title="停止生成"><Square size={14} />停止</button> : <button type="submit" disabled={!draft.trim() || !config || modelState !== 'ready'} title="发送消息"><Send size={15} />发送</button>}</div>
