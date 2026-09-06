@@ -131,6 +131,7 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 						const percent = event.total && event.total > 0 ? ` ${Math.min(100, Math.round((event.downloaded || 0) * 100 / event.total))}%` : '';
 						setMessage(`正在下载 GitHub Skill…${percent} · ${formatTransferRate(event.bytes_per_second || 0)}`);
 					}
+					if (event.type === 'processing') setMessage('下载完成，正在安装 Skill…');
 					if (event.type === 'error') throw new Error(event.error || '安装 GitHub Skill 失败');
 					if (event.type === 'complete') installed = event.data || [];
 				}

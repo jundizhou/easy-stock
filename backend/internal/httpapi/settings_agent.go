@@ -302,6 +302,9 @@ func (s *Server) settingsAgentSkillInstallGit(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	if emitProgress != nil {
+		emitProgress(skillDownloadProgress{Type: "processing", Downloaded: int64(len(data)), Total: int64(len(data))})
+	}
 	installed, err := importer.ImportSkills([]hermes.SkillImportFile{{Name: "github-skill.zip", Data: data}})
 	if err != nil {
 		fail(http.StatusBadRequest, "安装 Skill 失败: "+err.Error())
