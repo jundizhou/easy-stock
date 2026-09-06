@@ -3,6 +3,7 @@ package httpapi
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -245,10 +246,20 @@ func (s *Server) settingsAgentSkillInstallGit(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	client := &http.Client{Timeout: 45 * time.Second}
-	response, err := client.Get(source)
+	// GitHub's codeload endpoint can take tens of seconds to start sending a
+	// repository archive. Keep the request cancellable while giving the archive
+	// enough time to arrive.
+	client := &http.Client{Timeout: 2 * time.Minute}
+	requestCtx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	downloadRequest, err := http.NewRequestWithContext(requestCtx, http.MethodGet, source, nil)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "下载 Skill 仓库失败: "+err.Error())
+		return
+	}
+	response, err := client.Do(downloadRequest)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "下载 Skill 仓库失败（等待时间超过 120 秒或网络中断）: "+err.Error())
 		return
 	}
 	defer response.Body.Close()

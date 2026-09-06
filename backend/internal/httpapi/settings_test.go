@@ -311,3 +311,23 @@ func TestModelResponseTimeoutFollowsSettings(t *testing.T) {
 		t.Fatalf("configured model response timeout=%s, want 10m15s", got)
 	}
 }
+
+func TestStockAnalysisTimeoutCoversTwoModelStages(t *testing.T) {
+	store, err := appsettings.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{SettingsStore: store})
+	if _, err := store.Update(func(values *appsettings.Values) error {
+		values.LLM.ResponseTimeoutSeconds = 60
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.stockAnalysisModelTimeout(); got != 195*time.Second {
+		t.Fatalf("stock analysis stage timeout=%s, want 3m15s minimum", got)
+	}
+	if got := server.stockAnalysisTimeout(); got != 455*time.Second {
+		t.Fatalf("stock analysis pipeline timeout=%s, want 7m35s", got)
+	}
+}

@@ -33,7 +33,12 @@ func (s *Server) stockAIAnalysis(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	analysis, err := s.analyzeStock(r.Context(), normalized.Canonical)
+	// A stock analysis may use two sequential Hermes stages (theme evidence
+	// extraction followed by the final decision). Give the whole pipeline a
+	// budget that covers both stages and data collection.
+	ctx, cancel := context.WithTimeout(r.Context(), s.stockAnalysisTimeout())
+	defer cancel()
+	analysis, err := s.analyzeStock(ctx, normalized.Canonical)
 	if err != nil {
 		status := http.StatusBadGateway
 		var runError *stockAnalysisRunError
@@ -259,7 +264,7 @@ func (s *Server) analyzeStock(ctx context.Context, canonicalSymbol string) (stoc
 	if s.hermesGateway != nil {
 		status := s.hermesGateway.Status()
 		if status.Available && status.Configured && (len(announcements) > 0 || len(news) > 0) {
-			themeCtx, cancelTheme := context.WithTimeout(ctx, s.modelResponseTimeout())
+			themeCtx, cancelTheme := context.WithTimeout(ctx, s.stockAnalysisModelTimeout())
 			modelEvidence, modelErr := stockanalysis.ExtractThemeEvidence(themeCtx, s.hermesGateway, analysisInput)
 			cancelTheme()
 			if modelErr == nil {
@@ -293,7 +298,7 @@ func (s *Server) analyzeStock(ctx context.Context, canonicalSymbol string) (stoc
 				)
 				cancelKnowledge()
 			}
-			aiCtx, cancelAI := context.WithTimeout(ctx, s.modelResponseTimeout())
+			aiCtx, cancelAI := context.WithTimeout(ctx, s.stockAnalysisModelTimeout())
 			if aiErr := stockanalysis.EnrichWithAI(aiCtx, s.hermesGateway, &analysis, methodologyContext); aiErr != nil {
 				analysis.AI.Status = "error"
 				analysis.AI.Message = aiErr.Error() + "；已保留本地结构化研判"

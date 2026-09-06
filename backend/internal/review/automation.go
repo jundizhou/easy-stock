@@ -68,8 +68,8 @@ func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Sto
 		prompter = prompters[0]
 	}
 	bridgeClient := *httpClient
-	if bridgeClient.Timeout == 0 || bridgeClient.Timeout < 90*time.Second {
-		bridgeClient.Timeout = 90 * time.Second
+	if bridgeClient.Timeout == 0 || bridgeClient.Timeout < 5*time.Minute {
+		bridgeClient.Timeout = 5 * time.Minute
 	}
 	return &Automation{
 		store:                  store,

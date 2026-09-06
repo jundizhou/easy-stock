@@ -260,7 +260,7 @@ func (s *Server) reviewSyncOne(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "自动同步服务不可用")
 		return
 	}
-	ctx, cancel := contextWithTimeout(r, 3*time.Minute)
+	ctx, cancel := contextWithTimeout(r, 10*time.Minute)
 	defer cancel()
 	result := s.reviewAutomation.SyncOne(ctx, strings.TrimSpace(r.PathValue("id")))
 	status := http.StatusOK

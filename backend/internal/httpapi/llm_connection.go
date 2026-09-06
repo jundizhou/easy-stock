@@ -85,6 +85,24 @@ func (s *Server) modelResponseTimeout() time.Duration {
 	return time.Duration(seconds)*time.Second + 15*time.Second
 }
 
+// stockAnalysisModelTimeout is longer than the ordinary single-prompt
+// timeout. Older installations commonly have a 60 second response setting,
+// while stock analysis needs enough time for a long structured response from
+// Hermes without turning every request into local-only output.
+func (s *Server) stockAnalysisModelTimeout() time.Duration {
+	minimum := 3*time.Minute + 15*time.Second
+	if timeout := s.modelResponseTimeout(); timeout < minimum {
+		return minimum
+	}
+	return s.modelResponseTimeout()
+}
+
+func (s *Server) stockAnalysisTimeout() time.Duration {
+	// Data collection has its own 35 second deadline. Add cleanup grace around
+	// the two sequential model stages.
+	return 35*time.Second + 2*s.stockAnalysisModelTimeout() + 30*time.Second
+}
+
 func truncateRunes(value string, limit int) string {
 	runes := []rune(strings.TrimSpace(value))
 	if len(runes) <= limit {
