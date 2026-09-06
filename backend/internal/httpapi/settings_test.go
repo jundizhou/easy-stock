@@ -79,7 +79,7 @@ func TestSettingsLLMConnectionUsesSavedOpenAICompatibleConfig(t *testing.T) {
 		return nil
 	})
 	gateway := &fakeHermesGateway{
-		status:       hermes.Status{Available: true, Configured: true, APIKeyConfigured: true, Version: "0.18.2"},
+		status:       hermes.Status{Available: true, Configured: true, APIKeyConfigured: true, Version: "0.19.0"},
 		promptResult: hermes.PromptResult{Content: llmProbeMarker},
 	}
 	server := NewServer(Config{SettingsStore: store, HermesGateway: gateway})

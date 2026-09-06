@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const HERMES_AGENT_VERSION = process.env.HERMES_AGENT_VERSION || '0.18.2';
+export const HERMES_AGENT_VERSION = process.env.HERMES_AGENT_VERSION || '0.19.0';
 
 export function hermesRuntimePython(runtimeRoot, platform = process.platform) {
 	return platform === 'win32'
