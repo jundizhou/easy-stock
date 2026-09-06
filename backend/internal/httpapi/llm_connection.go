@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/hermes"
 )
 
 const llmProbeMarker = "A_STOCK_HERMES_OK"
@@ -39,7 +40,7 @@ func (s *Server) settingsLLMTest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 	defer cancel()
 	startedAt := time.Now()
-	result, err := s.hermesGateway.Prompt(ctx, "这是模型连接探针。请仅回复 "+llmProbeMarker+"，不要添加任何其他文字。")
+	result, err := hermes.PromptFullyAuthorized(ctx, s.hermesGateway, "这是模型连接探针。请仅回复 "+llmProbeMarker+"，不要添加任何其他文字。")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Hermes 模型连接失败: "+err.Error())
 		return

@@ -770,7 +770,7 @@ func embeddedModelResponseError(content string) error {
 		return errors.New("Hermes 模型鉴权失败，请在系统设置中更新 API Key")
 	case strings.HasPrefix(value, "http 403"):
 		return errors.New("Hermes 模型接口拒绝访问，请检查 API Key 权限和模型权限")
-	case strings.HasPrefix(value, "http 429"), strings.Contains(value, "rate limit exceeded"):
+	case strings.Contains(value, "http 429"), strings.Contains(value, "rate limit exceeded"), strings.Contains(value, "model_cooldown"), strings.Contains(value, "cooling down"):
 		return errors.New("Hermes 模型接口请求过于频繁或额度不足，请稍后重试并检查账户额度")
 	default:
 		return nil

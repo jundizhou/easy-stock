@@ -87,6 +87,7 @@ func TestEmbeddedModelResponseErrorMapsProviderFailures(t *testing.T) {
 		{content: `{"code":"INVALID_API_KEY","message":"Invalid API key"}`, want: "更新 API Key"},
 		{content: "HTTP 403: access denied", want: "模型权限"},
 		{content: "HTTP 429: rate limit exceeded", want: "额度"},
+		{content: "API call failed after 3 retries: All credentials are cooling down", want: "额度"},
 	}
 	for _, test := range tests {
 		err := embeddedModelResponseError(test.content)
