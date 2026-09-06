@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, LoaderCircle, Network, Plus, Puzzle, Save, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { CheckCircle2, CircleAlert, ExternalLink, LoaderCircle, Network, Plus, Puzzle, Save, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BackendConfig, HermesAgentSettings, HermesInstalledSkill, HermesMCPServerSetting, HermesSkillMarketEntry, HermesSkillMarketSource, HermesSkillSetting, SecretSettingStatus } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
@@ -20,6 +20,7 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 	const [gitURL, setGitURL] = useState('');
 	const [marketSkills, setMarketSkills] = useState<HermesSkillMarketEntry[]>([]);
 	const [marketSources, setMarketSources] = useState<HermesSkillMarketSource[]>([]);
+	const [downloadProgress, setDownloadProgress] = useState<{ downloaded: number; total: number; bytesPerSecond: number; url: string } | null>(null);
 	const directoryInput = useRef<HTMLInputElement>(null);
 	const zipInput = useRef<HTMLInputElement>(null);
 
@@ -106,17 +107,45 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 	const installGitSkillURL = async (url: string) => {
 		if (!config || !url.trim()) return;
 		setState('saving');
-		setMessage('正在下载 GitHub Skill…');
+		setDownloadProgress({ downloaded: 0, total: 0, bytesPerSecond: 0, url: '' });
+		setMessage('正在连接 GitHub…');
 		try {
-			const payload = await requestJSON<{ data: HermesInstalledSkill[] }>(config, '/api/v1/settings/agent/skills/install-git', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
+			const response = await fetch(new URL('/api/v1/settings/agent/skills/install-git?progress=1', config.backendUrl), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}) }, body: JSON.stringify({ url: url.trim() }) });
+			if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+			const reader = response.body?.getReader();
+			if (!reader) throw new Error('浏览器不支持读取下载进度');
+			const decoder = new TextDecoder();
+			let pending = '';
+			let installed: HermesInstalledSkill[] = [];
+			while (true) {
+				const { value, done } = await reader.read();
+				pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+				const lines = pending.split('\n');
+				pending = lines.pop() || '';
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					const event = JSON.parse(line) as { type: string; url?: string; downloaded?: number; total?: number; bytes_per_second?: number; data?: HermesInstalledSkill[]; error?: string };
+					if (event.type === 'started') setDownloadProgress((current) => ({ downloaded: current?.downloaded || 0, total: current?.total || 0, bytesPerSecond: current?.bytesPerSecond || 0, url: event.url || current?.url || '' }));
+					if (event.type === 'progress') {
+						setDownloadProgress((current) => ({ downloaded: event.downloaded || 0, total: event.total || 0, bytesPerSecond: event.bytes_per_second || 0, url: current?.url || '' }));
+						const percent = event.total && event.total > 0 ? ` ${Math.min(100, Math.round((event.downloaded || 0) * 100 / event.total))}%` : '';
+						setMessage(`正在下载 GitHub Skill…${percent} · ${formatTransferRate(event.bytes_per_second || 0)}`);
+					}
+					if (event.type === 'error') throw new Error(event.error || '安装 GitHub Skill 失败');
+					if (event.type === 'complete') installed = event.data || [];
+				}
+				if (done) break;
+			}
 			const refreshed = await requestJSON<{ data: HermesAgentSettings }>(config, '/api/v1/settings/agent');
 			setSkills(refreshed.data.skills || []);
 			setGitURL('');
 			setState('saved');
-			setMessage(`已从 GitHub 安装 ${payload.data?.length || 0} 个 Skill。`);
+			setMessage(`已从 GitHub 安装 ${installed.length} 个 Skill。`);
 		} catch (error) {
 			setState('error');
 			setMessage(error instanceof Error ? error.message : '安装 GitHub Skill 失败');
+		} finally {
+			setDownloadProgress(null);
 		}
 	};
 
@@ -151,7 +180,8 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 			{state === 'loading' ? <div className="agent-settings-loading"><LoaderCircle className="spin" size={18} />读取 Hermes 能力配置</div> : <>
 				<div className="agent-settings-block">
 					<div className="agent-settings-heading"><div><strong>Skills</strong><span>{enabledSkillCount}/{skills.length} 个已启用</span></div><div className="agent-settings-heading-actions"><label><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill" /></label><button type="button" onClick={() => directoryInput.current?.click()}><Plus size={14} />导入目录</button><button type="button" onClick={() => zipInput.current?.click()}><Plus size={14} />导入 ZIP</button><input ref={directoryInput} type="file" hidden multiple {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} onChange={(event) => void importSkills(event.target.files)} /><input ref={zipInput} type="file" hidden accept=".zip,application/zip" onChange={(event) => void importSkills(event.target.files)} /></div></div>
-					<div className="skill-git-import"><input value={gitURL} onChange={(event) => setGitURL(event.target.value)} placeholder="GitHub 仓库地址，例如 https://github.com/openai/skills" /><button type="button" disabled={!gitURL.trim() || state === 'saving'} onClick={() => void installGitSkill()}><Plus size={14} />从 GitHub 安装</button></div>
+					<div className="skill-git-import"><input value={gitURL} onChange={(event) => setGitURL(event.target.value)} placeholder="GitHub 仓库地址，例如 https://github.com/openai/skills" /><button type="button" disabled={!gitURL.trim() || state === 'saving'} onClick={() => void installGitSkill()}><Plus size={14} />从 GitHub 安装</button>{gitURL.trim() && <a className="skill-git-link" href={gitURL.trim()} target="_blank" rel="noreferrer" title="查看下载链接"><ExternalLink size={14} />查看链接</a>}</div>
+					{downloadProgress && <div className="skill-download-progress"><div className="skill-download-progress-bar"><i style={{ width: `${downloadProgress.total > 0 ? Math.min(100, downloadProgress.downloaded * 100 / downloadProgress.total) : 8}%` }} /></div><span>{downloadProgress.total > 0 ? `${Math.round(downloadProgress.downloaded * 100 / downloadProgress.total)}%` : '准备中'} · {formatBytes(downloadProgress.downloaded)}{downloadProgress.total > 0 ? ` / ${formatBytes(downloadProgress.total)}` : ''} · {formatTransferRate(downloadProgress.bytesPerSecond)}{downloadProgress.url && <a href={downloadProgress.url} target="_blank" rel="noreferrer">查看下载链接</a>}</span></div>}
 					{marketSkills.length > 0 && <div className="skill-market"><div className="skill-market-title"><strong>A 股精选 Skill</strong><span>easy-stock 投研目录</span></div><div className="skill-market-grid">{marketSkills.map((entry) => <article className="skill-market-card" key={entry.id}><div><strong>{entry.name}</strong><small>{entry.category}</small></div><p>{entry.description}</p><button type="button" disabled={marketInstalled(entry) || state === 'saving'} onClick={() => void installGitSkillFromMarket(entry)}>{marketInstalled(entry) ? '已安装' : '安装'}</button></article>)}</div></div>}
 					{marketSources.length > 0 && <div className="skill-market-sources"><div className="skill-market-title"><strong>更多市场</strong><span>打开目录浏览后，可复制仓库地址或下载 ZIP 导入</span></div><div className="skill-market-source-list">{marketSources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}><span><strong>{source.name}</strong><small>{source.region}</small></span><em>{source.description}</em></a>)}</div></div>}
 					<div className="skill-settings-list">
@@ -196,6 +226,19 @@ function SecretMapEditor({ label, entries, onChange, onAdd, onRemove }: { label:
 
 function toMCPDraft(server: HermesMCPServerSetting): MCPDraft {
 	return { ...server, id: nextID('mcp'), originalName: server.name, transport: server.transport || 'stdio', argsText: (server.args || []).join('\n'), env: toSecretDrafts(server.env, 'env'), headers: toSecretDrafts(server.headers, 'header') };
+}
+
+function formatBytes(value: number): string {
+	if (!value || value < 1024) return `${Math.max(0, Math.round(value || 0))} B`;
+	const units = ['KB', 'MB', 'GB'];
+	let amount = value / 1024;
+	let unit = 0;
+	while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit += 1; }
+	return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatTransferRate(value: number): string {
+	return value > 0 ? `${formatBytes(value)}/s` : '速度计算中';
 }
 
 function toSecretDrafts(values: Record<string, SecretSettingStatus> | undefined, prefix: string): SecretEntryDraft[] {

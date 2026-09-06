@@ -3181,6 +3181,14 @@ a:focus-visible {
 .skill-git-import button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); font-size: 10px; font-weight: 650; cursor: pointer; white-space: nowrap; }
 .skill-git-import button:hover:not(:disabled) { border-color: #8db8e5; background: #f8fbff; }
 .skill-git-import button:disabled { cursor: not-allowed; opacity: .55; }
+.skill-git-link { display: inline-flex; align-items: center; gap: 4px; min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--blue); font-size: 10px; text-decoration: none; white-space: nowrap; }
+.skill-git-link:hover { border-color: #8db8e5; background: #f8fbff; }
+.skill-download-progress { display: grid; gap: 4px; margin-top: 7px; color: var(--muted); font-size: 9px; }
+.skill-download-progress-bar { height: 5px; overflow: hidden; border-radius: 99px; background: var(--line-soft); }
+.skill-download-progress-bar i { display: block; height: 100%; border-radius: inherit; background: var(--blue); transition: width .2s ease; }
+.skill-download-progress span { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.skill-download-progress a { color: var(--blue); text-decoration: none; }
+.skill-download-progress a:hover { text-decoration: underline; }
 .skill-market { margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fbfdff; }
 .skill-market-title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .skill-market-title strong { color: var(--text); font-size: 11px; }

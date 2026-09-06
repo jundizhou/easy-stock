@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,19 @@ func TestGithubSkillArchiveURL(t *testing.T) {
 	}
 	if _, _, err := githubSkillArchiveURL("http://github.com/openai/skills"); err == nil {
 		t.Fatal("expected non-HTTPS URL to be rejected")
+	}
+}
+
+func TestReadSkillArchiveReportsProgress(t *testing.T) {
+	var events []skillDownloadProgress
+	data, err := readSkillArchive(bytes.NewReader([]byte("skill archive")), int64(len("skill archive")), func(event skillDownloadProgress) {
+		events = append(events, event)
+	})
+	if err != nil || string(data) != "skill archive" {
+		t.Fatalf("archive read failed: %v %q", err, data)
+	}
+	if len(events) == 0 || events[len(events)-1].Type != "progress" || events[len(events)-1].Downloaded != int64(len(data)) {
+		t.Fatalf("unexpected progress events: %+v", events)
 	}
 }
 

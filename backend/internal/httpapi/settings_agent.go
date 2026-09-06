@@ -246,6 +246,29 @@ func (s *Server) settingsAgentSkillInstallGit(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	streamProgress := r.URL.Query().Get("progress") == "1"
+	var emitProgress func(skillDownloadProgress)
+	if streamProgress {
+		w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "当前服务不支持下载进度")
+			return
+		}
+		emitProgress = func(progress skillDownloadProgress) {
+			_ = json.NewEncoder(w).Encode(progress)
+			flusher.Flush()
+		}
+		emitProgress(skillDownloadProgress{Type: "started", URL: source})
+	}
+	fail := func(status int, message string) {
+		if emitProgress != nil {
+			emitProgress(skillDownloadProgress{Type: "error", Error: message})
+			return
+		}
+		writeError(w, status, message)
+	}
 	// GitHub's codeload endpoint can take tens of seconds to start sending a
 	// repository archive. Keep the request cancellable while giving the archive
 	// enough time to arrive.
@@ -254,40 +277,99 @@ func (s *Server) settingsAgentSkillInstallGit(w http.ResponseWriter, r *http.Req
 	defer cancel()
 	downloadRequest, err := http.NewRequestWithContext(requestCtx, http.MethodGet, source, nil)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "下载 Skill 仓库失败: "+err.Error())
+		fail(http.StatusBadGateway, "下载 Skill 仓库失败: "+err.Error())
 		return
 	}
 	response, err := client.Do(downloadRequest)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "下载 Skill 仓库失败（等待时间超过 120 秒或网络中断）: "+err.Error())
+		fail(http.StatusBadGateway, "下载 Skill 仓库失败（等待时间超过 120 秒或网络中断）: "+err.Error())
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("下载 Skill 仓库失败: HTTP %d", response.StatusCode))
+		fail(http.StatusBadGateway, fmt.Sprintf("下载 Skill 仓库失败: HTTP %d", response.StatusCode))
 		return
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 128<<20+1))
+	data, err := readSkillArchive(response.Body, response.ContentLength, emitProgress)
 	if err != nil || len(data) > 128<<20 {
-		writeError(w, http.StatusBadGateway, "Skill 仓库压缩包过大或读取失败")
+		fail(http.StatusBadGateway, "Skill 仓库压缩包过大或读取失败")
 		return
 	}
 	if prefix != "" {
 		data, err = filterGitHubSkillArchive(data, prefix)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "读取 GitHub Skill 目录失败: "+err.Error())
+			fail(http.StatusBadRequest, "读取 GitHub Skill 目录失败: "+err.Error())
 			return
 		}
 	}
 	installed, err := importer.ImportSkills([]hermes.SkillImportFile{{Name: "github-skill.zip", Data: data}})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "安装 Skill 失败: "+err.Error())
+		fail(http.StatusBadRequest, "安装 Skill 失败: "+err.Error())
 		return
 	}
 	for i := range installed {
 		installed[i].Source = request.URL
 	}
+	if emitProgress != nil {
+		emitProgress(skillDownloadProgress{Type: "complete", Data: installed})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": installed})
+}
+
+type skillDownloadProgress struct {
+	Type           string                  `json:"type"`
+	URL            string                  `json:"url,omitempty"`
+	Downloaded     int64                   `json:"downloaded,omitempty"`
+	Total          int64                   `json:"total,omitempty"`
+	BytesPerSecond int64                   `json:"bytes_per_second,omitempty"`
+	Data           []hermes.InstalledSkill `json:"data,omitempty"`
+	Error          string                  `json:"error,omitempty"`
+}
+
+func readSkillArchive(source io.Reader, total int64, emit func(skillDownloadProgress)) ([]byte, error) {
+	const chunkSize = 32 << 10
+	data := bytes.NewBuffer(nil)
+	data.Grow(1 << 20)
+	buffer := make([]byte, chunkSize)
+	started := time.Now()
+	var downloaded int64
+	lastUpdate := time.Time{}
+	for {
+		n, err := source.Read(buffer)
+		if n > 0 {
+			downloading := int64(n)
+			downloaded += downloading
+			if downloaded > 128<<20 {
+				return nil, errors.New("Skill 仓库压缩包超过 128 MB 限制")
+			}
+			_, _ = data.Write(buffer[:n])
+			if emit != nil && (lastUpdate.IsZero() || time.Since(lastUpdate) >= 200*time.Millisecond) {
+				elapsed := time.Since(started).Seconds()
+				rate := int64(0)
+				if elapsed > 0 {
+					rate = int64(float64(downloaded) / elapsed)
+				}
+				emit(skillDownloadProgress{Type: "progress", Downloaded: downloaded, Total: total, BytesPerSecond: rate})
+				lastUpdate = time.Now()
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if emit != nil {
+		elapsed := time.Since(started).Seconds()
+		rate := int64(0)
+		if elapsed > 0 {
+			rate = int64(float64(downloaded) / elapsed)
+		}
+		emit(skillDownloadProgress{Type: "progress", Downloaded: downloaded, Total: total, BytesPerSecond: rate})
+	}
+	return data.Bytes(), nil
 }
 
 func githubSkillArchiveURL(raw string) (string, string, error) {
