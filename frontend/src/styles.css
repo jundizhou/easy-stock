@@ -3170,6 +3170,38 @@ a:focus-visible {
 .agent-settings-heading > label { display: flex; align-items: center; gap: 6px; width: min(220px, 48%); min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; color: var(--subtle); }
 .agent-settings-heading > label:focus-within { border-color: #8db8e5; outline: 3px solid rgba(36, 118, 210, 0.1); }
 .agent-settings-heading > label input { min-width: 0; min-height: 32px; padding: 0; border: 0; outline: 0; }
+.agent-settings-heading-actions { display: flex !important; align-items: center; justify-content: flex-end; gap: 6px !important; min-width: 0; }
+.agent-settings-heading-actions > label { display: flex; align-items: center; gap: 6px; width: min(220px, 35vw); min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; color: var(--subtle); }
+.agent-settings-heading-actions > label:focus-within { border-color: #8db8e5; outline: 3px solid rgba(36, 118, 210, 0.1); }
+.agent-settings-heading-actions > label input { min-width: 0; min-height: 32px; padding: 0; border: 0; outline: 0; }
+.agent-settings-heading-actions > button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); font-size: 10px; font-weight: 650; cursor: pointer; white-space: nowrap; }
+.agent-settings-heading-actions > button:hover { border-color: #8db8e5; background: #f8fbff; }
+.skill-git-import { display: flex; gap: 6px; margin-top: 8px; }
+.skill-git-import input { flex: 1; min-width: 0; min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); font-size: 10px; }
+.skill-git-import button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); font-size: 10px; font-weight: 650; cursor: pointer; white-space: nowrap; }
+.skill-git-import button:hover:not(:disabled) { border-color: #8db8e5; background: #f8fbff; }
+.skill-git-import button:disabled { cursor: not-allowed; opacity: .55; }
+.skill-market { margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fbfdff; }
+.skill-market-title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.skill-market-title strong { color: var(--text); font-size: 11px; }
+.skill-market-title span { color: var(--subtle); font-size: 9px; }
+.skill-market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.skill-market-card { display: grid; gap: 6px; padding: 9px; border: 1px solid var(--line-soft); border-radius: 8px; background: #fff; }
+.skill-market-card > div { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.skill-market-card strong { color: var(--text); font-size: 10px; }
+.skill-market-card small { color: var(--subtle); font-size: 8px; }
+.skill-market-card p { min-height: 28px; margin: 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.skill-market-card button { justify-self: start; min-height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--blue); font-size: 9px; cursor: pointer; }
+.skill-market-card button:hover:not(:disabled) { border-color: #8db8e5; background: #f8fbff; }
+.skill-market-card button:disabled { cursor: default; color: var(--subtle); opacity: .8; }
+.skill-market-sources { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.skill-market-source-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.skill-market-source-list a { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; color: inherit; text-decoration: none; }
+.skill-market-source-list a:hover { border-color: #8db8e5; background: #f8fbff; }
+.skill-market-source-list a span { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.skill-market-source-list strong { color: var(--text); font-size: 10px; }
+.skill-market-source-list small { color: var(--subtle); font-size: 8px; }
+.skill-market-source-list em { color: var(--muted); font-size: 8px; font-style: normal; line-height: 1.4; }
 .agent-settings-heading > button,
 .mcp-secret-map > div > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid #a9c7e5; border-radius: 7px; background: #f6faff; color: #175ea9; font-size: 10px; font-weight: 650; cursor: pointer; }
 .agent-settings-heading > button:hover,
@@ -3443,6 +3475,10 @@ a:focus-visible {
 	.agent-settings-heading { align-items: stretch; flex-direction: column; }
 	.agent-settings-heading > label { width: 100%; }
 	.agent-settings-heading > button { align-self: flex-start; }
+	.agent-settings-heading-actions { justify-content: flex-start !important; flex-wrap: wrap; }
+	.agent-settings-heading-actions > label { width: 100%; }
+	.skill-market-grid { grid-template-columns: 1fr; }
+	.skill-market-source-list { grid-template-columns: 1fr; }
 	.mcp-secret-row { grid-template-columns: minmax(0, 1fr) 34px; }
 	.mcp-secret-row > input:first-child { grid-column: 1 / -1; }
 	.agent-settings-footer { align-items: stretch; flex-direction: column; }
@@ -5210,6 +5246,13 @@ a:focus-visible {
 }
 .ai-answering strong { font-size: 9px; white-space: nowrap; }
 .ai-answering small { color: #70849a; font-size: 8px; line-height: 1.4; }
+.ai-approval-card { margin: 0 0 10px; padding: 12px 14px; border: 1px solid #e6b85c; border-radius: 12px; background: #fff9e8; color: #5b4311; }
+.ai-approval-card strong { display: block; font-size: 13px; }
+.ai-approval-card p { margin: 5px 0; font-size: 12px; }
+.ai-approval-card code { display: block; max-height: 72px; overflow: auto; padding: 6px 8px; border-radius: 6px; background: #fff3cc; font-size: 11px; white-space: pre-wrap; }
+.ai-approval-card > div { display: flex; gap: 7px; margin-top: 9px; }
+.ai-approval-card button { border: 0; border-radius: 7px; padding: 6px 10px; background: #2f7ecb; color: white; cursor: pointer; font-size: 11px; }
+.ai-approval-card button.deny { background: transparent; color: #8b5a14; border: 1px solid #d8b460; }
 .ai-answering-bars { display: flex; align-items: center; justify-content: center; gap: 2px; height: 18px; }
 .ai-answering-bars i { width: 3px; height: 6px; border-radius: 999px; background: #3d88cf; animation: ai-answering-wave 1s ease-in-out infinite; }
 .ai-answering-bars i:nth-child(2) { animation-delay: 120ms; }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/review"
 )
 
@@ -333,7 +334,7 @@ func (s *Server) reviewDailySummaryAnonymize(w http.ResponseWriter, r *http.Requ
 	prompt := buildDailySummaryAnonymizePrompt(request.Summary)
 	ctx, cancel := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 	defer cancel()
-	response, err := s.hermesGateway.Prompt(ctx, prompt)
+	response, err := hermes.PromptFullyAuthorized(ctx, s.hermesGateway, prompt)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Hermes 复盘脱敏失败: "+err.Error())
 		return

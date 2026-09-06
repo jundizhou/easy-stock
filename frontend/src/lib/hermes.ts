@@ -13,6 +13,8 @@ export type HermesStreamRequest = {
 	seedMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	onDelta?: (content: string) => void;
 	onSession?: (sessionID: string) => void;
+	onStatus?: (status: { kind: string; text?: string }) => void;
+	onApproval?: (approval: { patternKey?: string; description?: string; command?: string }, respond: (choice: 'once' | 'session' | 'deny') => void) => void;
 	signal?: AbortSignal;
 };
 
@@ -72,6 +74,10 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 			const id = `hermes-${nextID++}`;
 			socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
 			return id;
+		};
+		const respondApproval = (sessionID: string, choice: 'once' | 'session' | 'deny') => {
+			if (socket.readyState !== WebSocket.OPEN) return;
+			send('approval.respond', { session_id: sessionID, choice: choice === 'once' ? 'once' : choice });
 		};
 		const submitPrompt = () => {
 			submitRequestID = send('prompt.submit', { session_id: liveSessionID, text: request.prompt });
@@ -154,8 +160,29 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				request.onDelta?.(streamed);
 				return;
 			}
+			if (type === 'approval.request') {
+				const params = frame.params || {};
+				const payload = (params.payload && typeof params.payload === 'object' ? params.payload : {}) as Record<string, unknown>;
+				const sessionID = stringValue(params.session_id) || liveSessionID;
+				request.onApproval?.({
+					patternKey: stringValue(payload.pattern_key),
+					description: stringValue(payload.description),
+					command: stringValue(payload.command),
+				}, (choice) => respondApproval(sessionID, choice));
+				return;
+			}
+			if (type === 'status.update') {
+				const payload = (frame.params?.payload && typeof frame.params.payload === 'object' ? frame.params.payload : frame.params) as Record<string, unknown>;
+				request.onStatus?.({ kind: stringValue(payload.kind) || 'status', text: stringValue(payload.text) });
+				return;
+			}
 			if (type === 'message.complete') {
+				const status = eventText(frame, 'status');
 				const content = (eventText(frame, 'content') || eventText(frame, 'text') || streamed).trim();
+				if (status === 'error' || status === 'failed') {
+					finish(new Error(content || 'Hermes 执行失败'));
+					return;
+				}
 				if (!content) {
 					finish(new Error('Hermes 没有返回有效内容'));
 					return;

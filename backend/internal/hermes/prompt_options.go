@@ -28,9 +28,10 @@ var allowedSandboxToolsets = map[string]bool{
 // is intentionally coupled to Sandbox so callers cannot bypass consent while
 // the agent still has access to the normal application workspace.
 type PromptOptions struct {
-	Sandbox     bool
-	AutoApprove bool
-	Toolsets    []string
+	Sandbox          bool
+	AutoApprove      bool
+	Toolsets         []string
+	BrowserStatePath string
 }
 
 type OptionsPrompter interface {
@@ -47,6 +48,25 @@ func PromptUsingOptions(ctx context.Context, prompter Prompter, prompt string, o
 		return enhanced.PromptWithOptions(ctx, prompt, options)
 	}
 	return prompter.Prompt(ctx, prompt)
+}
+
+// PromptFullyAuthorized is for unattended product workflows (reviews,
+// analysis jobs and probes), never for the interactive AI chat. It runs in an
+// isolated workspace and automatically approves the limited toolsets allowed
+// by that workspace.
+func PromptFullyAuthorized(ctx context.Context, prompter Prompter, prompt string) (PromptResult, error) {
+	return PromptUsingOptions(ctx, prompter, prompt, PromptOptions{Sandbox: true, AutoApprove: true})
+}
+
+// PromptFullyAuthorizedWithBrowserState is the unattended equivalent for a
+// workflow that explicitly selected a browser login state.
+func PromptFullyAuthorizedWithBrowserState(ctx context.Context, prompter BrowserStatePrompter, prompt, statePath string) (PromptResult, error) {
+	if enhanced, ok := prompter.(interface {
+		PromptWithOptionsAndBrowserState(context.Context, string, string, PromptOptions) (PromptResult, error)
+	}); ok {
+		return enhanced.PromptWithOptionsAndBrowserState(ctx, prompt, statePath, PromptOptions{Sandbox: true, AutoApprove: true, Toolsets: []string{"web"}, BrowserStatePath: statePath})
+	}
+	return prompter.PromptWithBrowserState(ctx, prompt, statePath)
 }
 
 type promptProcessOptions struct {
@@ -135,6 +155,18 @@ func (r *Runtime) preparePromptSandbox(options PromptOptions) (*promptSandbox, e
 			"HERMES_PROFILE",
 			"HERMES_YOLO_MODE",
 		},
+	}
+	if options.BrowserStatePath != "" {
+		sandbox.process.env["AGENT_BROWSER_STATE"] = options.BrowserStatePath
+		sandbox.process.unset = append(sandbox.process.unset, "AGENT_BROWSER_PROFILE")
+		// The selected storage state is an explicit input to this unattended
+		// workflow and is intentionally kept available inside the sandbox.
+		for i, key := range sandbox.process.unset {
+			if key == "AGENT_BROWSER_STATE" {
+				sandbox.process.unset = append(sandbox.process.unset[:i], sandbox.process.unset[i+1:]...)
+				break
+			}
+		}
 	}
 	return sandbox, nil
 }

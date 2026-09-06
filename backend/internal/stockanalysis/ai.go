@@ -483,7 +483,7 @@ func hydrateModelThemeEvidence(input Input, item *ThemeEvidence) {
 
 func promptJSONObject[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string) (T, error) {
 	var decoded T
-	result, err := prompter.Prompt(ctx, prompt)
+	result, err := hermes.PromptFullyAuthorized(ctx, prompter, prompt)
 	if err != nil {
 		return decoded, fmt.Errorf("Hermes%s失败: %w", label, err)
 	}
@@ -500,7 +500,7 @@ func promptJSONObject[T any](ctx context.Context, prompter hermes.Prompter, prom
 
 [原始任务]
 ` + prompt + "\n\n[上一次无效输出，仅用于纠错]\n" + truncateText(result.Content, 4_000)
-	repaired, retryErr := prompter.Prompt(ctx, repairPrompt)
+	repaired, retryErr := hermes.PromptFullyAuthorized(ctx, prompter, repairPrompt)
 	if retryErr != nil {
 		return decoded, fmt.Errorf("Hermes未返回有效%sJSON: %v；自动纠错失败: %w", label, firstErr, retryErr)
 	}

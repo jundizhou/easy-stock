@@ -500,7 +500,7 @@ func EnrichDailyValidationWithAI(ctx context.Context, prompter hermes.Prompter, 
 5. 只返回严格JSON：{"headline":"...","actual_scenario":"base|strong|weak","scenario_verdict":"correct|partial|wrong|unverified","scenario_summary":"...","market_summary":"...","lessons":["..."],"realized_risks":["..."]}
 
 输入JSON：` + string(data)
-	result, err := prompter.Prompt(ctx, prompt)
+	result, err := hermes.PromptFullyAuthorized(ctx, prompter, prompt)
 	if err != nil {
 		return err
 	}
