@@ -260,7 +260,10 @@ func (s *Server) settingsAgentSkillInstallGit(w http.ResponseWriter, r *http.Req
 			_ = json.NewEncoder(w).Encode(progress)
 			flusher.Flush()
 		}
-		emitProgress(skillDownloadProgress{Type: "started", URL: source})
+		// Keep the user-facing link on GitHub's repository/tree page. The
+		// codeload URL above is an implementation detail and would immediately
+		// download the ZIP when opened in a browser.
+		emitProgress(skillDownloadProgress{Type: "started", URL: strings.TrimSpace(request.URL)})
 	}
 	fail := func(status int, message string) {
 		if emitProgress != nil {
