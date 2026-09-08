@@ -2,6 +2,8 @@ package stockanalysis
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -107,6 +109,43 @@ func TestEnrichWithAIPreservesNewListingRiskPlan(t *testing.T) {
 	}
 	if analysis.ActionPlan.DecisionLabel != originalPlan.DecisionLabel || analysis.ActionPlan.CurrentAction != originalPlan.CurrentAction || analysis.ActionPlan.Entry.PriceLow != originalPlan.Entry.PriceLow || analysis.RiskControl.SuggestedPositionMax > 10 {
 		t.Fatalf("AI overrode constrained new-listing plan: before=%+v after=%+v risk=%+v", originalPlan, analysis.ActionPlan, analysis.RiskControl)
+	}
+}
+
+func TestEnrichWithAIUsesLocalNarrativeWhenProviderOmitsFields(t *testing.T) {
+	analysis := Analysis{
+		Symbol: "600519.SH",
+		Name:   "测试股",
+		Conclusion: Conclusion{
+			Headline: "本地标题",
+			Summary:  "本地摘要",
+			Action:   "本地动作",
+			BestPath: "本地路径",
+			MainRisk: "本地风险",
+		},
+	}
+	prompter := fakeStockPrompter{content: `{"conclusion":{"title":"模型标题"},"decision":{"decision_mode":"short_term"}}`}
+	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err != nil {
+		t.Fatal(err)
+	}
+	if analysis.AI.Status != "ready" || analysis.Conclusion.Headline != "模型标题" || analysis.Conclusion.Summary != "本地摘要" || analysis.Conclusion.Action != "本地动作" {
+		t.Fatalf("partial AI conclusion was not merged with local narrative: %+v", analysis)
+	}
+}
+
+func TestEnrichWithAIRejectsEmptyObject(t *testing.T) {
+	analysis := Analysis{
+		Symbol: "600519.SH",
+		Name:   "测试股",
+		Conclusion: Conclusion{
+			Headline: "本地标题",
+			Summary:  "本地摘要",
+			Action:   "本地动作",
+		},
+	}
+	prompter := fakeStockPrompter{content: `{}`}
+	if err := EnrichWithAI(context.Background(), prompter, &analysis, ""); err == nil || !strings.Contains(err.Error(), "未返回有效个股分析JSON") {
+		t.Fatalf("empty AI result error = %v", err)
 	}
 }
 
@@ -736,8 +775,48 @@ func TestEnrichWithAIReplacesOnlyNarrativeConclusion(t *testing.T) {
 	if !strings.Contains(capturedPrompt, `"stock_news"`) || !strings.Contains(capturedPrompt, `"theme_news"`) {
 		t.Fatalf("news payload missing from AI prompt: %s", capturedPrompt)
 	}
-	if !strings.Contains(capturedPrompt, `"price_context"`) || !strings.Contains(capturedPrompt, `"daily_bars"`) || !strings.Contains(capturedPrompt, `"current_price"`) {
+	if !strings.Contains(capturedPrompt, `"price_context"`) || !strings.Contains(capturedPrompt, `"daily_kline_summary"`) || !strings.Contains(capturedPrompt, `"current_price"`) {
 		t.Fatalf("price and daily K-line context missing from AI prompt: %s", capturedPrompt)
+	}
+	if strings.Contains(capturedPrompt, `"daily_bars"`) {
+		t.Fatalf("full daily K-line array must not be sent to AI: %s", capturedPrompt)
+	}
+}
+
+func TestSummarizeDailyKLinesCompressesLatest120TradingDays(t *testing.T) {
+	lines := syntheticTrendLines("600519.SH", 140, 10, .08, 500_000_000)
+	bars := compactDailyBars(lines, 120)
+	summary := summarizeDailyKLines(bars)
+	if summary.SampleDays != 120 || summary.LimitedSample {
+		t.Fatalf("unexpected sample metadata: %+v", summary)
+	}
+	if summary.WindowReturns["120d"] <= 0 || summary.AverageVolume["20d"] <= 0 || summary.VolumeRatio5D20D <= 0 {
+		t.Fatalf("missing deterministic return or volume statistics: %+v", summary)
+	}
+	if len(summary.TwentyDaySegments) != 6 || summary.TwentyDaySegments[5].TradingDays != 20 {
+		t.Fatalf("20-day path segments missing: %+v", summary.TwentyDaySegments)
+	}
+	encodedBars, err := json.Marshal(bars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedSummary, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encodedSummary)*3 >= len(encodedBars) {
+		t.Fatalf("K-line summary did not materially shrink the prompt: bars=%d summary=%d", len(encodedBars), len(encodedSummary))
+	}
+}
+
+func TestSummarizeDailyKLinesMarksLimitedSample(t *testing.T) {
+	bars := compactDailyBars(syntheticTrendLines("688836.SH", 10, 20, .2, 100_000_000), 120)
+	summary := summarizeDailyKLines(bars)
+	if !summary.LimitedSample || summary.SampleDays != 10 {
+		t.Fatalf("limited sample metadata missing: %+v", summary)
+	}
+	if _, ok := summary.WindowReturns["20d"]; ok {
+		t.Fatalf("20-day return must not be emitted for a 10-day sample: %+v", summary.WindowReturns)
 	}
 }
 
@@ -755,24 +834,87 @@ func TestEnrichWithAIRetriesMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestExtractThemeEvidenceRetriesMalformedJSON(t *testing.T) {
+func TestExtractThemeEvidenceDoesNotRetryMalformedJSON(t *testing.T) {
 	now := time.Now()
 	prompter := &stagedStockPrompter{contents: []string{
 		"题材证据如下，但暂时无法输出结构化结果。",
-		`{"items":[{"theme":"机器人","type":"market_mapping","relation":"market_mapping","direction":"positive","source":"eastmoney:announcement","title":"关于产业客户合作的公告","snippet":"为机器人产业客户提供结算接口","strength":0.82}]}`,
+		`{"items":[]}`,
 	}}
-	items, err := ExtractThemeEvidence(context.Background(), prompter, Input{
+	_, err := ExtractThemeEvidence(context.Background(), prompter, Input{
 		Symbol: "300900.SZ", Quote: foundation.Quote{Name: "样本金融科技"}, Business: "金融软件",
 		Announcements: []foundation.MarketResearchItem{{Title: "关于产业客户合作的公告", Content: "公司为机器人产业客户提供结算接口。", PublishedAt: now, Meta: foundation.SourceMeta{Source: "eastmoney:announcement"}}},
 	})
+	if err == nil || !strings.Contains(err.Error(), "未返回有效题材证据JSON") {
+		t.Fatalf("malformed theme evidence error = %v", err)
+	}
+	if len(prompter.prompts) != 1 {
+		t.Fatalf("theme evidence should use one bounded attempt, prompts=%d", len(prompter.prompts))
+	}
+}
+
+func TestPrepareThemeEvidencePromptLimitsAndDeduplicatesCandidates(t *testing.T) {
+	now := time.Now()
+	input := Input{
+		Symbol: "300900.SZ", Quote: foundation.Quote{Name: "样本公司"}, Business: "机器人控制系统",
+		Concepts: []string{"机器人", "储能", "固态电池", "低空经济", "商业航天", "AI算力", "光通信/CPO", "化合物半导体", "智能制造", "新能源", "半导体"},
+	}
+	for index, concept := range input.Concepts {
+		input.Themes = append(input.Themes, foundation.ThemeOverview{Name: concept, TrendScore: 70 + index})
+	}
+	for index := 0; index < 12; index++ {
+		title := fmt.Sprintf("机器人项目合作公告%02d", index)
+		if index == 1 {
+			title = "机器人项目合作公告00"
+		}
+		input.Announcements = append(input.Announcements, foundation.MarketResearchItem{
+			Title: title, Content: strings.Repeat("公司推进机器人项目合作。", 40), PublishedAt: now.Add(-time.Duration(index) * time.Hour),
+		})
+	}
+	for index := 0; index < 10; index++ {
+		input.News = append(input.News, foundation.NewsItem{
+			Title: fmt.Sprintf("样本公司机器人业务进展%02d", index), Content: strings.Repeat("样本公司推进机器人产品销售。", 30), PublishedAt: now.Add(-time.Duration(index) * time.Hour),
+		})
+	}
+	prepared := PrepareThemeEvidencePrompt(input)
+	stats := prepared.Stats()
+	if stats.AnnouncementCandidates != maxThemeAIAnnouncements || stats.NewsCandidates != maxThemeAINews || stats.ThemeCandidates != maxThemeAIMarketThemes {
+		t.Fatalf("candidate limits not applied: %+v", stats)
+	}
+	if stats.PromptBytes <= 0 || stats.PromptBytes >= 20_000 || stats.ToolMode != "disabled" {
+		t.Fatalf("theme prompt is not bounded or tool-free: %+v", stats)
+	}
+	seenTitles := map[string]bool{}
+	for _, source := range prepared.sources {
+		if seenTitles[source.Title] {
+			t.Fatalf("duplicate source title retained: %q", source.Title)
+		}
+		seenTitles[source.Title] = true
+		if len([]rune(source.Snippet)) > maxThemeAISnippetRunes {
+			t.Fatalf("source snippet exceeded limit: %d", len([]rune(source.Snippet)))
+		}
+	}
+}
+
+func TestExtractPreparedThemeEvidenceRestoresExactLocalSourceAndDisablesTools(t *testing.T) {
+	now := time.Now()
+	content := "前置信息。公司为机器人产业客户提供结算接口。其他信息。"
+	prepared := PrepareThemeEvidencePrompt(Input{
+		Symbol: "300900.SZ", Quote: foundation.Quote{Name: "样本金融科技"}, Business: "金融软件", Concepts: []string{"机器人"},
+		Announcements: []foundation.MarketResearchItem{{Title: "关于产业客户合作的公告", Content: content, URL: "https://example.invalid/a1", PublishedAt: now, Meta: foundation.SourceMeta{Source: "eastmoney:announcement"}}},
+	})
+	prompter := &optionsStockPrompter{content: `{"items":[{"theme":"机器人","source_id":"a1","type":"market_mapping","relation":"customer_supplier","direction":"positive","strength":0.82},{"theme":"机器人","source_id":"missing","type":"fact","relation":"own_business","direction":"positive","strength":0.99}]}`}
+	items, attempts, err := ExtractPreparedThemeEvidence(context.Background(), prompter, prepared)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prompter.prompts) != 2 || !strings.Contains(prompter.prompts[1], "上一次输出无法解析") {
-		t.Fatalf("malformed JSON was not retried: %+v", prompter.prompts)
+	if len(prompter.options) != 1 || !prompter.options[0].DisableTools || !prompter.options[0].Sandbox || !prompter.options[0].AutoApprove {
+		t.Fatalf("strict JSON prompt did not use tool-free sandbox: %+v", prompter.options)
 	}
-	if len(items) != 1 || items[0].Relation != "market_mapping" || items[0].PublishedAt.IsZero() || items[0].Source != "eastmoney:announcement" {
-		t.Fatalf("repaired theme evidence was not normalized: %+v", items)
+	if len(attempts) != 1 || attempts[0].PromptBytes != prepared.Stats().PromptBytes || attempts[0].ResponseBytes == 0 {
+		t.Fatalf("attempt diagnostics missing: %+v", attempts)
+	}
+	if len(items) != 1 || items[0].Snippet != "公司为机器人产业客户提供结算接口" || items[0].Title != "关于产业客户合作的公告" || items[0].URL != "https://example.invalid/a1" || items[0].Source != "eastmoney:announcement" {
+		t.Fatalf("model evidence did not restore the exact local source: %+v", items)
 	}
 }
 
@@ -780,6 +922,40 @@ func TestDecodeJSONObjectSkipsInvalidBraceBlock(t *testing.T) {
 	var decoded aiThemeEvidenceResponse
 	if err := decodeJSONObject(`前置说明 {不是JSON} 后续结果 {"items":[]}`, &decoded); err != nil {
 		t.Fatalf("valid JSON object after invalid braces was not decoded: %v", err)
+	}
+}
+
+func TestDecodeJSONObjectSkipsValidUnrelatedObject(t *testing.T) {
+	var decoded aiConclusion
+	content := `Hermes status: {"status":"working","detail":"assembling result"}
+最终结果：{"headline":"等待确认","summary":"结构尚未形成一致信号。","action":"继续观察"}`
+	if err := decodeJSONObject(content, &decoded); err != nil {
+		t.Fatalf("valid target JSON after unrelated object was not decoded: %v", err)
+	}
+	if decoded.Headline != "等待确认" || decoded.Action != "继续观察" {
+		t.Fatalf("decoded unrelated object instead of final result: %+v", decoded)
+	}
+}
+
+func TestDecodeJSONObjectDoesNotLeakRejectedCandidateFields(t *testing.T) {
+	decoded := aiConclusion{MainRisk: "旧结果风险"}
+	content := `{"headline":"无效候选标题","summary":42}
+{"summary":"最终有效结论"}`
+	if err := decodeJSONObject(content, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Summary != "最终有效结论" || decoded.Headline != "" || decoded.MainRisk != "" {
+		t.Fatalf("rejected candidate or previous target leaked into result: %+v", decoded)
+	}
+}
+
+func TestDecodeJSONObjectRejectsUnrelatedObjectsWithoutMutatingTarget(t *testing.T) {
+	decoded := aiConclusion{Headline: "原结论"}
+	if err := decodeJSONObject(`{"status":"ready"} {"detail":"done"}`, &decoded); err == nil {
+		t.Fatal("unrelated objects should not count as an analysis result")
+	}
+	if decoded.Headline != "原结论" {
+		t.Fatalf("failed decoding changed target: %+v", decoded)
 	}
 }
 
@@ -889,6 +1065,23 @@ type stagedStockPrompter struct {
 	contents []string
 	prompts  []string
 	index    int
+}
+
+type optionsStockPrompter struct {
+	content string
+	prompts []string
+	options []hermes.PromptOptions
+}
+
+func (p *optionsStockPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
+	p.prompts = append(p.prompts, prompt)
+	return hermes.PromptResult{Content: p.content}, nil
+}
+
+func (p *optionsStockPrompter) PromptWithOptions(_ context.Context, prompt string, options hermes.PromptOptions) (hermes.PromptResult, error) {
+	p.prompts = append(p.prompts, prompt)
+	p.options = append(p.options, options)
+	return hermes.PromptResult{Content: p.content}, nil
 }
 
 func (p *stagedStockPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {

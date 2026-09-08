@@ -312,7 +312,7 @@ func TestModelResponseTimeoutFollowsSettings(t *testing.T) {
 	}
 }
 
-func TestStockAnalysisTimeoutCoversTwoModelStages(t *testing.T) {
+func TestStockAnalysisTimeoutCoversBoundedThemeAndFinalStages(t *testing.T) {
 	store, err := appsettings.Open("")
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +327,13 @@ func TestStockAnalysisTimeoutCoversTwoModelStages(t *testing.T) {
 	if got := server.stockAnalysisModelTimeout(); got != 195*time.Second {
 		t.Fatalf("stock analysis stage timeout=%s, want 3m15s minimum", got)
 	}
-	if got := server.stockAnalysisTimeout(); got != 455*time.Second {
-		t.Fatalf("stock analysis pipeline timeout=%s, want 7m35s", got)
+	if got := server.stockAnalysisThemeTimeout(); got != 45*time.Second {
+		t.Fatalf("theme evidence timeout=%s, want 45s", got)
+	}
+	if got := server.stockAnalysisQuickTimeout(); got != 45*time.Second {
+		t.Fatalf("quick analysis timeout=%s, want 45s", got)
+	}
+	if got := server.stockAnalysisTimeout(); got != 305*time.Second {
+		t.Fatalf("stock analysis pipeline timeout=%s, want 5m5s", got)
 	}
 }

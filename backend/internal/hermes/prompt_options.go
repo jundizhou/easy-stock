@@ -30,6 +30,7 @@ var allowedSandboxToolsets = map[string]bool{
 type PromptOptions struct {
 	Sandbox          bool
 	AutoApprove      bool
+	DisableTools     bool
 	Toolsets         []string
 	BrowserStatePath string
 }
@@ -125,11 +126,19 @@ func (r *Runtime) preparePromptSandbox(options PromptOptions) (*promptSandbox, e
 		return fail(fmt.Errorf("写入 Hermes Python 沙箱: %w", err))
 	}
 
+	if options.DisableTools && len(options.Toolsets) > 0 {
+		return fail(errors.New("Hermes 禁用工具时不能同时指定工具集"))
+	}
 	toolsets, err := cleanPromptToolsets(options.Toolsets)
 	if err != nil {
 		return fail(err)
 	}
-	if len(toolsets) == 0 {
+	if options.DisableTools {
+		// context_engine is a built-in zero-tool toolset. The minimal sandbox
+		// config does not enable a context engine, so this pins Hermes to an
+		// empty tool schema instead of falling back to its configured defaults.
+		toolsets = []string{"context_engine"}
+	} else if len(toolsets) == 0 {
 		toolsets = append([]string(nil), defaultSandboxToolsets...)
 	}
 	sandbox.process = promptProcessOptions{

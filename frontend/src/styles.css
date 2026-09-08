@@ -5862,6 +5862,22 @@ a:focus-visible {
 .stock-ai-error { justify-content: flex-start; min-height: 82px; border-color: #edc7ca; background: #fff8f8; color: #bc303a; }
 .stock-ai-error > button { margin-left: auto; }
 
+.stock-ai-refining {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 36px;
+	padding: 8px 11px;
+	border: 1px solid #bfd8ef;
+	border-radius: 8px;
+	background: #f2f8fe;
+	color: #2476d2;
+	font-size: 9px;
+	line-height: 1.45;
+}
+.stock-ai-refining strong { margin-right: 6px; color: #174f89; }
+.stock-ai-refining.warning { border-color: #e6cf9c; background: #fffaf0; color: #80652e; }
+
 .stock-ai-empty {
 	display: grid;
 	place-items: center;
@@ -5921,6 +5937,8 @@ a:focus-visible {
 .stock-ai-conclusion > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .stock-ai-ai-status { display: flex; align-items: center; gap: 6px; color: #6f8194; font-size: 9px; }
 .stock-ai-ai-status svg { color: #14865f; }
+.stock-ai-ai-status.error svg { color: #c43d49; }
+.stock-ai-ai-status.unavailable svg { color: #a96a08; }
 .stock-ai-ai-status button { min-height: 24px; padding: 0 7px; border: 0; background: transparent; font-size: 9px; }
 .stock-ai-verdict-actions { grid-column: 4; display: flex; flex-direction: column; justify-content: center; gap: 7px; min-width: 132px; padding: 14px; border-left: 1px solid var(--line-soft); }
 .stock-ai-verdict-actions button.export { border-color: #9dbfe2; background: #f6faff; color: #175ea9; }
@@ -6373,7 +6391,6 @@ a:focus-visible {
 .stock-ai-score-evidence strong { display: flex; align-items: center; gap: 5px; color: #14865f; font-size: 9px; }
 .stock-ai-score-evidence .negative strong { color: #c4313b; }
 .stock-ai-score-evidence span { color: var(--muted); font-size: 8px; line-height: 1.45; }
-
 .stock-ai-signals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px; }
 .stock-ai-signals article { display: grid; gap: 7px; min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: #f9fbfd; }
 .stock-ai-signals article > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

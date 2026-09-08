@@ -63,10 +63,8 @@ type Analysis struct {
 	dailyBars             []AIDailyBar
 }
 
-// AIDailyBar is the compact daily OHLCV representation sent to Hermes.
-// Keeping only the fields used for price planning avoids leaking provider
-// metadata and keeps the prompt bounded while preserving the recent price
-// structure, volume and turnover context.
+// AIDailyBar is the compact daily OHLCV representation retained for local
+// deterministic summarization before the final Hermes prompt is built.
 type AIDailyBar struct {
 	Date          string  `json:"date"`
 	Open          float64 `json:"open"`

@@ -15,6 +15,9 @@ type fakeHermesGateway struct {
 	status        hermes.Status
 	promptResult  hermes.PromptResult
 	promptErr     error
+	promptFunc    func(context.Context, string) (hermes.PromptResult, error)
+	prompts       []string
+	promptOptions []hermes.PromptOptions
 	modelAPIKey   string
 	modelKeyErr   error
 	start         func(context.Context) (hermes.Process, error)
@@ -27,8 +30,17 @@ func (g *fakeHermesGateway) Status() hermes.Status { return g.status }
 func (g *fakeHermesGateway) ModelAPIKey() (string, error) {
 	return g.modelAPIKey, g.modelKeyErr
 }
-func (g *fakeHermesGateway) Prompt(context.Context, string) (hermes.PromptResult, error) {
+
+func (g *fakeHermesGateway) Prompt(ctx context.Context, prompt string) (hermes.PromptResult, error) {
+	g.prompts = append(g.prompts, prompt)
+	if g.promptFunc != nil {
+		return g.promptFunc(ctx, prompt)
+	}
 	return g.promptResult, g.promptErr
+}
+func (g *fakeHermesGateway) PromptWithOptions(ctx context.Context, prompt string, options hermes.PromptOptions) (hermes.PromptResult, error) {
+	g.promptOptions = append(g.promptOptions, options)
+	return g.Prompt(ctx, prompt)
 }
 func (g *fakeHermesGateway) Start(ctx context.Context) (hermes.Process, error) {
 	if g.start != nil {

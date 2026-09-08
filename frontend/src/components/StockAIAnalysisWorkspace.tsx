@@ -78,7 +78,7 @@ type Props = {
 	onOpenSettings: () => void;
 };
 
-type LoadState = 'idle' | 'loading' | 'ready' | 'error';
+type LoadState = 'idle' | 'loading' | 'refining' | 'ready' | 'error';
 
 type AnalysisHistoryItem = {
 	symbol: string;
@@ -107,6 +107,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const [history, setHistory] = useState<AnalysisHistoryItem[]>(loadAnalysisHistory);
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
+	const [refinementNotice, setRefinementNotice] = useState('');
 	const [copied, setCopied] = useState(false);
 	const [exporting, setExporting] = useState(false);
 	const [exportNotice, setExportNotice] = useState('');
@@ -117,6 +118,8 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const [hotRankError, setHotRankError] = useState('');
 	const [hotStockSidebarCollapsed, setHotStockSidebarCollapsed] = useState(() => window.localStorage.getItem(hotStockSidebarStorageKey) === '1');
 	const exportRef = useRef<HTMLDivElement>(null);
+	const analysisRequestSequence = useRef(0);
+	const analysisAbortController = useRef<AbortController | null>(null);
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
 		setHistory((current) => {
@@ -136,9 +139,12 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 
 	useEffect(() => {
 		if (!initialAnalysis) return;
+		analysisAbortController.current?.abort();
+		analysisRequestSequence.current += 1;
 		setAnalysis(initialAnalysis);
 		setQuery(initialAnalysis.symbol);
 		setError('');
+		setRefinementNotice('');
 		setState('ready');
 		window.localStorage.setItem(symbolStorageKey, initialAnalysis.symbol);
 		saveAnalysis(initialAnalysis);
@@ -146,6 +152,10 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	}, [initialAnalysis, onInitialAnalysisConsumed, saveAnalysis]);
 
 	const runAnalysis = useCallback(async (rawSymbol: string) => {
+		analysisAbortController.current?.abort();
+		analysisAbortController.current = null;
+		const sequence = analysisRequestSequence.current + 1;
+		analysisRequestSequence.current = sequence;
 		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
 		if (!symbol) {
 			setError(directory.length > 0 ? '未找到唯一匹配的股票，请从搜索结果中选择' : '请输入6位股票代码，例如 600519');
@@ -157,24 +167,54 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 			setState('error');
 			return;
 		}
+		const controller = new AbortController();
+		analysisAbortController.current = controller;
 		setState('loading');
 		setError('');
+		setRefinementNotice('');
+		setAnalysis(null);
 		setQuery(symbol);
 		window.localStorage.setItem(symbolStorageKey, symbol);
 		try {
-			const payload = await requestJSON<{ data: StockAIAnalysis }>(config, '/api/v1/stocks/ai-analysis', {
+			const quickPayload = await requestJSON<{ data: StockAIAnalysis }>(config, '/api/v1/stocks/ai-analysis', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ symbol }),
+				body: JSON.stringify({ symbol, mode: 'quick' }),
+				signal: controller.signal,
 			});
-			setAnalysis(payload.data);
-			saveAnalysis(payload.data);
-			setState('ready');
+			if (controller.signal.aborted || analysisRequestSequence.current !== sequence) return;
+			setAnalysis(quickPayload.data);
+			saveAnalysis(quickPayload.data);
+			setState('refining');
+
+			try {
+				const fullPayload = await requestJSON<{ data: StockAIAnalysis }>(config, '/api/v1/stocks/ai-analysis', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ symbol, mode: 'full' }),
+					signal: controller.signal,
+				});
+				if (controller.signal.aborted || analysisRequestSequence.current !== sequence) return;
+				setAnalysis(fullPayload.data);
+				saveAnalysis(fullPayload.data);
+				setState('ready');
+			} catch (refinementError) {
+				if (isAbortError(refinementError) || analysisRequestSequence.current !== sequence) return;
+				setRefinementNotice(refinementError instanceof Error ? `完整 AI 研判未完成：${refinementError.message}` : '完整 AI 研判未完成，当前保留快速分析');
+				setState('ready');
+			}
 		} catch (loadError) {
+			if (isAbortError(loadError) || analysisRequestSequence.current !== sequence) return;
 			setError(loadError instanceof Error ? loadError.message : '个股AI分析失败');
 			setState('error');
+		} finally {
+			if (analysisAbortController.current === controller) analysisAbortController.current = null;
 		}
 	}, [config, directory, saveAnalysis]);
+
+	useEffect(() => () => {
+		analysisAbortController.current?.abort();
+	}, []);
 
 	useEffect(() => {
 		if (!config) return;
@@ -233,9 +273,12 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	};
 
 	const selectHistory = (item: AnalysisHistoryItem) => {
+		analysisAbortController.current?.abort();
+		analysisRequestSequence.current += 1;
 		setAnalysis(item.analysis);
 		setQuery(item.symbol);
 		setError('');
+		setRefinementNotice('');
 		setState('ready');
 	};
 
@@ -290,7 +333,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
+			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />
 			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
 				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
 				<div className="stock-ai-main">
@@ -299,7 +342,21 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 					{state === 'loading' && (
 						<div className="stock-ai-loading" role="status" aria-live="polite">
 							<LoaderCircle className="spin" size={30} />
-							<div><strong>正在建立完整决策画像</strong><span>为了保证分析的全面性和准确性，easy-stock 将获取行情、题材、公告、研报等完整数据，并进行多轮 AI 分析，预计耗时 5–10 分钟，请耐心等待。</span></div>
+							<div><strong>正在生成快速分析</strong><span>先完成行情、趋势、题材和风险的本地研判，结果出来后会继续补充完整 AI 结论。</span></div>
+						</div>
+					)}
+
+					{state === 'refining' && analysis && (
+						<div className="stock-ai-refining" role="status" aria-live="polite">
+							<LoaderCircle className="spin" size={16} />
+							<span><strong>快速分析已完成</strong>正在使用当前选择的模型补充题材证据和综合结论。</span>
+						</div>
+					)}
+
+					{refinementNotice && analysis && (
+						<div className="stock-ai-refining warning" role="status">
+							<CircleAlert size={16} />
+							<span>{refinementNotice}</span>
 						</div>
 					)}
 
@@ -573,7 +630,7 @@ function AnalysisVerdict({ analysis, copied, exporting, onRefresh, onExport, onC
 				<div className="stock-ai-tags"><span>{analysis.action_plan.decision_label || analysis.profile.type_label}</span><span>{analysis.profile.price_phase}</span><span>{analysis.profile.market_role}</span><span>{analysis.scorecard.direction} · {analysis.scorecard.grade}</span></div>
 				<h3>{analysis.conclusion.headline}</h3>
 				<p>{analysis.conclusion.summary}</p>
-				<div className="stock-ai-ai-status">
+				<div className={`stock-ai-ai-status ${analysis.ai.status}`}>
 					{analysis.ai.status === 'ready' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}
 					<span>{analysis.ai.message || (analysis.ai.status === 'ready' ? 'AI综合研判完成' : '本地规则研判')}</span>
 					{analysis.ai.status === 'unavailable' && <button type="button" onClick={onOpenSettings}><Settings size={12} />配置模型</button>}
@@ -1282,6 +1339,10 @@ function buildShortTermQuantitativeText(quantitative: StockAIShortTermQuantitati
 function formatPriceRange(low: number, high: number) {
 	if (!(low > 0) || !(high > 0)) return '数据不足';
 	return `${low.toFixed(2)}—${high.toFixed(2)}元`;
+}
+
+function isAbortError(error: unknown) {
+	return error instanceof Error && error.name === 'AbortError';
 }
 
 function canvasToPNGBlob(canvas: HTMLCanvasElement) {

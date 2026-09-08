@@ -153,6 +153,26 @@ func TestPreparePromptSandboxRejectsToolsOutsideAllowlist(t *testing.T) {
 	}
 }
 
+func TestPreparePromptSandboxCanDisableAllTools(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := NewRuntime(Config{Home: home})
+	sandbox, err := runtime.preparePromptSandbox(PromptOptions{Sandbox: true, DisableTools: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sandbox.close()
+
+	if got := sandbox.process.env["HERMES_TUI_TOOLSETS"]; got != "context_engine" {
+		t.Fatalf("toolsets = %q, want zero-tool context_engine pin", got)
+	}
+	if _, err := runtime.preparePromptSandbox(PromptOptions{Sandbox: true, DisableTools: true, Toolsets: []string{"web"}}); err == nil || !strings.Contains(err.Error(), "不能同时指定") {
+		t.Fatalf("DisableTools with explicit toolsets error = %v", err)
+	}
+}
+
 func TestSandboxSiteCustomizeBlocksHostFilesAndSubprocesses(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {

@@ -5,20 +5,41 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
+	"time"
 
 	"easy-stock/backend/internal/hermes"
 )
 
 type aiConclusion struct {
-	Headline  string           `json:"headline"`
-	Summary   string           `json:"summary"`
-	Action    string           `json:"action"`
-	BestPath  string           `json:"best_path"`
-	MainRisk  string           `json:"main_risk"`
-	StockNews aiNewsConclusion `json:"stock_news"`
-	ThemeNews aiNewsConclusion `json:"theme_news"`
-	Decision  aiDecisionPlan   `json:"decision"`
+	Headline       string             `json:"headline"`
+	Title          string             `json:"title"`
+	Summary        string             `json:"summary"`
+	Overview       string             `json:"overview"`
+	Action         string             `json:"action"`
+	Recommendation string             `json:"recommendation"`
+	BestPath       string             `json:"best_path"`
+	MainRisk       string             `json:"main_risk"`
+	StockNews      aiNewsConclusion   `json:"stock_news"`
+	ThemeNews      aiNewsConclusion   `json:"theme_news"`
+	Decision       aiDecisionPlan     `json:"decision"`
+	Conclusion     *aiConclusionBlock `json:"conclusion"`
+}
+
+// Some providers wrap the requested fields in a conclusion object or use a
+// nearby synonym despite the explicit output contract. Keep that response
+// usable while still rejecting an actually empty model response.
+type aiConclusionBlock struct {
+	Headline       string `json:"headline"`
+	Title          string `json:"title"`
+	Summary        string `json:"summary"`
+	Overview       string `json:"overview"`
+	Action         string `json:"action"`
+	Recommendation string `json:"recommendation"`
+	BestPath       string `json:"best_path"`
+	MainRisk       string `json:"main_risk"`
 }
 
 type aiNewsConclusion struct {
@@ -54,103 +75,47 @@ type aiPriceZone struct {
 	Action    string  `json:"action"`
 }
 
-type aiThemeEvidenceResponse struct {
-	Items []ThemeEvidence `json:"items"`
+type aiDailyKLineSummary struct {
+	SampleDays           int                   `json:"sample_days"`
+	LimitedSample        bool                  `json:"limited_sample"`
+	StartDate            string                `json:"start_date,omitempty"`
+	EndDate              string                `json:"end_date,omitempty"`
+	StartClose           float64               `json:"start_close,omitempty"`
+	LatestClose          float64               `json:"latest_close,omitempty"`
+	PeriodHigh           float64               `json:"period_high,omitempty"`
+	PeriodLow            float64               `json:"period_low,omitempty"`
+	RangePositionPercent float64               `json:"range_position_percent,omitempty"`
+	DrawdownFromPeak     float64               `json:"drawdown_from_peak_close_percent,omitempty"`
+	MaxDrawdown          float64               `json:"max_drawdown_percent,omitempty"`
+	UpDays               int                   `json:"up_days"`
+	DownDays             int                   `json:"down_days"`
+	FlatDays             int                   `json:"flat_days"`
+	MaxDailyGain         float64               `json:"max_daily_gain_percent,omitempty"`
+	MaxDailyLoss         float64               `json:"max_daily_loss_percent,omitempty"`
+	CurrentStreak        aiDailyKLineStreak    `json:"current_streak"`
+	WindowReturns        map[string]float64    `json:"window_returns_percent,omitempty"`
+	DailyVolatility      map[string]float64    `json:"daily_volatility_percent,omitempty"`
+	AverageVolume        map[string]float64    `json:"average_volume,omitempty"`
+	AverageAmount        map[string]float64    `json:"average_amount,omitempty"`
+	AverageTurnover      map[string]float64    `json:"average_turnover_percent,omitempty"`
+	VolumeRatio5D20D     float64               `json:"volume_ratio_5d_20d,omitempty"`
+	TwentyDaySegments    []aiDailyKLineSegment `json:"twenty_day_segments,omitempty"`
 }
 
-// ExtractThemeEvidence asks Hermes to normalize facts and market mappings that
-// are difficult to recover from short announcement titles. The response is only
-// a candidate-evidence layer; enrichTheme still verifies the quoted source,
-// market strength and price response before it promotes a theme.
-func ExtractThemeEvidence(ctx context.Context, prompter hermes.Prompter, input Input) ([]ThemeEvidence, error) {
-	if prompter == nil {
-		return nil, errors.New("AI分析底座不可用")
-	}
-	if len(input.Announcements) == 0 && len(input.News) == 0 {
-		return nil, nil
-	}
-	var source strings.Builder
-	source.WriteString("股票：" + input.Quote.Name + "（" + input.Symbol + "）\n")
-	source.WriteString("主营：" + firstNonEmpty(input.Business, input.Industry) + "\n")
-	source.WriteString("概念目录：" + strings.Join(input.Concepts, "、") + "\n")
-	lines := normalizeKLines(input.KLines)
-	if len(lines) > 0 {
-		daily, five := stockRecentReturns(lines)
-		twenty := windowReturn(closesOf(lines), min(len(lines), 20))
-		source.WriteString(fmt.Sprintf("价格反馈：当日%+.1f%%，5日%+.1f%%，20日%+.1f%%\n", daily, five, twenty))
-	}
-	source.WriteString("近期市场题材：\n")
-	for index, item := range input.Themes {
-		if index >= 30 {
-			break
-		}
-		name := firstNonEmpty(item.Name, item.Theme)
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		source.WriteString(fmt.Sprintf("- %s | 趋势%d | 阶段%s | 当日%+.1f%% | 5日强度%d | 涨停%d\n", name, item.TrendScore, firstNonEmpty(item.TrendStage, "待确认"), item.ChangePercent, item.FiveDayStrengthScore, item.LimitUpCount))
-	}
-	source.WriteString("开盘啦个股归因：\n")
-	for _, item := range input.CachedThemes {
-		if item.Symbol == input.Symbol && strings.TrimSpace(item.Theme) != "" {
-			source.WriteString(fmt.Sprintf("- %s | %s | %s | %s\n", item.TradeDate, item.Theme, item.Role, item.Source))
-		}
-	}
-	source.WriteString("近期涨停题材：\n")
-	for _, item := range input.LimitUps {
-		if item.Symbol == input.Symbol {
-			source.WriteString(fmt.Sprintf("- %s | %s | %s | 连板%d\n", item.Date.Format("2006-01-02"), item.PrimaryTheme, strings.Join(item.Concepts, "、"), item.Streak))
-		}
-	}
-	source.WriteString("公告：\n")
-	for _, item := range input.Announcements {
-		source.WriteString("- " + item.PublishedAt.Format("2006-01-02") + " | " + item.Title + " | " + item.Category + " | " + truncateText(item.Content, 900) + "\n")
-	}
-	source.WriteString("资讯：\n")
-	for _, item := range input.News {
-		if containsAnyFold(item.Title+" "+item.Content, input.Quote.Name, strings.Split(input.Symbol, ".")[0]) {
-			source.WriteString("- " + item.PublishedAt.Format("2006-01-02 15:04") + " | " + item.Title + " | " + truncateText(item.Content, 240) + "\n")
-		}
-	}
-	prompt := `你是A股题材证据调查器。请比较公司事实、近期市场题材和个股价格反馈，输出最多8个可能解释当前涨幅的具体题材，按可信度从高到低排序。
-规则：
-1. type区分fact（可核验的公司事实）、market_mapping（产业链/资金叙事映射）、inference（弱推断）。
-2. relation必须是own_business、subsidiary、equity_investment、customer_supplier、disposed_asset、market_mapping、unknown之一；direction必须是positive、negative、neutral之一。
-3. 必须识别事实主语：上市公司、子公司、参股公司、客户、交易标的不是一回事。其他公司名称、行业报告、图书论文中的题材词不能当作上市公司业务。
-4. 转让、出售、处置、退出投资、注销和明确否认相关业务属于negative，不得包装成当前正向题材。
-5. 不要因为题材市场很强就输出该题材。每个候选必须存在该股票自身的关联原文；market_mapping的snippet必须逐字引用输入中的关联依据，不能写模型总结。
-6. 概念目录只能作为线索，不能单独证明当前炒作；同时比较公告日期、市场热度与当日/5日/20日价格反馈。
-7. 题材名称使用短而具体的中文；不确定时输出inference或不输出，禁止为了凑数编造。
-8. source和title必须对应输入中的实际来源；snippet使用可回查的原文，strength为0到1。
-9. 只输出JSON：{"items":[{"theme":"...","type":"fact|market_mapping|inference","relation":"own_business|subsidiary|equity_investment|customer_supplier|disposed_asset|market_mapping|unknown","direction":"positive|negative|neutral","source":"...","title":"...","snippet":"逐字原文","strength":0.0}]}
+type aiDailyKLineStreak struct {
+	Direction string `json:"direction"`
+	Days      int    `json:"days"`
+}
 
-[输入]
-` + source.String()
-	decoded, err := promptJSONObject[aiThemeEvidenceResponse](ctx, prompter, prompt, "题材证据")
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ThemeEvidence, 0, min(len(decoded.Items), 12))
-	for _, item := range decoded.Items {
-		item.Theme = strings.TrimSpace(item.Theme)
-		if item.Theme == "" {
-			continue
-		}
-		item.Type = normalizeThemeEvidenceType(item.Type)
-		item.Relation = normalizeThemeEvidenceRelation(item.Relation)
-		item.Direction = normalizeThemeEvidenceDirection(item.Direction)
-		item.Strength = clamp(item.Strength, .15, .98)
-		hydrateModelThemeEvidence(input, &item)
-		if strings.TrimSpace(item.Source) == "" {
-			item.Source = "hermes-ai"
-		}
-		item.Freshness = freshnessForTime(item.PublishedAt)
-		out = append(out, item)
-		if len(out) >= 12 {
-			break
-		}
-	}
-	return out, nil
+type aiDailyKLineSegment struct {
+	StartDate       string  `json:"start_date"`
+	EndDate         string  `json:"end_date"`
+	TradingDays     int     `json:"trading_days"`
+	ReturnPercent   float64 `json:"return_percent"`
+	High            float64 `json:"high"`
+	Low             float64 `json:"low"`
+	AverageVolume   float64 `json:"average_volume"`
+	AverageTurnover float64 `json:"average_turnover_percent,omitempty"`
 }
 
 func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analysis, methodologyContext string) error {
@@ -180,11 +145,11 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 		"risks":        analysis.Risks,
 		"data_quality": analysis.DataQuality,
 		"price_context": map[string]any{
-			"current_quote":      analysis.Quote,
-			"current_price":      analysis.Quote.Price,
-			"current_trade_time": analysis.Quote.TradeTime,
-			"latest_daily_bar":   latestDailyBar(analysis.dailyBars),
-			"daily_bars":         analysis.dailyBars,
+			"current_quote":       analysis.Quote,
+			"current_price":       analysis.Quote.Price,
+			"current_trade_time":  analysis.Quote.TradeTime,
+			"latest_daily_bar":    latestDailyBar(analysis.dailyBars),
+			"daily_kline_summary": summarizeDailyKLines(analysis.dailyBars),
 		},
 	}
 	encoded, err := json.Marshal(payload)
@@ -199,7 +164,7 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 2. profile.primary_type只是本地初筛，不是最终答案。你必须综合市场情绪、题材共振、个股地位、涨停历史、量价趋势、相对强度、基本面、研报、公告和新闻，自主判断decision_mode。
 3. 不模拟任何投资名人的口吻，不使用“大佬投票”或人格化结论。
 4. action 必须是条件化建议，不能承诺收益；隔日预期只能描述情景，不得表述为确定性预测。
-5. price_context.current_price是当前行情价，优先级高于任何由日K推导出的旧收盘价；latest_daily_bar是最近一根日K，必须结合日期判断是否为当日收盘。daily_bars是最近120个交易日的精简日K序列，价格计划必须同时参考现价、日K结构、成交量和阶段压力。
+5. price_context.current_price是当前行情价，优先级高于任何由日K推导出的旧收盘价；latest_daily_bar是最近一根日K，必须结合日期判断是否为当日收盘。daily_kline_summary是本地代码对最近最多120个交易日K线计算出的确定性统计摘要，包含区间收益、波动、回撤、量能、连涨跌和20日分段结构；不要反推或编造摘要之外的逐日K线。
 6. scorecard、relative、theme、fundamental等事实和分数不得篡改；action_plan与risk_control里的价格只是本地候选，你可以依据全局分析重新定价。
 6.1 当profile.primary_type=new_listing时，这是不足20个交易日的上市初期受限样本分析。不得推断MA20/60/120、ATR14、20/60/120日收益或成熟趋势结构，不得把价格发现评分表述为成熟趋势评分；维持观察优先、小仓验证和上市区间失效约束。
 7. decision_mode=non_short时必须计算完整价格计划。价格不能只由均线或ATR决定，原因需要同时结合至少两个不同维度，例如基本面/研报预期、题材持续性、资金与趋势结构、新闻风险。必须满足：止损价 < 允许介入区间 < 第一止盈价 <= 第二止盈价，且第一止盈价必须高于当前现价；持有区间必须高于止损价。若现价已经超过原先按介入成本计算的目标，重新以现价上方的趋势延伸或压力位重算止盈区，并明确已有仓位如何移动保护位、新仓不追高。弱势非短线票可以把允许介入价设为右侧修复确认区，但仍要给出价格。
@@ -224,8 +189,8 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(result.Headline) == "" || strings.TrimSpace(result.Summary) == "" || strings.TrimSpace(result.Action) == "" {
-		return errors.New("Hermes个股分析缺少必要字段")
+	if !normalizeAIConclusion(&result, analysis.Conclusion) {
+		return errors.New("Hermes个股分析未返回可用结论")
 	}
 	analysis.Conclusion = Conclusion{
 		Headline: truncateText(result.Headline, 60),
@@ -240,6 +205,43 @@ func EnrichWithAI(ctx context.Context, prompter hermes.Prompter, analysis *Analy
 	decisionMessage := applyAIDecision(analysis, result.Decision)
 	analysis.AI = AISynthesisStatus{Status: "ready", Message: decisionMessage}
 	return nil
+}
+
+func normalizeAIConclusion(result *aiConclusion, fallback Conclusion) bool {
+	if result == nil {
+		return false
+	}
+	if block := result.Conclusion; block != nil {
+		result.Headline = firstNonEmpty(result.Headline, block.Headline, block.Title)
+		result.Summary = firstNonEmpty(result.Summary, block.Summary, block.Overview)
+		result.Action = firstNonEmpty(result.Action, block.Action, block.Recommendation)
+		result.BestPath = firstNonEmpty(result.BestPath, block.BestPath)
+		result.MainRisk = firstNonEmpty(result.MainRisk, block.MainRisk)
+	}
+	result.Headline = firstNonEmpty(result.Headline, result.Title)
+	result.Summary = firstNonEmpty(result.Summary, result.Overview)
+	result.Action = firstNonEmpty(result.Action, result.Recommendation)
+	usable := strings.TrimSpace(result.Headline) != "" ||
+		strings.TrimSpace(result.Summary) != "" ||
+		strings.TrimSpace(result.Action) != "" ||
+		strings.TrimSpace(result.BestPath) != "" ||
+		strings.TrimSpace(result.MainRisk) != "" ||
+		strings.TrimSpace(result.Decision.DecisionMode) != "" ||
+		strings.TrimSpace(result.StockNews.Summary) != "" ||
+		strings.TrimSpace(result.ThemeNews.Summary) != ""
+	if !usable {
+		return false
+	}
+	result.Headline = firstNonEmpty(result.Headline, result.Title, fallback.Headline)
+	result.Summary = firstNonEmpty(result.Summary, result.Overview, fallback.Summary)
+	result.Action = firstNonEmpty(result.Action, result.Recommendation, fallback.Action)
+	result.BestPath = firstNonEmpty(result.BestPath, fallback.BestPath)
+	result.MainRisk = firstNonEmpty(result.MainRisk, fallback.MainRisk)
+
+	// A decision or a news synthesis is still a meaningful AI result even when
+	// a provider omitted one of the three narrative fields. The local narrative
+	// is retained for only the omitted fields above.
+	return true
 }
 
 func applyAIDecision(analysis *Analysis, decision aiDecisionPlan) string {
@@ -359,6 +361,190 @@ func latestDailyBar(bars []AIDailyBar) AIDailyBar {
 	return bars[len(bars)-1]
 }
 
+func summarizeDailyKLines(bars []AIDailyBar) aiDailyKLineSummary {
+	valid := make([]AIDailyBar, 0, min(len(bars), 120))
+	start := max(len(bars)-120, 0)
+	for _, bar := range bars[start:] {
+		if bar.Close > 0 && bar.High > 0 && bar.Low > 0 {
+			valid = append(valid, bar)
+		}
+	}
+	summary := aiDailyKLineSummary{
+		SampleDays:      len(valid),
+		LimitedSample:   len(valid) < 20,
+		WindowReturns:   map[string]float64{},
+		DailyVolatility: map[string]float64{},
+		AverageVolume:   map[string]float64{},
+		AverageAmount:   map[string]float64{},
+		AverageTurnover: map[string]float64{},
+		CurrentStreak:   aiDailyKLineStreak{Direction: "flat"},
+	}
+	if len(valid) == 0 {
+		return summary
+	}
+
+	summary.StartDate = valid[0].Date
+	summary.EndDate = valid[len(valid)-1].Date
+	summary.StartClose = round2(valid[0].Close)
+	summary.LatestClose = round2(valid[len(valid)-1].Close)
+	summary.PeriodHigh = valid[0].High
+	summary.PeriodLow = valid[0].Low
+	closes := make([]float64, len(valid))
+	volumes := make([]float64, len(valid))
+	amounts := make([]float64, len(valid))
+	turnovers := make([]float64, len(valid))
+	returns := make([]float64, 0, len(valid))
+	peakClose := valid[0].Close
+	maxDrawdown := 0.0
+	for index, bar := range valid {
+		closes[index] = bar.Close
+		volumes[index] = bar.Volume
+		amounts[index] = bar.Amount
+		turnovers[index] = bar.TurnoverRate
+		if bar.High > summary.PeriodHigh {
+			summary.PeriodHigh = bar.High
+		}
+		if bar.Low < summary.PeriodLow {
+			summary.PeriodLow = bar.Low
+		}
+		if bar.Close > peakClose {
+			peakClose = bar.Close
+		}
+		if peakClose > 0 {
+			maxDrawdown = math.Min(maxDrawdown, percentChange(peakClose, bar.Close))
+		}
+
+		change := bar.ChangePercent
+		if change == 0 && index > 0 && valid[index-1].Close > 0 {
+			change = percentChange(valid[index-1].Close, bar.Close)
+		}
+		if index > 0 || bar.ChangePercent != 0 {
+			returns = append(returns, change)
+		}
+		switch {
+		case change > .005:
+			summary.UpDays++
+		case change < -.005:
+			summary.DownDays++
+		default:
+			summary.FlatDays++
+		}
+		if len(returns) == 1 || change > summary.MaxDailyGain {
+			summary.MaxDailyGain = change
+		}
+		if len(returns) == 1 || change < summary.MaxDailyLoss {
+			summary.MaxDailyLoss = change
+		}
+	}
+
+	summary.PeriodHigh = round2(summary.PeriodHigh)
+	summary.PeriodLow = round2(summary.PeriodLow)
+	if summary.PeriodHigh > summary.PeriodLow {
+		summary.RangePositionPercent = round2(clamp((summary.LatestClose-summary.PeriodLow)/(summary.PeriodHigh-summary.PeriodLow)*100, 0, 100))
+	}
+	summary.DrawdownFromPeak = round2(percentChange(peakClose, summary.LatestClose))
+	summary.MaxDrawdown = round2(maxDrawdown)
+	summary.MaxDailyGain = round2(summary.MaxDailyGain)
+	summary.MaxDailyLoss = round2(summary.MaxDailyLoss)
+	summary.CurrentStreak = dailyKLineStreak(returns)
+
+	for _, window := range []int{5, 10, 20, 60, 120} {
+		if len(valid) < window {
+			continue
+		}
+		key := fmt.Sprintf("%dd", window)
+		summary.WindowReturns[key] = round2(windowReturn(closes, window))
+		summary.AverageVolume[key] = round2(averageTail(volumes, window))
+		summary.AverageAmount[key] = round2(averageTail(amounts, window))
+		summary.AverageTurnover[key] = round2(averageTail(turnovers, window))
+		if len(returns) > 0 {
+			observations := min(window, len(returns))
+			summary.DailyVolatility[key] = round2(standardDeviation(returns[len(returns)-observations:]))
+		}
+	}
+	if len(valid) >= 20 {
+		summary.VolumeRatio5D20D = round2(divide(averageTail(volumes, 5), averageTail(volumes, 20)))
+	}
+	summary.TwentyDaySegments = summarizeDailyKLineSegments(valid, 20)
+	return summary
+}
+
+func dailyKLineStreak(returns []float64) aiDailyKLineStreak {
+	if len(returns) == 0 {
+		return aiDailyKLineStreak{Direction: "flat"}
+	}
+	direction := "flat"
+	switch {
+	case returns[len(returns)-1] > .005:
+		direction = "up"
+	case returns[len(returns)-1] < -.005:
+		direction = "down"
+	}
+	days := 0
+	for index := len(returns) - 1; index >= 0; index-- {
+		current := "flat"
+		if returns[index] > .005 {
+			current = "up"
+		} else if returns[index] < -.005 {
+			current = "down"
+		}
+		if current != direction {
+			break
+		}
+		days++
+	}
+	return aiDailyKLineStreak{Direction: direction, Days: days}
+}
+
+func summarizeDailyKLineSegments(bars []AIDailyBar, window int) []aiDailyKLineSegment {
+	if len(bars) == 0 || window <= 0 {
+		return nil
+	}
+	segments := make([]aiDailyKLineSegment, 0, (len(bars)+window-1)/window)
+	for start := 0; start < len(bars); start += window {
+		end := min(start+window, len(bars))
+		segmentBars := bars[start:end]
+		high := segmentBars[0].High
+		low := segmentBars[0].Low
+		volumeTotal := 0.0
+		turnoverTotal := 0.0
+		for _, bar := range segmentBars {
+			high = math.Max(high, bar.High)
+			low = math.Min(low, bar.Low)
+			volumeTotal += bar.Volume
+			turnoverTotal += bar.TurnoverRate
+		}
+		segments = append(segments, aiDailyKLineSegment{
+			StartDate:       segmentBars[0].Date,
+			EndDate:         segmentBars[len(segmentBars)-1].Date,
+			TradingDays:     len(segmentBars),
+			ReturnPercent:   round2(percentChange(segmentBars[0].Close, segmentBars[len(segmentBars)-1].Close)),
+			High:            round2(high),
+			Low:             round2(low),
+			AverageVolume:   round2(volumeTotal / float64(len(segmentBars))),
+			AverageTurnover: round2(turnoverTotal / float64(len(segmentBars))),
+		})
+	}
+	return segments
+}
+
+func standardDeviation(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	mean := 0.0
+	for _, value := range values {
+		mean += value
+	}
+	mean /= float64(len(values))
+	variance := 0.0
+	for _, value := range values {
+		delta := value - mean
+		variance += delta * delta
+	}
+	return math.Sqrt(variance / float64(len(values)))
+}
+
 func makeAIPriceZone(label string, low, high float64, input aiPriceZone) ActionPriceZone {
 	return ActionPriceZone{
 		Label: label, PriceLow: low, PriceHigh: high, PriceText: formatActionPriceRange(low, high),
@@ -452,47 +638,73 @@ func normalizeThemeEvidenceDirection(value string) string {
 	}
 }
 
-func hydrateModelThemeEvidence(input Input, item *ThemeEvidence) {
-	if item == nil || strings.TrimSpace(item.Title) == "" {
-		return
-	}
-	matchTitle := func(candidate string) bool {
-		left := normalizeEvidenceText(item.Title)
-		right := normalizeEvidenceText(candidate)
-		return left != "" && right != "" && (left == right || strings.Contains(left, right) || strings.Contains(right, left))
-	}
-	for _, source := range input.Announcements {
-		if !matchTitle(source.Title) {
-			continue
-		}
-		item.PublishedAt = source.PublishedAt
-		item.URL = firstNonEmpty(item.URL, source.URL)
-		item.Source = firstNonEmpty(source.Meta.Source, item.Source, "eastmoney:announcement")
-		return
-	}
-	for _, source := range input.News {
-		if !matchTitle(source.Title) {
-			continue
-		}
-		item.PublishedAt = source.PublishedAt
-		item.URL = firstNonEmpty(item.URL, source.URL)
-		item.Source = firstNonEmpty(source.Meta.Source, item.Source, "market-news")
-		return
-	}
+type promptJSONObjectOptions struct {
+	maxAttempts  int
+	disableTools bool
+	onAttempt    func(promptJSONAttempt)
+}
+
+type promptJSONAttempt struct {
+	number        int
+	durationMS    int64
+	promptBytes   int
+	responseBytes int
+	err           string
 }
 
 func promptJSONObject[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string) (T, error) {
-	var decoded T
-	result, err := hermes.PromptFullyAuthorized(ctx, prompter, prompt)
-	if err != nil {
-		return decoded, fmt.Errorf("Hermes%s失败: %w", label, err)
-	}
-	firstErr := decodeJSONObject(result.Content, &decoded)
-	if firstErr == nil {
-		return decoded, nil
-	}
+	return promptJSONObjectWithOptions[T](ctx, prompter, prompt, label, promptJSONObjectOptions{maxAttempts: 2, disableTools: true})
+}
 
-	repairPrompt := `上一次输出无法解析为任务要求的JSON。请重新完成下面的原始任务，并只返回一个合法JSON对象：
+func promptJSONObjectWithOptions[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string, options promptJSONObjectOptions) (T, error) {
+	var decoded T
+	if options.maxAttempts <= 0 {
+		options.maxAttempts = 1
+	}
+	attemptPrompt := prompt
+	var firstDecodeErr error
+	for attempt := 1; attempt <= options.maxAttempts; attempt++ {
+		startedAt := time.Now()
+		result, callErr := hermes.PromptUsingOptions(ctx, prompter, attemptPrompt, hermes.PromptOptions{
+			Sandbox: true, AutoApprove: true, DisableTools: options.disableTools,
+		})
+		diagnostic := promptJSONAttempt{
+			number: attempt, durationMS: time.Since(startedAt).Milliseconds(), promptBytes: len([]byte(attemptPrompt)),
+			responseBytes: len([]byte(result.Content)),
+		}
+		if callErr != nil {
+			diagnostic.err = callErr.Error()
+			if options.onAttempt != nil {
+				options.onAttempt(diagnostic)
+			}
+			if attempt == 1 {
+				return decoded, fmt.Errorf("Hermes%s失败: %w", label, callErr)
+			}
+			return decoded, fmt.Errorf("Hermes未返回有效%sJSON: %v；自动纠错失败: %w", label, firstDecodeErr, callErr)
+		}
+
+		decoded = *new(T)
+		decodeErr := decodeJSONObject(result.Content, &decoded)
+		if decodeErr == nil {
+			if options.onAttempt != nil {
+				options.onAttempt(diagnostic)
+			}
+			return decoded, nil
+		}
+		diagnostic.err = decodeErr.Error()
+		if options.onAttempt != nil {
+			options.onAttempt(diagnostic)
+		}
+		if attempt == 1 {
+			firstDecodeErr = decodeErr
+		}
+		if attempt >= options.maxAttempts {
+			if options.maxAttempts == 1 {
+				return decoded, fmt.Errorf("Hermes未返回有效%sJSON: %w", label, decodeErr)
+			}
+			return decoded, fmt.Errorf("Hermes未返回有效%sJSON: 首次%v；自动纠错后%w", label, firstDecodeErr, decodeErr)
+		}
+		attemptPrompt = `上一次输出无法解析为任务要求的JSON。请重新完成下面的原始任务，并只返回一个合法JSON对象：
 - 使用英文半角双引号；
 - 不要Markdown代码块、解释、思考过程或前后缀；
 - 所有字段严格遵循原始任务给出的结构；
@@ -500,15 +712,8 @@ func promptJSONObject[T any](ctx context.Context, prompter hermes.Prompter, prom
 
 [原始任务]
 ` + prompt + "\n\n[上一次无效输出，仅用于纠错]\n" + truncateText(result.Content, 4_000)
-	repaired, retryErr := hermes.PromptFullyAuthorized(ctx, prompter, repairPrompt)
-	if retryErr != nil {
-		return decoded, fmt.Errorf("Hermes未返回有效%sJSON: %v；自动纠错失败: %w", label, firstErr, retryErr)
 	}
-	decoded = *new(T)
-	if err := decodeJSONObject(repaired.Content, &decoded); err != nil {
-		return decoded, fmt.Errorf("Hermes未返回有效%sJSON: 首次%v；自动纠错后%w", label, firstErr, err)
-	}
-	return decoded, nil
+	return decoded, fmt.Errorf("Hermes未返回有效%sJSON", label)
 }
 
 func decodeJSONObject(content string, target any) error {
@@ -524,8 +729,10 @@ func decodeJSONObject(content string, target any) error {
 	for start := strings.IndexByte(content, '{'); start >= 0; {
 		end := balancedJSONObjectEnd(content, start)
 		if end > start {
-			decoder := json.NewDecoder(strings.NewReader(content[start:end]))
-			if err := decoder.Decode(target); err == nil {
+			candidate := content[start:end]
+			if !hasKnownJSONField(candidate, target) {
+				lastErr = errors.New("JSON object does not contain expected fields")
+			} else if err := decodeFreshJSONObject(candidate, target); err == nil {
 				return nil
 			} else {
 				lastErr = err
@@ -541,6 +748,51 @@ func decodeJSONObject(content string, target any) error {
 		return lastErr
 	}
 	return errors.New("JSON object not found")
+}
+
+func hasKnownJSONField(candidate string, target any) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(candidate), &fields); err != nil {
+		return false
+	}
+	targetType := reflect.TypeOf(target)
+	if targetType == nil {
+		return false
+	}
+	for targetType.Kind() == reflect.Pointer {
+		targetType = targetType.Elem()
+	}
+	if targetType.Kind() != reflect.Struct {
+		return len(fields) > 0
+	}
+	for index := 0; index < targetType.NumField(); index++ {
+		field := targetType.Field(index)
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "" {
+			name = field.Name
+		}
+		if name == "-" {
+			continue
+		}
+		if _, ok := fields[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeFreshJSONObject(candidate string, target any) error {
+	targetValue := reflect.ValueOf(target)
+	if !targetValue.IsValid() || targetValue.Kind() != reflect.Pointer || targetValue.IsNil() {
+		return errors.New("JSON decode target must be a non-nil pointer")
+	}
+	fresh := reflect.New(targetValue.Elem().Type())
+	decoder := json.NewDecoder(strings.NewReader(candidate))
+	if err := decoder.Decode(fresh.Interface()); err != nil {
+		return err
+	}
+	targetValue.Elem().Set(fresh.Elem())
+	return nil
 }
 
 func balancedJSONObjectEnd(content string, start int) int {

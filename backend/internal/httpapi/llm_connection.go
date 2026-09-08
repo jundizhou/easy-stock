@@ -97,10 +97,18 @@ func (s *Server) stockAnalysisModelTimeout() time.Duration {
 	return s.modelResponseTimeout()
 }
 
+func (s *Server) stockAnalysisThemeTimeout() time.Duration {
+	return 45 * time.Second
+}
+
+func (s *Server) stockAnalysisQuickTimeout() time.Duration {
+	return 45 * time.Second
+}
+
 func (s *Server) stockAnalysisTimeout() time.Duration {
 	// Data collection has its own 35 second deadline. Add cleanup grace around
-	// the two sequential model stages.
-	return 35*time.Second + 2*s.stockAnalysisModelTimeout() + 30*time.Second
+	// the bounded theme classification and the full final decision.
+	return 35*time.Second + s.stockAnalysisThemeTimeout() + s.stockAnalysisModelTimeout() + 30*time.Second
 }
 
 func truncateRunes(value string, limit int) string {
