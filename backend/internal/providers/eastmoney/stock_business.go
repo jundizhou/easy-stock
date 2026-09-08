@@ -79,7 +79,7 @@ func (c *Client) StockFundamentals(ctx context.Context, symbol string) (foundati
 	endpoint := c.f10BaseURL + "/api/data/v1/get"
 	params := url.Values{}
 	params.Set("reportName", "RPT_F10_FINANCE_MAINFINADATA")
-	params.Set("columns", "SECUCODE,REPORT_DATE,REPORT_DATE_NAME,TOTALOPERATEREVE,TOTALOPERATEREVETZ,PARENTNETPROFIT,PARENTNETPROFITTZ,EPSJB,ROEJQ,XSMLL,ZCFZL,MGJYXJJE")
+	params.Set("columns", "SECUCODE,REPORT_DATE,REPORT_DATE_NAME,TOTALOPERATEREVE,TOTALOPERATEREVETZ,PARENTNETPROFIT,PARENTNETPROFITTZ,KCFJCXSYJLR,KCFJCXSYJLRTZ,EPSJB,ROEJQ,XSMLL,ZCFZL,MGJYXJJE")
 	params.Set("filter", fmt.Sprintf("(SECUCODE=\"%s\")", escapeEastMoneyFilter(normalized.Canonical)))
 	params.Set("pageNumber", "1")
 	params.Set("pageSize", "1")
@@ -94,18 +94,20 @@ func (c *Client) StockFundamentals(ctx context.Context, symbol string) (foundati
 		Message string `json:"message"`
 		Result  *struct {
 			Data []struct {
-				Symbol                    string        `json:"SECUCODE"`
-				ReportDate                string        `json:"REPORT_DATE"`
-				ReportName                string        `json:"REPORT_DATE_NAME"`
-				Revenue                   flexibleFloat `json:"TOTALOPERATEREVE"`
-				RevenueYearOverYear       flexibleFloat `json:"TOTALOPERATEREVETZ"`
-				NetProfit                 flexibleFloat `json:"PARENTNETPROFIT"`
-				NetProfitYearOverYear     flexibleFloat `json:"PARENTNETPROFITTZ"`
-				EPS                       flexibleFloat `json:"EPSJB"`
-				ROE                       flexibleFloat `json:"ROEJQ"`
-				GrossMargin               flexibleFloat `json:"XSMLL"`
-				DebtRatio                 flexibleFloat `json:"ZCFZL"`
-				OperatingCashFlowPerShare flexibleFloat `json:"MGJYXJJE"`
+				Symbol                    string         `json:"SECUCODE"`
+				ReportDate                string         `json:"REPORT_DATE"`
+				ReportName                string         `json:"REPORT_DATE_NAME"`
+				Revenue                   flexibleFloat  `json:"TOTALOPERATEREVE"`
+				RevenueYearOverYear       flexibleFloat  `json:"TOTALOPERATEREVETZ"`
+				NetProfit                 flexibleFloat  `json:"PARENTNETPROFIT"`
+				NetProfitYearOverYear     flexibleFloat  `json:"PARENTNETPROFITTZ"`
+				DeductedNetProfit         *flexibleFloat `json:"KCFJCXSYJLR"`
+				DeductedNetProfitYoY      *flexibleFloat `json:"KCFJCXSYJLRTZ"`
+				EPS                       flexibleFloat  `json:"EPSJB"`
+				ROE                       flexibleFloat  `json:"ROEJQ"`
+				GrossMargin               flexibleFloat  `json:"XSMLL"`
+				DebtRatio                 flexibleFloat  `json:"ZCFZL"`
+				OperatingCashFlowPerShare flexibleFloat  `json:"MGJYXJJE"`
 			} `json:"data"`
 		} `json:"result"`
 	}
@@ -119,13 +121,16 @@ func (c *Client) StockFundamentals(ctx context.Context, symbol string) (foundati
 		return foundation.StockFundamentals{}, fmt.Errorf("eastmoney stock fundamentals returned no data for %s", normalized.Canonical)
 	}
 	raw := payload.Result.Data[0]
-	deductedNetProfit, deductedNetProfitYearOverYear, deductedReportDate, deductedErr := c.stockDeductedProfit(ctx, normalized.Canonical)
-	// The two F10 endpoints can publish at different times. Only combine them
-	// when they refer to the same reporting period; otherwise leave the
-	// sustainability fields unavailable instead of mixing periods.
-	deductedAvailable := deductedErr == nil && sameReportPeriod(raw.ReportDate, deductedReportDate)
-	if !deductedAvailable {
-		deductedNetProfit, deductedNetProfitYearOverYear, deductedReportDate = 0, 0, ""
+	deductedAvailable := raw.DeductedNetProfit != nil
+	deductedNetProfit := 0.0
+	deductedNetProfitYearOverYear := 0.0
+	deductedReportDate := ""
+	if raw.DeductedNetProfit != nil {
+		deductedNetProfit = float64(*raw.DeductedNetProfit)
+		deductedReportDate = strings.TrimSpace(raw.ReportDate)
+	}
+	if raw.DeductedNetProfitYoY != nil {
+		deductedNetProfitYearOverYear = float64(*raw.DeductedNetProfitYoY)
 	}
 	return foundation.StockFundamentals{
 		Symbol: normalized.Canonical, ReportDate: strings.TrimSpace(raw.ReportDate), ReportName: strings.TrimSpace(raw.ReportName),
@@ -137,55 +142,6 @@ func (c *Client) StockFundamentals(ctx context.Context, symbol string) (foundati
 		OperatingCashFlowPerShare: float64(raw.OperatingCashFlowPerShare),
 		Meta:                      foundation.SourceMeta{Source: "eastmoney:f10-financials", SourceURL: requestURL, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds()},
 	}, nil
-}
-
-func (c *Client) stockDeductedProfit(ctx context.Context, symbol string) (float64, float64, string, error) {
-	endpoint := c.f10BaseURL + "/api/data/v1/get"
-	params := url.Values{}
-	params.Set("reportName", "RPT_F10_QTR_MAINFINADATA")
-	params.Set("columns", "SECUCODE,REPORT_DATE,DEDU_PARENT_PROFIT,DPNP_YOY_RATIO")
-	params.Set("filter", fmt.Sprintf("(SECUCODE=\"%s\")", escapeEastMoneyFilter(symbol)))
-	params.Set("pageNumber", "1")
-	params.Set("pageSize", "1")
-	params.Set("sortTypes", "-1")
-	params.Set("sortColumns", "REPORT_DATE")
-	params.Set("source", "HSF10")
-	params.Set("client", "PC")
-	requestURL := endpoint + "?" + params.Encode()
-	var payload struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-		Result  *struct {
-			Data []struct {
-				ReportDate                    string        `json:"REPORT_DATE"`
-				DeductedNetProfit             flexibleFloat `json:"DEDU_PARENT_PROFIT"`
-				DeductedNetProfitYearOverYear flexibleFloat `json:"DPNP_YOY_RATIO"`
-			} `json:"data"`
-		} `json:"result"`
-	}
-	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
-		return 0, 0, "", err
-	}
-	if !payload.Success || payload.Result == nil || len(payload.Result.Data) == 0 {
-		return 0, 0, "", fmt.Errorf("eastmoney deducted profit unavailable: %s", payload.Message)
-	}
-	raw := payload.Result.Data[0]
-	return float64(raw.DeductedNetProfit), float64(raw.DeductedNetProfitYearOverYear), strings.TrimSpace(raw.ReportDate), nil
-}
-
-func sameReportPeriod(left, right string) bool {
-	left = strings.TrimSpace(left)
-	right = strings.TrimSpace(right)
-	if left == "" || right == "" {
-		return false
-	}
-	if len(left) >= 10 {
-		left = left[:10]
-	}
-	if len(right) >= 10 {
-		right = right[:10]
-	}
-	return left == right
 }
 
 func normalizeBusinessText(value string) string {

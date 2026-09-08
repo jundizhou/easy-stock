@@ -209,8 +209,20 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 	if analysis.ActionPlan.CurrentAction != "回避，等待重新筑底" {
 		t.Fatalf("action = %q", analysis.ActionPlan.CurrentAction)
 	}
-	if analysis.RiskControl.SuggestedPositionMax > 10 || analysis.RiskControl.StopPrice >= analysis.Trend.LatestClose {
+	if analysis.RiskControl.SuggestedPositionMax > 10 || analysis.RiskControl.ExistingPositionStopPrice <= 0 || analysis.RiskControl.ExistingPositionStopPrice >= analysis.Trend.LatestClose {
 		t.Fatalf("weak risk control is not defensive: %+v", analysis.RiskControl)
+	}
+	if analysis.RiskControl.StopPrice <= analysis.RiskControl.ExistingPositionStopPrice || analysis.RiskControl.StopPrice >= analysis.RiskControl.EntryReference {
+		t.Fatalf("new-entry stop was not separated from the current-position defense: %+v", analysis.RiskControl)
+	}
+	weakStructurePoints := 0.0
+	for _, factor := range analysis.RiskControl.Factors {
+		if factor.Key == "weak_structure" {
+			weakStructurePoints = factor.Points
+		}
+	}
+	if weakStructurePoints != 10 {
+		t.Fatalf("weak structure should add a limited 10-point execution penalty: %+v", analysis.RiskControl.Factors)
 	}
 	if analysis.NextDay.Bias != "防守观察" || !strings.Contains(analysis.NextDay.Scenarios[1].Action, "不新增仓位") {
 		t.Fatalf("weak next-day plan must stay defensive: %+v", analysis.NextDay)
@@ -223,6 +235,9 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 	}
 	if analysis.ActionPlan.StopLoss.PriceText == "" || analysis.ActionPlan.StopLoss.PriceHigh != analysis.RiskControl.StopPrice {
 		t.Fatalf("weak-risk stop-loss price is unclear: %+v", analysis.ActionPlan.StopLoss)
+	}
+	if !strings.Contains(analysis.ActionPlan.StopLoss.Reason, "新仓计划") || !strings.Contains(strings.Join(analysis.RiskControl.Rules, "；"), "已有仓位防守") {
+		t.Fatalf("weak-risk stop contexts are not explicit: action=%+v risk=%+v", analysis.ActionPlan.StopLoss, analysis.RiskControl)
 	}
 	if analysis.ActionPlan.TakeProfit.PriceLow <= analysis.ActionPlan.Entry.PriceHigh {
 		t.Fatalf("weak-risk take-profit must be above confirmed entry zone: %+v", analysis.ActionPlan)
@@ -334,6 +349,18 @@ func TestFundamentalScoreAcceptsExplicitZeroRecurringProfit(t *testing.T) {
 	})
 	if !item.RecurringNetProfitAvailable || item.RecurringNetProfit != 0 || item.Sustainability != "较差" {
 		t.Fatalf("explicit zero recurring profit was treated as missing: %+v", item)
+	}
+}
+
+func TestFundamentalScoreUsesCumulativeDeductedProfitForInterimReport(t *testing.T) {
+	item := analyzeFundamentals(&foundation.StockFundamentals{
+		ReportDate: "2026-06-30", ReportName: "2026中报",
+		RevenueYearOverYear: 54.800369148545, NetProfit: 43284002000, NetProfitYearOverYear: 41.983941749454,
+		DeductedNetProfit: 39013300000, DeductedNetProfitYearOverYear: 43.444603004956, DeductedNetProfitAvailable: true,
+		ROE: 12.08, GrossMargin: 23.9283938867, DebtRatio: 63.6524529171, OperatingCashFlowPerShare: 13.015213596184,
+	})
+	if item.Score != 75 || item.Sustainability != "较好" || item.NonRecurringProfitRatio >= 10 {
+		t.Fatalf("strong interim fundamentals were misclassified: %+v", item)
 	}
 }
 
@@ -464,7 +491,13 @@ func TestAnalyzeThemeFallsBackToBusinessWhenHotThemePriceDoesNotMatch(t *testing
 	if analysis.Theme.Resonance.State != "价格未确认" || !strings.Contains(analysis.Theme.Description, "5日涨幅未跟随") || !strings.Contains(analysis.Theme.Description, "公司主业集成电路") {
 		t.Fatalf("price rejection reason missing: %+v", analysis.Theme)
 	}
-	if len(analysis.Theme.ConfirmedThemes) != 1 || analysis.Theme.ConfirmedThemes[0].Name != "商业航天" {
+	foundRejectedTheme := false
+	for _, item := range analysis.Theme.ConfirmedThemes {
+		if item.Name == "商业航天" && strings.Contains(item.Detail, "5日涨幅未跟随") {
+			foundRejectedTheme = true
+		}
+	}
+	if !foundRejectedTheme {
 		t.Fatalf("rejected theme evidence should remain inspectable: %+v", analysis.Theme.ConfirmedThemes)
 	}
 	foundThemeQuality := false
@@ -475,6 +508,70 @@ func TestAnalyzeThemeFallsBackToBusinessWhenHotThemePriceDoesNotMatch(t *testing
 	}
 	if !foundThemeQuality {
 		t.Fatalf("theme price validation quality missing: %+v", analysis.DataQuality)
+	}
+}
+
+func TestAnalyzeThemeKeepsF10BusinessFactsWithoutHotResonance(t *testing.T) {
+	lines := syntheticTrendLines("688072.SH", 80, 20, .06, 900_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "688072.SH", Quote: foundation.Quote{Symbol: "688072.SH", Name: "样本装备", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business:       "半导体装备、真空及锂电装备、精密元器件业务",
+		BusinessDetail: "公司主要从事半导体装备、真空及锂电装备、精密元器件业务。",
+		BusinessSource: "eastmoney:f10-business",
+		Concepts:       []string{"半导体", "半导体设备", "锂电池", "专精特新"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Theme.IsHot || analysis.Theme.HotTheme != "" || analysis.Theme.Resonance.State != "事实已确认" {
+		t.Fatalf("business facts must remain separate from current speculation: %+v", analysis.Theme)
+	}
+	found := map[string]bool{}
+	for _, item := range analysis.Theme.ConfirmedThemes {
+		found[item.Name] = true
+		if item.Confidence != "高" || !strings.Contains(item.Detail, "F10主营已确认") {
+			t.Fatalf("unexpected F10 fact tag: %+v", item)
+		}
+	}
+	for _, name := range []string{"半导体设备", "真空设备", "锂电设备", "精密元器件"} {
+		if !found[name] {
+			t.Fatalf("missing F10 business theme %q: %+v", name, analysis.Theme.ConfirmedThemes)
+		}
+	}
+	if found["半导体"] {
+		t.Fatalf("broad parent theme should not displace a more specific business fact: %+v", analysis.Theme.ConfirmedThemes)
+	}
+	if len(analysis.Theme.SpeculativeThemes) != 0 {
+		t.Fatalf("catalog-only labels must not become market mappings: %+v", analysis.Theme.SpeculativeThemes)
+	}
+}
+
+func TestAnalyzeThemePromotesF10FactOnlyAfterMarketAndPriceConfirmation(t *testing.T) {
+	lines := syntheticTrendLines("688072.SH", 80, 20, .28, 900_000_000)
+	analysis, err := Analyze(Input{
+		Symbol: "688072.SH", Quote: foundation.Quote{Symbol: "688072.SH", Name: "样本装备", Price: lines[len(lines)-1].Close}, KLines: lines,
+		Business:       "半导体装备、真空及锂电装备、精密元器件业务",
+		BusinessDetail: "公司主要从事半导体装备、真空及锂电装备、精密元器件业务。",
+		BusinessSource: "eastmoney:f10-business",
+		Concepts:       []string{"半导体设备", "锂电池"},
+		Themes: []foundation.ThemeOverview{{
+			Name: "半导体设备", TrendScore: 82, RisingNodes: 18, MatchedNodes: 24, LimitUpCount: 3, ActiveDays: 5, FiveDayStrengthScore: 78,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !analysis.Theme.IsHot || analysis.Theme.HotTheme != "半导体设备" || analysis.Theme.Source != "eastmoney:f10-business" {
+		t.Fatalf("F10 fact with market and price confirmation should become current theme: %+v", analysis.Theme)
+	}
+	foundFact := false
+	for _, item := range analysis.Theme.ConfirmedThemes {
+		if item.Name == "半导体设备" {
+			foundFact = true
+		}
+	}
+	if !foundFact || !analysis.Theme.Resonance.Available {
+		t.Fatalf("selected theme must remain visible in the fact layer: %+v", analysis.Theme)
 	}
 }
 
