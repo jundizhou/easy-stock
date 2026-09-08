@@ -576,6 +576,9 @@ export type StockAIDimensionScore = {
 export type StockAIScorecard = {
 	algorithm_version?: string;
 	overall: number;
+	opportunity_score?: number;
+	risk_score?: number;
+	data_coverage?: number;
 	grade: string;
 	direction: string;
 	conviction: string;
@@ -749,12 +752,19 @@ export type StockAIFundamental = {
 	available: boolean;
 	score: number;
 	quality: string;
+	sustainability?: string;
+	sustainability_flags?: string[];
 	report_date: string;
 	report_name: string;
 	revenue: number;
 	revenue_yoy: number;
 	net_profit: number;
 	net_profit_yoy: number;
+	recurring_net_profit_available?: boolean;
+	recurring_net_profit?: number;
+	recurring_net_profit_yoy?: number;
+	non_recurring_profit?: number;
+	non_recurring_profit_ratio?: number;
 	eps: number;
 	roe: number;
 	gross_margin: number;

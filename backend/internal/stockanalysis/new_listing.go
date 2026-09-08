@@ -316,15 +316,22 @@ func buildNewListingScorecard(profile Profile, signals []Signal) Scorecard {
 	weights := map[string]float64{"listing_period": .22, "liquidity": .12, "turnover": .12, "theme": .12, "market": .10, "fundamental": .14, "research": .05, "risk": .13}
 	dimensions := make([]DimensionScore, 0, len(signals))
 	positive, negative := make([]string, 0, 5), make([]string, 0, 5)
-	total, weightTotal := 0.0, 0.0
+	opportunityTotal, opportunityWeight := 0.0, 0.0
+	riskResilience := 50.0
+	weightTotal := 0.0
 	positiveDimensions := 0
 	for _, signal := range signals {
 		weight := weights[signal.Key]
 		if weight <= 0 {
 			continue
 		}
-		total += float64(signal.Strength) * weight
 		weightTotal += weight
+		if signal.Key == "risk" {
+			riskResilience = float64(signal.Strength)
+		} else {
+			opportunityTotal += float64(signal.Strength) * weight
+			opportunityWeight += weight
+		}
 		if signal.Tone == "positive" {
 			positive = append(positive, signal.Label+"："+signal.Detail)
 			positiveDimensions++
@@ -337,8 +344,14 @@ func buildNewListingScorecard(profile Profile, signals []Signal) Scorecard {
 			dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight / weightTotal, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
 		}
 	}
-	overall := min(80, calibratedStockScore(divide(total, weightTotal), positiveDimensions))
-	return Scorecard{AlgorithmVersion: "stock-score-v2", Overall: overall, Grade: "观察", Direction: "观察", Conviction: "较低", Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
+	opportunity := divide(opportunityTotal, opportunityWeight)
+	if positiveDimensions >= 3 {
+		opportunity += 2
+	}
+	rawOverall := opportunity*.75 + riskResilience*.25
+	coverage := clamp(weightTotal, 0, 1)
+	overall := min(80, int(math.Round(clamp(50+coverage*(rawOverall-50), 20, 80))))
+	return Scorecard{AlgorithmVersion: "stock-score-v3", Overall: overall, Opportunity: int(math.Round(clamp(opportunity, 0, 100))), Risk: int(math.Round(clamp(100-riskResilience, 0, 100))), Coverage: int(math.Round(coverage * 100)), Grade: "观察", Direction: "观察", Conviction: "较低", Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
 }
 
 func buildNewListingRisks(trend TrendAnalysis, theme ThemeAnalysis, market *MarketContext) []string {
@@ -424,10 +437,11 @@ func buildNewListingDataQuality(input Input, profile Profile, lines []foundation
 		quality = append(quality, DataQuality{Key: "theme_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的题材新闻", recentNewsWindowDays)})
 	}
 	if profile.PrimaryType != "emotion_leader" {
-		if fundamental != nil && fundamental.Available {
-			quality = append(quality, DataQuality{Key: "fundamental", Status: "ready", Message: "已接入最新东方财富F10财务指标"})
-		} else {
+		status, message := fundamentalQualityStatus(fundamental)
+		if status == "" {
 			quality = append(quality, DataQuality{Key: "fundamental", Status: "limited", Message: "最新F10财务指标暂不可用"})
+		} else {
+			quality = append(quality, DataQuality{Key: "fundamental", Status: status, Message: message})
 		}
 		if research != nil && research.Available {
 			quality = append(quality, DataQuality{Key: "research", Status: "ready", Message: fmt.Sprintf("已读取近45日%d篇机构研报", research.ReportCount)})

@@ -407,9 +407,10 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 	positive := make([]string, 0, 5)
 	negative := make([]string, 0, 5)
 	effectiveWeights := map[string]float64{}
-	baseScore := 0.0
+	opportunityScore := 50.0
+	riskResilience := 50.0
 	positiveGroups := 0
-	var structureScore, riskResilience float64
+	structureScore := 50.0
 	for _, signal := range signals {
 		if signal.Tone == "positive" {
 			positive = append(positive, signal.Label+"："+signal.Detail)
@@ -417,24 +418,63 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 			negative = append(negative, signal.Label+"："+signal.Detail)
 		}
 	}
-	for groupIndex, group := range active {
-		groupWeight := group.definition.weight / activeWeight
-		baseScore += group.score * groupWeight
+	opportunityActiveWeight := 0.0
+	for _, group := range active {
+		if _, isRisk := group.members["risk"]; !isRisk {
+			opportunityActiveWeight += group.definition.weight
+		}
+	}
+	if opportunityActiveWeight > 0 {
+		opportunityScore = 0
+	}
+	for _, group := range active {
+		if _, isRisk := group.members["risk"]; isRisk {
+			riskResilience = group.score
+			continue
+		}
+		if opportunityActiveWeight > 0 {
+			opportunityScore += group.score * group.definition.weight / opportunityActiveWeight
+		}
 		if group.score >= 65 {
 			positiveGroups++
 		}
-		if groupIndex == 0 {
+		if _, ok := group.members["trend"]; ok {
 			structureScore = group.score
 		}
-		for key, memberWeight := range group.members {
-			memberTotal := 0.0
-			for _, weight := range group.members {
-				memberTotal += weight
-			}
-			effectiveWeights[key] = groupWeight * memberWeight / memberTotal
+	}
+	bonus := 0.0
+	if positiveGroups >= 3 {
+		bonus += 2
+	}
+	if positiveGroups >= 5 {
+		bonus += 2
+	}
+	opportunityScore = clamp(opportunityScore+bonus, 0, 100)
+	horizonOpportunityWeight := 0.75
+	if profile.PrimaryType == "emotion_leader" {
+		horizonOpportunityWeight = 0.80
+	}
+	rawOverall := opportunityScore*horizonOpportunityWeight + riskResilience*(1-horizonOpportunityWeight)
+	coverage := clamp(activeWeight, 0, 1)
+	overall := int(math.Round(clamp(50+coverage*(rawOverall-50), 20, 95)))
+	if structureScore < 30 && riskResilience <= 25 {
+		overall = min(overall, 49)
+	}
+	// Effective dimension weights describe contribution to the composite score,
+	// while omitted dimensions lower coverage instead of silently inflating it.
+	for _, group := range active {
+		groupWeight := 0.0
+		if _, isRisk := group.members["risk"]; isRisk {
+			groupWeight = 1 - horizonOpportunityWeight
+		} else if opportunityActiveWeight > 0 {
+			groupWeight = horizonOpportunityWeight * group.definition.weight / opportunityActiveWeight
 		}
-		if _, ok := group.members["risk"]; ok {
-			riskResilience = group.score
+		memberTotal := 0.0
+		for _, weight := range group.members {
+			memberTotal += weight
+		}
+		for key, memberWeight := range group.members {
+			effectiveWeights[key] = groupWeight * memberWeight / memberTotal
 		}
 	}
 	for _, signal := range signals {
@@ -442,26 +482,35 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 			dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
 		}
 	}
-	overall := calibratedStockScore(baseScore, positiveGroups)
-	if structureScore < 30 && riskResilience <= 25 {
-		overall = min(overall, 49)
-	}
 	direction := "中性"
 	grade := "C"
 	switch {
 	case overall >= 85:
-		direction, grade = "偏多", "A"
+		direction = "偏多"
 	case overall >= 75:
-		direction, grade = "谨慎偏多", "B+"
+		direction = "谨慎偏多"
 	case overall >= 65:
-		direction, grade = "略偏多", "B"
-	case overall < 45:
-		direction, grade = "偏空", "E"
-	case overall < 55:
-		direction, grade = "谨慎偏空", "D"
+		direction = "略偏多"
+	case overall < 40:
+		direction = "偏空"
+	case overall < 50:
+		direction = "谨慎偏空"
+	}
+	if overall >= 85 {
+		grade = "A"
+	} else if overall >= 75 {
+		grade = "B+"
+	} else if overall >= 65 {
+		grade = "B"
+	} else if overall >= 50 {
+		grade = "C"
+	} else if overall >= 40 {
+		grade = "D"
+	} else {
+		grade = "E"
 	}
 	conviction := "中等"
-	if profile.Confidence >= .76 && activeWeight >= .75 && positiveGroups >= 3 {
+	if profile.Confidence >= .76 && coverage >= .75 && positiveGroups >= 3 {
 		conviction = "较高"
 	} else if profile.Confidence < .58 || activeWeight < .60 || len(positive) == len(negative) {
 		conviction = "较低"
@@ -472,18 +521,7 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 	if len(negative) == 0 {
 		negative = []string{"暂无突出负面共振，但仍必须执行结构失效条件"}
 	}
-	return Scorecard{AlgorithmVersion: "stock-score-v2", Overall: overall, Grade: grade, Direction: direction, Conviction: conviction, Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
-}
-
-func calibratedStockScore(base float64, positiveGroups int) int {
-	bonus := 0.0
-	if positiveGroups >= 3 {
-		bonus += 2
-	}
-	if positiveGroups >= 5 {
-		bonus += 2
-	}
-	return int(math.Round(clamp(58+.82*(base-50)+bonus, 20, 95)))
+	return Scorecard{AlgorithmVersion: "stock-score-v3", Overall: overall, Opportunity: int(math.Round(opportunityScore)), Risk: int(math.Round(clamp(100-riskResilience, 0, 100))), Coverage: int(math.Round(coverage * 100)), Grade: grade, Direction: direction, Conviction: conviction, Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
 }
 
 func closesOf(lines []foundation.KLine) []float64 {

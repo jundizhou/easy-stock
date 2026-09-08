@@ -707,10 +707,12 @@ function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	return <section className="stock-ai-panel stock-ai-fundamental-panel">
 		<header><div><span>公司质量</span><h3>基本面 · 最新财报</h3></div><Building2 size={19} /></header>
 		{item?.available ? <>
-			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date}</span><p>{item.summary}</p></div>
+			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date} · 收益持续性{item.sustainability || '待确认'}</span><p>{item.summary}</p>{(item.sustainability_flags || []).map((flag) => <small key={flag} className="stock-ai-fundamental-warning">{flag}</small>)}</div>
 			<div className="stock-ai-fundamental-metrics">
 				<FundamentalMetric label="营业收入" value={formatCompactAmount(item.revenue)} detail={`同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
 				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="扣非净利润" value={item.recurring_net_profit_available && typeof item.recurring_net_profit === 'number' ? formatCompactAmount(item.recurring_net_profit) : '--'} detail={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' ? `同比 ${signedPercent(item.recurring_net_profit_yoy)}` : '数据待补充'} tone={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' && item.recurring_net_profit_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="一次性损益占比" value={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' ? `${item.non_recurring_profit_ratio.toFixed(1)}%` : '--'} detail="占归母净利润绝对值" tone={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' && item.non_recurring_profit_ratio >= 30 ? 'negative' : ''} />
 				<FundamentalMetric label="ROE" value={`${item.roe.toFixed(1)}%`} detail={`EPS ${item.eps.toFixed(2)}`} />
 				<FundamentalMetric label="毛利率" value={`${item.gross_margin.toFixed(1)}%`} detail={`负债率 ${item.debt_ratio.toFixed(1)}%`} />
 			</div>
@@ -761,6 +763,7 @@ function ScorecardPanel({ analysis }: { analysis: StockAIAnalysis }) {
 			<header><div><span>综合决策</span><h3>多维加权评分</h3></div><BarChart3 size={19} /></header>
 			<div className="stock-ai-scorecard-body">
 				<div className="stock-ai-score-ring" style={{ '--score': analysis.scorecard.overall } as React.CSSProperties}><div><strong>{analysis.scorecard.overall}</strong><span>{analysis.scorecard.grade} · {analysis.scorecard.direction}</span></div></div>
+				<div className="stock-ai-score-summary"><span>机会分<strong>{analysis.scorecard.opportunity_score ?? '--'}</strong></span><span>风险分<strong>{analysis.scorecard.risk_score ?? '--'}</strong></span><span>数据覆盖<strong>{analysis.scorecard.data_coverage != null ? `${analysis.scorecard.data_coverage}%` : '--'}</strong></span></div>
 				<div className="stock-ai-dimensions">
 					{analysis.scorecard.dimensions.map((item) => <div key={item.key}><span>{item.label}<small>{Math.round(item.weight * 100)}%</small></span><div><i style={{ width: `${item.score}%` }} /></div><strong>{item.score}</strong></div>)}
 				</div>
