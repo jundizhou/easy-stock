@@ -41,8 +41,8 @@ func TestAnalyzeNewListingWithOneTradingDay(t *testing.T) {
 	if len(analysis.Timeframes) != 4 || analysis.Relative.Available || analysis.Scorecard.Conviction != "较低" {
 		t.Fatalf("limited-sample workspace is misleading: timeframes=%+v relative=%+v scorecard=%+v", analysis.Timeframes, analysis.Relative, analysis.Scorecard)
 	}
-	if analysis.Scorecard.AlgorithmVersion != "stock-score-v2" || analysis.Scorecard.Overall > 80 {
-		t.Fatalf("new-listing scorecard must use the capped V2 observation scale: %+v", analysis.Scorecard)
+	if analysis.Scorecard.AlgorithmVersion != "stock-score-v3" || analysis.Scorecard.Overall > 80 {
+		t.Fatalf("new-listing scorecard must use the capped V3 observation scale: %+v", analysis.Scorecard)
 	}
 	foundLimitedKLine := false
 	for _, item := range analysis.DataQuality {
@@ -229,7 +229,7 @@ func TestAnalyzeBuildsCompleteDecisionWorkspace(t *testing.T) {
 	if len(analysis.Timeframes) != 5 || len(analysis.Signals) < 6 || len(analysis.Scorecard.Dimensions) < 6 {
 		t.Fatalf("complete score workspace missing: timeframes=%d signals=%d dimensions=%d", len(analysis.Timeframes), len(analysis.Signals), len(analysis.Scorecard.Dimensions))
 	}
-	if analysis.Scorecard.AlgorithmVersion != "stock-score-v2" {
+	if analysis.Scorecard.AlgorithmVersion != "stock-score-v3" {
 		t.Fatalf("score algorithm version = %q", analysis.Scorecard.AlgorithmVersion)
 	}
 	if !analysis.Relative.Available || analysis.Relative.BenchmarkName != "创业板指" {
@@ -246,7 +246,7 @@ func TestAnalyzeBuildsCompleteDecisionWorkspace(t *testing.T) {
 	}
 }
 
-func TestScorecardV2CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t *testing.T) {
+func TestScorecardV3CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t *testing.T) {
 	signals := []Signal{
 		{Key: "trend", Label: "趋势结构", Tone: "neutral", Strength: 50},
 		{Key: "timeframe", Label: "周期一致性", Tone: "neutral", Strength: 50},
@@ -255,8 +255,8 @@ func TestScorecardV2CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t
 		{Key: "risk", Label: "风险约束", Tone: "neutral", Strength: 50},
 	}
 	scorecard := buildScorecard(Profile{PrimaryType: "trend_capacity", Confidence: .7}, signals)
-	if scorecard.Overall != 58 || scorecard.AlgorithmVersion != "stock-score-v2" {
-		t.Fatalf("neutral V2 scorecard = %+v", scorecard)
+	if scorecard.Overall != 50 || scorecard.AlgorithmVersion != "stock-score-v3" {
+		t.Fatalf("neutral V3 scorecard = %+v", scorecard)
 	}
 	weightTotal := 0.0
 	for _, dimension := range scorecard.Dimensions {
@@ -270,19 +270,43 @@ func TestScorecardV2CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t
 	}
 }
 
-func TestStockScoreV2UsesGentleCalibration(t *testing.T) {
-	for _, item := range []struct {
-		base, want float64
-		positive   int
-	}{
-		{base: 40, positive: 0, want: 50},
-		{base: 50, positive: 0, want: 58},
-		{base: 70, positive: 3, want: 76},
-		{base: 80, positive: 5, want: 87},
-	} {
-		if got := calibratedStockScore(item.base, item.positive); got != int(item.want) {
-			t.Fatalf("calibratedStockScore(%.0f, %d) = %d, want %.0f", item.base, item.positive, got, item.want)
-		}
+func TestFundamentalScoreUsesRecurringProfitWhenAvailable(t *testing.T) {
+	item := analyzeFundamentals(&foundation.StockFundamentals{
+		ReportDate: "2026-03-31", ReportName: "2026一季报",
+		RevenueYearOverYear: 20, NetProfit: 100, NetProfitYearOverYear: 120,
+		DeductedNetProfit: 10, DeductedNetProfitYearOverYear: -20, DeductedNetProfitAvailable: true,
+		ROE: 10, GrossMargin: 30, DebtRatio: 50,
+	})
+	if item.RecurringNetProfit != 10 || item.RecurringNetProfitYearOverYear != -20 {
+		t.Fatalf("recurring profit was not selected: %+v", item)
+	}
+	if item.NonRecurringProfitRatio != 90 || item.Sustainability != "较差" || item.Score >= 45 {
+		t.Fatalf("one-off profit was not penalized: %+v", item)
+	}
+	if len(item.SustainabilityFlags) == 0 || !strings.Contains(strings.Join(item.SustainabilityFlags, "；"), "非经常性") {
+		t.Fatalf("sustainability warning missing: %+v", item)
+	}
+}
+
+func TestFundamentalScoreAcceptsExplicitZeroRecurringProfit(t *testing.T) {
+	item := analyzeFundamentals(&foundation.StockFundamentals{
+		ReportDate: "2026-03-31", NetProfit: 20, NetProfitYearOverYear: 10,
+		DeductedNetProfitAvailable: true, DeductedNetProfit: 0, DeductedNetProfitYearOverYear: 0,
+	})
+	if !item.RecurringNetProfitAvailable || item.RecurringNetProfit != 0 || item.Sustainability != "较差" {
+		t.Fatalf("explicit zero recurring profit was treated as missing: %+v", item)
+	}
+}
+
+func TestExtremeDailyDropKeepsRiskModelAdvisory(t *testing.T) {
+	lines := syntheticTrendLines("600000.SH", 30, 10, .1, 500_000_000)
+	lines[len(lines)-1].ChangePercent = -10
+	analysis, err := Analyze(Input{Symbol: "600000.SH", Quote: foundation.Quote{Name: "测试股"}, KLines: lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.RiskControl.Score >= 100 || analysis.RiskControl.SuggestedPositionMax <= 0 {
+		t.Fatalf("single-day move should remain an advisory risk input: %+v", analysis.RiskControl)
 	}
 }
 
