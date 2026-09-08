@@ -18,11 +18,13 @@ import { llmProviderDefaultModel, llmProviderName } from '../lib/llm-providers';
 import {
 	ChatConversation,
 	ChatMessage,
+	chatModelKey,
 	clearHermesSessionIDs,
 	createChatConversation,
 	createChatID,
 	deriveChatTitle,
 	parseStoredConversations,
+	resumableHermesSessionID,
 	storeableConversations,
 } from '../lib/chat';
 import { streamHermesPrompt } from '../lib/hermes';
@@ -358,10 +360,12 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 	const sendMessage = async (event?: FormEvent) => {
 		event?.preventDefault();
 		const content = draft.trim();
-		if (!content || !config || sending) return;
+		if (!content || !config || !llmConfig || modelState !== 'ready' || sending) return;
 
 		const now = new Date().toISOString();
 		const current = activeConversation || createChatConversation(now);
+		const modelKey = chatModelKey(llmConfig, activeLLMProfileID);
+		const hermesSessionID = resumableHermesSessionID(current, modelKey);
 		const userMessage: ChatMessage = {
 			id: createChatID('message'),
 			role: 'user',
@@ -400,7 +404,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 			const result = await streamHermesPrompt({
 				config,
 				prompt: content,
-				hermesSessionID: current.hermes_session_id,
+				hermesSessionID,
 				seedMessages,
 				signal: controller.signal,
 				onStatus: (status) => setActivityStatus(status.text || (status.kind === 'process' ? '正在执行操作…' : '正在处理…')),
@@ -409,7 +413,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 					setActivityStatus('等待你的授权后继续');
 				},
 				onSession: (hermesSessionID) => setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
-					? { ...conversation, hermes_session_id: hermesSessionID }
+					? { ...conversation, hermes_session_id: hermesSessionID, hermes_model_key: modelKey }
 					: conversation)),
 				onDelta: (nextContent) => setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
 					? { ...conversation, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, content: nextContent } : message) }
@@ -417,7 +421,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 			});
 			const completedAt = new Date().toISOString();
 			setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
-				? { ...conversation, hermes_session_id: result.hermesSessionID || conversation.hermes_session_id, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, content: result.content, created_at: completedAt } : message), updated_at: completedAt }
+				? { ...conversation, hermes_session_id: result.hermesSessionID || conversation.hermes_session_id, hermes_model_key: modelKey, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, content: result.content, created_at: completedAt } : message), updated_at: completedAt }
 				: conversation));
 			setModelState('ready');
 		} catch (error) {

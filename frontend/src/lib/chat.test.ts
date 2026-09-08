@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearHermesSessionIDs, deriveChatTitle, parseStoredConversations, storeableConversations, type ChatConversation } from './chat';
+import { chatModelKey, clearHermesSessionIDs, deriveChatTitle, parseStoredConversations, resumableHermesSessionID, storeableConversations, type ChatConversation } from './chat';
 
 describe('AI chat history helpers', () => {
 	it('derives a compact title from the first message', () => {
@@ -25,12 +25,33 @@ describe('AI chat history helpers', () => {
 	it('clears Hermes sessions after changing the global chat model without removing messages', () => {
 		const current = conversation('current', '2026-08-07T00:00:00.000Z');
 		current.hermes_session_id = 'hermes-old-model';
+		current.hermes_model_key = 'old-model-key';
 		current.messages = [{ id: 'message-1', role: 'user', content: '保留这条消息', created_at: current.created_at }];
 
 		const [next] = clearHermesSessionIDs([current]);
 
 		expect(next.hermes_session_id).toBeUndefined();
+		expect(next.hermes_model_key).toBeUndefined();
 		expect(next.messages).toEqual(current.messages);
+	});
+
+	it('only resumes a Hermes session created for the active model configuration', () => {
+		const current = conversation('current', '2026-09-08T00:00:00.000Z');
+		const deepSeekKey = chatModelKey({ provider: 'deepseek', base_url: 'https://api.deepseek.com/', model: 'deepseek-v4-flash', api_mode: 'codex_responses' }, 'deepseek-profile');
+		const lunaKey = chatModelKey({ provider: 'custom', base_url: 'https://dutifly.com/sub2api/v1', model: 'gpt-5.6-luna', api_mode: 'codex_responses' }, 'luna-profile');
+		current.hermes_session_id = 'hermes-luna-session';
+		current.hermes_model_key = lunaKey;
+
+		expect(resumableHermesSessionID(current, deepSeekKey)).toBeUndefined();
+		expect(resumableHermesSessionID(current, lunaKey)).toBe('hermes-luna-session');
+	});
+
+	it('does not resume legacy sessions that have no model configuration marker', () => {
+		const current = conversation('legacy', '2026-09-08T00:00:00.000Z');
+		current.hermes_session_id = 'hermes-legacy-session';
+		const modelKey = chatModelKey({ provider: 'deepseek', base_url: 'https://api.deepseek.com', model: 'deepseek-v4-flash', api_mode: 'codex_responses' });
+
+		expect(resumableHermesSessionID(current, modelKey)).toBeUndefined();
 	});
 });
 

@@ -12,9 +12,17 @@ export type ChatConversation = {
 	id: string;
 	title: string;
 	hermes_session_id?: string;
+	hermes_model_key?: string;
 	messages: ChatMessage[];
 	created_at: string;
 	updated_at: string;
+};
+
+export type ChatModelConfig = {
+	provider: string;
+	base_url: string;
+	model: string;
+	api_mode: string;
 };
 
 const MAX_STORED_CONVERSATIONS = 30;
@@ -64,10 +72,24 @@ export function storeableConversations(conversations: ChatConversation[]) {
 		.slice(0, MAX_STORED_CONVERSATIONS);
 }
 
+export function chatModelKey(config: ChatModelConfig, profileID = '') {
+	return JSON.stringify({
+		profile_id: profileID.trim(),
+		provider: config.provider.trim().toLowerCase(),
+		base_url: config.base_url.trim().replace(/\/+$/, ''),
+		model: config.model.trim(),
+		api_mode: config.api_mode.trim().toLowerCase(),
+	});
+}
+
+export function resumableHermesSessionID(conversation: ChatConversation, modelKey: string) {
+	return conversation.hermes_model_key === modelKey ? conversation.hermes_session_id : undefined;
+}
+
 export function clearHermesSessionIDs(conversations: ChatConversation[]): ChatConversation[] {
 	return conversations.map((conversation) => {
-		if (!conversation.hermes_session_id) return conversation;
-		const { hermes_session_id: _hermesSessionID, ...next } = conversation;
+		if (!conversation.hermes_session_id && !conversation.hermes_model_key) return conversation;
+		const { hermes_session_id: _hermesSessionID, hermes_model_key: _hermesModelKey, ...next } = conversation;
 		return next;
 	});
 }
@@ -80,6 +102,7 @@ function isConversation(value: unknown): value is ChatConversation {
 		&& typeof item.created_at === 'string'
 		&& typeof item.updated_at === 'string'
 		&& (item.hermes_session_id === undefined || typeof item.hermes_session_id === 'string')
+		&& (item.hermes_model_key === undefined || typeof item.hermes_model_key === 'string')
 		&& Array.isArray(item.messages)
 		&& item.messages.every(isMessage);
 }
