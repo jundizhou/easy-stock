@@ -165,21 +165,64 @@ func buildRiskControl(profile Profile, trend TrendAnalysis, short ShortTermAnaly
 		secondTarget = trend.Resistance
 	}
 
-	riskScore := 18 + atr*6
-	if trend.RangePosition60 >= 90 {
-		riskScore += 10
-	}
-	if trend.VolumeRatio >= 1.6 && trend.Return20 < 4 {
-		riskScore += 10
+	stopPercent := math.Abs(percentChange(entry, stop))
+	risk := RiskControl{
+		EntryReference: entry, StopPrice: round2(stop), StopPercent: round2(stopPercent),
+		TakeProfitFirst: round2(firstTarget), TakeProfitSecond: round2(secondTarget),
+		RiskReward:      round2(divide(secondTarget-entry, riskPerShare)),
+		PositionFormula: "可买股数 = min(账户允许亏损 ÷ 每股止损距离, 仓位上限金额 ÷ 计划买入价)，向下取整到100股",
 	}
 	if profile.PrimaryType == "weak_risk" {
-		riskScore += 25
+		risk.ExistingPositionStopPrice = risk.StopPrice
+		risk.ExistingPositionStopPercent = risk.StopPercent
+	}
+	return finalizeRiskControl(risk, profile, trend, short, market)
+}
+
+func finalizeRiskControl(risk RiskControl, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, market *MarketContext) RiskControl {
+	atr := clamp(trend.ATR14Percent, 1.5, 10)
+	factors := []RiskFactor{
+		{Key: "base", Label: "基础执行风险", Points: 18, Detail: "所有交易计划的基础不确定性"},
+		{Key: "volatility", Label: "ATR波动", Points: round2(atr * 6), Detail: fmt.Sprintf("ATR14 %.2f%%", trend.ATR14Percent)},
+	}
+	addFactor := func(key, label string, points float64, detail string) {
+		if math.Abs(points) < 1e-9 {
+			return
+		}
+		factors = append(factors, RiskFactor{Key: key, Label: label, Points: round2(points), Detail: detail})
+	}
+	if trend.RangePosition60 >= 90 {
+		addFactor("high_position", "高位拥挤", 10, fmt.Sprintf("60日区间位置%.1f%%", trend.RangePosition60))
+	}
+	if trend.VolumeRatio >= 1.6 && trend.Return20 < 4 {
+		addFactor("volume_mismatch", "放量未涨", 10, fmt.Sprintf("量比%.2f，20日%+.1f%%", trend.VolumeRatio, trend.Return20))
+	}
+	if profile.PrimaryType == "weak_risk" {
+		addFactor("weak_structure", "弱势结构", 10, "趋势风险已在趋势维度计分，此处只保留有限执行附加")
 	}
 	if profile.PrimaryType == "emotion_leader" || short.MaxLimitStreak20 >= 2 {
-		riskScore += 10
+		addFactor("emotion", "情绪波动", 10, fmt.Sprintf("近20日最高%d连板", short.MaxLimitStreak20))
 	}
 	if market != nil && (market.Phase == "退潮" || market.Phase == "冰点") {
-		riskScore += 15
+		addFactor("market", "市场退潮", 15, "市场阶段为"+market.Phase)
+	}
+	switch short.Tradability {
+	case "容量充足":
+		addFactor("liquidity", "流动性缓冲", -8, "成交容量充足，执行冲击相对较低")
+	case "流动性较好":
+		addFactor("liquidity", "流动性缓冲", -4, "成交活跃度较好")
+	case "流动性偏低":
+		addFactor("liquidity", "流动性不足", 10, "成交额偏低，止损执行可能产生冲击")
+	}
+	if risk.StopPercent > 8 {
+		addFactor("stop_distance", "止损距离", clamp((risk.StopPercent-8)*1.2, 0, 12), fmt.Sprintf("计划止损距离%.1f%%，超过8%%", risk.StopPercent))
+	} else if risk.StopPercent > 5 {
+		addFactor("stop_distance", "止损距离", clamp((risk.StopPercent-5)*1.5, 0, 4.5), fmt.Sprintf("计划止损距离%.1f%%，超过5%%", risk.StopPercent))
+	}
+
+	riskScore := 0.0
+	for _, factor := range factors {
+		riskScore += factor.Points
 	}
 	riskScore = clamp(riskScore, 0, 100)
 	level := "中等"
@@ -207,24 +250,29 @@ func buildRiskControl(profile Profile, trend TrendAnalysis, short ShortTermAnaly
 		positionMin = max(positionMin-5, 0)
 		positionMax = max(positionMax-10, positionMin)
 	}
-	stopPercent := math.Abs(percentChange(entry, stop))
-	rules := []string{
-		fmt.Sprintf("计划止损参考%.2f，触发后以执行纪律为先，不用盘中想象替代条件", stop),
+	rules := make([]string, 0, 6)
+	if risk.ExistingPositionStopPrice > 0 && math.Abs(risk.ExistingPositionStopPrice-risk.StopPrice) >= .01 {
+		rules = append(rules,
+			fmt.Sprintf("已有仓位防守参考%.2f，距当前分析价约%.1f%%", risk.ExistingPositionStopPrice, risk.ExistingPositionStopPercent),
+			fmt.Sprintf("新仓只有完成右侧确认后，才使用%.2f计划止损", risk.StopPrice),
+		)
+	} else {
+		rules = append(rules, fmt.Sprintf("计划止损参考%.2f，触发后以执行纪律为先，不用盘中想象替代条件", risk.StopPrice))
+	}
+	rules = append(rules,
 		fmt.Sprintf("单笔账户风险建议不超过%.1f%%，再由止损距离反推股数", singleTradeRisk),
 		"未达到入场条件时不预支仓位；首次确认后仍保留加仓空间",
 		"盈利达到1R后优先处理本金风险，趋势延续部分再跟随结构移动保护位",
 		"禁止在失效位下方补仓摊薄成本",
-	}
-	return RiskControl{
-		Level: level, Score: int(math.Round(riskScore)), EntryReference: round2(entry),
-		StopPrice: round2(stop), StopPercent: round2(stopPercent),
-		TakeProfitFirst: round2(firstTarget), TakeProfitSecond: round2(secondTarget),
-		RiskReward:           round2(divide(secondTarget-entry, riskPerShare)),
-		SuggestedPositionMin: positionMin, SuggestedPositionMax: positionMax,
-		SingleTradeRisk: singleTradeRisk,
-		PositionFormula: "可买股数 = min(账户允许亏损 ÷ 每股止损距离, 仓位上限金额 ÷ 计划买入价)，向下取整到100股",
-		Rules:           rules,
-	}
+	)
+	risk.Level = level
+	risk.Score = int(math.Round(riskScore))
+	risk.SuggestedPositionMin = positionMin
+	risk.SuggestedPositionMax = positionMax
+	risk.SingleTradeRisk = singleTradeRisk
+	risk.Factors = factors
+	risk.Rules = rules
+	return risk
 }
 
 func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl) NextDayPlan {
@@ -354,7 +402,7 @@ func buildSignals(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnaly
 	if research != nil && research.Available {
 		signals = append(signals, Signal{Key: "research", Label: "机构研报", Tone: scoreTone(research.Score), Strength: research.Score, Detail: research.Summary})
 	}
-	signals = append(signals, Signal{Key: "risk", Label: "风险约束", Tone: scoreTone(100 - risk.Score), Strength: 100 - risk.Score, Detail: fmt.Sprintf("%s风险 · 止损距离%.1f%%", risk.Level, risk.StopPercent)})
+	signals = append(signals, Signal{Key: "risk", Label: "风险承受力", Tone: scoreTone(100 - risk.Score), Strength: 100 - risk.Score, Detail: fmt.Sprintf("风险压力%d · 计划止损距离%.1f%%", risk.Score, risk.StopPercent)})
 	return signals
 }
 

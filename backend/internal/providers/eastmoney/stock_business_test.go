@@ -35,18 +35,19 @@ func TestExtractMainBusinessSupportsCoreBusinessWording(t *testing.T) {
 }
 
 func TestStockFundamentalsReturnsLatestReport(t *testing.T) {
+	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
 		if r.URL.Query().Get("sortColumns") != "REPORT_DATE" {
 			t.Fatalf("unexpected request: %s", r.URL.String())
-		}
-		if r.URL.Query().Get("reportName") == "RPT_F10_QTR_MAINFINADATA" {
-			_, _ = w.Write([]byte(`{"result":{"data":[{"REPORT_DATE":"2026-03-31 00:00:00","DEDU_PARENT_PROFIT":12000000,"DPNP_YOY_RATIO":18.5}]},"success":true}`))
-			return
 		}
 		if r.URL.Query().Get("reportName") != "RPT_F10_FINANCE_MAINFINADATA" {
 			t.Fatalf("unexpected report: %s", r.URL.String())
 		}
-		_, _ = w.Write([]byte(`{"result":{"data":[{"SECUCODE":"688297.SH","REPORT_DATE":"2026-03-31 00:00:00","REPORT_DATE_NAME":"2026一季报","TOTALOPERATEREVE":574284022.39,"TOTALOPERATEREVETZ":143.59,"PARENTNETPROFIT":16864497.49,"PARENTNETPROFITTZ":0.11,"EPSJB":0.025,"ROEJQ":0.29,"XSMLL":13.82,"ZCFZL":42.5,"MGJYXJJE":0.32}]},"success":true}`))
+		if !strings.Contains(r.URL.Query().Get("columns"), "KCFJCXSYJLR") {
+			t.Fatalf("cumulative deducted profit columns missing: %s", r.URL.String())
+		}
+		_, _ = w.Write([]byte(`{"result":{"data":[{"SECUCODE":"688297.SH","REPORT_DATE":"2026-03-31 00:00:00","REPORT_DATE_NAME":"2026一季报","TOTALOPERATEREVE":574284022.39,"TOTALOPERATEREVETZ":143.59,"PARENTNETPROFIT":16864497.49,"PARENTNETPROFITTZ":0.11,"KCFJCXSYJLR":12000000,"KCFJCXSYJLRTZ":18.5,"EPSJB":0.025,"ROEJQ":0.29,"XSMLL":13.82,"ZCFZL":42.5,"MGJYXJJE":0.32}]},"success":true}`))
 	}))
 	defer server.Close()
 
@@ -55,16 +56,22 @@ func TestStockFundamentalsReturnsLatestReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.ReportName != "2026一季报" || item.RevenueYearOverYear != 143.59 || item.DeductedNetProfit != 12000000 || item.DeductedNetProfitYearOverYear != 18.5 || !item.DeductedNetProfitAvailable || item.DeductedNetProfitReportDate == "" || item.GrossMargin != 13.82 || item.Meta.Source != "eastmoney:f10-financials" {
+	if requestCount != 1 || item.ReportName != "2026一季报" || item.RevenueYearOverYear != 143.59 || item.DeductedNetProfit != 12000000 || item.DeductedNetProfitYearOverYear != 18.5 || !item.DeductedNetProfitAvailable || item.DeductedNetProfitReportDate == "" || item.GrossMargin != 13.82 || item.Meta.Source != "eastmoney:f10-financials" {
 		t.Fatalf("unexpected fundamentals: %+v", item)
 	}
 }
 
-func TestSameReportPeriodRequiresMatchingDates(t *testing.T) {
-	if !sameReportPeriod("2026-03-31 00:00:00", "2026-03-31") {
-		t.Fatal("expected timestamps from the same report period to match")
+func TestStockFundamentalsMarksMissingDeductedProfitUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result":{"data":[{"SECUCODE":"688297.SH","REPORT_DATE":"2026-03-31 00:00:00","KCFJCXSYJLR":null,"KCFJCXSYJLRTZ":null}]},"success":true}`))
+	}))
+	defer server.Close()
+
+	item, err := NewClient(WithF10BaseURL(server.URL)).StockFundamentals(context.Background(), "688297.SH")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if sameReportPeriod("2026-03-31", "2025-12-31") {
-		t.Fatal("different report periods must not be combined")
+	if item.DeductedNetProfitAvailable || item.DeductedNetProfit != 0 || item.DeductedNetProfitYearOverYear != 0 {
+		t.Fatalf("missing deducted profit was treated as available: %+v", item)
 	}
 }

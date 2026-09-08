@@ -59,6 +59,7 @@ func Analyze(input Input) (Analysis, error) {
 	if action.DecisionMode != "short_term" {
 		riskControl = alignRiskControlWithActionPlan(riskControl, action)
 	}
+	riskControl = finalizeRiskControl(riskControl, profile, trend, shortTerm, market)
 	nextDay := buildNextDayPlan(lines, profile, trend, shortTerm, theme, market, relative, riskControl)
 	signals := buildSignals(trend, shortTerm, theme, market, relative, riskControl, timeframes, fundamental, research)
 	scorecard := buildScorecard(profile, signals)
@@ -855,6 +856,7 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 		stop = latest * (1 - clamp(atrPercent*0.8, 2, 8)/100)
 	}
 	stop = round2(math.Max(stop, 0.01))
+	existingPositionStop := stop
 
 	anchor, anchorLabel := actionSupportAnchor(trend, latest)
 	entryLow := math.Max(stop*1.005, anchor*(1-zonePercent/100))
@@ -875,6 +877,9 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 
 	entryLow = round2(math.Max(entryLow, stop+0.01))
 	entryHigh = round2(math.Max(entryHigh, entryLow))
+	if profile.PrimaryType == "weak_risk" {
+		stop = recoveryEntryStop(trend, entryLow, atrPercent)
+	}
 	pressure := actionPressureAnchor(trend, latest, entryHigh, atrPercent)
 	if pressure > entryLow*1.003 && entryHigh >= pressure {
 		entryHigh = round2(math.Max(entryLow, pressure*0.995))
@@ -885,8 +890,9 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 	holdReason := fmt.Sprintf("价格守在%.2f计划失效位上方，至%.2f阶段压力前，原有趋势与盈亏比仍可跟踪。", stop, holdHigh)
 	holdAction := "已有仓位可继续持有；靠近上沿观察放量突破还是冲高回落，跌向下沿则主动收紧风险。"
 	if profile.PrimaryType == "weak_risk" {
+		holdLow = round2(math.Max(existingPositionStop+0.01, 0.01))
 		holdHigh = round2(math.Max(entryLow, holdLow))
-		holdReason = fmt.Sprintf("仅针对已有仓位：%.2f失效位上方至%.2f修复确认位之间，仍属于纪律性观察区。", stop, holdHigh)
+		holdReason = fmt.Sprintf("仅针对已有仓位：当前防守位%.2f上方至%.2f修复确认位之间，仍属于纪律性观察区。", existingPositionStop, holdHigh)
 		holdAction = "不把反弹等同反转；反抽无量或无法站回确认区时优先减仓，不新增交易仓位。"
 	} else if profile.PrimaryType == "emotion_leader" {
 		holdReason = fmt.Sprintf("只要未跌破%.2f失效位且辨识度仍在，可跟踪至%.2f压力区；高波动下不机械死扛。", stop, holdHigh)
@@ -948,7 +954,26 @@ func buildActionPriceZones(profile Profile, trend TrendAnalysis, short ShortTerm
 		Reason:    fmt.Sprintf("%.2f来自结构支撑下方的ATR缓冲止损；跌破说明承接和原交易假设已经失效。", stop),
 		Action:    "触发后停止介入，已有仓位执行减仓或止损；不在止损位下方补仓摊薄成本。",
 	}
+	if profile.PrimaryType == "weak_risk" {
+		stopLoss.Reason = fmt.Sprintf("该止损仅对应%.2f—%.2f右侧确认后的新仓计划，并按修复支撑与ATR缓冲重新计算；当前已有仓位使用独立防守位。", entryLow, entryHigh)
+		stopLoss.Action = "未触发右侧介入前不使用该新仓止损；触发后跌破则退出，不把重新走弱解释为普通回踩。"
+	}
 	return entry, hold, takeProfit, stopLoss
+}
+
+func recoveryEntryStop(trend TrendAnalysis, entryLow, atrPercent float64) float64 {
+	bufferPercent := clamp(atrPercent*0.18, 0.5, 1.8)
+	support := 0.0
+	for _, candidate := range []float64{trend.Support, trend.MA20, trend.MA60} {
+		if candidate > support && candidate < entryLow {
+			support = candidate
+		}
+	}
+	stop := support * (1 - bufferPercent/100)
+	if stop <= 0 || stop >= entryLow {
+		stop = entryLow * (1 - clamp(atrPercent*0.8, 2, 8)/100)
+	}
+	return round2(math.Max(stop, 0.01))
 }
 
 func compactDailyBars(lines []foundation.KLine, limit int) []AIDailyBar {
@@ -1133,6 +1158,10 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: fmt.Sprintf("已识别事实题材%s，等待题材成分股盘面验证", theme.Primary)})
 	case theme.Resonance.State == "价格未确认":
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("近期热点关联未通过个股涨幅验证，当前按东方财富F10主营业务%s定位", theme.Primary)})
+	case theme.Resonance.State == "事实已确认":
+		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("已确认%d项公司事实题材，当前尚未形成主炒作共振", len(theme.ConfirmedThemes))})
+	case theme.Resonance.State == "映射待确认":
+		quality = append(quality, DataQuality{Key: "theme", Status: "limited", Message: fmt.Sprintf("已识别%d项市场映射，仍需公司证据和盘面验证", len(theme.SpeculativeThemes))})
 	case strings.Contains(theme.Source, "kaipanla-limit-up"):
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: "已命中开盘啦短线连板缓存"})
 	case strings.Contains(theme.Source, "kaipanla-theme-leader"):
@@ -1649,7 +1678,10 @@ func themeRank(rank int) int {
 }
 
 func compactTheme(value string) string {
-	replacer := strings.NewReplacer("概念", "", "板块", "", "产业链", "", " ", "", "-", "", "_", "")
+	replacer := strings.NewReplacer(
+		"锂离子电池装备", "锂电设备", "锂离子电池设备", "锂电设备", "锂电池装备", "锂电设备", "锂电池设备", "锂电设备", "装备", "设备",
+		"概念", "", "板块", "", "产业链", "", " ", "", "-", "", "_", "", "/", "",
+	)
 	return strings.ToLower(replacer.Replace(strings.TrimSpace(value)))
 }
 

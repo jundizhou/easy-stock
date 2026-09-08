@@ -301,11 +301,29 @@ func applyAIDecision(analysis *Analysis, decision aiDecisionPlan) string {
 		plan.StopLoss = stopLoss
 		plan.PricingSource = "hermes-ai"
 		analysis.RiskControl = alignRiskControlWithActionPlan(analysis.RiskControl, *plan)
+		refreshAnalysisRisk(analysis)
 		return "Hermes已综合市场、题材、资金、基本面、研报与风险生成价格计划"
 	}
 	plan.PricingSource = "local-rules"
 	analysis.RiskControl = alignRiskControlWithActionPlan(analysis.RiskControl, *plan)
+	refreshAnalysisRisk(analysis)
 	return "Hermes已完成全局研判；AI价格未通过一致性校验，当前保留本地候选价格"
+}
+
+func refreshAnalysisRisk(analysis *Analysis) {
+	if analysis == nil {
+		return
+	}
+	analysis.RiskControl = finalizeRiskControl(analysis.RiskControl, analysis.Profile, analysis.Trend, analysis.ShortTerm, analysis.Market)
+	analysis.Signals = buildSignals(analysis.Trend, analysis.ShortTerm, analysis.Theme, analysis.Market, analysis.Relative, analysis.RiskControl, analysis.Timeframes, analysis.Fundamental, analysis.Research)
+	analysis.Scorecard = buildScorecard(analysis.Profile, analysis.Signals)
+	for index := range analysis.Evidence {
+		if analysis.Evidence[index].Category != "风控" {
+			continue
+		}
+		analysis.Evidence[index].Title = fmt.Sprintf("%s风险 · %d分", analysis.RiskControl.Level, analysis.RiskControl.Score)
+		analysis.Evidence[index].Detail = fmt.Sprintf("计划失效位%.2f，建议仓位%d%%—%d%%", analysis.RiskControl.StopPrice, analysis.RiskControl.SuggestedPositionMin, analysis.RiskControl.SuggestedPositionMax)
+	}
 }
 
 func normalizeDecisionMode(value string) string {

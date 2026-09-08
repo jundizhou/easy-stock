@@ -663,7 +663,7 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 	const themeRole = theme.role && theme.role !== '待确认' ? theme.role : '';
 	const themeDetail = theme.is_hot
 		? [themeRole, themeSource, theme.business ? `主业：${theme.business}` : ''].filter(Boolean).join(' · ')
-		: [themeSource, theme.resonance.state === '价格未确认' ? '热点涨幅未通过验证' : '未发现明确热点炒作'].filter(Boolean).join(' · ');
+		: [themeSource, theme.resonance.state === '价格未确认' ? '热点涨幅未通过验证' : theme.confirmed_themes?.length ? '公司题材已确认，暂无主炒共振' : '未发现明确热点炒作'].filter(Boolean).join(' · ');
 	return (
 		<>
 			{isNewListing && <NewListingNotice analysis={analysis} />}
@@ -671,7 +671,7 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<KPICard icon={<Gauge size={17} />} label={isNewListing ? '观察评分' : '综合评分'} value={`${analysis.scorecard.overall} · ${analysis.scorecard.grade}`} detail={`${analysis.scorecard.direction} · 置信度${analysis.scorecard.conviction}`} tone="blue" />
 				<KPICard icon={<TrendingUp size={17} />} label={isNewListing ? '价格发现' : '趋势强度'} value={`${analysis.trend.score}`} detail={`${analysis.trend.strength} · ${analysis.trend.setup}`} tone="green" />
 				<KPICard icon={<Scale size={17} />} label="相对强度" value={analysis.relative_strength.available ? `${analysis.relative_strength.score}` : '--'} detail={analysis.relative_strength.available ? `${analysis.relative_strength.state} · ${analysis.relative_strength.benchmark_name}` : analysis.relative_strength.detail} tone="purple" />
-				<KPICard icon={<ShieldCheck size={17} />} label="交易风险" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
+				<KPICard icon={<ShieldCheck size={17} />} label="风险压力" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
 				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={isNewListing ? `上市 ${analysis.trend.history_days || analysis.chart.length} 日 · ${analysis.short_term.tradability}` : `近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
 				<KPICard icon={<Target size={17} />} label={theme.is_hot ? '热点定位' : '主业定位'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />
 			</section>
@@ -739,15 +739,27 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 function ThemeAttributionPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	const theme = normalizeStockAITheme(analysis.theme);
 	const resonance = theme.resonance;
+	const inactiveState = resonance.state === '价格未确认'
+		? '热点涨幅未通过验证 · 已回退主业'
+		: theme.confirmed_themes?.length
+			? '公司题材已确认 · 暂无主炒共振'
+			: theme.speculative_themes?.length
+				? '存在市场映射 · 暂未确认主炒'
+				: '未发现事件与盘面共振';
+	const inactiveResonance = resonance.state === '事实已确认'
+		? '事实题材已确认'
+		: resonance.state === '映射待确认'
+			? '题材映射待确认'
+			: '暂无当前炒作题材';
 	return <section className="stock-ai-panel stock-ai-theme-attribution-panel">
-		<header><div><span>事件驱动归因</span><h3>主业 · 事实题材 · 当前炒作 · 市场延伸</h3></div><Target size={19} /></header>
+		<header><div><span>业务与市场归因</span><h3>主业 · 事实题材 · 当前炒作 · 市场延伸</h3></div><Target size={19} /></header>
 		<div className="stock-ai-theme-attribution-body">
-			<div className="stock-ai-theme-primary"><span>{theme.is_hot ? '当前主炒作' : '当前主业'}</span><strong>{theme.is_hot ? theme.hot_theme || theme.primary : theme.business_theme || theme.primary || '暂无有效题材'}</strong><em>{theme.is_hot ? `置信度${theme.confidence} · 炒作相关性${theme.hot_score}` : theme.resonance.state === '价格未确认' ? '热点涨幅未通过验证 · 已回退主业' : '未发现事件与盘面共振'}</em><small>{theme.description}</small></div>
+			<div className="stock-ai-theme-primary"><span>{theme.is_hot ? '当前主炒作' : '当前主业'}</span><strong>{theme.is_hot ? theme.hot_theme || theme.primary : theme.business_theme || theme.primary || '主业待补充'}</strong><em>{theme.is_hot ? `置信度${theme.confidence} · 炒作相关性${theme.hot_score}` : inactiveState}</em><small>{theme.description}</small></div>
 			<div className="stock-ai-theme-columns">
-				<div><span>事实支撑</span>{(theme.confirmed_themes || []).length ? theme.confirmed_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>{item.confidence} · {item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无结构化事实题材</small>}</div>
-				<div><span>市场延伸 / 映射</span>{(theme.speculative_themes || []).length ? theme.speculative_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>{item.confidence} · {item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无有效延伸题材</small>}</div>
+				<div><span>事实支撑</span>{(theme.confirmed_themes || []).length ? theme.confirmed_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>证据{item.confidence} · 相关性{item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无结构化事实题材</small>}</div>
+				<div><span>市场延伸 / 映射</span>{(theme.speculative_themes || []).length ? theme.speculative_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>置信度{item.confidence} · 相关性{item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无有效延伸题材</small>}</div>
 			</div>
-			<div className="stock-ai-theme-resonance"><div><span>题材共振</span><strong>{resonance.available ? `${resonance.score} · ${resonance.state}` : '暂无有效题材'}</strong><small>{resonance.detail}</small></div>{resonance.available && <div className="stock-ai-theme-resonance-metrics">{[['个股动能', resonance.stock_momentum], ['相对强度', resonance.relative_strength], ['上涨广度', resonance.breadth], ['涨停能量', resonance.limit_up_energy], ['持续性', resonance.persistence], ['证据质量', resonance.evidence_quality], ['资金扩散', resonance.capital_diffusion]].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong><i><b style={{ width: `${value}%` }} /></i></article>)}</div>}</div>
+			<div className="stock-ai-theme-resonance"><div><span>题材共振</span><strong>{resonance.available ? `${resonance.score} · ${resonance.state}` : inactiveResonance}</strong><small>{resonance.detail}</small></div>{resonance.available && <div className="stock-ai-theme-resonance-metrics">{[['个股动能', resonance.stock_momentum], ['相对强度', resonance.relative_strength], ['上涨广度', resonance.breadth], ['涨停能量', resonance.limit_up_energy], ['持续性', resonance.persistence], ['证据质量', resonance.evidence_quality], ['资金扩散', resonance.capital_diffusion]].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong><i><b style={{ width: `${value}%` }} /></i></article>)}</div>}</div>
 		</div>
 	</section>;
 }
@@ -817,10 +829,10 @@ function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; ti
 function ScorecardPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	return (
 		<section className="stock-ai-panel stock-ai-scorecard-panel">
-			<header><div><span>综合决策</span><h3>多维加权评分</h3></div><BarChart3 size={19} /></header>
+			<header><div><span>交易决策</span><h3>当前交易机会评分</h3></div><BarChart3 size={19} /></header>
 			<div className="stock-ai-scorecard-body">
 				<div className="stock-ai-score-ring" style={{ '--score': analysis.scorecard.overall } as React.CSSProperties}><div><strong>{analysis.scorecard.overall}</strong><span>{analysis.scorecard.grade} · {analysis.scorecard.direction}</span></div></div>
-				<div className="stock-ai-score-summary"><span>机会分<strong>{analysis.scorecard.opportunity_score ?? '--'}</strong></span><span>风险分<strong>{analysis.scorecard.risk_score ?? '--'}</strong></span><span>数据覆盖<strong>{analysis.scorecard.data_coverage != null ? `${analysis.scorecard.data_coverage}%` : '--'}</strong></span></div>
+				<div className="stock-ai-score-summary"><span>机会分<strong>{analysis.scorecard.opportunity_score ?? '--'}</strong></span><span>风险压力<strong>{analysis.scorecard.risk_score ?? '--'}</strong></span><span>数据覆盖<strong>{analysis.scorecard.data_coverage != null ? `${analysis.scorecard.data_coverage}%` : '--'}</strong></span></div>
 				<div className="stock-ai-dimensions">
 					{analysis.scorecard.dimensions.map((item) => <div key={item.key}><span>{item.label}<small>{Math.round(item.weight * 100)}%</small></span><div><i style={{ width: `${item.score}%` }} /></div><strong>{item.score}</strong></div>)}
 				</div>
@@ -914,11 +926,16 @@ function RiskExecutionView({ analysis }: { analysis: StockAIAnalysis }) {
 	return (
 		<>
 			<section className={`stock-ai-risk-hero ${risk.level === '高' ? 'high' : risk.level === '较低' ? 'low' : 'medium'}`}>
-				<div><ShieldCheck size={26} /><span><small>当前交易风险</small><strong>{risk.level} · {risk.score}分</strong></span></div>
+				<div><ShieldCheck size={26} /><span><small>当前风险压力</small><strong>{risk.level} · {risk.score}分</strong></span></div>
 				<div><small>建议仓位区间</small><strong>{risk.suggested_position_min_percent}% — {risk.suggested_position_max_percent}%</strong></div>
 				<div><small>单笔账户风险</small><strong>≤ {risk.single_trade_risk_percent.toFixed(1)}%</strong></div>
 				<div><small>结构盈亏比</small><strong>{risk.risk_reward.toFixed(2)} R</strong></div>
 			</section>
+			{risk.risk_factors?.length ? <section className="stock-ai-risk-factors" aria-label="风险压力构成">
+				{risk.risk_factors.map((factor) => <article className={factor.points < 0 ? 'relief' : factor.key === 'base' ? 'base' : 'pressure'} key={factor.key}>
+					<span>{factor.label}</span><strong>{factor.points > 0 ? '+' : ''}{factor.points.toFixed(1)}</strong><small>{factor.detail}</small>
+				</article>)}
+			</section> : null}
 
 			<div className="stock-ai-risk-grid">
 				<PositionCalculator analysis={analysis} />
@@ -928,7 +945,8 @@ function RiskExecutionView({ analysis }: { analysis: StockAIAnalysis }) {
 						<PriceLadderRow label="第二目标" value={risk.take_profit_second} tone="profit" detail="达到后根据趋势强度移动保护位" />
 						<PriceLadderRow label="第一目标" value={risk.take_profit_first} tone="profit" detail="约1R位置，优先处理本金风险" />
 						<PriceLadderRow label="计划买入" value={risk.entry_reference} tone="entry" detail="仅为仓位计算参考，不等同触发买点" />
-						<PriceLadderRow label="计划止损" value={risk.stop_price} tone="stop" detail={`距参考价${risk.stop_percent.toFixed(1)}%，触发后停止解释`} />
+						<PriceLadderRow label={risk.existing_position_stop_price ? '新仓计划止损' : '计划止损'} value={risk.stop_price} tone="stop" detail={`距计划成本${risk.stop_percent.toFixed(1)}%，触发后停止解释`} />
+						{risk.existing_position_stop_price ? <PriceLadderRow label="已有仓位防守" value={risk.existing_position_stop_price} tone="stop" detail={`距当前分析价约${(risk.existing_position_stop_percent || 0).toFixed(1)}%`} /> : null}
 					</div>
 				</section>
 			</div>

@@ -660,6 +660,8 @@ export type StockAIRiskControl = {
 	entry_reference: number;
 	stop_price: number;
 	stop_percent: number;
+	existing_position_stop_price?: number;
+	existing_position_stop_percent?: number;
 	take_profit_first: number;
 	take_profit_second: number;
 	risk_reward: number;
@@ -667,6 +669,7 @@ export type StockAIRiskControl = {
 	suggested_position_max_percent: number;
 	single_trade_risk_percent: number;
 	position_formula: string;
+	risk_factors?: Array<{ key: string; label: string; points: number; detail: string }>;
 	rules: string[];
 };
 

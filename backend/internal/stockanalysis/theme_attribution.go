@@ -71,6 +71,17 @@ var themeNegativeFactKeywords = []string{
 	"未开展", "尚未开展", "未形成收入", "尚未形成收入", "无相关收入", "终止", "取消", "澄清",
 }
 
+var themeNonBusinessLabels = []string{
+	"沪股通", "深股通", "融资融券", "转融券", "转融通", "机构重仓", "基金重仓", "社保重仓", "养老金",
+	"国企改革", "央企改革", "地方国企", "央企", "国有企业", "回购", "股权激励", "高送转", "填权",
+	"预盈预增", "预亏预减", "昨日涨停", "昨日连板", "破净股", "低价股", "次新股", "注册制次新股",
+	"标普", "MSCI", "富时罗素", "QFII", "证金持股", "AH股", "参股新股",
+}
+
+var genericBusinessThemeLabels = []string{
+	"业务", "产品", "服务", "制造", "设备", "装备", "材料", "软件", "硬件", "元器件", "专用设备", "通用设备",
+}
+
 func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) ThemeAnalysis {
 	buckets := map[string]*themeEvidenceBucket{}
 	ensure := func(name string) *themeEvidenceBucket {
@@ -104,6 +115,16 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	for _, concept := range base.Concepts {
 		if canonical := canonicalTheme(concept); canonical != "" {
 			add(canonical, ThemeEvidence{Theme: canonical, Type: "catalog", Source: "eastmoney:stock-concepts", Title: "个股概念目录", Snippet: concept, Strength: .18, Freshness: .35}, false, true)
+		}
+	}
+	for _, candidate := range businessThemeCandidates(input) {
+		if snippet, ok := businessThemeFactSnippet(input, candidate); ok {
+			canonical := canonicalTheme(candidate)
+			add(canonical, ThemeEvidence{
+				Theme: canonical, Type: "fact", Relation: "own_business", Direction: "positive",
+				Source: firstNonEmpty(input.BusinessSource, "eastmoney:f10-business"), Title: "东方财富F10主营业务",
+				Snippet: truncateText(snippet, 220), Strength: .90, Freshness: .70,
+			}, true, false)
 		}
 	}
 	for _, item := range input.Announcements {
@@ -189,7 +210,11 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 		if ordered[i].score != ordered[j].score {
 			return ordered[i].score > ordered[j].score
 		}
-		return themePrimaryPriority(ordered[i].name) > themePrimaryPriority(ordered[j].name)
+		leftPriority, rightPriority := themePrimaryPriority(ordered[i].name), themePrimaryPriority(ordered[j].name)
+		if leftPriority != rightPriority {
+			return leftPriority > rightPriority
+		}
+		return ordered[i].name < ordered[j].name
 	})
 
 	best := (*themeEvidenceBucket)(nil)
@@ -198,11 +223,19 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	for _, candidate := range ordered {
 		explicitMarket := hasExplicitMarketAttribution(candidate.evidence)
 		minimumScore := 55
-		if !candidate.confirmed && !explicitMarket {
-			if !candidate.mappingOK || !candidate.marketOK {
+		if !explicitMarket {
+			// Company facts answer "what the company does". A current traded
+			// theme additionally needs a live market theme; otherwise the fact is
+			// retained below without being mislabeled as the current speculation.
+			if !candidate.marketOK {
 				continue
 			}
-			minimumScore = 62
+			if !candidate.confirmed {
+				if !candidate.mappingOK {
+					continue
+				}
+				minimumScore = 62
+			}
 		}
 		if candidate.score < minimumScore {
 			continue
@@ -217,6 +250,7 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 		best = candidate
 		break
 	}
+	base.ConfirmedThemes, base.SpeculativeThemes = buildThemeLayerTags(ordered, rejected, rejectedPrice)
 	if best == nil {
 		base.HotTheme, base.IsHot, base.HotScore = "", false, 0
 		base.Primary = firstNonEmpty(base.Business, input.Industry)
@@ -226,23 +260,22 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 		base.AsOf = ""
 		base.TrendScore, base.ActiveDays, base.MaxStreak = 0, 0, 0
 		base.TrendStage, base.Role = "", "待确认"
-		base.EvidenceItems = nil
-		base.Evidence = nil
-		if input.BusinessDetail != "" {
+		base.EvidenceItems = collectThemeLayerEvidence(ordered, 8)
+		base.Evidence = themeEvidenceStrings(base.EvidenceItems, 5)
+		if len(base.Evidence) == 0 && input.BusinessDetail != "" {
 			base.Evidence = []string{"F10主营资料：" + truncateText(input.BusinessDetail, 120)}
 		}
-		base.ConfirmedThemes, base.SpeculativeThemes = nil, nil
 		if rejected != nil {
-			tag := ThemeTag{Name: rejected.name, Score: rejected.score, EvidenceCount: len(rejected.evidence), Detail: rejectedPrice.detail, Confidence: confidenceForScore(rejected.score)}
-			if rejected.confirmed {
-				tag.Layer = "事实支撑"
-				base.ConfirmedThemes = []ThemeTag{tag}
-			} else {
-				tag.Layer = "市场延伸"
-				base.SpeculativeThemes = []ThemeTag{tag}
-			}
 			base.Description = fmt.Sprintf("%s虽为近期热点候选，但%s；当前按公司主业%s定位", rejected.name, rejectedPrice.detail, firstNonEmpty(base.Primary, "未取得"))
 			base.Resonance = ThemeResonance{Available: false, State: "价格未确认", Detail: rejectedPrice.detail, StockMomentum: rejectedPrice.stockMomentum, RelativeStrength: rejectedPrice.relative}
+		} else if len(base.ConfirmedThemes) > 0 {
+			names := themeTagNames(base.ConfirmedThemes, 4)
+			base.Description = fmt.Sprintf("已由公司主营或公告确认%s，但尚未形成可验证的当前主炒作共振；当前按公司主业%s定位", strings.Join(names, "、"), firstNonEmpty(base.Primary, "未取得"))
+			base.Resonance = ThemeResonance{Available: false, State: "事实已确认", Detail: fmt.Sprintf("已确认公司涉及%s，尚未同时满足热点强度和个股价格反馈", strings.Join(names, "、"))}
+		} else if len(base.SpeculativeThemes) > 0 {
+			names := themeTagNames(base.SpeculativeThemes, 4)
+			base.Description = fmt.Sprintf("识别到%s等市场映射，但公司关系或盘面验证仍不足；当前按公司主业%s定位", strings.Join(names, "、"), firstNonEmpty(base.Primary, "未取得"))
+			base.Resonance = ThemeResonance{Available: false, State: "映射待确认", Detail: fmt.Sprintf("%s尚未形成公司证据、市场热度与个股价格的一致验证", strings.Join(names, "、"))}
 		} else {
 			base.Description = fmt.Sprintf("未发现同时具备事件证据、热点强度和个股涨幅验证的有效题材，当前按公司主业%s定位", firstNonEmpty(base.Primary, "未取得"))
 			base.Resonance = ThemeResonance{Available: false, State: "暂无题材", Detail: "未发现同时具备事件证据、热点强度和个股涨幅验证的有效题材"}
@@ -267,26 +300,6 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	}
 	base.EvidenceItems = append([]ThemeEvidence(nil), best.evidence...)
 	base.Evidence = themeEvidenceStrings(best.evidence, 5)
-	base.ConfirmedThemes = make([]ThemeTag, 0, 4)
-	base.SpeculativeThemes = make([]ThemeTag, 0, 4)
-	for _, candidate := range ordered {
-		if candidate.name == best.name {
-			continue
-		}
-		if candidate.score < 35 {
-			continue
-		}
-		tag := ThemeTag{Name: candidate.name, Score: candidate.score, EvidenceCount: len(candidate.evidence), Detail: themeTagDetail(candidate)}
-		if candidate.confirmed && candidate.score >= 55 {
-			tag.Layer, tag.Confidence = "事实支撑", confidenceForScore(candidate.score)
-			base.ConfirmedThemes = append(base.ConfirmedThemes, tag)
-		} else {
-			tag.Layer, tag.Confidence = "市场延伸", confidenceForScore(candidate.score)
-			base.SpeculativeThemes = append(base.SpeculativeThemes, tag)
-		}
-	}
-	base.ConfirmedThemes = base.ConfirmedThemes[:min(len(base.ConfirmedThemes), 4)]
-	base.SpeculativeThemes = base.SpeculativeThemes[:min(len(base.SpeculativeThemes), 4)]
 	attributionKind := "公司事实或市场明确归因"
 	if best.mappingOK && !best.confirmed && !hasExplicitMarketAttribution(best.evidence) {
 		attributionKind = "经原文核验的市场映射"
@@ -297,6 +310,273 @@ func enrichTheme(input Input, short ShortTermAnalysis, base ThemeAnalysis) Theme
 	}
 	base.Resonance = calculateThemeResonance(input, short, *best)
 	return base
+}
+
+func businessThemeCandidates(input Input) []string {
+	result := businessThemeSegments(input.Business)
+	result = append(result, input.Concepts...)
+	if strings.TrimSpace(input.Industry) != "" {
+		result = append(result, input.Industry)
+	}
+	businessText := strings.Join([]string{input.Business, input.BusinessDetail}, "。")
+	for _, overview := range input.Themes {
+		name := firstNonEmpty(overview.Name, overview.Theme)
+		if businessTextSupportsTheme(businessText, name) {
+			result = append(result, name)
+		}
+	}
+	normalized := make([]string, 0, len(result))
+	seen := map[string]bool{}
+	for _, candidate := range result {
+		canonical := canonicalTheme(candidate)
+		if canonical == "" || seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		normalized = append(normalized, canonical)
+		if len(normalized) >= 48 {
+			break
+		}
+	}
+	return normalized
+}
+
+func businessThemeSegments(value string) []string {
+	segments := strings.FieldsFunc(strings.TrimSpace(value), func(r rune) bool {
+		switch r {
+		case '、', '，', ',', '；', ';', '。', '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	})
+	result := make([]string, 0, len(segments)*2)
+	for _, segment := range segments {
+		segment = trimBusinessThemeLabel(segment)
+		splitSharedSuffix := false
+		for _, connector := range []string{"及", "和", "与"} {
+			parts := strings.Split(segment, connector)
+			if len(parts) != 2 {
+				continue
+			}
+			left, right := trimBusinessThemeLabel(parts[0]), trimBusinessThemeLabel(parts[1])
+			suffix := businessThemeSuffix(right)
+			if suffix != "" && !strings.HasSuffix(left, suffix) {
+				left += suffix
+			}
+			splitSharedSuffix = suffix != ""
+			if validBusinessThemeLabel(left) {
+				result = append(result, left)
+			}
+			if validBusinessThemeLabel(right) {
+				result = append(result, right)
+			}
+			break
+		}
+		if !splitSharedSuffix && validBusinessThemeLabel(segment) {
+			result = append(result, segment)
+		}
+	}
+	return uniqueStrings(result, 16)
+}
+
+func trimBusinessThemeLabel(value string) string {
+	value = strings.TrimSpace(value)
+	for _, prefix := range []string{"公司主要从事", "主要从事", "主营业务为", "主营业务是", "主营"} {
+		value = strings.TrimPrefix(value, prefix)
+	}
+	for _, suffix := range []string{"相关业务", "业务"} {
+		value = strings.TrimSuffix(value, suffix)
+	}
+	return strings.Trim(value, " ：:、")
+}
+
+func businessThemeSuffix(value string) string {
+	for _, suffix := range []string{"精密元器件", "元器件", "设备", "装备", "系统", "材料", "器件", "软件", "服务", "产品"} {
+		if strings.HasSuffix(value, suffix) {
+			return suffix
+		}
+	}
+	return ""
+}
+
+func validBusinessThemeLabel(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len([]rune(value)) < 2 || len([]rune(value)) > 16 {
+		return false
+	}
+	if containsAnyFold(value, themeNonBusinessLabels...) {
+		return false
+	}
+	normalized := normalizeBusinessThemeText(value)
+	for _, generic := range genericBusinessThemeLabels {
+		if normalized == normalizeBusinessThemeText(generic) {
+			return false
+		}
+	}
+	return true
+}
+
+func businessThemeFactSnippet(input Input, theme string) (string, bool) {
+	if !validBusinessThemeLabel(theme) {
+		return "", false
+	}
+	for _, derived := range businessThemeSegments(input.Business) {
+		if normalizeBusinessThemeText(derived) == normalizeBusinessThemeText(theme) {
+			return firstNonEmpty(input.Business, input.BusinessDetail), true
+		}
+	}
+	for _, text := range []string{input.Business, input.BusinessDetail} {
+		if !businessTextSupportsTheme(text, theme) {
+			continue
+		}
+		for _, clause := range strings.FieldsFunc(text, func(r rune) bool {
+			switch r {
+			case '。', '！', '？', '；', '\n', '\r':
+				return true
+			default:
+				return false
+			}
+		}) {
+			if businessTextSupportsTheme(clause, theme) && !themeMentionIsQualifiedExtension(clause, theme) && !containsAnyFold(clause, themeNegativeFactKeywords...) {
+				return strings.TrimSpace(clause), true
+			}
+		}
+	}
+	return "", false
+}
+
+func businessTextSupportsTheme(text, theme string) bool {
+	if !validBusinessThemeLabel(theme) {
+		return false
+	}
+	text = normalizeBusinessThemeText(text)
+	theme = normalizeBusinessThemeText(theme)
+	return theme != "" && strings.Contains(text, theme)
+}
+
+func normalizeBusinessThemeText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		"锂离子电池装备", "锂电设备", "锂离子电池设备", "锂电设备", "锂电池装备", "锂电设备", "锂电池设备", "锂电设备", "装备", "设备",
+		"概念", "", "板块", "", "产业链", "",
+		" ", "", "\t", "", "\n", "", "\r", "",
+		"，", "", ",", "", "。", "", "；", "", ";", "", "：", "", ":", "",
+		"、", "", "/", "", "-", "", "_", "", "（", "", "）", "", "(", "", ")", "",
+	)
+	return replacer.Replace(value)
+}
+
+func themeMentionIsQualifiedExtension(text, theme string) bool {
+	text = normalizeBusinessThemeText(text)
+	theme = normalizeBusinessThemeText(theme)
+	if theme == "" {
+		return false
+	}
+	for _, suffix := range []string{"设备", "材料", "产业链", "客户", "产业客户", "行业客户", "下游客户", "供应商"} {
+		if strings.Contains(text, theme+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildThemeLayerTags(ordered []*themeEvidenceBucket, rejected *themeEvidenceBucket, rejectedPrice themePriceConfirmation) ([]ThemeTag, []ThemeTag) {
+	confirmedCandidates := make([]ThemeTag, 0, len(ordered))
+	speculativeCandidates := make([]ThemeTag, 0, len(ordered))
+	for _, candidate := range ordered {
+		detail := themeTagDetail(candidate)
+		if candidate == rejected {
+			detail = rejectedPrice.detail
+		}
+		tag := ThemeTag{Name: candidate.name, Score: candidate.score, EvidenceCount: len(candidate.evidence), Detail: detail}
+		if candidate.confirmed {
+			tag.Layer = "事实支撑"
+			tag.Confidence = confidenceForEvidence(candidate.evidence)
+			confirmedCandidates = append(confirmedCandidates, tag)
+			continue
+		}
+		if candidate.score < 35 || (!candidate.mappingOK && !hasExplicitMarketAttribution(candidate.evidence) && !(candidate.marketOK && hasThemeEvidenceType(candidate.evidence, "news"))) {
+			continue
+		}
+		tag.Layer, tag.Confidence = "市场延伸", confidenceForScore(candidate.score)
+		speculativeCandidates = append(speculativeCandidates, tag)
+	}
+	sort.SliceStable(confirmedCandidates, func(i, j int) bool {
+		leftLength := len([]rune(compactTheme(confirmedCandidates[i].Name)))
+		rightLength := len([]rune(compactTheme(confirmedCandidates[j].Name)))
+		if leftLength != rightLength {
+			return leftLength > rightLength
+		}
+		if confirmedCandidates[i].Score != confirmedCandidates[j].Score {
+			return confirmedCandidates[i].Score > confirmedCandidates[j].Score
+		}
+		return confirmedCandidates[i].Name < confirmedCandidates[j].Name
+	})
+	confirmed := distinctThemeTags(confirmedCandidates, 4)
+	speculative := distinctThemeTags(speculativeCandidates, 4)
+	return confirmed[:min(len(confirmed), 4)], speculative[:min(len(speculative), 4)]
+}
+
+func distinctThemeTags(items []ThemeTag, limit int) []ThemeTag {
+	result := make([]ThemeTag, 0, min(len(items), limit))
+	for _, item := range items {
+		name := compactTheme(item.Name)
+		duplicate := false
+		for _, existing := range result {
+			existingName := compactTheme(existing.Name)
+			if name == existingName || (len([]rune(name)) >= 2 && len([]rune(existingName)) >= 2 && (strings.Contains(name, existingName) || strings.Contains(existingName, name))) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		result = append(result, item)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+func collectThemeLayerEvidence(ordered []*themeEvidenceBucket, limit int) []ThemeEvidence {
+	result := make([]ThemeEvidence, 0, limit)
+	seen := map[string]bool{}
+	for _, candidate := range ordered {
+		if !candidate.confirmed && !candidate.mappingOK && !hasExplicitMarketAttribution(candidate.evidence) {
+			continue
+		}
+		for _, item := range candidate.evidence {
+			if item.Type == "catalog" {
+				continue
+			}
+			key := canonicalTheme(item.Theme) + "|" + item.Source + "|" + item.Title
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, item)
+			if len(result) >= limit {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func themeTagNames(items []ThemeTag, limit int) []string {
+	result := make([]string, 0, min(len(items), limit))
+	for _, item := range items {
+		if strings.TrimSpace(item.Name) != "" {
+			result = append(result, item.Name)
+		}
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
 }
 
 func companyThemeFactSnippet(text string, keywords []string) (string, bool) {
@@ -414,6 +694,9 @@ func normalizeEvidenceText(value string) string {
 }
 
 func inputConfirmsThemeFact(input Input, theme string) bool {
+	if _, ok := businessThemeFactSnippet(input, theme); ok {
+		return true
+	}
 	keywords := append([]string{theme}, themeAliases(theme)...)
 	for _, item := range input.Announcements {
 		if announcementReducesThemeExposure(item.Title) {
@@ -727,6 +1010,9 @@ func canonicalTheme(value string) string {
 	if value == "" {
 		return ""
 	}
+	value = strings.NewReplacer(
+		"锂离子电池装备", "锂电设备", "锂离子电池设备", "锂电设备", "锂电池装备", "锂电设备", "锂电池设备", "锂电设备", "装备", "设备",
+	).Replace(value)
 	for _, group := range themeKeywordGroups {
 		if strings.EqualFold(value, group.name) {
 			return group.name
@@ -844,10 +1130,20 @@ func hasExplicitMarketAttribution(items []ThemeEvidence) bool {
 	return false
 }
 func firstEvidenceSource(items []ThemeEvidence) string {
+	fallback := ""
 	for _, item := range items {
-		if item.Source != "" {
+		if item.Source == "" {
+			continue
+		}
+		if fallback == "" {
+			fallback = item.Source
+		}
+		if item.Type != "catalog" {
 			return item.Source
 		}
+	}
+	if fallback != "" {
+		return fallback
 	}
 	return "theme-attribution"
 }
@@ -865,6 +1161,12 @@ func themeEvidenceStrings(items []ThemeEvidence, limit int) []string {
 	return uniqueStrings(out, limit)
 }
 func themeTagDetail(bucket *themeEvidenceBucket) string {
+	if hasF10BusinessEvidence(bucket.evidence) {
+		if bucket.marketOK {
+			return fmt.Sprintf("F10主营已确认，题材趋势%d分，炒作相关性%d", bucket.market.TrendScore, bucket.score)
+		}
+		return fmt.Sprintf("F10主营已确认，尚未匹配到当前市场热点，炒作相关性%d", bucket.score)
+	}
 	if bucket.mappingOK && !bucket.confirmed {
 		if bucket.marketOK {
 			return fmt.Sprintf("原文映射已核验，题材趋势%d分，证据%d条", bucket.market.TrendScore, len(bucket.evidence))
@@ -875,6 +1177,32 @@ func themeTagDetail(bucket *themeEvidenceBucket) string {
 		return fmt.Sprintf("题材趋势%d分，证据%d条", bucket.market.TrendScore, len(bucket.evidence))
 	}
 	return fmt.Sprintf("证据%d条，等待盘面确认", len(bucket.evidence))
+}
+func hasF10BusinessEvidence(items []ThemeEvidence) bool {
+	for _, item := range items {
+		if item.Type == "fact" && item.Relation == "own_business" && strings.Contains(strings.ToLower(item.Source), "f10-business") {
+			return true
+		}
+	}
+	return false
+}
+func hasThemeEvidenceType(items []ThemeEvidence, evidenceType string) bool {
+	for _, item := range items {
+		if item.Type == evidenceType {
+			return true
+		}
+	}
+	return false
+}
+func confidenceForEvidence(items []ThemeEvidence) string {
+	strength := maxEvidenceStrength(items)
+	if strength >= .85 {
+		return "高"
+	}
+	if strength >= .60 {
+		return "中"
+	}
+	return "低"
 }
 func confidenceForScore(score int) string {
 	if score >= 75 {

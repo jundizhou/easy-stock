@@ -217,19 +217,29 @@ type NextDayPlan struct {
 }
 
 type RiskControl struct {
-	Level                string   `json:"level"`
-	Score                int      `json:"score"`
-	EntryReference       float64  `json:"entry_reference"`
-	StopPrice            float64  `json:"stop_price"`
-	StopPercent          float64  `json:"stop_percent"`
-	TakeProfitFirst      float64  `json:"take_profit_first"`
-	TakeProfitSecond     float64  `json:"take_profit_second"`
-	RiskReward           float64  `json:"risk_reward"`
-	SuggestedPositionMin int      `json:"suggested_position_min_percent"`
-	SuggestedPositionMax int      `json:"suggested_position_max_percent"`
-	SingleTradeRisk      float64  `json:"single_trade_risk_percent"`
-	PositionFormula      string   `json:"position_formula"`
-	Rules                []string `json:"rules"`
+	Level                       string       `json:"level"`
+	Score                       int          `json:"score"`
+	EntryReference              float64      `json:"entry_reference"`
+	StopPrice                   float64      `json:"stop_price"`
+	StopPercent                 float64      `json:"stop_percent"`
+	ExistingPositionStopPrice   float64      `json:"existing_position_stop_price,omitempty"`
+	ExistingPositionStopPercent float64      `json:"existing_position_stop_percent,omitempty"`
+	TakeProfitFirst             float64      `json:"take_profit_first"`
+	TakeProfitSecond            float64      `json:"take_profit_second"`
+	RiskReward                  float64      `json:"risk_reward"`
+	SuggestedPositionMin        int          `json:"suggested_position_min_percent"`
+	SuggestedPositionMax        int          `json:"suggested_position_max_percent"`
+	SingleTradeRisk             float64      `json:"single_trade_risk_percent"`
+	PositionFormula             string       `json:"position_formula"`
+	Factors                     []RiskFactor `json:"risk_factors,omitempty"`
+	Rules                       []string     `json:"rules"`
+}
+
+type RiskFactor struct {
+	Key    string  `json:"key"`
+	Label  string  `json:"label"`
+	Points float64 `json:"points"`
+	Detail string  `json:"detail"`
 }
 
 type ShortTermAnalysis struct {
