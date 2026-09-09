@@ -283,7 +283,7 @@ func TestAnalyzeBuildsCompleteDecisionWorkspace(t *testing.T) {
 	if len(analysis.Timeframes) != 5 || len(analysis.Signals) < 6 || len(analysis.Scorecard.Dimensions) < 6 {
 		t.Fatalf("complete score workspace missing: timeframes=%d signals=%d dimensions=%d", len(analysis.Timeframes), len(analysis.Signals), len(analysis.Scorecard.Dimensions))
 	}
-	if analysis.Scorecard.AlgorithmVersion != "stock-score-v3" {
+	if analysis.Scorecard.AlgorithmVersion != "stock-score-v4" {
 		t.Fatalf("score algorithm version = %q", analysis.Scorecard.AlgorithmVersion)
 	}
 	if !analysis.Relative.Available || analysis.Relative.BenchmarkName != "创业板指" {
@@ -300,7 +300,7 @@ func TestAnalyzeBuildsCompleteDecisionWorkspace(t *testing.T) {
 	}
 }
 
-func TestScorecardV3CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t *testing.T) {
+func TestScorecardV4CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t *testing.T) {
 	signals := []Signal{
 		{Key: "trend", Label: "趋势结构", Tone: "neutral", Strength: 50},
 		{Key: "timeframe", Label: "周期一致性", Tone: "neutral", Strength: 50},
@@ -309,8 +309,8 @@ func TestScorecardV3CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t
 		{Key: "risk", Label: "风险约束", Tone: "neutral", Strength: 50},
 	}
 	scorecard := buildScorecard(Profile{PrimaryType: "trend_capacity", Confidence: .7}, signals)
-	if scorecard.Overall != 50 || scorecard.AlgorithmVersion != "stock-score-v3" {
-		t.Fatalf("neutral V3 scorecard = %+v", scorecard)
+	if scorecard.Overall != 50 || scorecard.AlgorithmVersion != "stock-score-v4" {
+		t.Fatalf("neutral V4 scorecard = %+v", scorecard)
 	}
 	weightTotal := 0.0
 	for _, dimension := range scorecard.Dimensions {
@@ -321,6 +321,37 @@ func TestScorecardV3CalibratesNeutralEvidenceWithoutInventingMissingDimensions(t
 	}
 	if math.Abs(weightTotal-1) > .0001 {
 		t.Fatalf("effective weights sum to %.4f", weightTotal)
+	}
+}
+
+func TestScorecardV4CompressesCorrelatedTechnicalDownside(t *testing.T) {
+	signals := []Signal{
+		{Key: "trend", Label: "趋势结构", Tone: "negative", Strength: 10},
+		{Key: "timeframe", Label: "周期一致性", Tone: "negative", Strength: 10},
+		{Key: "momentum", Label: "价格动能", Tone: "negative", Strength: 10},
+		{Key: "volume", Label: "量价配合", Tone: "negative", Strength: 10},
+		{Key: "relative", Label: "相对强度", Tone: "negative", Strength: 10},
+		{Key: "theme", Label: "题材共振", Tone: "neutral", Strength: 50},
+		{Key: "market", Label: "市场环境", Tone: "neutral", Strength: 50},
+		{Key: "fundamental", Label: "基本面", Tone: "neutral", Strength: 50},
+		{Key: "research", Label: "机构研报", Tone: "neutral", Strength: 50},
+		{Key: "risk", Label: "风险承受力", Tone: "negative", Strength: 20},
+	}
+	scorecard := buildScorecard(Profile{PrimaryType: "range_watch", Confidence: .7}, signals)
+	if scorecard.Overall < 30 || scorecard.Overall >= 45 {
+		t.Fatalf("correlated downside was not kept in an observation range: %+v", scorecard)
+	}
+	for _, dimension := range scorecard.Dimensions {
+		switch dimension.Key {
+		case "trend", "timeframe", "momentum", "volume", "relative":
+			if dimension.Score != 30 {
+				t.Fatalf("technical downside floor not applied to %s: %+v", dimension.Key, dimension)
+			}
+		case "risk":
+			if dimension.Score != 20 {
+				t.Fatalf("independent risk score was smoothed: %+v", dimension)
+			}
+		}
 	}
 }
 

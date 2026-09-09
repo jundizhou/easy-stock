@@ -431,24 +431,26 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 	type activeGroup struct {
 		definition scoreGroup
 		score      float64
+		rawScore   float64
 		members    map[string]float64
 	}
 	active := make([]activeGroup, 0, len(groups))
 	activeWeight := 0.0
 	for _, group := range groups {
-		memberTotal, scoreTotal := 0.0, 0.0
+		memberTotal, scoreTotal, rawScoreTotal := 0.0, 0.0, 0.0
 		available := map[string]float64{}
 		for key, memberWeight := range group.members {
 			if signal, ok := signalByKey[key]; ok {
 				available[key] = memberWeight
 				memberTotal += memberWeight
-				scoreTotal += float64(signal.Strength) * memberWeight
+				scoreTotal += scorecardSignalStrength(key, signal.Strength) * memberWeight
+				rawScoreTotal += float64(signal.Strength) * memberWeight
 			}
 		}
 		if memberTotal == 0 {
 			continue
 		}
-		active = append(active, activeGroup{definition: group, score: scoreTotal / memberTotal, members: available})
+		active = append(active, activeGroup{definition: group, score: scoreTotal / memberTotal, rawScore: rawScoreTotal / memberTotal, members: available})
 		activeWeight += group.weight
 	}
 	dimensions := make([]DimensionScore, 0, len(signals))
@@ -487,7 +489,7 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 			positiveGroups++
 		}
 		if _, ok := group.members["trend"]; ok {
-			structureScore = group.score
+			structureScore = group.rawScore
 		}
 	}
 	bonus := 0.0
@@ -527,7 +529,8 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 	}
 	for _, signal := range signals {
 		if weight := effectiveWeights[signal.Key]; weight > 0 {
-			dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: signal.Strength, Weight: weight, Status: scoreStatus(signal.Strength), Detail: signal.Detail})
+			score := int(math.Round(scorecardSignalStrength(signal.Key, signal.Strength)))
+			dimensions = append(dimensions, DimensionScore{Key: signal.Key, Label: signal.Label, Score: score, Weight: weight, Status: scoreStatus(score), Detail: signal.Detail})
 		}
 	}
 	direction := "中性"
@@ -569,7 +572,22 @@ func buildScorecard(profile Profile, signals []Signal) Scorecard {
 	if len(negative) == 0 {
 		negative = []string{"暂无突出负面共振，但仍必须执行结构失效条件"}
 	}
-	return Scorecard{AlgorithmVersion: "stock-score-v3", Overall: overall, Opportunity: int(math.Round(opportunityScore)), Risk: int(math.Round(clamp(100-riskResilience, 0, 100))), Coverage: int(math.Round(coverage * 100)), Grade: grade, Direction: direction, Conviction: conviction, Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
+	return Scorecard{AlgorithmVersion: "stock-score-v4", Overall: overall, Opportunity: int(math.Round(opportunityScore)), Risk: int(math.Round(clamp(100-riskResilience, 0, 100))), Coverage: int(math.Round(coverage * 100)), Grade: grade, Direction: direction, Conviction: conviction, Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
+}
+
+// Technical dimensions share the same price path. Compress only their extreme
+// downside so one sustained decline is not counted as several full penalties;
+// the independent risk dimension remains unsmoothed.
+func scorecardSignalStrength(key string, strength int) float64 {
+	value := float64(strength)
+	switch key {
+	case "trend", "timeframe", "momentum", "volume", "relative":
+		if value < 50 {
+			value = 50 - (50-value)*0.65
+			value = math.Max(value, 30)
+		}
+	}
+	return clamp(value, 0, 100)
 }
 
 func closesOf(lines []foundation.KLine) []float64 {
