@@ -270,7 +270,7 @@ IFS= read -r submit
 printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"approval.request","session_id":"sandbox-session","payload":{"pattern_key":"execute_code"}}}'
 IFS= read -r approval
 printf '%s' "$approval" > "$APPROVAL_CAPTURE_PATH"
-printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"message.complete","payload":{"content":"{\"ok\":true}"}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"message.complete","payload":{"content":"{\"ok\":true}","usage":{"prompt_tokens":120,"completion_tokens":30,"total_tokens":150}}}}'
 `
 	if err := os.WriteFile(launcher, []byte(fixture), 0o700); err != nil {
 		t.Fatal(err)
@@ -288,6 +288,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"message.compl
 	}
 	if result.Content != `{"ok":true}` || result.SessionID != "sandbox-session" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.Usage.PromptTokens != 120 || result.Usage.CompletionTokens != 30 || result.Usage.TotalTokens != 150 {
+		t.Fatalf("unexpected token usage: %+v", result.Usage)
 	}
 	approvalData, err := os.ReadFile(capturePath)
 	if err != nil {

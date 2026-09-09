@@ -380,9 +380,9 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 								<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => void runAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
 									{analysis.research_report ? <>
 										<StockResearchReportView analysis={analysis} view={mode === 'analysis' ? 'research' : mode} verification={research.job?.id === analysis.analysis_id ? research.job?.verification : undefined} verifying={research.verifying} onVerify={research.job?.id === analysis.analysis_id ? () => void research.verify() : undefined} />
-										{mode === 'analysis' && <details className="stock-research-quantitative"><summary>量化基线与行情数据 · {analysis.scorecard.overall} 分</summary><FullAnalysisView analysis={analysis} /></details>}
+										{mode === 'analysis' && <details className="stock-research-quantitative" open><summary>量化基线与行情数据 · {analysis.scorecard.overall} 分</summary><FullAnalysisView analysis={analysis} /></details>}
 										{mode === 'risk' && analysis.research_report.decision.price_plan && <PositionCalculator analysis={analysis} />}
-									</> : analysis.analysis_id ? <section className="stock-research-band"><h3>当前仅有量化快照</h3><p>{analysis.ai?.message || 'AI研究尚未完成'}</p><details className="stock-research-quantitative"><summary>查看历史量价与资料</summary><FullAnalysisView analysis={analysis} /></details></section> : <>
+									</> : analysis.analysis_id ? <section className="stock-research-band"><h3>当前仅有量化快照</h3><p>{analysis.ai?.message || 'AI研究尚未完成'}</p><details className="stock-research-quantitative" open><summary>查看历史量价与资料</summary><FullAnalysisView analysis={analysis} /></details></section> : <>
 										{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
 										{mode === 'expectation' && <ExpectationView analysis={analysis} />}
 										{mode === 'risk' && <RiskExecutionView analysis={analysis} />}

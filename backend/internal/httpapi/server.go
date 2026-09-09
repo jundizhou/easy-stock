@@ -71,15 +71,18 @@ type Server struct {
 	reviewAutomation      *review.Automation
 	remoteDailySync       *review.RemoteDailySync
 	hermesGateway         hermes.Gateway
+	usageGateway          hermes.Gateway
 	masteryLibrary        *methodology.Library
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
 	startupError          error
 	logger                *log.Logger
+	tokenUsage            *tokenUsageStore
 }
 
 func NewServer(config any) *Server {
 	cfg := normalizeConfig(config)
+	tokenUsage := newTokenUsageStore(cfg.SettingsPath)
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
 	}
@@ -254,11 +257,12 @@ func NewServer(config any) *Server {
 			_ = cfg.HermesGateway.SyncLLM(values.LLM, migratedKey)
 		}
 	}
+	usageGateway := newTokenUsageGateway(cfg.HermesGateway, tokenUsage)
 	if cfg.ReviewImporter == nil {
 		cfg.ReviewImporter = review.NewImporter(cfg.ReviewHTTP, cfg.WeChatAPIURL)
 	}
 	if cfg.ReviewAutomation == nil {
-		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, cfg.WeChatAPIURL, cfg.HermesGateway)
+		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, cfg.WeChatAPIURL, usageGateway)
 	}
 	if dailyMarketProvider := newReviewDailyMarketProvider(cfg.MarketOverview); dailyMarketProvider != nil {
 		cfg.ReviewAutomation.SetDailyMarketProvider(dailyMarketProvider)
@@ -302,10 +306,12 @@ func NewServer(config any) *Server {
 		reviewAutomation:      cfg.ReviewAutomation,
 		remoteDailySync:       cfg.RemoteDailySync,
 		hermesGateway:         cfg.HermesGateway,
+		usageGateway:          usageGateway,
 		masteryLibrary:        cfg.MasteryLibrary,
 		marketEmotionStore:    cfg.MarketEmotionStore,
 		startupError:          errors.Join(startupErrors...),
 		logger:                cfg.Logger,
+		tokenUsage:            tokenUsage,
 	}
 	if kaipanlaService != nil {
 		s.themeRadarStore = kaipanlaService.Store()
@@ -319,8 +325,8 @@ func NewServer(config any) *Server {
 		s.stockConcepts,
 	)
 	s.stockResearch = stockanalysis.NewResearchService(cfg.StockResearchStore, s.runStockResearch)
-	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
-	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
+	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
+	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
 	s.routes()
 	return s
 }
@@ -511,6 +517,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reviews/remote-daily/status", s.reviewRemoteDailyStatus)
 	s.mux.HandleFunc("POST /api/v1/reviews/remote-daily/sync", s.reviewRemoteDailySync)
 	s.mux.HandleFunc("GET /api/v1/settings", s.settingsGet)
+	s.mux.HandleFunc("GET /api/v1/settings/token-usage", s.tokenUsageSummary)
+	s.mux.HandleFunc("POST /api/v1/settings/token-usage", s.tokenUsageRecord)
 	s.mux.HandleFunc("PUT /api/v1/settings", s.settingsUpdate)
 	s.mux.HandleFunc("GET /api/v1/settings/agent", s.settingsAgentGet)
 	s.mux.HandleFunc("PUT /api/v1/settings/agent", s.settingsAgentUpdate)

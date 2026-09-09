@@ -6,6 +6,8 @@ export type BackendConfig = {
   token: string;
 };
 
+export type TokenUsageSummary = { rows: Array<{ date: string; module: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }>; modules: string[]; total: { prompt_tokens: number; completion_tokens: number; total_tokens: number } };
+
 export type BackendBridge = {
   getBackendConfig: () => Promise<BackendConfig>;
 	getRuntimeLogStatus?: () => Promise<RuntimeLogStatus>;

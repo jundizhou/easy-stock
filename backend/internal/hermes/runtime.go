@@ -46,6 +46,7 @@ type PromptResult struct {
 	Content         string
 	SessionID       string
 	StoredSessionID string
+	Usage           TokenUsage
 }
 
 type Process interface {
@@ -708,6 +709,9 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, o
 			}
 			if frame.Error != nil {
 				return PromptResult{}, r.hermesFailure(fmt.Sprintf("Hermes: %s", frame.Error.Message), diagnostics.String())
+			}
+			if usage := usageFromFrame(frame); usage.TotalTokens > 0 {
+				result.Usage = usage
 			}
 			if eventType(frame) == "gateway.ready" && !created {
 				created = true

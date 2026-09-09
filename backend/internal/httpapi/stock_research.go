@@ -72,7 +72,11 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 			cancel()
 		}
 	}
-	guarded := researchPrompter{prompter: s.hermesGateway, consistent: func() bool {
+	promptGateway := s.usageGateway
+	if promptGateway == nil {
+		promptGateway = s.hermesGateway
+	}
+	guarded := researchPrompter{prompter: promptGateway, consistent: func() bool {
 		if s.settingsStore == nil {
 			return true
 		}
@@ -122,6 +126,7 @@ func (p researchPrompter) PromptWithOptions(ctx context.Context, prompt string, 
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
+	callCtx = hermes.WithUsageModule(callCtx, "stock-analysis")
 	result, err := hermes.PromptUsingOptions(callCtx, p.prompter, prompt, options)
 	if !p.consistent() {
 		return hermes.PromptResult{}, fmt.Errorf("研究期间模型配置发生变化")

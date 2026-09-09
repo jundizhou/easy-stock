@@ -79,6 +79,41 @@ func TestResearchAPIHistorySnapshotAndReportBoundChat(t *testing.T) {
 	}
 }
 
+func TestStockResearchRecordsTokenUsageByModule(t *testing.T) {
+	gateway := &fakeHermesGateway{
+		status: hermes.Status{Available: true, Configured: true},
+		promptFunc: func(_ context.Context, prompt string) (hermes.PromptResult, error) {
+			if strings.Contains(prompt, "独立提出需要核实的问题") {
+				return hermes.PromptResult{Content: `{"questions":[]}`, Usage: hermes.TokenUsage{PromptTokens: 120, CompletionTokens: 30, TotalTokens: 150}}, nil
+			}
+			return hermes.PromptResult{Content: validHTTPResearchJSON, Usage: hermes.TokenUsage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 500}}, nil
+		},
+	}
+	server := NewServer(Config{Realtime: stockAnalysisRealtime{}, KLinePrimary: stockAnalysisKLines{}, KLineFallback: stockAnalysisKLines{}, StockBusiness: stockAnalysisBusiness{}, MarketOverview: &fakeMarketOverviewProvider{}, ReviewDBPath: ":memory:", HermesGateway: gateway})
+	defer server.Close()
+	created := httptest.NewRequest(http.MethodPost, "/api/v1/stocks/research", strings.NewReader(`{"symbol":"600519","purpose":"observe"}`))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, created)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create: %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data stockanalysis.ResearchJob `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	job, err := server.stockResearch.Wait(ctx, payload.Data.ID)
+	if err != nil || job.Status != "succeeded" {
+		t.Fatalf("job: %+v %v", job, err)
+	}
+	if len(server.tokenUsage.Entries) == 0 || server.tokenUsage.Entries[0].Module != "stock-analysis" || server.tokenUsage.Entries[0].Total != 650 {
+		t.Fatalf("token usage = %+v", server.tokenUsage.Entries)
+	}
+}
+
 func TestResearchChatWithoutStoreRemovesMetadataAndRefusesToInventReport(t *testing.T) {
 	server := &Server{}
 	data := server.enrichHermesPrompt(context.Background(), []byte(`{"method":"prompt.submit","params":{"text":"继续","analysis_id":"missing"}}`))

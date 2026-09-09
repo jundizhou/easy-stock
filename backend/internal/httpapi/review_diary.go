@@ -334,7 +334,11 @@ func (s *Server) reviewDailySummaryAnonymize(w http.ResponseWriter, r *http.Requ
 	prompt := buildDailySummaryAnonymizePrompt(request.Summary)
 	ctx, cancel := context.WithTimeout(r.Context(), s.modelResponseTimeout())
 	defer cancel()
-	response, err := hermes.PromptFullyAuthorized(ctx, s.hermesGateway, prompt)
+	promptGateway := s.usageGateway
+	if promptGateway == nil {
+		promptGateway = s.hermesGateway
+	}
+	response, err := hermes.PromptFullyAuthorized(hermes.WithUsageModule(ctx, "review-diary"), promptGateway, prompt)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Hermes 复盘脱敏失败: "+err.Error())
 		return

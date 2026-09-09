@@ -414,6 +414,8 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, initialAnal
 				hermesSessionID,
 				seedMessages,
 				signal: controller.signal,
+				module: 'ai-chat',
+				onUsage: (usage) => { void requestJSON(config, '/api/v1/settings/token-usage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: 'ai-chat', ...usage }) }); },
 				onStatus: (status) => setActivityStatus(status.text || (status.kind === 'process' ? '正在执行操作…' : '正在处理…')),
 				onApproval: (approval, respond) => {
 					setApprovalRequest({ description: approval.description, command: approval.command, respond });

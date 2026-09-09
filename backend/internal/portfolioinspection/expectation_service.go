@@ -222,7 +222,7 @@ func (s *ExpectationService) run(job ExpectationJob, summary review.DailySummary
 		prompt, promptErr := buildExpectationPrompt(summary, request, job.Results, metrics, rules)
 		if promptErr != nil {
 			aiErr = promptErr
-		} else if response, err := hermes.PromptFullyAuthorized(ctx, s.gateway, prompt); err != nil {
+		} else if response, err := hermes.PromptFullyAuthorized(hermes.WithUsageModule(ctx, "portfolio-expectation"), s.gateway, prompt); err != nil {
 			aiErr = fmt.Errorf("持仓明日预期AI分析失败: %w", err)
 		} else if err := decodeJSONObject(response.Content, &conclusion); err != nil {
 			aiErr = fmt.Errorf("持仓明日预期AI未返回有效JSON: %w", err)

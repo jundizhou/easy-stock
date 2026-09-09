@@ -15,6 +15,8 @@ export type HermesStreamRequest = {
 	onDelta?: (content: string) => void;
 	onSession?: (sessionID: string) => void;
 	onStatus?: (status: { kind: string; text?: string }) => void;
+	module?: string;
+	onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
 	onApproval?: (approval: { patternKey?: string; description?: string; command?: string }, respond: (choice: 'once' | 'session' | 'deny') => void) => void;
 	signal?: AbortSignal;
 };
@@ -178,6 +180,10 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				return;
 			}
 			if (type === 'message.complete') {
+				const rawUsage = (frame.params?.payload && typeof frame.params.payload === 'object' ? frame.params.payload : frame.params) as Record<string, unknown>;
+				const usage = (rawUsage.usage && typeof rawUsage.usage === 'object' ? rawUsage.usage : rawUsage) as Record<string, unknown>;
+				const prompt_tokens = Number(usage.prompt_tokens || usage.input_tokens || 0); const completion_tokens = Number(usage.completion_tokens || usage.output_tokens || 0); const total_tokens = Number(usage.total_tokens || prompt_tokens + completion_tokens);
+				if (total_tokens > 0) request.onUsage?.({ prompt_tokens, completion_tokens, total_tokens });
 				const status = eventText(frame, 'status');
 				const content = (eventText(frame, 'content') || eventText(frame, 'text') || streamed).trim();
 				if (status === 'error' || status === 'failed') {
