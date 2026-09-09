@@ -75,27 +75,29 @@ type RiskContribution struct {
 }
 
 type Metrics struct {
-	TotalPositionPercent int                `json:"total_position_percent"`
-	CashPercent          int                `json:"cash_percent"`
-	CoveragePercent      float64            `json:"coverage_percent"`
-	MaxSinglePercent     int                `json:"max_single_percent"`
-	TopThreePercent      int                `json:"top_three_percent"`
-	HHI                  float64            `json:"concentration_hhi"`
-	WeightedScore        float64            `json:"weighted_stock_score"`
-	WeightedRisk         float64            `json:"weighted_risk_score"`
-	StopLossRiskPercent  float64            `json:"stop_loss_risk_percent"`
-	ShortTermPercent     int                `json:"short_term_percent"`
-	NewListingPercent    int                `json:"new_listing_percent"`
-	HighRiskPercent      int                `json:"high_risk_percent"`
-	HealthScore          int                `json:"health_score"`
-	HealthScoreAvailable bool               `json:"health_score_available"`
-	RiskResilienceScore  int                `json:"risk_resilience_score"`
-	DiversificationScore int                `json:"diversification_score"`
-	StyleMatchScore      int                `json:"style_match_score"`
-	StyleBreaches        []string           `json:"style_breaches"`
-	ThemeExposures       []ThemeExposure    `json:"theme_exposures"`
-	HighCorrelations     []CorrelationPair  `json:"high_correlations"`
-	RiskContributions    []RiskContribution `json:"risk_contributions"`
+	TotalPositionPercent      int                `json:"total_position_percent"`
+	CashPercent               int                `json:"cash_percent"`
+	CoveragePercent           float64            `json:"coverage_percent"`
+	MaxSinglePercent          int                `json:"max_single_percent"`
+	TopThreePercent           int                `json:"top_three_percent"`
+	HHI                       float64            `json:"concentration_hhi"`
+	WeightedScore             float64            `json:"weighted_stock_score"`
+	WeightedRisk              float64            `json:"weighted_risk_score"`
+	StopLossRiskPercent       float64            `json:"stop_loss_risk_percent"`
+	StopLossCoveragePercent   float64            `json:"stop_loss_coverage_percent"`
+	AIResearchCoveragePercent float64            `json:"ai_research_coverage_percent"`
+	ShortTermPercent          int                `json:"short_term_percent"`
+	NewListingPercent         int                `json:"new_listing_percent"`
+	HighRiskPercent           int                `json:"high_risk_percent"`
+	HealthScore               int                `json:"health_score"`
+	HealthScoreAvailable      bool               `json:"health_score_available"`
+	RiskResilienceScore       int                `json:"risk_resilience_score"`
+	DiversificationScore      int                `json:"diversification_score"`
+	StyleMatchScore           int                `json:"style_match_score"`
+	StyleBreaches             []string           `json:"style_breaches"`
+	ThemeExposures            []ThemeExposure    `json:"theme_exposures"`
+	HighCorrelations          []CorrelationPair  `json:"high_correlations"`
+	RiskContributions         []RiskContribution `json:"risk_contributions"`
 }
 
 type HoldingConclusion struct {

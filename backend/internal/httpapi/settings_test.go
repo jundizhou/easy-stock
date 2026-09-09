@@ -333,7 +333,7 @@ func TestStockAnalysisTimeoutCoversBoundedThemeAndFinalStages(t *testing.T) {
 	if got := server.stockAnalysisQuickTimeout(); got != 45*time.Second {
 		t.Fatalf("quick analysis timeout=%s, want 45s", got)
 	}
-	if got := server.stockAnalysisTimeout(); got != 305*time.Second {
-		t.Fatalf("stock analysis pipeline timeout=%s, want 5m5s", got)
+	if got := server.stockAnalysisTimeout(); got != 12*time.Minute+15*time.Second {
+		t.Fatalf("stock analysis pipeline timeout=%s, want 12m15s", got)
 	}
 }

@@ -1,4 +1,5 @@
 import { logRuntimeEvent, runtimeErrorDetails, runtimeFeatureForPath } from './runtime-log';
+import type { ResearchReport } from './stock-research';
 
 export type BackendConfig = {
   backendUrl: string;
@@ -943,6 +944,9 @@ export type StockAITrendPoint = {
 };
 
 export type StockAIAnalysis = {
+	analysis_id?: string;
+	snapshot_id?: string;
+	research_report?: ResearchReport;
 	symbol: string;
 	name: string;
 	generated_at: string;
@@ -1021,6 +1025,8 @@ export type PortfolioMetrics = {
 	weighted_stock_score: number;
 	weighted_risk_score: number;
 	stop_loss_risk_percent: number;
+	stop_loss_coverage_percent?: number;
+	ai_research_coverage_percent?: number;
 	short_term_percent: number;
 	new_listing_percent: number;
 	high_risk_percent: number;

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,15 @@ func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 	gateway := &fakeHermesGateway{
 		status:       hermes.Status{Available: true, Configured: true},
 		promptResult: hermes.PromptResult{Content: `{"health_score":1,"risk_level":"极高","style_match":"明显偏离","executive_summary":"组合结构总体可控，继续按确认与失效条件管理持仓。","primary_risks":[],"concentration_findings":[],"holdings":[{"symbol":"600519.SH","portfolio_role":"核心","risk_contribution":100,"conclusion":"趋势结构稳定","action_priority":"保持","action":"满足趋势条件时持有","confirmation":"趋势延续","invalidation":"跌破止损"}],"adjustment_order":[],"scenarios":[],"next_checklist":[],"data_limitations":[],"confidence":0.8}`},
+	}
+	gateway.promptFunc = func(_ context.Context, prompt string) (hermes.PromptResult, error) {
+		if strings.Contains(prompt, "独立提出需要核实的问题") {
+			return hermes.PromptResult{Content: `{"questions":[]}`}, nil
+		}
+		if strings.Contains(prompt, "你是A股研究决策器") {
+			return hermes.PromptResult{Content: validHTTPResearchJSON}, nil
+		}
+		return gateway.promptResult, nil
 	}
 	server := NewServer(Config{
 		Realtime: stockAnalysisRealtime{}, KLinePrimary: stockAnalysisKLines{}, KLineFallback: stockAnalysisKLines{},
@@ -74,7 +84,7 @@ func TestPortfolioInspectionRunsInBackgroundAndReturnsReport(t *testing.T) {
 			if !payload.Data.ReportAvailable || payload.Data.Report.Metrics.Total != 60 || payload.Data.Report.Metrics.Cash != 40 || payload.Data.Report.AlgorithmVersion != "portfolio-health-v2" {
 				t.Fatalf("unexpected completed job: %+v", payload.Data)
 			}
-			if !payload.Data.Report.Metrics.HealthAvailable || payload.Data.Report.Conclusion.Health != payload.Data.Report.Metrics.Health || payload.Data.Report.Conclusion.Health == 1 || payload.Data.Report.Conclusion.RiskLevel == "极高" || payload.Data.Report.Conclusion.StyleMatch == "明显偏离" {
+			if payload.Data.Report.Metrics.HealthAvailable || payload.Data.Report.Conclusion.Health != payload.Data.Report.Metrics.Health || payload.Data.Report.Conclusion.Health == 1 || payload.Data.Report.Conclusion.RiskLevel == "极高" || payload.Data.Report.Conclusion.StyleMatch == "明显偏离" {
 				t.Fatalf("AI changed deterministic health score: %+v", payload.Data.Report)
 			}
 			return

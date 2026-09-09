@@ -30,6 +30,7 @@ import (
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/sector"
+	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 )
 
@@ -62,6 +63,8 @@ type Server struct {
 	portfolioStore        *portfolioinspection.Store
 	portfolioInspection   *portfolioinspection.Service
 	portfolioExpectation  *portfolioinspection.ExpectationService
+	stockResearchStore    *stockanalysis.ResearchStore
+	stockResearch         *stockanalysis.ResearchService
 	reviewImporter        ReviewImporter
 	wechatAPIURL          string
 	settingsStore         *appsettings.Store
@@ -197,6 +200,16 @@ func NewServer(config any) *Server {
 			cfg.PortfolioStore, _ = portfolioinspection.OpenStore(":memory:")
 		}
 	}
+	if cfg.StockResearchStore == nil {
+		store, err := stockanalysis.OpenResearchStore(cfg.StockResearchDBPath)
+		if err != nil {
+			if cfg.StrictPersistence {
+				startupErrors = append(startupErrors, fmt.Errorf("open stock research database: %w", err))
+			}
+			store, _ = stockanalysis.OpenResearchStore(":memory:")
+		}
+		cfg.StockResearchStore = store
+	}
 	if cfg.ReviewHTTP == nil {
 		cfg.ReviewHTTP = &http.Client{Timeout: 90 * time.Second}
 	}
@@ -282,6 +295,7 @@ func NewServer(config any) *Server {
 		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
 		reviewStore:           cfg.ReviewStore,
 		portfolioStore:        cfg.PortfolioStore,
+		stockResearchStore:    cfg.StockResearchStore,
 		reviewImporter:        cfg.ReviewImporter,
 		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
 		settingsStore:         cfg.SettingsStore,
@@ -304,8 +318,9 @@ func NewServer(config any) *Server {
 		s.kLineFallback,
 		s.stockConcepts,
 	)
-	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
-	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
+	s.stockResearch = stockanalysis.NewResearchService(cfg.StockResearchStore, s.runStockResearch)
+	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
+	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
 	s.routes()
 	return s
 }
@@ -322,6 +337,12 @@ func (s *Server) Close() error {
 		return nil
 	}
 	var closeErrors []error
+	if s.stockResearch != nil {
+		s.stockResearch.Close()
+	}
+	if s.stockResearchStore != nil {
+		closeErrors = append(closeErrors, s.stockResearchStore.Close())
+	}
 	if s.reviewStore != nil {
 		closeErrors = append(closeErrors, s.reviewStore.Close())
 	}
@@ -451,6 +472,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery/trader", s.masteryTrader)
 	s.mux.HandleFunc("POST /api/v1/short-term/mastery/refresh", s.masteryRefresh)
 	s.mux.HandleFunc("POST /api/v1/stocks/ai-analysis", s.stockAIAnalysis)
+	s.mux.HandleFunc("POST /api/v1/stocks/research", s.stockResearchCreate)
+	s.mux.HandleFunc("GET /api/v1/stocks/research", s.stockResearchList)
+	s.mux.HandleFunc("GET /api/v1/stocks/research/{id}", s.stockResearchGet)
+	s.mux.HandleFunc("DELETE /api/v1/stocks/research/{id}", s.stockResearchDelete)
+	s.mux.HandleFunc("POST /api/v1/stocks/research/{id}/cancel", s.stockResearchCancel)
+	s.mux.HandleFunc("POST /api/v1/stocks/research/{id}/verify", s.stockResearchVerify)
+	s.mux.HandleFunc("GET /api/v1/stocks/research/{id}/snapshot", s.stockResearchSnapshot)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -469,10 +470,10 @@ func TestServerReturnsThemeOverviews(t *testing.T) {
 func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 	location := time.FixedZone("CST", 8*60*60)
 	tradeDate := time.Now().In(location).Format("2006-01-02")
-	requestCount := 0
+	var requestCount atomic.Int32
 	var remote *httptest.Server
 	remote = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		requestCount.Add(1)
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
 		}
@@ -552,8 +553,8 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 	if _, exists := stocks["000063.SZ"]; !exists {
 		t.Fatalf("industry stock missing from fused screen: %+v", stocks)
 	}
-	if requestCount != 6 {
-		t.Fatalf("remote request count=%d, want one fixed refresh batch of 6", requestCount)
+	if requestCount.Load() != 6 {
+		t.Fatalf("remote request count=%d, want one fixed refresh batch of 6", requestCount.Load())
 	}
 }
 

@@ -662,6 +662,21 @@ type promptJSONObjectOptions struct {
 	onAttempt    func(promptJSONAttempt)
 }
 
+type invalidJSONResponseError struct {
+	label string
+	cause error
+}
+
+func (e *invalidJSONResponseError) Error() string {
+	return fmt.Sprintf("Hermes未返回有效%sJSON: %v", e.label, e.cause)
+}
+func (e *invalidJSONResponseError) Unwrap() error { return e.cause }
+
+func isInvalidModelJSON(err error) bool {
+	var invalid *invalidJSONResponseError
+	return errors.As(err, &invalid)
+}
+
 type promptJSONAttempt struct {
 	number        int
 	durationMS    int64
@@ -718,7 +733,7 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter hermes.Pro
 		}
 		if attempt >= options.maxAttempts {
 			if options.maxAttempts == 1 {
-				return decoded, fmt.Errorf("Hermes未返回有效%sJSON: %w", label, decodeErr)
+				return decoded, &invalidJSONResponseError{label: label, cause: decodeErr}
 			}
 			return decoded, fmt.Errorf("Hermes未返回有效%sJSON: 首次%v；自动纠错后%w", label, firstDecodeErr, decodeErr)
 		}

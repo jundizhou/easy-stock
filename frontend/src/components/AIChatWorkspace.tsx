@@ -34,6 +34,7 @@ type Props = {
 	config: BackendConfig | null;
 	refreshKey: number;
 	initialPrompt?: string;
+	initialAnalysisID?: string;
 	onInitialPromptConsumed?: () => void;
 	onOpenSettings: () => void;
 };
@@ -75,7 +76,7 @@ const starterPrompts = [
 	'帮我设计今天的复盘清单，区分事实、预期与明日验证条件。',
 ];
 
-export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPromptConsumed, onOpenSettings }: Props) {
+export function AIChatWorkspace({ config, refreshKey, initialPrompt, initialAnalysisID, onInitialPromptConsumed, onOpenSettings }: Props) {
 	const [conversations, setConversations] = useState<ChatConversation[]>(() => {
 		try {
 			return loadStoredConversations();
@@ -135,10 +136,15 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 	useEffect(() => {
 		const prompt = initialPrompt?.trim();
 		if (!prompt) return;
+		if (initialAnalysisID) {
+			abortRef.current?.abort();
+			const conversation = { ...createChatConversation(), analysis_id: initialAnalysisID };
+			setConversations((current) => [conversation, ...current]); setActiveID(conversation.id);
+		}
 		setDraft(prompt);
 		window.setTimeout(() => textareaRef.current?.focus(), 0);
 		onInitialPromptConsumed?.();
-	}, [initialPrompt, onInitialPromptConsumed]);
+	}, [initialPrompt, initialAnalysisID, onInitialPromptConsumed]);
 
 	useEffect(() => {
 		const textarea = textareaRef.current;
@@ -404,6 +410,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, onInitialPr
 			const result = await streamHermesPrompt({
 				config,
 				prompt: content,
+				analysisID: current.analysis_id,
 				hermesSessionID,
 				seedMessages,
 				signal: controller.signal,

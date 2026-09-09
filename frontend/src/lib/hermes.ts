@@ -9,6 +9,7 @@ export type HermesStreamResult = {
 export type HermesStreamRequest = {
 	config: BackendConfig;
 	prompt: string;
+	analysisID?: string;
 	hermesSessionID?: string;
 	seedMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	onDelta?: (content: string) => void;
@@ -80,7 +81,7 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 			send('approval.respond', { session_id: sessionID, choice: choice === 'once' ? 'once' : choice });
 		};
 		const submitPrompt = () => {
-			submitRequestID = send('prompt.submit', { session_id: liveSessionID, text: request.prompt });
+			submitRequestID = send('prompt.submit', { session_id: liveSessionID, text: request.prompt, ...(request.analysisID ? { analysis_id: request.analysisID } : {}) });
 		};
 		const setupSession = (method = setupMethod) => {
 			setupMethod = method;

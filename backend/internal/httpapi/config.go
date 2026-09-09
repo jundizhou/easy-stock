@@ -13,6 +13,7 @@ import (
 	"easy-stock/backend/internal/methodology"
 	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/review"
+	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 )
 
@@ -121,6 +122,8 @@ type Config struct {
 	Inflection           InflectionEvaluator
 	ReviewDBPath         string
 	PortfolioDBPath      string
+	StockResearchDBPath  string
+	StockResearchStore   *stockanalysis.ResearchStore
 	MarketEmotionDBPath  string
 	ThemeRadarDBPath     string
 	DuanxianxiaBaseURL   string

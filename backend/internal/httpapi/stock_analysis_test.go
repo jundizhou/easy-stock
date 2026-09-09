@@ -100,19 +100,19 @@ func TestStockAIAnalysisEndpointBuildsTrendProfile(t *testing.T) {
 	if payload.Data.Scorecard.Overall <= 0 || len(payload.Data.Timeframes) != 5 || !payload.Data.Relative.Available || payload.Data.Relative.BenchmarkSymbol != "000001.SH" {
 		t.Fatalf("complete analysis dimensions missing: %+v", payload.Data)
 	}
-	if len(payload.Data.NextDay.Scenarios) != 4 || payload.Data.RiskControl.StopPrice <= 0 {
-		t.Fatalf("decision and risk plans missing: %+v", payload.Data)
+	if len(payload.Data.NextDay.Scenarios) != 0 || payload.Data.RiskControl.StopPrice != 0 {
+		t.Fatalf("quantitative fallback must not masquerade as an AI execution plan: %+v", payload.Data)
 	}
 	if !payload.Data.StockNews.Available || payload.Data.StockNews.ArticleCount < 1 || !payload.Data.ThemeNews.Available || payload.Data.ThemeNews.ArticleCount < 1 {
 		t.Fatalf("news analysis missing: stock=%+v theme=%+v", payload.Data.StockNews, payload.Data.ThemeNews)
 	}
 	logOutput := logs.String()
-	for _, stage := range []string{"data_collection", "theme_evidence", "local_analysis", "knowledge_context", "final_decision"} {
+	for _, stage := range []string{"data_collection", "local_analysis"} {
 		if !strings.Contains(logOutput, `event=stock_analysis_stage`) || !strings.Contains(logOutput, `stage="`+stage+`"`) {
 			t.Fatalf("stock analysis stage %q missing from logs: %s", stage, logOutput)
 		}
 	}
-	if !strings.Contains(logOutput, "duration_ms=") || !strings.Contains(logOutput, `stage="final_decision" status="skipped"`) {
+	if !strings.Contains(logOutput, "duration_ms=") || strings.Contains(logOutput, `stage="synthesizing"`) {
 		t.Fatalf("stage duration or skip status missing from logs: %s", logOutput)
 	}
 }
@@ -157,8 +157,8 @@ func TestStockAIAnalysisEndpointSupportsNewListingWithOneKLine(t *testing.T) {
 	if payload.Data.Profile.PrimaryType != "new_listing" || payload.Data.Trend.HistoryDays != 1 || payload.Data.Trend.MA20 != 0 {
 		t.Fatalf("unexpected new-listing response: %+v", payload.Data)
 	}
-	if payload.Data.RiskControl.StopPrice <= 0 || payload.Data.RiskControl.SuggestedPositionMax > 10 {
-		t.Fatalf("new-listing risk controls missing: %+v", payload.Data.RiskControl)
+	if payload.Data.RiskControl.StopPrice != 0 || payload.Data.RiskControl.SuggestedPositionMax != 0 {
+		t.Fatalf("unresearched limited sample produced execution advice: %+v", payload.Data.RiskControl)
 	}
 	if len(payload.Data.DataQuality) == 0 || payload.Data.DataQuality[0].Key != "kline" || payload.Data.DataQuality[0].Status != "limited" {
 		t.Fatalf("new-listing data quality missing: %+v", payload.Data.DataQuality)
@@ -209,10 +209,10 @@ func TestStockAIAnalysisFullModeUsesCurrentModelWithToolFreeStages(t *testing.T)
 	gateway := &fakeHermesGateway{
 		status: hermes.Status{Available: true, Configured: true, APIKeyConfigured: true},
 		promptFunc: func(_ context.Context, prompt string) (hermes.PromptResult, error) {
-			if strings.Contains(prompt, "题材证据分类器") {
-				return hermes.PromptResult{Content: `{"items":[]}`}, nil
+			if strings.Contains(prompt, "独立提出需要核实的问题") {
+				return hermes.PromptResult{Content: `{"questions":[],"hypotheses":[],"missing_facts":[]}`}, nil
 			}
-			return hermes.PromptResult{Content: `{"headline":"完整研判完成","summary":"当前模型已结合本地结构化数据完成综合判断。","action":"等待条件确认"}`}, nil
+			return hermes.PromptResult{Content: validHTTPResearchJSON}, nil
 		},
 	}
 	server := NewServer(Config{
@@ -253,10 +253,12 @@ func TestStockAIAnalysisFullModeUsesCurrentModelWithToolFreeStages(t *testing.T)
 		}
 	}
 	logOutput := logs.String()
-	if !strings.Contains(logOutput, `event=stock_analysis_theme_candidates`) || !strings.Contains(logOutput, `model_mode="current_selected"`) || !strings.Contains(logOutput, `event=stock_analysis_theme_attempt`) || !strings.Contains(logOutput, `response_bytes=`) {
-		t.Fatalf("theme diagnostics missing: %s", logOutput)
+	if !strings.Contains(logOutput, `stage="researching"`) || !strings.Contains(logOutput, `stage="synthesizing"`) || !strings.Contains(logOutput, `stage="validating"`) {
+		t.Fatalf("research diagnostics missing: %s", logOutput)
 	}
 }
+
+const validHTTPResearchJSON = `{"headline":"完整研判完成","thesis":{"text":"量价结构需要进一步验证","kind":"inference","source_ids":["m-price"]},"support":[{"text":"统计来自历史日线","kind":"fact","source_ids":["m-price"]},{"text":"实时价格单独记录","kind":"fact","source_ids":["m-quote"]}],"counter":[],"alternatives":[],"main_conflict":"历史趋势不等同于未来表现","evidence_level":"limited","limitations":[],"conditions":[{"id":"c1","text":"等待后续公告","metric":"disclosure","window":"next_disclosure","source_ids":["m-price"]}],"invalidation_ids":["c1"],"scenarios":[],"decision":{"status":"no_plan","mode":"non_short","horizon":"swing","new_position":"观察","existing_position":"核实风险","reason":"缺少直接事件证据","price_plan":null},"baseline_relation":"insufficient","baseline_reason":"基线不包含未来事件"}`
 
 func TestStockAIAnalysisRejectsUnknownMode(t *testing.T) {
 	server := NewServer(Config{ReviewDBPath: ":memory:", SettingsPath: ""})

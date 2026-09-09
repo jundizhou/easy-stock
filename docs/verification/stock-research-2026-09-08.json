@@ -1,0 +1,15 @@
+{
+  "quote_date": "2026-09-08",
+  "report_date": "2026-06-30",
+  "reference_source": "同花顺 iFind 独立查询：2026-09-08未复权收盘价；2026-06-30累计营业总收入、归母净利润、扣非归母净利润",
+  "amount_unit": "CNY",
+  "amount_tolerance": 5001,
+  "rounding_note": "独立查询部分金额按亿元保留四位小数，允许最多5001元的显示舍入差，不表示原始数据存在该误差。",
+  "cases": [
+    {"symbol":"600519","name":"贵州茅台","close":1309.30,"revenue":92278070000,"net_profit":44516880000,"deducted_net_profit":44464210000,"pitfall":"营业总收入922.7807亿元不等于营业收入907.0326亿元；归母净利润同比下降，不可称盈利同步增长。"},
+    {"symbol":"300750","name":"宁德时代","close":335.49,"revenue":276916580000,"net_profit":43284000000,"deducted_net_profit":39013300000,"pitfall":"上半年累计增长不能替代单季口径，更不能直接推出下一交易日上涨。"},
+    {"symbol":"601138","name":"工业富联","close":64.75,"revenue":557860650000,"net_profit":23740460000,"deducted_net_profit":22984120000,"pitfall":"总收入与净利润增长不能单独证明某一细分业务占比或股价上涨的直接原因。"},
+    {"symbol":"688981","name":"中芯国际","close":121.52,"revenue":38635120000,"net_profit":4467430000,"deducted_net_profit":2993610000,"pitfall":"需区分人民币与美元、归母净利润与净利润总额，不能混用不同上市市场的披露口径。"},
+    {"symbol":"600770","name":"综艺股份","close":5.90,"revenue":330770000,"net_profit":47137370,"deducted_net_profit":-6454321.97,"pitfall":"归母盈利但扣非仍亏损，不能据归母增长宣称主营盈利质量已充分改善。"}
+  ]
+}

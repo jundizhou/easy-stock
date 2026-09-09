@@ -24,6 +24,7 @@ func main() {
 	}
 	reviewDBPath := os.Getenv("A_STOCK_REVIEW_DB")
 	portfolioDBPath := os.Getenv("A_STOCK_PORTFOLIO_DB")
+	stockResearchDBPath := os.Getenv("A_STOCK_RESEARCH_DB")
 	marketEmotionDBPath := os.Getenv("A_STOCK_MARKET_EMOTION_DB")
 	themeRadarDBPath := os.Getenv("A_STOCK_THEME_RADAR_DB")
 	settingsPath := os.Getenv("A_STOCK_SETTINGS_PATH")
@@ -40,6 +41,9 @@ func main() {
 	}
 	if portfolioDBPath == "" {
 		portfolioDBPath = dataPath(dataDir, "portfolio-inspections.db")
+	}
+	if stockResearchDBPath == "" {
+		stockResearchDBPath = dataPath(dataDir, "stock-research.db")
 	}
 	if marketEmotionDBPath == "" {
 		marketEmotionDBPath = dataPath(dataDir, "market-emotion.db")
@@ -85,6 +89,7 @@ func main() {
 		Token:                os.Getenv("A_STOCK_TOKEN"),
 		ReviewDBPath:         reviewDBPath,
 		PortfolioDBPath:      portfolioDBPath,
+		StockResearchDBPath:  stockResearchDBPath,
 		RemoteDailyReviewURL: os.Getenv("A_STOCK_DAILY_REVIEW_BASE_URL"),
 		MarketEmotionDBPath:  marketEmotionDBPath,
 		ThemeRadarDBPath:     themeRadarDBPath,

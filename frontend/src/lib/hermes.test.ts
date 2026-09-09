@@ -36,6 +36,7 @@ describe('Hermes TUI gateway client', () => {
 		const promise = streamHermesPrompt({
 			config: { backendUrl: 'http://127.0.0.1:20001', token: 'token' },
 			prompt: '分析市场拐点',
+			analysisID: 'saved-analysis-1',
 			onDelta: (content) => deltas.push(content),
 		});
 		const socket = FakeWebSocket.instances[0];
@@ -45,7 +46,7 @@ describe('Hermes TUI gateway client', () => {
 		expect(setup.method).toBe('session.create');
 		socket.receive({ jsonrpc: '2.0', id: setup.id, result: { session_id: 'live-1', stored_session_id: 'stored-1' } });
 		const submit = JSON.parse(socket.sent[1]);
-		expect(submit).toMatchObject({ method: 'prompt.submit', params: { session_id: 'live-1', text: '分析市场拐点' } });
+		expect(submit).toMatchObject({ method: 'prompt.submit', params: { session_id: 'live-1', text: '分析市场拐点', analysis_id: 'saved-analysis-1' } });
 		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'message.delta', payload: { text: '第一段' } } });
 		socket.receive({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', payload: { content: '完整回复' } } });
 		await expect(promise).resolves.toEqual({ content: '完整回复', hermesSessionID: 'stored-1' });

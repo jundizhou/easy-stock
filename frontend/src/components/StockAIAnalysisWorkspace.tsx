@@ -65,6 +65,9 @@ import {
 	searchStockDirectory,
 	signedPercent,
 } from '../lib/stock-analysis';
+import { useStockResearch } from '../lib/use-stock-research';
+import { isResearchRunning, researchPlanText, type ResearchRequest } from '../lib/stock-research';
+import { StockResearchHistory, StockResearchOptions, StockResearchProgress, StockResearchReportView } from './StockResearchReport';
 
 export type StockAIWorkspaceMode = 'analysis' | 'expectation' | 'risk';
 
@@ -98,11 +101,18 @@ const hotStockSidebarStorageKey = 'easy-stock.stock-ai-popular-sidebar-collapsed
 const directoryStorageTTL = 24 * 60 * 60 * 1000;
 const examples = ['600519', '300750', '002594', '601138', '688981'];
 
+function readStoredValue(key: string) { try { return window.localStorage.getItem(key) || ''; } catch { return ''; } }
+function writeStoredValue(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch { /* Backend research history remains available. */ } }
+
 type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
 type HotRankState = 'idle' | 'loading' | 'ready' | 'error';
 
 export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnalysis, onInitialAnalysisConsumed, onAskAI, onOpenSettings }: Props) {
-	const [query, setQuery] = useState(() => window.localStorage.getItem(symbolStorageKey) || '');
+	const research = useStockResearch(config);
+	const [purpose, setPurpose] = useState<ResearchRequest['purpose']>('observe');
+	const [horizon, setHorizon] = useState<ResearchRequest['horizon']>('swing');
+	const [cost, setCost] = useState('');
+	const [query, setQuery] = useState(() => readStoredValue(symbolStorageKey));
 	const [analysis, setAnalysis] = useState<StockAIAnalysis | null>(null);
 	const [history, setHistory] = useState<AnalysisHistoryItem[]>(loadAnalysisHistory);
 	const [state, setState] = useState<LoadState>('idle');
@@ -116,12 +126,13 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const [hotRanks, setHotRanks] = useState<HotStockRankData | null>(null);
 	const [hotRankState, setHotRankState] = useState<HotRankState>('idle');
 	const [hotRankError, setHotRankError] = useState('');
-	const [hotStockSidebarCollapsed, setHotStockSidebarCollapsed] = useState(() => window.localStorage.getItem(hotStockSidebarStorageKey) === '1');
+	const [hotStockSidebarCollapsed, setHotStockSidebarCollapsed] = useState(() => readStoredValue(hotStockSidebarStorageKey) === '1');
 	const exportRef = useRef<HTMLDivElement>(null);
 	const analysisRequestSequence = useRef(0);
 	const analysisAbortController = useRef<AbortController | null>(null);
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
+		if (item.analysis_id) return;
 		setHistory((current) => {
 			const next: AnalysisHistoryItem[] = [{
 				symbol: item.symbol,
@@ -132,13 +143,15 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 				profile: item.profile.type_label,
 				analysis: item,
 			}, ...current.filter((entry) => entry.symbol !== item.symbol)].slice(0, 10);
-			window.localStorage.setItem(historyStorageKey, JSON.stringify(next));
+			try { window.localStorage.setItem(historyStorageKey, JSON.stringify(next)); } catch { /* Research jobs are persisted by the backend. */ }
 			return next;
 		});
 	}, []);
 
 	useEffect(() => {
 		if (!initialAnalysis) return;
+		if (initialAnalysis.analysis_id) research.open(initialAnalysis.analysis_id);
+		else research.clear();
 		analysisAbortController.current?.abort();
 		analysisRequestSequence.current += 1;
 		setAnalysis(initialAnalysis);
@@ -146,10 +159,25 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 		setError('');
 		setRefinementNotice('');
 		setState('ready');
-		window.localStorage.setItem(symbolStorageKey, initialAnalysis.symbol);
+		writeStoredValue(symbolStorageKey, initialAnalysis.symbol);
 		saveAnalysis(initialAnalysis);
 		onInitialAnalysisConsumed?.();
-	}, [initialAnalysis, onInitialAnalysisConsumed, saveAnalysis]);
+	}, [initialAnalysis, onInitialAnalysisConsumed, saveAnalysis, research.open, research.clear]);
+
+	useEffect(() => {
+		const job = research.job;
+		if (!job) return;
+		if (job.analysis) setAnalysis(job.analysis);
+		setState(isResearchRunning(job) ? job.analysis ? 'refining' : 'loading' : job.analysis ? 'ready' : 'error');
+		if (job.status === 'failed' && !job.analysis) setError(job.error || job.message);
+	}, [research.job]);
+	useEffect(() => {
+		if (research.error && !research.job && !research.starting) { setState('error'); setError(research.error); }
+	}, [research.error, research.job, research.starting]);
+	useEffect(() => {
+		if (!research.job) return;
+		setQuery(research.job.request.symbol); setPurpose(research.job.request.purpose); setHorizon(research.job.request.horizon); setCost(research.job.request.cost_price?.toString() || '');
+	}, [research.job?.id]);
 
 	const runAnalysis = useCallback(async (rawSymbol: string) => {
 		analysisAbortController.current?.abort();
@@ -167,50 +195,21 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 			setState('error');
 			return;
 		}
-		const controller = new AbortController();
-		analysisAbortController.current = controller;
 		setState('loading');
 		setError('');
 		setRefinementNotice('');
 		setAnalysis(null);
 		setQuery(symbol);
-		window.localStorage.setItem(symbolStorageKey, symbol);
+		writeStoredValue(symbolStorageKey, symbol);
 		try {
-			const quickPayload = await requestJSON<{ data: StockAIAnalysis }>(config, '/api/v1/stocks/ai-analysis', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ symbol, mode: 'quick' }),
-				signal: controller.signal,
-			});
-			if (controller.signal.aborted || analysisRequestSequence.current !== sequence) return;
-			setAnalysis(quickPayload.data);
-			saveAnalysis(quickPayload.data);
-			setState('refining');
-
-			try {
-				const fullPayload = await requestJSON<{ data: StockAIAnalysis }>(config, '/api/v1/stocks/ai-analysis', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ symbol, mode: 'full' }),
-					signal: controller.signal,
-				});
-				if (controller.signal.aborted || analysisRequestSequence.current !== sequence) return;
-				setAnalysis(fullPayload.data);
-				saveAnalysis(fullPayload.data);
-				setState('ready');
-			} catch (refinementError) {
-				if (isAbortError(refinementError) || analysisRequestSequence.current !== sequence) return;
-				setRefinementNotice(refinementError instanceof Error ? `完整 AI 研判未完成：${refinementError.message}` : '完整 AI 研判未完成，当前保留快速分析');
-				setState('ready');
-			}
+			if (purpose === 'holding' && cost && (!(Number(cost) > 0) || !Number.isFinite(Number(cost)))) throw new Error('持仓成本须为正数');
+			await research.start({ symbol, purpose, horizon, ...(purpose === 'holding' && cost ? { cost_price: Number(cost) } : {}) });
 		} catch (loadError) {
 			if (isAbortError(loadError) || analysisRequestSequence.current !== sequence) return;
 			setError(loadError instanceof Error ? loadError.message : '个股AI分析失败');
 			setState('error');
-		} finally {
-			if (analysisAbortController.current === controller) analysisAbortController.current = null;
 		}
-	}, [config, directory, saveAnalysis]);
+	}, [config, directory, research.start, purpose, horizon, cost]);
 
 	useEffect(() => () => {
 		analysisAbortController.current?.abort();
@@ -253,7 +252,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const toggleHotStockSidebar = () => {
 		setHotStockSidebarCollapsed((current) => {
 			const next = !current;
-			window.localStorage.setItem(hotStockSidebarStorageKey, next ? '1' : '0');
+			writeStoredValue(hotStockSidebarStorageKey, next ? '1' : '0');
 			return next;
 		});
 	};
@@ -273,6 +272,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	};
 
 	const selectHistory = (item: AnalysisHistoryItem) => {
+		research.clear();
 		analysisAbortController.current?.abort();
 		analysisRequestSequence.current += 1;
 		setAnalysis(item.analysis);
@@ -285,7 +285,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const removeHistory = (symbol: string) => {
 		setHistory((current) => {
 			const next = current.filter((item) => item.symbol !== symbol);
-			window.localStorage.setItem(historyStorageKey, JSON.stringify(next));
+			writeStoredValue(historyStorageKey, JSON.stringify(next));
 			return next;
 		});
 	};
@@ -334,19 +334,23 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	return (
 		<section className="stock-ai-workspace">
 			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />
+			<StockResearchOptions purpose={purpose} horizon={horizon} cost={cost} onPurpose={setPurpose} onHorizon={setHorizon} onCost={setCost} />
 			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
 				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
 				<div className="stock-ai-main">
+					<StockResearchHistory items={research.history} activeID={research.selectedID} onOpen={(id) => { setAnalysis(null); setState('loading'); research.open(id); }} onRemove={(id) => { void research.remove(id).then((removed) => { if (removed && (analysis?.analysis_id === id || research.selectedID === id)) { setAnalysis(null); setState('idle'); setError(''); } }); }} />
+					<StockResearchProgress job={research.job} onCancel={() => void research.cancel()} />
+					{research.error && <div className="stock-ai-error" role="alert"><CircleAlert size={18} /><span>{research.error}</span></div>}
 					{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
 
-					{state === 'loading' && (
+					{state === 'loading' && !research.job && (
 						<div className="stock-ai-loading" role="status" aria-live="polite">
 							<LoaderCircle className="spin" size={30} />
-							<div><strong>正在生成快速分析</strong><span>先完成行情、趋势、题材和风险的本地研判，结果出来后会继续补充完整 AI 结论。</span></div>
+							<div><strong>正在准备研究</strong></div>
 						</div>
 					)}
 
-					{state === 'refining' && analysis && (
+					{state === 'refining' && analysis && !research.job && (
 						<div className="stock-ai-refining" role="status" aria-live="polite">
 							<LoaderCircle className="spin" size={16} />
 							<span><strong>快速分析已完成</strong>正在使用当前选择的模型补充题材证据和综合结论。</span>
@@ -374,9 +378,15 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 							<div className="stock-ai-export-sheet" ref={exportRef}>
 								<AnalysisExportHeader analysis={analysis} mode={mode} />
 								<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => void runAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
-								{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
-								{mode === 'expectation' && <ExpectationView analysis={analysis} />}
-								{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
+									{analysis.research_report ? <>
+										<StockResearchReportView analysis={analysis} view={mode === 'analysis' ? 'research' : mode} verification={research.job?.id === analysis.analysis_id ? research.job?.verification : undefined} verifying={research.verifying} onVerify={research.job?.id === analysis.analysis_id ? () => void research.verify() : undefined} />
+										{mode === 'analysis' && <details className="stock-research-quantitative"><summary>量化基线与行情数据 · {analysis.scorecard.overall} 分</summary><FullAnalysisView analysis={analysis} /></details>}
+										{mode === 'risk' && analysis.research_report.decision.price_plan && <PositionCalculator analysis={analysis} />}
+									</> : analysis.analysis_id ? <section className="stock-research-band"><h3>当前仅有量化快照</h3><p>{analysis.ai?.message || 'AI研究尚未完成'}</p><details className="stock-research-quantitative"><summary>查看历史量价与资料</summary><FullAnalysisView analysis={analysis} /></details></section> : <>
+										{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
+										{mode === 'expectation' && <ExpectationView analysis={analysis} />}
+										{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
+									</>}
 								<AnalysisExportFooter analysis={analysis} />
 							</div>
 							{exportNotice && <div className={`stock-ai-export-notice ${exportNotice.includes('失败') ? 'error' : ''}`} role="status">{exportNotice}</div>}
@@ -627,7 +637,7 @@ function AnalysisVerdict({ analysis, copied, exporting, onRefresh, onExport, onC
 				<div className="stock-ai-quote"><strong>{formatPrice(analysis.quote.price)}</strong><em className={analysis.quote.change_percent >= 0 ? 'up' : 'down'}>{signedPercent(analysis.quote.change_percent)}</em></div>
 			</div>
 			<div className="stock-ai-conclusion">
-				<div className="stock-ai-tags"><span>{analysis.action_plan.decision_label || analysis.profile.type_label}</span><span>{analysis.profile.price_phase}</span><span>{analysis.profile.market_role}</span><span>{analysis.scorecard.direction} · {analysis.scorecard.grade}</span></div>
+				<div className="stock-ai-tags"><span>{analysis.action_plan.decision_label || analysis.profile.type_label}</span>{analysis.research_report ? <span>AI研究 · 量化基线独立保留</span> : <><span>{analysis.profile.price_phase}</span><span>{analysis.profile.market_role}</span><span>{analysis.scorecard.direction} · {analysis.scorecard.grade}</span></>}</div>
 				<h3>{analysis.conclusion.headline}</h3>
 				<p>{analysis.conclusion.summary}</p>
 				<div className={`stock-ai-ai-status ${analysis.ai.status}`}>
@@ -778,7 +788,7 @@ function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {
 		{item?.available ? <>
 			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date} · 收益持续性{item.sustainability || '待确认'}</span><p>{item.summary}</p>{(item.sustainability_flags || []).map((flag) => <small key={flag} className="stock-ai-fundamental-warning">{flag}</small>)}</div>
 			<div className="stock-ai-fundamental-metrics">
-				<FundamentalMetric label="营业收入" value={formatCompactAmount(item.revenue)} detail={`同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="营业总收入" value={formatCompactAmount(item.revenue)} detail={`同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
 				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
 				<FundamentalMetric label="扣非净利润" value={item.recurring_net_profit_available && typeof item.recurring_net_profit === 'number' ? formatCompactAmount(item.recurring_net_profit) : '--'} detail={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' ? `同比 ${signedPercent(item.recurring_net_profit_yoy)}` : '数据待补充'} tone={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' && item.recurring_net_profit_yoy >= 0 ? 'positive' : 'negative'} />
 				<FundamentalMetric label="一次性损益占比" value={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' ? `${item.non_recurring_profit_ratio.toFixed(1)}%` : '--'} detail="占归母净利润绝对值" tone={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' && item.non_recurring_profit_ratio >= 30 ? 'negative' : ''} />
@@ -989,7 +999,7 @@ function ShortTermRiskExecutionView({ analysis }: { analysis: StockAIAnalysis })
 
 function PositionCalculator({ analysis }: { analysis: StockAIAnalysis }) {
 	const risk = analysis.risk_control;
-	const [capital, setCapital] = useState(() => Number(window.localStorage.getItem(capitalStorageKey)) || 200_000);
+	const [capital, setCapital] = useState(() => Number(readStoredValue(capitalStorageKey)) || 200_000);
 	const [riskPercent, setRiskPercent] = useState(risk.single_trade_risk_percent);
 	const [entryPrice, setEntryPrice] = useState(risk.entry_reference);
 	const [stopPrice, setStopPrice] = useState(risk.stop_price);
@@ -1012,7 +1022,7 @@ function PositionCalculator({ analysis }: { analysis: StockAIAnalysis }) {
 				: '参数无效';
 	const updateCapital = (value: number) => {
 		setCapital(value);
-		if (Number.isFinite(value) && value > 0) window.localStorage.setItem(capitalStorageKey, String(value));
+		if (Number.isFinite(value) && value > 0) writeStoredValue(capitalStorageKey, String(value));
 	};
 	return (
 		<section className="stock-ai-panel stock-ai-calculator-panel">
@@ -1160,6 +1170,11 @@ function ActionPriceCard({ tone, zone }: { tone: 'entry' | 'hold' | 'take-profit
 }
 
 function resolveActionPricePlan(analysis: StockAIAnalysis) {
+	if (analysis.research_report) {
+		const plan = analysis.action_plan;
+		if (!analysis.research_report.decision.price_plan || !plan.entry?.price_text || !plan.hold?.price_text || !plan.take_profit?.price_text || !plan.stop_loss?.price_text) return null;
+		return { entry: plan.entry, hold: plan.hold, takeProfit: plan.take_profit, stopLoss: plan.stop_loss };
+	}
 	const plan = analysis.action_plan;
 	if (isShortTermDecision(analysis)) return null;
 	if (!plan.entry?.price_text || !plan.hold?.price_text) return null;
@@ -1296,6 +1311,7 @@ function loadAnalysisHistory(): AnalysisHistoryItem[] {
 }
 
 function buildPlanText(analysis: StockAIAnalysis) {
+	if (analysis.research_report) return researchPlanText(analysis);
 	if (isShortTermDecision(analysis)) {
 		const playbook = analysis.action_plan.short_term_playbook;
 		return [

@@ -172,16 +172,17 @@ function PortfolioReportView({ report, status, onNew, onOpenStockAnalysis }: { r
 	return <div className="portfolio-report">
 		<header className="portfolio-report-header"><div><span><WalletCards size={15} />持仓 AI 巡检报告</span><h2>{report.profile.label}型组合 · {conclusion.risk_level}风险</h2><p>{formatDate(report.generated_at)} · 覆盖 {metrics.coverage_percent}% · {conclusion.source === 'hermes-ai' ? 'AI 综合研判' : '本地规则研判'}</p></div><button type="button" onClick={onNew}><Plus size={15} />新建巡检</button></header>
 		{status === 'partial' && <div className="portfolio-report-warning"><CircleAlert size={15} />报告已生成，但部分个股或组合分析使用降级结果。</div>}
+		{metrics.stop_loss_coverage_percent !== undefined && metrics.stop_loss_coverage_percent < 100 && <div className="portfolio-report-warning"><CircleAlert size={15} />有效静态止损仅覆盖 {metrics.stop_loss_coverage_percent}% 的持仓；其余风险未估算，不能视为零风险。</div>}
 		{isV2 ? <section className="portfolio-report-overview">
 			<div className="portfolio-health-score"><span>组合健康度</span><strong>{metrics.health_score_available ? conclusion.health_score : '—'}</strong><small>{metrics.health_score_available ? 'V2 确定性评分' : '覆盖不足，暂不评分'}</small></div>
 			<div><span>个股质量</span><strong>{metrics.weighted_stock_score.toFixed(1)}</strong><small>健康度权重 45%</small></div>
-			<div><span>风险韧性</span><strong>{metrics.risk_resilience_score}</strong><small>权重 25% · 止损风险 {metrics.stop_loss_risk_percent.toFixed(2)}%</small></div>
+			<div><span>风险韧性</span><strong>{(metrics.stop_loss_coverage_percent ?? 100) < 70 ? '待补证' : metrics.risk_resilience_score}</strong><small>权重 25% · {(metrics.stop_loss_coverage_percent ?? 100) < 100 ? `止损覆盖 ${metrics.stop_loss_coverage_percent}%` : `止损风险 ${metrics.stop_loss_risk_percent.toFixed(2)}%`}</small></div>
 			<div><span>分散 / 风格</span><strong>{metrics.diversification_score} / {metrics.style_match_score}</strong><small>{conclusion.style_match} · 持仓 {metrics.total_position_percent}% / 现金 {metrics.cash_percent}%</small></div>
 		</section> : <section className="portfolio-report-overview">
 			<div className="portfolio-health-score"><span>组合健康度</span><strong>{conclusion.health_score}</strong><small>历史评分</small></div>
 			<div><span>风格匹配</span><strong>{conclusion.style_match}</strong><small>{metrics.style_match_score} 分</small></div>
 			<div><span>持仓 / 现金</span><strong>{metrics.total_position_percent}% / {metrics.cash_percent}%</strong><small>当前配置</small></div>
-			<div><span>预估止损风险</span><strong>{metrics.stop_loss_risk_percent.toFixed(2)}%</strong><small>占组合资产</small></div>
+			<div><span>预估止损风险</span><strong>{(metrics.stop_loss_coverage_percent ?? 100) < 100 ? '覆盖不完整' : `${metrics.stop_loss_risk_percent.toFixed(2)}%`}</strong><small>占组合资产</small></div>
 		</section>}
 		<section className="portfolio-executive"><h3>巡检结论</h3><p>{conclusion.executive_summary}</p></section>
 

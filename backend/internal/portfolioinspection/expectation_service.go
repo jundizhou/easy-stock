@@ -17,6 +17,7 @@ import (
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
+	"easy-stock/backend/internal/stockanalysis"
 )
 
 var ErrExpectationRunning = errors.New("已有持仓明日预期正在运行，请等待完成后再开始")
@@ -26,18 +27,22 @@ type DailySummaryStore interface {
 }
 
 type ExpectationService struct {
-	store       *Store
-	reviews     DailySummaryStore
-	gateway     hermes.Gateway
-	analyze     StockAnalyzer
-	logger      *log.Logger
-	concurrency int
-	mu          sync.Mutex
-	runningID   string
+	store          *Store
+	reviews        DailySummaryStore
+	gateway        hermes.Gateway
+	analyze        StockAnalyzer
+	analyzeHolding HoldingAnalyzer
+	logger         *log.Logger
+	concurrency    int
+	mu             sync.Mutex
+	runningID      string
 }
 
-func NewExpectationService(store *Store, reviews DailySummaryStore, gateway hermes.Gateway, analyze StockAnalyzer, logger *log.Logger) *ExpectationService {
+func NewExpectationService(store *Store, reviews DailySummaryStore, gateway hermes.Gateway, analyze StockAnalyzer, logger *log.Logger, holdingAnalyzers ...HoldingAnalyzer) *ExpectationService {
 	service := &ExpectationService{store: store, reviews: reviews, gateway: gateway, analyze: analyze, logger: logger, concurrency: DefaultConcurrency}
+	if len(holdingAnalyzers) > 0 {
+		service.analyzeHolding = holdingAnalyzers[0]
+	}
 	if store != nil {
 		_ = store.MarkExpectationsInterrupted(context.Background())
 	}
@@ -109,8 +114,11 @@ func (s *ExpectationService) Start(ctx context.Context, request ExpectationReque
 	if s.logger != nil {
 		s.logger.Printf("level=info event=portfolio_expectation_start feature=portfolio-expectation job_id=%q trade_date=%s stocks=%d", job.ID, request.SummaryDate, len(request.Holdings))
 	}
+	initial := job
+	initial.Results = append([]HoldingResult(nil), job.Results...)
+	initial.Request.Holdings = append([]Holding(nil), job.Request.Holdings...)
 	go s.run(job, summary)
-	return job, nil
+	return initial, nil
 }
 
 func (s *ExpectationService) Get(ctx context.Context, id string) (ExpectationJob, error) {
@@ -150,7 +158,13 @@ func (s *ExpectationService) run(job ExpectationJob, summary review.DailySummary
 		go func() {
 			for index := range work {
 				events <- analysisEvent{index: index, started: true}
-				analysis, err := s.analyze(ctx, job.Results[index].Holding.Symbol)
+				var analysis stockanalysis.Analysis
+				var err error
+				if s.analyzeHolding != nil {
+					analysis, err = s.analyzeHolding(ctx, job.Results[index].Holding)
+				} else {
+					analysis, err = s.analyze(ctx, job.Results[index].Holding.Symbol)
+				}
 				result := HoldingResult{Holding: job.Results[index].Holding, CompletedAt: time.Now().UTC()}
 				if err != nil {
 					result.Status, result.Error = "failed", err.Error()
@@ -203,7 +217,8 @@ func (s *ExpectationService) run(job ExpectationJob, summary review.DailySummary
 
 	conclusion := localExpectationReport(summary, request, job.Results, metrics)
 	aiErr := error(nil)
-	if metrics.CoveragePercent >= MinimumAICoverage {
+	researchCoverage := researchCoverageForAggregation(job.Results, metrics)
+	if researchCoverage >= MinimumAICoverage {
 		prompt, promptErr := buildExpectationPrompt(summary, request, job.Results, metrics, rules)
 		if promptErr != nil {
 			aiErr = promptErr
@@ -217,7 +232,7 @@ func (s *ExpectationService) run(job ExpectationJob, summary review.DailySummary
 			conclusion.Source = "hermes-ai"
 		}
 	} else {
-		aiErr = fmt.Errorf("有效个股分析仅覆盖 %.1f%% 持仓，低于完整预期所需的 %d%%", metrics.CoveragePercent, MinimumAICoverage)
+		aiErr = fmt.Errorf("有效个股AI研究仅覆盖 %.1f%% 持仓，低于完整预期所需的 %d%%；量化快照不算作AI研究成功", researchCoverage, MinimumAICoverage)
 	}
 	if aiErr != nil {
 		conclusion = localExpectationReport(summary, request, job.Results, metrics)

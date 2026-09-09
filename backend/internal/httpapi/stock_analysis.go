@@ -131,13 +131,21 @@ func (s *Server) logThemeEvidenceAttempts(symbol string, attempts []stockanalysi
 }
 
 func (s *Server) analyzeStock(ctx context.Context, canonicalSymbol string) (stockanalysis.Analysis, error) {
-	return s.analyzeStockWithMode(ctx, canonicalSymbol, stockAnalysisModeFull)
+	return s.awaitStockResearch(ctx, stockanalysis.ResearchRequest{Symbol: canonicalSymbol, Purpose: "holding"})
 }
 
 func (s *Server) analyzeStockWithMode(ctx context.Context, canonicalSymbol, mode string) (stockanalysis.Analysis, error) {
+	if mode == stockAnalysisModeFull {
+		return s.awaitStockResearch(ctx, stockanalysis.ResearchRequest{Symbol: canonicalSymbol})
+	}
+	analysis, _, err := s.collectStockResearch(ctx, canonicalSymbol)
+	return analysis, err
+}
+
+func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol string) (stockanalysis.Analysis, *stockanalysis.ResearchSnapshot, error) {
 	normalized, err := foundation.NormalizeSymbol(canonicalSymbol)
 	if err != nil {
-		return stockanalysis.Analysis{}, err
+		return stockanalysis.Analysis{}, nil, err
 	}
 	dataCtx, cancelData := context.WithTimeout(ctx, 35*time.Second)
 	defer cancelData()
@@ -256,7 +264,7 @@ func (s *Server) analyzeStockWithMode(ctx context.Context, canonicalSymbol, mode
 	collectionWG.Wait()
 	if lineErr != nil {
 		s.logStockAnalysisStage(normalized.Canonical, "data_collection", "failed", dataStartedAt, len(lines), lineErr)
-		return stockanalysis.Analysis{}, &stockAnalysisRunError{status: http.StatusBadGateway, err: fmt.Errorf("个股K线加载失败: %w", lineErr)}
+		return stockanalysis.Analysis{}, nil, &stockAnalysisRunError{status: http.StatusBadGateway, err: fmt.Errorf("个股K线加载失败: %w", lineErr)}
 	}
 
 	concepts := make([]string, 0, 8)
@@ -344,96 +352,17 @@ func (s *Server) analyzeStockWithMode(ctx context.Context, canonicalSymbol, mode
 		News:            news,
 		CollectionGaps:  gaps,
 	}
-	if mode == stockAnalysisModeFull && s.hermesGateway != nil {
-		status := s.hermesGateway.Status()
-		if status.Available && status.Configured && (len(announcements) > 0 || len(news) > 0) {
-			prepared := stockanalysis.PrepareThemeEvidencePrompt(analysisInput)
-			s.logThemeEvidencePrompt(normalized.Canonical, prepared.Stats())
-			if prepared.Empty() {
-				s.logStockAnalysisStage(normalized.Canonical, "theme_evidence", "skipped", time.Time{}, 0, nil)
-			} else {
-				themeStartedAt := time.Now()
-				s.logStockAnalysisStage(normalized.Canonical, "theme_evidence", "started", time.Time{}, prepared.Stats().AnnouncementCandidates+prepared.Stats().NewsCandidates, nil)
-				themeCtx, cancelTheme := context.WithTimeout(ctx, s.stockAnalysisThemeTimeout())
-				modelEvidence, attempts, modelErr := stockanalysis.ExtractPreparedThemeEvidence(themeCtx, s.hermesGateway, prepared)
-				cancelTheme()
-				s.logThemeEvidenceAttempts(normalized.Canonical, attempts)
-				if modelErr == nil {
-					analysisInput.ModelThemeEvidence = modelEvidence
-					s.logStockAnalysisStage(normalized.Canonical, "theme_evidence", "completed", themeStartedAt, len(modelEvidence), nil)
-				} else {
-					analysisInput.CollectionGaps = append(analysisInput.CollectionGaps, "大模型题材抽取不可用，已使用本地证据规则: "+modelErr.Error())
-					s.logStockAnalysisStage(normalized.Canonical, "theme_evidence", "failed", themeStartedAt, 0, modelErr)
-				}
-			}
-		} else {
-			s.logStockAnalysisStage(normalized.Canonical, "theme_evidence", "skipped", time.Time{}, 0, nil)
-		}
-	} else {
-		s.logStockAnalysisStage(normalized.Canonical, "theme_evidence", "skipped", time.Time{}, 0, nil)
-	}
 	localStartedAt := time.Now()
 	s.logStockAnalysisStage(normalized.Canonical, "local_analysis", "started", time.Time{}, len(lines), nil)
 	analysis, err := stockanalysis.Analyze(analysisInput)
 	if err != nil {
 		s.logStockAnalysisStage(normalized.Canonical, "local_analysis", "failed", localStartedAt, len(lines), err)
-		return stockanalysis.Analysis{}, &stockAnalysisRunError{status: http.StatusUnprocessableEntity, err: err}
+		return stockanalysis.Analysis{}, nil, &stockAnalysisRunError{status: http.StatusUnprocessableEntity, err: err}
 	}
 	s.logStockAnalysisStage(normalized.Canonical, "local_analysis", "completed", localStartedAt, len(analysis.Evidence), nil)
-	if mode == stockAnalysisModeQuick {
-		analysis.AI.Status = "rules"
-		analysis.AI.Message = "快速分析已完成，当前展示本地结构化研判"
-		s.logStockAnalysisStage(normalized.Canonical, "knowledge_context", "skipped", time.Time{}, 0, nil)
-		s.logStockAnalysisStage(normalized.Canonical, "final_decision", "skipped", time.Time{}, 0, nil)
-		return analysis, nil
-	}
-
-	if s.hermesGateway == nil {
-		analysis.AI.Status = "unavailable"
-		analysis.AI.Message = "Hermes未启用，当前展示本地结构化研判"
-		s.logStockAnalysisStage(normalized.Canonical, "knowledge_context", "skipped", time.Time{}, 0, nil)
-		s.logStockAnalysisStage(normalized.Canonical, "final_decision", "skipped", time.Time{}, 0, nil)
-	} else {
-		status := s.hermesGateway.Status()
-		if !status.Available || !status.Configured {
-			analysis.AI.Status = "unavailable"
-			analysis.AI.Message = firstNonEmpty(status.Message, "请先在系统设置中配置AI模型")
-			s.logStockAnalysisStage(normalized.Canonical, "knowledge_context", "skipped", time.Time{}, 0, nil)
-			s.logStockAnalysisStage(normalized.Canonical, "final_decision", "skipped", time.Time{}, 0, nil)
-		} else {
-			methodologyContext := ""
-			if s.masteryLibrary != nil {
-				knowledgeStartedAt := time.Now()
-				s.logStockAnalysisStage(normalized.Canonical, "knowledge_context", "started", time.Time{}, 0, nil)
-				knowledgeCtx, cancelKnowledge := context.WithTimeout(ctx, 6*time.Second)
-				var knowledgeErr error
-				methodologyContext, knowledgeErr = s.masteryLibrary.ContextForPrompt(
-					knowledgeCtx,
-					fmt.Sprintf("结合游资心法、情绪周期、趋势与风险控制分析%s %s", analysis.Name, analysis.Symbol),
-					6_000,
-				)
-				cancelKnowledge()
-				knowledgeStatus := "completed"
-				if knowledgeErr != nil {
-					knowledgeStatus = "failed"
-				}
-				s.logStockAnalysisStage(normalized.Canonical, "knowledge_context", knowledgeStatus, knowledgeStartedAt, len([]rune(methodologyContext)), knowledgeErr)
-			} else {
-				s.logStockAnalysisStage(normalized.Canonical, "knowledge_context", "skipped", time.Time{}, 0, nil)
-			}
-			aiStartedAt := time.Now()
-			s.logStockAnalysisStage(normalized.Canonical, "final_decision", "started", time.Time{}, 1, nil)
-			aiCtx, cancelAI := context.WithTimeout(ctx, s.stockAnalysisModelTimeout())
-			if aiErr := stockanalysis.EnrichWithAI(aiCtx, s.hermesGateway, &analysis, methodologyContext); aiErr != nil {
-				analysis.AI.Status = "error"
-				analysis.AI.Message = aiErr.Error() + "；已保留本地结构化研判"
-				s.logStockAnalysisStage(normalized.Canonical, "final_decision", "failed", aiStartedAt, 0, aiErr)
-			} else {
-				s.logStockAnalysisStage(normalized.Canonical, "final_decision", "completed", aiStartedAt, 1, nil)
-			}
-			cancelAI()
-		}
-	}
-
-	return analysis, nil
+	analysis.AI.Status = "rules"
+	analysis.AI.Message = "快速分析已完成，当前为量化基线，尚未形成AI研究结论"
+	snapshot := stockanalysis.BuildResearchSnapshot(analysisInput, analysis, time.Now().UTC())
+	analysis.SnapshotID = snapshot.ID
+	return analysis, &snapshot, nil
 }

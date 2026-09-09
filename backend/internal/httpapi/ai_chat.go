@@ -140,9 +140,6 @@ func (s *Server) aiChatWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) enrichHermesPrompt(parent context.Context, payload []byte) []byte {
-	if s.masteryLibrary == nil {
-		return payload
-	}
 	var frame map[string]any
 	if err := json.Unmarshal(payload, &frame); err != nil || rpcString(frame["method"]) != "prompt.submit" {
 		return payload
@@ -157,11 +154,29 @@ func (s *Server) enrichHermesPrompt(parent context.Context, payload []byte) []by
 	}
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
-	knowledge, err := s.masteryLibrary.ContextForPrompt(ctx, prompt, 12_000)
-	if err != nil || strings.TrimSpace(knowledge) == "" {
-		return payload
+	contexts := []string{}
+	bound := false
+	if id := strings.TrimSpace(rpcString(params["analysis_id"])); id != "" {
+		bound = true
+		delete(params, "analysis_id")
+		if s.stockResearchStore != nil {
+			if report, err := s.stockResearchChatContext(ctx, id); err == nil {
+				contexts = append(contexts, report)
+			} else {
+				contexts = append(contexts, "[绑定的研究报告未找到，不得按模型记忆补齐原报告或假装已经读取证据。]")
+			}
+		} else {
+			contexts = append(contexts, "[研究报告服务不可用，尚未读取绑定报告。不得凭记忆补齐。]")
+		}
 	}
-	params["text"] = "[本地游资心法知识库]\n" + knowledge + "\n\n[用户当前问题]\n" + prompt
+	if s.masteryLibrary != nil && !bound {
+		if knowledge, err := s.masteryLibrary.ContextForPrompt(ctx, prompt, 12_000); err == nil && strings.TrimSpace(knowledge) != "" {
+			contexts = append(contexts, "[本地游资心法知识库]\n"+knowledge)
+		}
+	}
+	if len(contexts) > 0 {
+		params["text"] = strings.Join(contexts, "\n\n") + "\n\n[用户当前问题]\n" + prompt
+	}
 	updated, err := json.Marshal(frame)
 	if err != nil || len(updated) > maxHermesGatewayFrameBytes {
 		return payload

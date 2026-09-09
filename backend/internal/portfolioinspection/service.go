@@ -23,19 +23,24 @@ import (
 var ErrJobRunning = errors.New("已有持仓巡检正在运行，请等待完成后再开始新的巡检")
 
 type StockAnalyzer func(context.Context, string) (stockanalysis.Analysis, error)
+type HoldingAnalyzer func(context.Context, Holding) (stockanalysis.Analysis, error)
 
 type Service struct {
-	store       *Store
-	gateway     hermes.Gateway
-	analyze     StockAnalyzer
-	logger      *log.Logger
-	concurrency int
-	mu          sync.Mutex
-	runningID   string
+	store          *Store
+	gateway        hermes.Gateway
+	analyze        StockAnalyzer
+	analyzeHolding HoldingAnalyzer
+	logger         *log.Logger
+	concurrency    int
+	mu             sync.Mutex
+	runningID      string
 }
 
-func NewService(store *Store, gateway hermes.Gateway, analyze StockAnalyzer, logger *log.Logger) *Service {
+func NewService(store *Store, gateway hermes.Gateway, analyze StockAnalyzer, logger *log.Logger, holdingAnalyzers ...HoldingAnalyzer) *Service {
 	service := &Service{store: store, gateway: gateway, analyze: analyze, logger: logger, concurrency: DefaultConcurrency}
+	if len(holdingAnalyzers) > 0 {
+		service.analyzeHolding = holdingAnalyzers[0]
+	}
 	if store != nil {
 		_ = store.MarkInterrupted(context.Background())
 	}
@@ -78,8 +83,11 @@ func (s *Service) Start(ctx context.Context, request Request) (Job, error) {
 	if s.logger != nil {
 		s.logger.Printf("level=info event=portfolio_inspection_start feature=portfolio-inspection job_id=%q profile=%s stocks=%d total_position=%d", job.ID, normalized.TraderProfile, len(normalized.Holdings), totalPosition(normalized.Holdings))
 	}
+	initial := job
+	initial.Results = append([]HoldingResult(nil), job.Results...)
+	initial.Request.Holdings = append([]Holding(nil), job.Request.Holdings...)
 	go s.run(job)
-	return job, nil
+	return initial, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Job, error) {
@@ -120,7 +128,13 @@ func (s *Service) run(job Job) {
 		go func() {
 			for index := range work {
 				events <- event{index: index, started: true}
-				analysis, err := s.analyze(ctx, job.Results[index].Holding.Symbol)
+				var analysis stockanalysis.Analysis
+				var err error
+				if s.analyzeHolding != nil {
+					analysis, err = s.analyzeHolding(ctx, job.Results[index].Holding)
+				} else {
+					analysis, err = s.analyze(ctx, job.Results[index].Holding.Symbol)
+				}
 				events <- event{index: index, analysis: analysis, err: err}
 			}
 		}()
@@ -188,10 +202,11 @@ func (s *Service) run(job Job) {
 
 	conclusion := localReport(job.Request, job.Results, metrics, rules)
 	aiErr := error(nil)
-	if metrics.CoveragePercent >= MinimumAICoverage {
+	researchCoverage := researchCoverageForAggregation(job.Results, metrics)
+	if researchCoverage >= MinimumAICoverage {
 		conclusion, aiErr = s.generateAIReport(ctx, job.Request, job.Results, metrics, rules)
 	} else {
-		aiErr = fmt.Errorf("有效个股分析仅覆盖 %.1f%% 持仓，低于组合结论所需的 %d%%", metrics.CoveragePercent, MinimumAICoverage)
+		aiErr = fmt.Errorf("有效个股AI研究仅覆盖 %.1f%% 持仓，低于组合结论所需的 %d%%；量化快照不算作AI研究成功", researchCoverage, MinimumAICoverage)
 	}
 	if aiErr != nil {
 		conclusion = localReport(job.Request, job.Results, metrics, rules)

@@ -9,6 +9,7 @@ export type ChatMessage = {
 };
 
 export type ChatConversation = {
+	analysis_id?: string;
 	id: string;
 	title: string;
 	hermes_session_id?: string;
@@ -98,6 +99,7 @@ function isConversation(value: unknown): value is ChatConversation {
 	if (!value || typeof value !== 'object') return false;
 	const item = value as Partial<ChatConversation>;
 	return typeof item.id === 'string'
+		&& (item.analysis_id === undefined || typeof item.analysis_id === 'string')
 		&& typeof item.title === 'string'
 		&& typeof item.created_at === 'string'
 		&& typeof item.updated_at === 'string'

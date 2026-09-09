@@ -25,6 +25,7 @@ describe('AI chat history helpers', () => {
 	it('clears Hermes sessions after changing the global chat model without removing messages', () => {
 		const current = conversation('current', '2026-08-07T00:00:00.000Z');
 		current.hermes_session_id = 'hermes-old-model';
+		current.analysis_id = 'saved-report';
 		current.hermes_model_key = 'old-model-key';
 		current.messages = [{ id: 'message-1', role: 'user', content: '保留这条消息', created_at: current.created_at }];
 
@@ -33,6 +34,8 @@ describe('AI chat history helpers', () => {
 		expect(next.hermes_session_id).toBeUndefined();
 		expect(next.hermes_model_key).toBeUndefined();
 		expect(next.messages).toEqual(current.messages);
+		expect(next.analysis_id).toBe('saved-report');
+		expect(parseStoredConversations(JSON.stringify([next]))[0].analysis_id).toBe('saved-report');
 	});
 
 	it('only resumes a Hermes session created for the active model configuration', () => {

@@ -33,6 +33,9 @@ type Input struct {
 }
 
 type Analysis struct {
+	AnalysisID            string               `json:"analysis_id,omitempty"`
+	SnapshotID            string               `json:"snapshot_id,omitempty"`
+	ResearchReport        *ResearchReport      `json:"research_report,omitempty"`
 	Symbol                string               `json:"symbol"`
 	Name                  string               `json:"name"`
 	GeneratedAt           time.Time            `json:"generated_at"`

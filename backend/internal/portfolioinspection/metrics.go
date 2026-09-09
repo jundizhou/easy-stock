@@ -32,6 +32,7 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 
 	analyses := make(map[string]HoldingResult, len(results))
 	successWeight := 0
+	stopWeight, aiWeight := 0, 0
 	themeWeights := map[string]int{}
 	themeCounts := map[string]int{}
 	for _, result := range results {
@@ -41,6 +42,9 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 		analyses[result.Holding.Symbol] = result
 		weight := result.Holding.Weight
 		successWeight += weight
+		if result.Analysis.AI.Status == "ready" {
+			aiWeight += weight
+		}
 		metrics.WeightedScore += float64(weight * result.Analysis.Scorecard.Overall)
 		metrics.WeightedRisk += float64(weight * result.Analysis.RiskControl.Score)
 		if result.Analysis.ActionPlan.DecisionMode == "short_term" {
@@ -58,6 +62,7 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 		}
 		stop := result.Analysis.RiskControl.StopPrice
 		if price > 0 && stop > 0 && stop < price {
+			stopWeight += weight
 			metrics.StopLossRiskPercent += float64(weight) * (price - stop) / price
 		}
 		theme := strings.TrimSpace(result.Analysis.Theme.Primary)
@@ -72,6 +77,8 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 	}
 	if metrics.TotalPositionPercent > 0 {
 		metrics.CoveragePercent = float64(successWeight) / float64(metrics.TotalPositionPercent) * 100
+		metrics.StopLossCoveragePercent = round(float64(stopWeight)/float64(metrics.TotalPositionPercent)*100, 1)
+		metrics.AIResearchCoveragePercent = round(float64(aiWeight)/float64(metrics.TotalPositionPercent)*100, 1)
 	}
 	if successWeight > 0 {
 		metrics.WeightedScore /= float64(successWeight)
@@ -94,7 +101,13 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 	metrics.DiversificationScore, diversificationWarnings = diversification(metrics, rules, request)
 	metrics.StyleMatchScore, styleWarnings = styleMatch(metrics, rules)
 	metrics.StyleBreaches = uniqueWarnings(append(append(riskWarnings, diversificationWarnings...), styleWarnings...))
-	metrics.HealthScoreAvailable = metrics.CoveragePercent >= MinimumAICoverage
+	metrics.HealthScoreAvailable = metrics.CoveragePercent >= MinimumAICoverage && metrics.StopLossCoveragePercent >= MinimumAICoverage
+	if metrics.StopLossCoveragePercent < 100 {
+		metrics.StyleBreaches = append(metrics.StyleBreaches, "部分仓位缺少有效静态止损方案，预估止损风险仅覆盖已知部分，不是完整风险预算")
+	}
+	if metrics.AIResearchCoveragePercent < 100 {
+		metrics.StyleBreaches = append(metrics.StyleBreaches, "部分个股只有量化快照，没有成功完成AI研究")
+	}
 	if metrics.HealthScoreAvailable {
 		health := metrics.WeightedScore*.45 + float64(metrics.RiskResilienceScore)*.25 + float64(metrics.DiversificationScore)*.20 + float64(metrics.StyleMatchScore)*.10
 		metrics.HealthScore = int(math.Round(math.Max(0, math.Min(100, health))))
@@ -103,6 +116,15 @@ func CalculateMetrics(request Request, results []HoldingResult, rules ProfileRul
 		}
 	}
 	return metrics
+}
+
+func researchCoverageForAggregation(results []HoldingResult, metrics Metrics) float64 {
+	for _, result := range results {
+		if result.Analysis != nil && result.Analysis.AnalysisID != "" {
+			return metrics.AIResearchCoveragePercent
+		}
+	}
+	return metrics.CoveragePercent
 }
 
 func calculateCorrelations(analyses map[string]HoldingResult) []CorrelationPair {

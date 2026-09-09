@@ -106,9 +106,8 @@ func (s *Server) stockAnalysisQuickTimeout() time.Duration {
 }
 
 func (s *Server) stockAnalysisTimeout() time.Duration {
-	// Data collection has its own 35 second deadline. Add cleanup grace around
-	// the bounded theme classification and the full final decision.
-	return 35*time.Second + s.stockAnalysisThemeTimeout() + s.stockAnalysisModelTimeout() + 30*time.Second
+	// Compatibility route waits for the same persisted job as the async API.
+	return 12*time.Minute + 15*time.Second
 }
 
 func truncateRunes(value string, limit int) string {

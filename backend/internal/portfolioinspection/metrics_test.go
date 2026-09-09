@@ -8,6 +8,19 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 )
 
+func TestMissingStaticPlanDoesNotImplyZeroPortfolioRisk(t *testing.T) {
+	request := Request{TraderProfile: "balanced", Holdings: []Holding{{Symbol: "600519.SH", Weight: 80}}}
+	analysis := stockanalysis.Analysis{Scorecard: stockanalysis.Scorecard{Overall: 90}, RiskControl: stockanalysis.RiskControl{Score: 50}}
+	rules, _ := RulesFor(request.TraderProfile)
+	metrics := CalculateMetrics(request, []HoldingResult{{Holding: request.Holdings[0], Status: "succeeded", Analysis: &analysis}}, rules)
+	if metrics.StopLossCoveragePercent != 0 || metrics.HealthScoreAvailable || metrics.AIResearchCoveragePercent != 0 {
+		t.Fatalf("missing plan reported as complete: %+v", metrics)
+	}
+	if len(metrics.StyleBreaches) == 0 {
+		t.Fatal("missing risk plan warning absent")
+	}
+}
+
 func TestCalculateMetricsIncludesCashConcentrationAndCorrelation(t *testing.T) {
 	request := Request{TraderProfile: ProfileBalanced, Holdings: []Holding{
 		{Symbol: "600519.SH", Weight: 40},
