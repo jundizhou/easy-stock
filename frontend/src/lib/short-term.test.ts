@@ -50,23 +50,23 @@ describe('short-term theme helpers', () => {
 		expect(stocks[0].confirmation).not.toBe('已确认');
 	});
 
-	it('preserves the fused daily ranking returned by the backend', () => {
+	it('sorts themes by selected strength before source-balanced ranking', () => {
 		const first: ThemeOverview = {
 			theme: 'kpl:1', name: '通信', change_percent: 0, main_net_inflow: 0,
 			rising_nodes: 0, falling_nodes: 0, matched_nodes: 0, total_nodes: 0,
-			top_node_change_percent: 0, trend_score: 70, source_rank: 1,
+			top_node_change_percent: 0, trend_score: 70, daily_strength_score: 65, source_rank: 1,
 		};
 		const industry: ThemeOverview = {
 			theme: 'compute_rental', name: '算力租赁', change_percent: 0, main_net_inflow: 0,
 			rising_nodes: 0, falling_nodes: 0, matched_nodes: 0, total_nodes: 0,
-			top_node_change_percent: 0, trend_score: 99, daily_rank: 2,
+			top_node_change_percent: 0, trend_score: 99, daily_strength_score: 88, daily_rank: 2,
 		};
 		const third: ThemeOverview = {
 			theme: 'kpl:2', name: '芯片', change_percent: 0, main_net_inflow: 0,
 			rising_nodes: 0, falling_nodes: 0, matched_nodes: 0, total_nodes: 0,
-			top_node_change_percent: 0, trend_score: 90, source_rank: 3,
+			top_node_change_percent: 0, trend_score: 90, daily_strength_score: 82, source_rank: 3,
 		};
-		expect(rankThemeOverviews([industry, third, first]).map((item) => item.name)).toEqual(['通信', '算力租赁', '芯片']);
+		expect(rankThemeOverviews([first, industry, third]).map((item) => item.name)).toEqual(['算力租赁', '芯片', '通信']);
 	});
 
 	it('switches Kaipanla ordering between daily and five-day strength', () => {

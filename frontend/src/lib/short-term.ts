@@ -148,12 +148,14 @@ function normalizeTrendStage(value: ThemeOverview['trend_stage'], score: number)
 
 export function rankThemeOverviews(items: ThemeOverview[], window: ThemeStrengthWindow = 'daily'): ThemeOverview[] {
 	return [...items].sort((a, b) => {
+		const strengthDiff = themeStrengthScore(b, window) - themeStrengthScore(a, window);
+		if (strengthDiff !== 0) return strengthDiff;
 		const aRank = window === 'daily' ? a.daily_rank ?? a.source_rank : a.five_day_rank;
 		const bRank = window === 'daily' ? b.daily_rank ?? b.source_rank : b.five_day_rank;
 		if (typeof aRank === 'number' && aRank > 0 && typeof bRank === 'number' && bRank > 0 && aRank !== bRank) {
 			return aRank - bRank;
 		}
-		return themeStrengthScore(b, window) - themeStrengthScore(a, window);
+		return a.name.localeCompare(b.name, 'zh-CN');
 	});
 }
 
