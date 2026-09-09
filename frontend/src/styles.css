@@ -1360,6 +1360,7 @@ a:focus-visible {
 .stock-controls {
 	display: flex;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: 10px;
 	padding: 9px 13px;
 	border-bottom: 1px solid var(--line-soft);
@@ -1369,13 +1370,16 @@ a:focus-visible {
 .stock-controls > label:not(.stock-search) {
 	display: flex;
 	align-items: center;
+	flex: 0 0 auto;
 	gap: 6px;
 	color: var(--muted);
 	font-size: 11px;
+	white-space: nowrap;
 }
 
 .stock-controls select {
 	height: 32px;
+	min-width: 92px;
 	padding: 0 26px 0 9px;
 	border: 1px solid var(--line);
 	border-radius: 6px;
@@ -1385,9 +1389,9 @@ a:focus-visible {
 }
 
 .stock-search {
-	flex: 0 1 235px;
+	flex: 1 1 280px;
 	gap: 7px;
-	min-width: 170px;
+	min-width: 240px;
 	height: 32px;
 	padding: 0 9px;
 	border: 1px solid var(--line);
@@ -1479,7 +1483,9 @@ a:focus-visible {
 	height: 46px;
 	padding: 7px 10px;
 	border-bottom: 1px solid var(--line-soft);
+	overflow: hidden;
 	text-align: right;
+	vertical-align: middle;
 	white-space: nowrap;
 }
 
@@ -1496,9 +1502,9 @@ a:focus-visible {
 	text-align: left;
 }
 
-.stock-table th:nth-child(1) { width: 112px; }
-.stock-table th:nth-child(2) { width: 108px; }
-.stock-table th:nth-child(3) { width: 64px; }
+.stock-table th:nth-child(1) { width: 152px; }
+.stock-table th:nth-child(2) { width: 118px; }
+.stock-table th:nth-child(3) { width: 76px; }
 .stock-table th:nth-child(4),
 .stock-table th:nth-child(5) { width: 76px; }
 .stock-table th:nth-child(6),
@@ -1524,15 +1530,21 @@ a:focus-visible {
 }
 
 .stock-table td strong {
+	overflow: hidden;
 	font-size: 12px;
 	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .stock-table td small {
+	overflow: hidden;
 	margin-top: 3px;
 	color: var(--subtle);
 	font-family: "SFMono-Regular", Consolas, monospace;
 	font-size: 10px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .node-tags {
@@ -1545,7 +1557,11 @@ a:focus-visible {
 .role-badge {
 	display: inline-flex;
 	align-items: center;
+	box-sizing: border-box;
+	max-width: 100%;
+	min-width: 0;
 	min-height: 22px;
+	overflow: hidden;
 	padding: 0 7px;
 	border: 1px solid var(--line);
 	border-radius: 5px;
@@ -1553,11 +1569,19 @@ a:focus-visible {
 }
 
 .role-badge em {
+	flex: 0 0 auto;
 	margin-right: 4px;
 	padding-right: 4px;
 	border-right: 1px solid currentColor;
 	font-style: normal;
 	opacity: 0.75;
+}
+
+.role-badge-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .role-badge.leader {
@@ -2465,9 +2489,9 @@ a:focus-visible {
 		display: none;
 	}
 
-	.stock-table th:nth-child(1) { width: 112px; }
-	.stock-table th:nth-child(2) { width: 98px; }
-	.stock-table th:nth-child(3) { width: 58px; }
+	.stock-table th:nth-child(1) { width: 142px; }
+	.stock-table th:nth-child(2) { width: 108px; }
+	.stock-table th:nth-child(3) { width: 68px; }
 	.stock-table th:nth-child(4),
 	.stock-table th:nth-child(5),
 	.stock-table th:nth-child(6),
@@ -2654,6 +2678,7 @@ a:focus-visible {
 	.stock-controls .stock-search {
 		margin-left: 0;
 		flex-basis: 100%;
+		min-width: 0;
 	}
 
 	.identity-panel,

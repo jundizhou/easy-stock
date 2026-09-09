@@ -991,7 +991,7 @@ function RoleBadge({ role, regime }: { role: StockRole; regime?: ThemeStock['lim
 		'低位观察': 'watch',
 		'掉队': 'lagging',
 	};
-	return <span className={`role-badge ${roleClass[role]}`}>{regime && <em>{regime}</em>}{role}</span>;
+	return <span className={`role-badge ${roleClass[role]}`}>{regime && <em>{regime}</em>}<span className="role-badge-label">{role}</span></span>;
 }
 
 function StateBadge({ state }: { state: ThemeStock['state'] }) {
