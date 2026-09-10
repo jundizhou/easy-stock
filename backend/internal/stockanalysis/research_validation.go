@@ -3,6 +3,7 @@ package stockanalysis
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,6 +18,12 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		anchors[anchor.ID] = anchor
 	}
 	notes := []string{"已校验来源编号、引文和数字结构；语义解释仍属于AI判断，并非完整事实认证"}
+	if repaired := repairResearchSourceIDs(result, sources); len(repaired) > 0 {
+		notes = append(notes, repaired...)
+	}
+	if softenUnsupportedAttribution(result, sources) {
+		notes = append(notes, "未提供直接资金流或板块因果证据，已将题材/资金归因降为待验证假设")
+	}
 	validateClaim := func(claim *ResearchClaim) error {
 		claim.Text = truncateExactText(claim.Text, 350)
 		if strings.TrimSpace(claim.Text) == "" {
@@ -116,6 +123,10 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		conditionIDs[condition.ID] = true
 		condition.Status = "pending"
 		condition.Text = truncateExactText(condition.Text, 220)
+		if normalized, ok := normalizeResearchConditionOperator(condition.Operator); ok && normalized != condition.Operator {
+			condition.Operator = normalized
+			notes = append(notes, "已将交易条件中的同义比较词规范为协议枚举")
+		}
 		for _, id := range condition.SourceIDs {
 			if _, ok := sources[id]; !ok {
 				return notes, fmt.Errorf("条件引用了未知来源%s", id)
@@ -139,7 +150,7 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 			condition.Threshold = &value
 			condition.SourceIDs = uniqueStrings(append(condition.SourceIDs, anchor.SourceID), 6)
 			if condition.Operator != "gte" && condition.Operator != "lte" {
-				return notes, fmt.Errorf("价格条件只允许gte/lte")
+				return notes, fmt.Errorf("价格条件只允许gte/lte，收到%q", condition.Operator)
 			}
 			comparison := "不低于"
 			if condition.Operator == "lte" {
@@ -154,7 +165,7 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 				return notes, fmt.Errorf("量比条件阈值不合法")
 			}
 			if condition.Operator != "gte" && condition.Operator != "lte" {
-				return notes, fmt.Errorf("量比条件只允许gte/lte")
+				return notes, fmt.Errorf("量比条件只允许gte/lte，收到%q", condition.Operator)
 			}
 			condition.SourceIDs = uniqueStrings(append(condition.SourceIDs, "m-price"), 6)
 			if condition.Window == "next_disclosure" {
@@ -244,6 +255,176 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		decision.NewPosition = "暂不形成新仓计划；" + decision.Reason
 	}
 	return uniqueStrings(notes, 12), nil
+}
+
+// Models occasionally drop or alter one character while copying a long source
+// id into JSON. Repair only a unique one-edit match for generated sources;
+// ambiguous or unrelated ids remain validation errors.
+func repairResearchSourceIDs(result *ResearchSynthesis, sources map[string]ResearchSource) []string {
+	repairs := map[string]string{}
+	repairIDs := func(ids *[]string) {
+		for index, id := range *ids {
+			if _, ok := sources[id]; ok || !strings.HasPrefix(id, "s-") {
+				continue
+			}
+			matches := []string{}
+			for candidate := range sources {
+				if !strings.HasPrefix(candidate, "s-") || !sourceIDWithinOneEdit(id, candidate) {
+					continue
+				}
+				matches = append(matches, candidate)
+			}
+			if len(matches) == 1 {
+				(*ids)[index] = matches[0]
+				repairs[id] = matches[0]
+			}
+		}
+	}
+	repairClaim := func(claim *ResearchClaim) { repairIDs(&claim.SourceIDs) }
+	repairClaim(&result.Thesis)
+	for index := range result.Support {
+		repairClaim(&result.Support[index])
+	}
+	for index := range result.Counter {
+		repairClaim(&result.Counter[index])
+	}
+	for index := range result.Alternatives {
+		repairClaim(&result.Alternatives[index])
+	}
+	for index := range result.Conditions {
+		repairIDs(&result.Conditions[index].SourceIDs)
+	}
+	if result.Decision.PricePlan != nil {
+		repairIDs(&result.Decision.PricePlan.SourceIDs)
+	}
+	if len(repairs) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(repairs))
+	for id := range repairs {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	notes := make([]string, 0, len(keys))
+	for _, id := range keys {
+		notes = append(notes, fmt.Sprintf("已将模型近似来源编号%s纠正为%s", id, repairs[id]))
+	}
+	return notes
+}
+
+func sourceIDWithinOneEdit(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if !strings.HasPrefix(a, "s-") || !strings.HasPrefix(b, "s-") {
+		return false
+	}
+	a, b = a[2:], b[2:]
+	if len(a) > len(b)+1 || len(b) > len(a)+1 {
+		return false
+	}
+	if len(a) == len(b) {
+		differences := 0
+		for index := range a {
+			if a[index] != b[index] {
+				differences++
+				if differences > 1 {
+					return false
+				}
+			}
+		}
+		return differences == 1
+	}
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	shortIndex, longIndex := 0, 0
+	differences := 0
+	for shortIndex < len(a) && longIndex < len(b) {
+		if a[shortIndex] == b[longIndex] {
+			shortIndex++
+			longIndex++
+			continue
+		}
+		differences++
+		if differences > 1 {
+			return false
+		}
+		longIndex++
+	}
+	return true
+}
+
+func normalizeResearchConditionOperator(operator string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(operator)) {
+	case "gte", "ge", ">=", "≥", "at_least", "greater_than_or_equal", "不低于", "至少", "大于等于":
+		return "gte", true
+	case "lte", "le", "<=", "≤", "at_most", "less_than_or_equal", "不高于", "至多", "小于等于":
+		return "lte", true
+	default:
+		return operator, false
+	}
+}
+
+// Price and volume evidence can show movement, but cannot identify who caused
+// it. Keep generated reports from turning a correlation into a causal claim.
+func softenUnsupportedAttribution(result *ResearchSynthesis, sources map[string]ResearchSource) bool {
+	directCapitalEvidence := false
+	for _, source := range sources {
+		if source.Kind == "fund_flow" || source.Kind == "capital_flow" || source.Kind == "lhb" {
+			directCapitalEvidence = true
+			break
+		}
+	}
+	if directCapitalEvidence {
+		return false
+	}
+	rewrite := func(value *string) bool {
+		before := *value
+		if containsAnyFold(before, "缺少资金", "缺乏资金", "没有资金", "缺少增量资金", "缺乏增量资金", "没有增量资金", "不能证明", "无法确认", "未经证实", "待验证假设") {
+			return false
+		}
+		for _, pair := range [][2]string{
+			{"更可能由题材预期与资金驱动", "题材预期与资金行为仅为待验证假设，驱动来源无法确认"},
+			{"题材资金脉冲", "题材与资金行为的待验证假设"},
+			{"资金驱动", "资金行为假设"},
+			{"资金动能强", "价格动能较强"},
+			{"增量资金", "增量资金的未证实假设"},
+			{"资金性质", "成交与持仓结构性质"},
+		} {
+			*value = strings.ReplaceAll(*value, pair[0], pair[1])
+		}
+		return before != *value
+	}
+	changed := false
+	for _, text := range []*string{&result.Headline, &result.MainConflict, &result.BaselineReason} {
+		changed = rewrite(text) || changed
+	}
+	for _, claim := range []*ResearchClaim{&result.Thesis} {
+		if rewrite(&claim.Text) {
+			claim.Kind = "inference"
+			changed = true
+		}
+	}
+	for _, claims := range [][]ResearchClaim{result.Support, result.Counter, result.Alternatives} {
+		for index := range claims {
+			if rewrite(&claims[index].Text) {
+				claims[index].Kind = "inference"
+				changed = true
+			}
+		}
+	}
+	changed = rewrite(&result.Decision.NewPosition) || changed
+	changed = rewrite(&result.Decision.ExistingPosition) || changed
+	changed = rewrite(&result.Decision.Reason) || changed
+	for index := range result.Conditions {
+		changed = rewrite(&result.Conditions[index].Text) || changed
+	}
+	for index := range result.Scenarios {
+		changed = rewrite(&result.Scenarios[index].Description) || changed
+		changed = rewrite(&result.Scenarios[index].Response) || changed
+	}
+	return changed
 }
 
 func researchPricesStale(snapshot ResearchSnapshot) bool {

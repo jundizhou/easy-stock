@@ -770,13 +770,15 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, o
 func embeddedModelResponseError(content string) error {
 	value := strings.ToLower(strings.TrimSpace(content))
 	switch {
+	case strings.Contains(value, "model_not_found"), strings.Contains(value, "unknown provider for model"), strings.Contains(value, "model not found"):
+		return errors.New("Hermes 当前模型不可用，请在设置中切换可用模型或检查模型名称")
 	case strings.HasPrefix(value, "api call failed") && (strings.Contains(value, "auth_unavailable") || strings.Contains(value, "invalidated oauth")):
 		return errors.New("Hermes 上游模型授权已失效或暂无可用授权，请在模型服务端恢复连接后重试")
 	case strings.HasPrefix(value, "http 401"), strings.Contains(value, "invalid_api_key"), strings.Contains(value, "invalid api key"):
 		return errors.New("Hermes 模型鉴权失败，请在系统设置中更新 API Key")
 	case strings.HasPrefix(value, "http 403"):
 		return errors.New("Hermes 模型接口拒绝访问，请检查 API Key 权限和模型权限")
-	case strings.Contains(value, "http 429"), strings.Contains(value, "rate limit exceeded"), strings.Contains(value, "model_cooldown"), strings.Contains(value, "cooling down"):
+	case strings.Contains(value, "http 429"), strings.Contains(value, "rate limit exceeded"), strings.Contains(value, "model_cooldown"), strings.Contains(value, "cooling down"), strings.Contains(value, "all credentials"):
 		return errors.New("Hermes 模型接口请求过于频繁或额度不足，请稍后重试并检查账户额度")
 	case strings.HasPrefix(value, "api call failed"):
 		return errors.New("Hermes 上游模型调用失败，请检查模型服务连接；该响应不是有效分析内容")

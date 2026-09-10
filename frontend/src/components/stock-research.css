@@ -5,7 +5,8 @@
 .stock-research-options label { display:flex; gap:8px; align-items:center; }
 .stock-research-options select,.stock-research-options input { min-height:32px; max-width:140px; border:1px solid #d9dce1; border-radius:4px; background:white; padding:4px 8px; }
 .stock-research-progress { display:flex; gap:9px; align-items:center; min-height:40px; background:#edf4ef; color:#285d43; padding:9px 12px; font-size:12px; border-left:3px solid #398b60; }
-.stock-research-progress span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.stock-research-progress-message { flex:1; min-width:0; overflow-wrap:anywhere; }
+.stock-research-progress-elapsed { flex:0 0 auto; color:inherit; font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .stock-research-progress button { display:grid; place-items:center; width:30px; height:30px; border:1px solid #c9d5cd; border-radius:4px; background:white; }
 .stock-research-progress.degraded,.stock-research-progress.failed,.stock-research-progress.interrupted,.stock-research-progress.cancelled { background:#f7f1e7; border-color:#ad852e; color:#756020; }
 .stock-research-history { padding:6px 0 12px; }

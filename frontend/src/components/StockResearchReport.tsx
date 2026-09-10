@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './stock-research.css';
 import { ArrowUpRight, CheckCircle2, CircleAlert, FileText, History, LoaderCircle, SearchCheck, Square, Trash2 } from 'lucide-react';
 import type { StockAIAnalysis } from '../lib/backend';
-import { conditionStatusLabel, evidenceLevelLabel, isResearchRunning, researchConditionValue, safeResearchURL, type ResearchClaim, type ResearchJob, type ResearchJobSummary, type ResearchReport, type ResearchRequest, type ResearchVerification } from '../lib/stock-research';
+import { conditionStatusLabel, evidenceLevelLabel, isResearchRunning, researchConditionValue, researchLevelLabel, safeResearchURL, type ResearchClaim, type ResearchJob, type ResearchJobSummary, type ResearchReport, type ResearchRequest, type ResearchVerification } from '../lib/stock-research';
 
 export function StockResearchOptions({ purpose, horizon, cost, onPurpose, onHorizon, onCost }: { purpose: ResearchRequest['purpose']; horizon: ResearchRequest['horizon']; cost: string; onPurpose: (value: ResearchRequest['purpose']) => void; onHorizon: (value: ResearchRequest['horizon']) => void; onCost: (value: string) => void }) {
 	return <div className="stock-research-options">
@@ -13,13 +13,29 @@ export function StockResearchOptions({ purpose, horizon, cost, onPurpose, onHori
 }
 
 export function StockResearchProgress({ job, onCancel }: { job: ResearchJob | null; onCancel: () => void }) {
+	const [now, setNow] = useState(() => Date.now());
+	const running = Boolean(job && isResearchRunning(job));
+	useEffect(() => {
+		if (!running) return;
+		const timer = window.setInterval(() => setNow(Date.now()), 1000);
+		return () => window.clearInterval(timer);
+	}, [running, job?.id]);
 	if (!job) return null;
-	const running = isResearchRunning(job);
+	const elapsed = formatElapsedTime(job.started_at, running ? now : Date.parse(job.completed_at || job.updated_at));
 	return <div className={`stock-research-progress ${job.status}`} role="status">
 		{running ? <LoaderCircle className="spin" size={17} /> : job.status === 'succeeded' ? <CheckCircle2 size={17} /> : <CircleAlert size={17} />}
-		<span>{job.message}{job.error ? `：${job.error}` : ''}</span>
+		<span className="stock-research-progress-message">{job.message}{job.error ? `：${job.error}` : ''}</span>
+		<strong className="stock-research-progress-elapsed">目前总耗时 {elapsed}</strong>
 		{running && <button type="button" onClick={onCancel} title="停止本次研究" aria-label="停止本次研究"><Square size={15} /></button>}
 	</div>;
+}
+
+function formatElapsedTime(startedAt: string, endAt: number) {
+	const started = Date.parse(startedAt);
+	if (!Number.isFinite(started) || !Number.isFinite(endAt)) return '计算中';
+	const seconds = Math.max(0, Math.floor((endAt - started) / 1000));
+	const minutes = Math.floor(seconds / 60);
+	return `${minutes}分${String(seconds % 60).padStart(2, '0')}秒`;
 }
 
 export function StockResearchHistory({ items, activeID, onOpen, onRemove }: { items: ResearchJobSummary[]; activeID: string; onOpen: (id: string) => void; onRemove: (id: string) => void }) {
@@ -41,7 +57,7 @@ export function StockResearchReportView({ analysis, view = 'research', verificat
 	if (!report) return null;
 	const openSource = (id: string) => { setTab('evidence'); setSourceID(id); };
 	return <div className="stock-research-report">
-		<header className="stock-research-report-header"><div><strong>{view === 'risk' ? '条件与执行边界' : view === 'expectation' ? '情景与后续核验' : 'AI研究判断'}</strong><span>证据{evidenceLevelLabel(report.evidence_level)} · {report.model || '当前模型'}</span></div><div role="tablist" aria-label="研究内容"><button role="tab" aria-selected={tab === 'research'} onClick={() => setTab('research')}>研判</button><button role="tab" aria-selected={tab === 'evidence'} onClick={() => setTab('evidence')}>证据 {report.sources.length}</button></div></header>
+		<header className="stock-research-report-header"><div><strong>{view === 'risk' ? '条件与执行边界' : view === 'expectation' ? '情景与后续核验' : 'AI研究判断'}</strong><span>{researchLevelLabel(report.analysis_level || report.request.analysis_level)} · 证据{evidenceLevelLabel(report.evidence_level)} · {report.model || '当前模型'}</span></div><div role="tablist" aria-label="研究内容"><button role="tab" aria-selected={tab === 'research'} onClick={() => setTab('research')}>研判</button><button role="tab" aria-selected={tab === 'evidence'} onClick={() => setTab('evidence')}>证据 {report.sources.length}</button></div></header>
 		{tab === 'evidence' ? <ResearchEvidence report={report} selectedID={sourceID} /> : <>
 			{view === 'research' && <><div className="stock-research-thesis"><h3>{report.headline}</h3><Claim claim={report.thesis} onSource={openSource} /><p><strong>核心分歧</strong>{report.main_conflict || '暂未形成明确的分歧判断'}</p></div>
 			<div className="stock-research-arguments"><section><h4>支持依据</h4>{report.support.length ? report.support.map((claim, i) => <Claim key={i} claim={claim} onSource={openSource} />) : <p>尚未取得足够支持依据</p>}</section><section><h4>反对依据</h4>{report.counter.length ? report.counter.map((claim, i) => <Claim key={i} claim={claim} onSource={openSource} />) : <p>未取得直接反证，不代表不存在风险</p>}</section></div>

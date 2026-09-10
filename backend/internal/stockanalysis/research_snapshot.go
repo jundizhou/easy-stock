@@ -29,6 +29,11 @@ func NormalizeResearchRequest(request ResearchRequest) (ResearchRequest, error) 
 		return request, err
 	}
 	request.Symbol = symbol.Canonical
+	level, validLevel := normalizeResearchLevel(request.AnalysisLevel)
+	if !validLevel {
+		return request, fmt.Errorf("analysis_level must be quantitative, quick, standard or deep")
+	}
+	request.AnalysisLevel = level
 	if request.Purpose == "" {
 		request.Purpose = "observe"
 	}

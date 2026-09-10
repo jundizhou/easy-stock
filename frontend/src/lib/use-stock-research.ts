@@ -15,6 +15,7 @@ export function useStockResearch(config: BackendConfig | null) {
 	const [verifying, setVerifying] = useState(false);
 	const [selectionVersion, setSelectionVersion] = useState(0);
 	const sequence = useRef(0);
+	const latestJob = useRef<ResearchJob | null>(null);
 	const refreshHistory = useCallback(async () => {
 		if (!config) return;
 		try { const response = await requestJSON<{ data: ResearchJobSummary[] }>(config, '/api/v1/stocks/research'); setHistory(response.data); }
@@ -32,7 +33,11 @@ export function useStockResearch(config: BackendConfig | null) {
 			try {
 				const response = await requestJSON<{ data: ResearchJob }>(config, `/api/v1/stocks/research/${selectedID}`, { signal: controller.signal });
 				if (controller.signal.aborted || currentSequence !== sequence.current) return;
-				setJob(response.data); setError(''); failures = 0;
+				if (!sameResearchJob(latestJob.current, response.data)) {
+					latestJob.current = response.data;
+					setJob(response.data);
+				}
+				setError(''); failures = 0;
 				if (isResearchRunning(response.data)) timer = setTimeout(poll, 1500);
 				else void refreshHistory();
 			} catch (reason) {
@@ -45,15 +50,16 @@ export function useStockResearch(config: BackendConfig | null) {
 		return () => { controller.abort(); if (timer) clearTimeout(timer); };
 	}, [config, selectedID, selectionVersion, refreshHistory]);
 
-	const open = useCallback((id: string) => { sequence.current++; setJob(null); setError(''); setSelectedID(id); setSelectionVersion((value) => value + 1); rememberSelection(id); }, []);
+	const open = useCallback((id: string) => { sequence.current++; latestJob.current = null; setJob(null); setError(''); setSelectedID(id); setSelectionVersion((value) => value + 1); rememberSelection(id); }, []);
 	const clear = useCallback(() => open(''), [open]);
 	const start = useCallback(async (request: ResearchRequest) => {
 		if (!config) throw new Error('后端尚未连接');
 		const current = ++sequence.current;
-		setStarting(true); setError(''); setJob(null); setSelectedID('');
+		setStarting(true); setError(''); latestJob.current = null; setJob(null); setSelectedID('');
 		try {
 			const response = await requestJSON<{ data: ResearchJob }>(config, '/api/v1/stocks/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
 			if (sequence.current !== current) return;
+			latestJob.current = response.data;
 			setJob(response.data); setSelectedID(response.data.id); rememberSelection(response.data.id); void refreshHistory();
 		} catch (reason) { if (sequence.current === current) setError(reason instanceof Error ? reason.message : '研究提交失败'); throw reason; }
 		finally { setStarting(false); }
@@ -82,4 +88,14 @@ export function useStockResearch(config: BackendConfig | null) {
 		finally { setVerifying(false); }
 	}, [config, job]);
 	return { job, history, error, starting, verifying, selectedID, start, open, clear, cancel, remove, verify, refreshHistory };
+}
+
+function sameResearchJob(previous: ResearchJob | null, next: ResearchJob) {
+	if (!previous || previous.id !== next.id) return false;
+	if (previous.status !== next.status || previous.stage !== next.stage || previous.message !== next.message || previous.updated_at !== next.updated_at || previous.completed_at !== next.completed_at || previous.error !== next.error) return false;
+	const previousAnalysis = previous.analysis;
+	const nextAnalysis = next.analysis;
+	if (Boolean(previousAnalysis) !== Boolean(nextAnalysis)) return false;
+	if (!previousAnalysis || !nextAnalysis) return true;
+	return previousAnalysis.analysis_id === nextAnalysis.analysis_id && previousAnalysis.generated_at === nextAnalysis.generated_at && previousAnalysis.scorecard.overall === nextAnalysis.scorecard.overall;
 }

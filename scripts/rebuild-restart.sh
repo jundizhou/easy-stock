@@ -138,7 +138,7 @@ stop_port "${FRONTEND_PORT}" "frontend"
 
 log "starting backend on ${BACKEND_ADDR}"
 start_detached "${BACKEND_SESSION}" \
-  "cd '${ROOT_DIR}' && echo \$\$ > '${BACKEND_PID_FILE}' && A_STOCK_ADDR='${BACKEND_ADDR}' A_STOCK_TOKEN='${TOKEN}' exec '${ROOT_DIR}/desktop/bin/easy-stock-backend' > '${BACKEND_LOG}' 2>&1"
+  "cd '${ROOT_DIR}' && echo \$\$ > '${BACKEND_PID_FILE}' && A_STOCK_ADDR='${BACKEND_ADDR}' A_STOCK_TOKEN='${TOKEN}' A_STOCK_RESEARCH_DB='${RUNTIME_DIR}/stock-research.db' exec '${ROOT_DIR}/desktop/bin/easy-stock-backend' > '${BACKEND_LOG}' 2>&1"
 
 wait_for_http "${BACKEND_URL}/api/health" "backend"
 

@@ -154,3 +154,25 @@ func TestResearchServicePersistsFailureAndRecoversWorkerPanic(t *testing.T) {
 		t.Fatal("poll payload duplicated full snapshot")
 	}
 }
+
+func TestResearchServiceQuantitativeCompletesWithoutAI(t *testing.T) {
+	store, err := OpenResearchStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := NewResearchService(store, func(_ context.Context, request ResearchRequest, _ ResearchPublisher) (Analysis, *ResearchSnapshot, error) {
+		return Analysis{Symbol: request.Symbol, AI: AISynthesisStatus{Status: "skipped"}}, nil, nil
+	})
+	defer service.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	job, err := service.Start(ctx, ResearchRequest{Symbol: "000930", AnalysisLevel: ResearchLevelQuantitative})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = service.Wait(ctx, job.ID)
+	if err != nil || job.Status != "succeeded" || job.Analysis.AI.Status == "ready" || job.Analysis.ResearchReport != nil {
+		t.Fatalf("quantitative completion = %+v, error = %v", job, err)
+	}
+}

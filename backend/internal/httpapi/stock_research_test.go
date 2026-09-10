@@ -38,7 +38,7 @@ func TestResearchAPIHistorySnapshotAndReportBoundChat(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	job, err := server.stockResearch.Wait(ctx, response.Data.ID)
 	if err != nil || job.Status != "succeeded" {
@@ -103,13 +103,13 @@ func TestStockResearchRecordsTokenUsageByModule(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	job, err := server.stockResearch.Wait(ctx, payload.Data.ID)
 	if err != nil || job.Status != "succeeded" {
 		t.Fatalf("job: %+v %v", job, err)
 	}
-	if len(server.tokenUsage.Entries) == 0 || server.tokenUsage.Entries[0].Module != "stock-analysis" || server.tokenUsage.Entries[0].Total != 650 {
+	if len(server.tokenUsage.Entries) == 0 || server.tokenUsage.Entries[0].Module != "stock-analysis" || server.tokenUsage.Entries[0].Total != 1150 {
 		t.Fatalf("token usage = %+v", server.tokenUsage.Entries)
 	}
 }
@@ -136,5 +136,19 @@ func TestResearchModelIdentityGuardPreservesOptions(t *testing.T) {
 	_, err := p.Prompt(context.Background(), "research")
 	if err == nil || len(gateway.promptOptions) != 1 || !gateway.promptOptions[0].DisableTools {
 		t.Fatal("model changed mid-call without guard")
+	}
+}
+
+func TestResearchPromptStageUsesTaskNotSharedJSONFields(t *testing.T) {
+	for _, tc := range []struct{ prompt, stage string }{
+		{"你是A股证据研究员。任务是独立提出需要核实的问题。核心判断、交易条件", "outline"},
+		{"你是A股快速研究员。核心判断 conditions", "quick"},
+		{"你是A股证据研究员。只基于输入证据形成“核心判断”。不输出交易条件", "core"},
+		{"你是A股交易条件整理器。核心判断 core_judgment conditions", "trade"},
+		{"你是A股研究决策器。核心判断 conditions\n[结构修复要求]", "repair"},
+	} {
+		if got := researchPromptStage(tc.prompt); got != tc.stage {
+			t.Errorf("stage = %q, want %q", got, tc.stage)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 import type { StockAIAnalysis } from './backend';
 
-export type ResearchRequest = { symbol: string; purpose: 'observe' | 'new_position' | 'holding'; horizon: 'short' | 'swing' | 'medium'; cost_price?: number };
+export type ResearchAnalysisLevel = 'quantitative' | 'quick' | 'standard' | 'deep';
+export type ResearchRequest = { symbol: string; purpose: 'observe' | 'new_position' | 'holding'; horizon: 'short' | 'swing' | 'medium'; cost_price?: number; analysis_level?: ResearchAnalysisLevel };
 export type ResearchSource = { id: string; kind: string; title: string; content: string; provider: string; url?: string; published_at?: string; captured_at: string; report_date?: string; time_status: string };
 export type ResearchClaim = { text: string; kind: string; source_ids: string[]; quote?: string };
 export type ResearchCondition = { id: string; text: string; metric: string; operator: string; anchor_id?: string; threshold?: number; window: string; source_ids: string[]; status: string };
@@ -12,6 +13,7 @@ export type ResearchReport = {
 	decision: { status: string; mode: string; horizon: string; new_position: string; existing_position: string; reason: string; price_plan?: { entry_anchor: string; stop_anchor: string; target_anchor?: string; reason: string; source_ids: string[] } | null };
 	baseline_relation: string; baseline_reason: string; snapshot_id: string; snapshot_version: number; prompt_version: string;
 	request: ResearchRequest; model: string; generated_at: string; cutoff_at: string; sources: ResearchSource[];
+	analysis_level?: ResearchAnalysisLevel;
 	anchors: Array<{ id: string; label: string; price: number; source_id: string; as_of: string }>;
 	questions: Array<{ question: string; why: string; tool: string; query: string; source_id?: string; status: string; outcome?: string }>;
 	attempts: Array<{ stage: string; duration_ms: number; prompt_bytes: number; response_bytes: number; error?: string }>;
@@ -24,6 +26,7 @@ export type ResearchJobSummary = Pick<ResearchJob, 'id' | 'request' | 'status' |
 
 export const isResearchRunning = (job?: Pick<ResearchJob, 'status'> | null) => !!job && (job.status === 'queued' || job.status === 'running');
 export const evidenceLevelLabel = (level: string) => ({ sufficient: '较充分', limited: '有限', insufficient: '不足' }[level] || '未评估');
+export const researchLevelLabel = (level?: ResearchAnalysisLevel) => ({ quantitative: '量化速览', quick: 'AI快速研判', standard: 'AI标准研判', deep: 'AI深度研究' }[level || 'deep'] || 'AI深度研究');
 export const conditionStatusLabel = (status: string) => ({ pending: '待观察', met: '已满足', not_met: '窗口结束未满足', not_yet: '尚未满足', unavailable: '数据不足', manual_review: '需人工核实' }[status] || '待观察');
 export function safeResearchURL(value?: string) {
 	try { const url = new URL(value || ''); return ['https:', 'http:'].includes(url.protocol) ? url.href : undefined; } catch { return undefined; }

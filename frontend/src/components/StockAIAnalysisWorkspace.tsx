@@ -37,11 +37,14 @@ import {
 	Trash2,
 	TrendingUp,
 	WalletCards,
+	X,
 	Zap,
 } from 'lucide-react';
 import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
+	AppSettings,
+	LLMProfile,
 	StockAIActionPriceZone,
 	StockAIAnalysis,
 	StockAIDataQuality,
@@ -66,7 +69,7 @@ import {
 	signedPercent,
 } from '../lib/stock-analysis';
 import { useStockResearch } from '../lib/use-stock-research';
-import { isResearchRunning, researchPlanText, type ResearchRequest } from '../lib/stock-research';
+import { isResearchRunning, researchPlanText, type ResearchAnalysisLevel, type ResearchRequest } from '../lib/stock-research';
 import { StockResearchHistory, StockResearchOptions, StockResearchProgress, StockResearchReportView } from './StockResearchReport';
 
 export type StockAIWorkspaceMode = 'analysis' | 'expectation' | 'risk';
@@ -101,17 +104,33 @@ const hotStockSidebarStorageKey = 'easy-stock.stock-ai-popular-sidebar-collapsed
 const directoryStorageTTL = 24 * 60 * 60 * 1000;
 const examples = ['600519', '300750', '002594', '601138', '688981'];
 
+const researchLevelOptions: Array<{ value: ResearchAnalysisLevel; title: string; description: string; coverage: string; tokens: string; time: string }> = [
+	{ value: 'quantitative', title: '量化速览', description: '只使用本地行情与规则计算，不调用 AI。', coverage: '无 AI 判断', tokens: '0 Token', time: '10～45 秒' },
+	{ value: 'quick', title: 'AI 快速研判', description: '用少量核心数据快速形成初步判断，不生成交易计划。', coverage: '基础覆盖', tokens: '约 2,000～6,000', time: '1～3 分钟' },
+	{ value: 'standard', title: 'AI 标准研判', description: '压缩行情与公告，分别生成核心判断和交易条件。', coverage: '中等覆盖', tokens: '约 6,000～16,000', time: '2～6 分钟' },
+	{ value: 'deep', title: 'AI 深度研究', description: '完整执行证据核验、核心判断和交易条件。', coverage: '最高覆盖', tokens: '约 20,000～50,000', time: '3～18 分钟' },
+];
+
 function readStoredValue(key: string) { try { return window.localStorage.getItem(key) || ''; } catch { return ''; } }
 function writeStoredValue(key: string, value: string) { try { window.localStorage.setItem(key, value); } catch { /* Backend research history remains available. */ } }
 
 type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
 type HotRankState = 'idle' | 'loading' | 'ready' | 'error';
+type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const reasoningOptions: Array<{ value: ReasoningEffort; label: string }> = [
+	{ value: 'none', label: '关闭思考' }, { value: 'minimal', label: '极简' }, { value: 'low', label: '低' },
+	{ value: 'medium', label: '中' }, { value: 'high', label: '高' }, { value: 'xhigh', label: '极高' }, { value: 'max', label: '最大' },
+];
 
 export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnalysis, onInitialAnalysisConsumed, onAskAI, onOpenSettings }: Props) {
 	const research = useStockResearch(config);
 	const [purpose, setPurpose] = useState<ResearchRequest['purpose']>('observe');
 	const [horizon, setHorizon] = useState<ResearchRequest['horizon']>('swing');
 	const [cost, setCost] = useState('');
+	const [researchLevel, setResearchLevel] = useState<ResearchAnalysisLevel>('deep');
+	const [levelDialogOpen, setLevelDialogOpen] = useState(false);
+	const [pendingAnalysisSymbol, setPendingAnalysisSymbol] = useState('');
 	const [query, setQuery] = useState(() => readStoredValue(symbolStorageKey));
 	const [analysis, setAnalysis] = useState<StockAIAnalysis | null>(null);
 	const [history, setHistory] = useState<AnalysisHistoryItem[]>(loadAnalysisHistory);
@@ -127,9 +146,52 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const [hotRankState, setHotRankState] = useState<HotRankState>('idle');
 	const [hotRankError, setHotRankError] = useState('');
 	const [hotStockSidebarCollapsed, setHotStockSidebarCollapsed] = useState(() => readStoredValue(hotStockSidebarStorageKey) === '1');
+	const [llmProfiles, setLLMProfiles] = useState<LLMProfile[]>([]);
+	const [activeLLMProfileID, setActiveLLMProfileID] = useState('');
+	const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
+	const [aiChoiceBusy, setAIChoiceBusy] = useState(false);
 	const exportRef = useRef<HTMLDivElement>(null);
 	const analysisRequestSequence = useRef(0);
 	const analysisAbortController = useRef<AbortController | null>(null);
+	const analysisRef = useRef<StockAIAnalysis | null>(null);
+	const lastRefreshKey = useRef(0);
+	analysisRef.current = analysis;
+
+	useEffect(() => {
+		if (!config) return;
+		let cancelled = false;
+		void Promise.all([
+			requestJSON<{ data: AppSettings }>(config, '/api/v1/settings'),
+			requestJSON<{ data: { reasoning_effort?: string } }>(config, '/api/v1/settings/agent'),
+		]).then(([settings, agent]) => {
+			if (cancelled) return;
+			setLLMProfiles(settings.data.llm_profiles || []);
+			setActiveLLMProfileID(settings.data.active_llm_profile_id || settings.data.llm_profiles?.[0]?.id || '');
+			const effort = agent.data.reasoning_effort as ReasoningEffort;
+			if (reasoningOptions.some((item) => item.value === effort)) setReasoningEffort(effort);
+		}).catch(() => undefined);
+		return () => { cancelled = true; };
+	}, [config, refreshKey]);
+
+	const switchResearchModel = async (profileID: string) => {
+		if (!config || !profileID || profileID === activeLLMProfileID || aiChoiceBusy) return;
+		setAIChoiceBusy(true);
+		try {
+			const response = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active_llm_profile_id: profileID }) });
+			setLLMProfiles(response.data.llm_profiles || []);
+			setActiveLLMProfileID(response.data.active_llm_profile_id || profileID);
+		} finally { setAIChoiceBusy(false); }
+	};
+
+	const switchResearchReasoning = async (next: ReasoningEffort) => {
+		if (!config || next === reasoningEffort || aiChoiceBusy) return;
+		setAIChoiceBusy(true);
+		try {
+			const response = await requestJSON<{ data: { reasoning_effort?: string } }>(config, '/api/v1/settings/agent', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reasoning_effort: next }) });
+			const saved = response.data.reasoning_effort as ReasoningEffort;
+			if (reasoningOptions.some((item) => item.value === saved)) setReasoningEffort(saved);
+		} finally { setAIChoiceBusy(false); }
+	};
 
 	const saveAnalysis = useCallback((item: StockAIAnalysis) => {
 		if (item.analysis_id) return;
@@ -177,9 +239,10 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	useEffect(() => {
 		if (!research.job) return;
 		setQuery(research.job.request.symbol); setPurpose(research.job.request.purpose); setHorizon(research.job.request.horizon); setCost(research.job.request.cost_price?.toString() || '');
+		if (research.job.request.analysis_level) setResearchLevel(research.job.request.analysis_level);
 	}, [research.job?.id]);
 
-	const runAnalysis = useCallback(async (rawSymbol: string) => {
+	const runAnalysis = useCallback(async (rawSymbol: string, selectedLevel: ResearchAnalysisLevel = researchLevel) => {
 		analysisAbortController.current?.abort();
 		analysisAbortController.current = null;
 		const sequence = analysisRequestSequence.current + 1;
@@ -203,13 +266,30 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 		writeStoredValue(symbolStorageKey, symbol);
 		try {
 			if (purpose === 'holding' && cost && (!(Number(cost) > 0) || !Number.isFinite(Number(cost)))) throw new Error('持仓成本须为正数');
-			await research.start({ symbol, purpose, horizon, ...(purpose === 'holding' && cost ? { cost_price: Number(cost) } : {}) });
+			await research.start({ symbol, purpose, horizon, analysis_level: selectedLevel, ...(purpose === 'holding' && cost ? { cost_price: Number(cost) } : {}) });
 		} catch (loadError) {
 			if (isAbortError(loadError) || analysisRequestSequence.current !== sequence) return;
 			setError(loadError instanceof Error ? loadError.message : '个股AI分析失败');
 			setState('error');
 		}
-	}, [config, directory, research.start, purpose, horizon, cost]);
+	}, [config, directory, research.start, purpose, horizon, cost, researchLevel]);
+
+	const requestAnalysis = useCallback((rawSymbol: string) => {
+		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
+		if (!symbol) {
+			setError(directory.length > 0 ? '未找到唯一匹配的股票，请从搜索结果中选择' : '请输入6位股票代码，例如 600519');
+			setState('error');
+			return;
+		}
+		if (!config) {
+			setError('后端尚未连接');
+			setState('error');
+			return;
+		}
+		setPendingAnalysisSymbol(symbol);
+		setResearchLevel('deep');
+		setLevelDialogOpen(true);
+	}, [analysis?.research_report, config, directory]);
 
 	useEffect(() => () => {
 		analysisAbortController.current?.abort();
@@ -262,13 +342,22 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	}, [loadHotRanks]);
 
 	useEffect(() => {
-		if (refreshKey <= 0 || !analysis?.symbol) return;
-		void runAnalysis(analysis.symbol);
-	}, [analysis?.symbol, refreshKey, runAnalysis]);
+		if (refreshKey <= 0 || lastRefreshKey.current === refreshKey) return;
+		lastRefreshKey.current = refreshKey;
+		const currentAnalysis = analysisRef.current;
+		if (!currentAnalysis?.symbol) return;
+		void runAnalysis(currentAnalysis.symbol, currentAnalysis.research_report?.analysis_level || currentAnalysis.research_report?.request.analysis_level || researchLevel);
+	}, [refreshKey, runAnalysis]);
 
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
-		void runAnalysis(query);
+		requestAnalysis(query);
+	};
+
+	const confirmResearchLevel = () => {
+		if (!pendingAnalysisSymbol) return;
+		setLevelDialogOpen(false);
+		void runAnalysis(pendingAnalysisSymbol, researchLevel);
 	};
 
 	const selectHistory = (item: AnalysisHistoryItem) => {
@@ -333,10 +422,11 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />
+			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} llmProfiles={llmProfiles} activeLLMProfileID={activeLLMProfileID} reasoningEffort={reasoningEffort} choiceBusy={aiChoiceBusy} onModelChange={(id) => void switchResearchModel(id)} onReasoningChange={(value) => void switchResearchReasoning(value)} />
+			{levelDialogOpen && <ResearchLevelDialog value={researchLevel} onChange={setResearchLevel} onCancel={() => setLevelDialogOpen(false)} onConfirm={confirmResearchLevel} />}
 			<StockResearchOptions purpose={purpose} horizon={horizon} cost={cost} onPurpose={setPurpose} onHorizon={setHorizon} onCost={setCost} />
 			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
-				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
+					<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => requestAnalysis(symbol)} />
 				<div className="stock-ai-main">
 					<StockResearchHistory items={research.history} activeID={research.selectedID} onOpen={(id) => { setAnalysis(null); setState('loading'); research.open(id); }} onRemove={(id) => { void research.remove(id).then((removed) => { if (removed && (analysis?.analysis_id === id || research.selectedID === id)) { setAnalysis(null); setState('idle'); setError(''); } }); }} />
 					<StockResearchProgress job={research.job} onCancel={() => void research.cancel()} />
@@ -368,11 +458,11 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 						<div className="stock-ai-error">
 							<CircleAlert size={22} />
 							<div><strong>分析没有完成</strong><span>{error}</span></div>
-							<button type="button" onClick={() => void runAnalysis(query)}><RefreshCw size={14} />重试</button>
+							<button type="button" onClick={() => requestAnalysis(query)}><RefreshCw size={14} />重试</button>
 						</div>
 					)}
 
-					{state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => void runAnalysis(symbol)} />}
+					{state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => requestAnalysis(symbol)} />}
 					{state !== 'loading' && analysis && (
 						<div className="stock-ai-result">
 							<div className="stock-ai-export-sheet" ref={exportRef}>
@@ -487,7 +577,7 @@ function AnalysisExportFooter({ analysis }: { analysis: StockAIAnalysis }) {
 	</footer>;
 }
 
-function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSubmit, loading }: {
+function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSubmit, loading, llmProfiles, activeLLMProfileID, reasoningEffort, choiceBusy, onModelChange, onReasoningChange }: {
 	query: string;
 	mode: StockAIWorkspaceMode;
 	directory: StockDirectoryEntry[];
@@ -495,6 +585,12 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 	onQuery: (value: string) => void;
 	onSubmit: (event: FormEvent) => void;
 	loading: boolean;
+	llmProfiles: LLMProfile[];
+	activeLLMProfileID: string;
+	reasoningEffort: ReasoningEffort;
+	choiceBusy: boolean;
+	onModelChange: (value: string) => void;
+	onReasoningChange: (value: ReasoningEffort) => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(0);
@@ -532,6 +628,10 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 			: `${directoryState === 'cached' ? '本机缓存' : '已缓存'} ${directory.length.toLocaleString('zh-CN')} 只A股 · 名称/代码均可搜索`;
 	return (
 		<header className="stock-ai-search-hero">
+			<div className="stock-ai-research-options">
+				<label><span>模型</span><select value={activeLLMProfileID} onChange={(event) => onModelChange(event.target.value)} disabled={choiceBusy || loading || !llmProfiles.length} aria-label="完整分析模型"><option value="">当前模型</option>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name} · {profile.model}</option>)}</select></label>
+				<label><span>思考</span><select value={reasoningEffort} onChange={(event) => onReasoningChange(event.target.value as ReasoningEffort)} disabled={choiceBusy || loading} aria-label="完整分析思考等级">{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+			</div>
 			<div>
 				<span><BrainCircuit size={15} />STOCK DECISION SYSTEM</span>
 				<h2>个股 AI 分析</h2>
@@ -556,6 +656,37 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 			</form>
 		</header>
 	);
+}
+
+function ResearchLevelDialog({ value, onChange, onCancel, onConfirm }: { value: ResearchAnalysisLevel; onChange: (value: ResearchAnalysisLevel) => void; onCancel: () => void; onConfirm: () => void }) {
+	const dialogRef = useRef<HTMLElement>(null);
+	useEffect(() => {
+		const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+			if (event.key === 'Escape') { event.preventDefault(); onCancel(); return; }
+			if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+			const currentIndex = researchLevelOptions.findIndex((option) => option.value === value);
+			const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? researchLevelOptions.length - 1 : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + researchLevelOptions.length) % researchLevelOptions.length;
+			event.preventDefault(); onChange(researchLevelOptions[nextIndex].value);
+		};
+		window.addEventListener('keydown', handleKeyDown);
+		const selected = dialogRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]');
+		selected?.focus();
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [onCancel, onChange, value]);
+	return <div className="stock-ai-level-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+		<section ref={dialogRef} className="stock-ai-level-dialog" role="dialog" aria-modal="true" aria-labelledby="stock-ai-level-title">
+			<header><div><span><Sparkles size={14} />ANALYSIS MODE</span><h2 id="stock-ai-level-title">选择分析深度</h2><p>不同级别会使用不同数量的行情、公告和研究步骤。</p></div><button type="button" onClick={onCancel} aria-label="关闭分析级别选择"><X size={17} /></button></header>
+			<div className="stock-ai-level-list" role="radiogroup" aria-label="分析级别">
+				{researchLevelOptions.map((option) => <button type="button" role="radio" tabIndex={value === option.value ? 0 : -1} aria-checked={value === option.value} className={value === option.value ? 'active' : ''} onClick={() => onChange(option.value)} key={option.value}>
+					<span className="stock-ai-level-radio" aria-hidden="true">{value === option.value ? <CheckCircle2 size={18} /> : <span />}</span>
+					<span className="stock-ai-level-copy"><strong>{option.title}{option.value === 'deep' && <em>默认</em>}</strong><small>{option.description}</small></span>
+					<span className="stock-ai-level-meta"><small>{option.coverage}</small><small>{option.tokens} · {option.time}</small></span>
+				</button>)}
+			</div>
+			<p className="stock-ai-level-note">Token 和耗时为估算值，实际结果取决于当前模型、思考等级、数据量和上游服务响应。级别越高表示证据覆盖更广，不代表绝对准确或收益确定。</p>
+			<footer><button type="button" className="secondary" onClick={onCancel}>取消</button><button type="button" onClick={onConfirm}><Sparkles size={14} />开始分析</button></footer>
+		</section>
+	</div>;
 }
 
 function stockMarketLabel(symbol: string) {

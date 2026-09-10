@@ -100,6 +100,17 @@ func (s *Server) logStockAnalysisStage(symbol, stage, status string, startedAt t
 	)
 }
 
+func (s *Server) logStockResearchModelCall(symbol string, level stockanalysis.ResearchLevel, stage string, startedAt time.Time, promptBytes, responseBytes int, err error) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	if err != nil {
+		s.logger.Printf("level=warn event=stock_research_model_call feature=stock-analysis symbol=%q analysis_level=%q stage=%q duration_ms=%d prompt_bytes=%d response_bytes=%d error=%q", symbol, level, stage, time.Since(startedAt).Milliseconds(), promptBytes, responseBytes, runtimelog.Redact(err.Error()))
+		return
+	}
+	s.logger.Printf("level=info event=stock_research_model_call feature=stock-analysis symbol=%q analysis_level=%q stage=%q duration_ms=%d prompt_bytes=%d response_bytes=%d", symbol, level, stage, time.Since(startedAt).Milliseconds(), promptBytes, responseBytes)
+}
+
 func (s *Server) logThemeEvidencePrompt(symbol string, stats stockanalysis.ThemeEvidencePromptStats) {
 	if s == nil || s.logger == nil {
 		return

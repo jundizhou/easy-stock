@@ -10,10 +10,11 @@ import (
 const ResearchPromptVersion = "stock-research-v2"
 
 type ResearchRequest struct {
-	Symbol    string   `json:"symbol"`
-	Purpose   string   `json:"purpose"`
-	Horizon   string   `json:"horizon"`
-	CostPrice *float64 `json:"cost_price,omitempty"`
+	Symbol        string        `json:"symbol"`
+	Purpose       string        `json:"purpose"`
+	Horizon       string        `json:"horizon"`
+	CostPrice     *float64      `json:"cost_price,omitempty"`
+	AnalysisLevel ResearchLevel `json:"analysis_level,omitempty"`
 }
 
 // Source text is evidence, not an instruction or a verified interpretation.
@@ -131,6 +132,29 @@ type ResearchSynthesis struct {
 	BaselineReason   string              `json:"baseline_reason"`
 }
 
+// ResearchCoreSynthesis and ResearchTradeConditions are kept separate at the
+// model boundary so the model does not have to produce one large nested JSON
+// object. ResearchSynthesis remains the persisted, backward-compatible shape.
+type ResearchCoreSynthesis struct {
+	Headline         string          `json:"headline"`
+	Thesis           ResearchClaim   `json:"thesis"`
+	Support          []ResearchClaim `json:"support"`
+	Counter          []ResearchClaim `json:"counter"`
+	Alternatives     []ResearchClaim `json:"alternatives"`
+	MainConflict     string          `json:"main_conflict"`
+	EvidenceLevel    string          `json:"evidence_level"`
+	Limitations      []string        `json:"limitations"`
+	BaselineRelation string          `json:"baseline_relation"`
+	BaselineReason   string          `json:"baseline_reason"`
+}
+
+type ResearchTradeConditions struct {
+	Conditions      []ResearchCondition `json:"conditions"`
+	InvalidationIDs []string            `json:"invalidation_ids"`
+	Scenarios       []ResearchScenario  `json:"scenarios"`
+	Decision        ResearchDecision    `json:"decision"`
+}
+
 type ResearchAttempt struct {
 	Stage         string `json:"stage"`
 	DurationMS    int64  `json:"duration_ms"`
@@ -153,6 +177,7 @@ type ResearchReport struct {
 	SnapshotVersion int                       `json:"snapshot_version"`
 	PromptVersion   string                    `json:"prompt_version"`
 	Request         ResearchRequest           `json:"request"`
+	AnalysisLevel   ResearchLevel             `json:"analysis_level"`
 	Model           string                    `json:"model"`
 	GeneratedAt     time.Time                 `json:"generated_at"`
 	CutoffAt        time.Time                 `json:"cutoff_at"`

@@ -66,7 +66,7 @@ func (s *ResearchService) Start(ctx context.Context, request ResearchRequest) (R
 	if err := s.store.Save(ctx, job); err != nil {
 		return job, err
 	}
-	runCtx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	runCtx, cancel := context.WithTimeout(context.Background(), ResearchTotalTimeout(request))
 	s.active[key] = activeResearch{id: job.ID, cancel: cancel}
 	s.wg.Add(1)
 	go s.execute(runCtx, key, job)
@@ -131,7 +131,7 @@ func (s *ResearchService) execute(ctx context.Context, key string, job ResearchJ
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		job.Status = "failed"
 		job.Stage = "failed"
-		job.Error = "研究超过12分钟总时限"
+		job.Error = fmt.Sprintf("研究超过%s总时限", formatResearchDuration(ResearchTotalTimeout(job.Request)))
 		job.Message = "研究超时，保留已完成的数据"
 	} else if ctx.Err() != nil {
 		job.Status = "cancelled"
@@ -142,6 +142,10 @@ func (s *ResearchService) execute(ctx context.Context, key string, job ResearchJ
 		job.Stage = "failed"
 		job.Error = err.Error()
 		job.Message = "研究未完成，已保存可用数据"
+	} else if job.Request.AnalysisLevel == ResearchLevelQuantitative && analysis.Symbol != "" {
+		job.Status = "succeeded"
+		job.Stage = "completed"
+		job.Message = "量化速览完成，未调用AI"
 	} else if analysis.AI.Status != "ready" {
 		job.Status = "degraded"
 		job.Stage = "completed"
@@ -159,6 +163,13 @@ func (s *ResearchService) execute(ctx context.Context, key string, job ResearchJ
 		s.initializationError = fmt.Errorf("保存研究结果失败：%w", saveErr)
 		s.mu.Unlock()
 	}
+}
+
+func formatResearchDuration(duration time.Duration) string {
+	if duration%time.Minute == 0 {
+		return fmt.Sprintf("%d分钟", int(duration/time.Minute))
+	}
+	return duration.String()
 }
 
 func (s *ResearchService) Wait(ctx context.Context, id string) (ResearchJob, error) {

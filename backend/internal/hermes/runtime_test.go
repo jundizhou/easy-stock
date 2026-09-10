@@ -88,6 +88,7 @@ func TestEmbeddedModelResponseErrorMapsProviderFailures(t *testing.T) {
 		{content: "HTTP 403: access denied", want: "模型权限"},
 		{content: "HTTP 429: rate limit exceeded", want: "额度"},
 		{content: "API call failed after 3 retries: All credentials are cooling down", want: "额度"},
+		{content: `{"error":{"code":"model_not_found","message":"unknown provider for model gpt-5.6-sol"}}`, want: "模型不可用"},
 		{content: "API call failed after 3 retries: HTTP 503: auth_unavailable: no auth available", want: "授权已失效"},
 		{content: "API call failed after 3 retries: HTTP 502", want: "上游模型调用失败"},
 	}

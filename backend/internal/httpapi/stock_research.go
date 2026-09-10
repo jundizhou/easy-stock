@@ -45,8 +45,16 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 		return analysis, snapshot, err
 	}
 	provisional := stockanalysis.QuantitativeOnly(analysis)
-	if err = publish("baseline", "量化快照已就绪，AI研究尚未完成", &provisional, snapshot); err != nil {
+	message := "量化快照已就绪，AI研究尚未完成"
+	if request.AnalysisLevel == stockanalysis.ResearchLevelQuantitative {
+		provisional.AI = stockanalysis.AISynthesisStatus{Status: "skipped", Message: "量化速览完成，未调用AI"}
+		message = provisional.AI.Message
+	}
+	if err = publish("baseline", message, &provisional, snapshot); err != nil {
 		return provisional, snapshot, err
+	}
+	if request.AnalysisLevel == stockanalysis.ResearchLevelQuantitative {
+		return provisional, snapshot, nil
 	}
 	if s.hermesGateway == nil || !s.hermesGateway.Status().Available || !s.hermesGateway.Status().Configured {
 		analysis.AI.Status = "unavailable"
@@ -60,7 +68,7 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 		model = values.LLM.Model
 		modelIdentity = s.stockResearchModelIdentity()
 	}
-	modelCtx, cancel := context.WithTimeout(ctx, 9*time.Minute)
+	modelCtx, cancel := context.WithTimeout(ctx, stockanalysis.ResearchTotalTimeout(request))
 	defer cancel()
 	baseline := analysis
 	var persistenceErr error
@@ -76,7 +84,9 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 	if promptGateway == nil {
 		promptGateway = s.hermesGateway
 	}
-	guarded := researchPrompter{prompter: promptGateway, consistent: func() bool {
+	guarded := researchPrompter{prompter: promptGateway, request: request, onCall: func(stage string, startedAt time.Time, promptBytes, responseBytes int, err error) {
+		s.logStockResearchModelCall(request.Symbol, request.AnalysisLevel, stage, startedAt, promptBytes, responseBytes, err)
+	}, consistent: func() bool {
 		if s.settingsStore == nil {
 			return true
 		}
@@ -113,6 +123,8 @@ func (s *Server) stockResearchModelIdentity() string {
 // Keep per-call time and model identity bounded without losing tool-free options.
 type researchPrompter struct {
 	prompter   hermes.Prompter
+	request    stockanalysis.ResearchRequest
+	onCall     func(string, time.Time, int, int, error)
 	consistent func() bool
 }
 
@@ -124,14 +136,35 @@ func (p researchPrompter) PromptWithOptions(ctx context.Context, prompt string, 
 	if !p.consistent() {
 		return hermes.PromptResult{}, fmt.Errorf("研究期间模型配置发生变化")
 	}
-	callCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	callCtx, cancel := context.WithTimeout(ctx, stockanalysis.ResearchStageTimeout(p.request))
 	defer cancel()
 	callCtx = hermes.WithUsageModule(callCtx, "stock-analysis")
+	startedAt := time.Now()
 	result, err := hermes.PromptUsingOptions(callCtx, p.prompter, prompt, options)
+	if p.onCall != nil {
+		p.onCall(researchPromptStage(prompt), startedAt, len([]byte(prompt)), len([]byte(result.Content)), err)
+	}
 	if !p.consistent() {
 		return hermes.PromptResult{}, fmt.Errorf("研究期间模型配置发生变化")
 	}
 	return result, err
+}
+
+func researchPromptStage(prompt string) string {
+	switch {
+	case strings.Contains(prompt, "[结构修复要求]"):
+		return "repair"
+	case strings.HasPrefix(prompt, "你是A股快速研究员"):
+		return "quick"
+	case strings.HasPrefix(prompt, "你是A股交易条件整理器"):
+		return "trade"
+	case strings.HasPrefix(prompt, "你是A股证据研究员。只基于输入证据形成"):
+		return "core"
+	case strings.HasPrefix(prompt, "你是A股证据研究员。任务是独立提出需要核实的问题"):
+		return "outline"
+	default:
+		return "quick"
+	}
 }
 
 func (s *Server) supplementStockResearch(ctx context.Context, snapshot stockanalysis.ResearchSnapshot, question stockanalysis.ResearchQuestion) ([]stockanalysis.ResearchSource, error) {

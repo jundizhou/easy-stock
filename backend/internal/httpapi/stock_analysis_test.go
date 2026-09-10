@@ -244,8 +244,8 @@ func TestStockAIAnalysisFullModeUsesCurrentModelWithToolFreeStages(t *testing.T)
 	if payload.Data.AI.Status != "ready" || payload.Data.Conclusion.Headline != "完整研判完成" {
 		t.Fatalf("full mode result = %+v", payload.Data)
 	}
-	if len(gateway.prompts) != 2 || len(gateway.promptOptions) != 2 {
-		t.Fatalf("full mode calls = prompts:%d options:%d, want two stages", len(gateway.prompts), len(gateway.promptOptions))
+	if len(gateway.prompts) != 3 || len(gateway.promptOptions) != 3 {
+		t.Fatalf("full mode calls = prompts:%d options:%d, want three stages", len(gateway.prompts), len(gateway.promptOptions))
 	}
 	for _, options := range gateway.promptOptions {
 		if !options.DisableTools || !options.Sandbox || !options.AutoApprove || len(options.Toolsets) != 0 {
