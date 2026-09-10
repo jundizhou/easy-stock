@@ -1,0 +1,98 @@
+/* Legacy light colors remain as var() fallbacks in each component. */
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--bg: #151719;
+	--surface: #1c1e21;
+	--surface-2: #222528;
+	--surface-3: #2b2e32;
+	--line: #44494f;
+	--line-soft: #32363b;
+	--text: #e7e9ec;
+	--muted: #b0b7c0;
+	--subtle: #949ea9;
+	--blue: #79b6fa;
+	--up: #ff7c86;
+	--up-soft: rgba(255, 124, 134, .12);
+	--down: #64d7aa;
+	--down-soft: rgba(100, 215, 170, .12);
+	--amber: #edc36e;
+	--purple: #c2a5f5;
+
+	--theme-text: var(--text);
+	--theme-muted: var(--muted);
+	--theme-subtle: var(--subtle);
+	--theme-on-emphasis: #ffffff;
+	--theme-surface: var(--surface);
+	--theme-surface-soft: var(--surface-2);
+	--theme-surface-muted: var(--surface-3);
+	--theme-surface-strong: #30363c;
+	--theme-line: var(--line);
+	--theme-line-soft: var(--line-soft);
+	--theme-shadow: rgba(0, 0, 0, .3);
+	--theme-overlay: rgba(0, 0, 0, .7);
+	--theme-glass: rgba(28, 30, 33, .95);
+
+	--theme-blue: var(--blue);
+	--theme-green: var(--down);
+	--theme-red: var(--up);
+	--theme-amber: var(--amber);
+	--theme-purple: var(--purple);
+	--theme-cyan: #6cd0d6;
+	--theme-blue-soft: #233348;
+	--theme-green-soft: #20382e;
+	--theme-red-soft: #402a30;
+	--theme-amber-soft: #3b3325;
+	--theme-purple-soft: #342c43;
+	--theme-cyan-soft: #22373b;
+	--theme-blue-line: #456b96;
+	--theme-green-line: #416d59;
+	--theme-red-line: #88505b;
+	--theme-amber-line: #7d6840;
+	--theme-purple-line: #6f598e;
+	--theme-cyan-line: #416d75;
+	--theme-blue-solid: #285e98;
+	--theme-green-solid: #286447;
+	--theme-red-solid: #9e3e4a;
+	--theme-amber-solid: #775b22;
+	--theme-purple-solid: #65498b;
+	--theme-cyan-solid: #28626c;
+}
+
+.theme-toggle {
+	flex: 0 0 42px;
+	width: 42px;
+	height: 42px;
+}
+
+.theme-toggle:focus-visible {
+	outline: 2px solid var(--blue);
+	outline-offset: 3px;
+}
+
+.top-actions,
+.top-actions .data-status,
+.top-actions .data-status > div {
+	min-width: 0;
+}
+
+.top-actions .icon-button,
+.top-actions .status-dot {
+	flex-shrink: 0;
+}
+
+.top-actions .data-status strong,
+.top-actions .data-status small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+	color: var(--text);
+}
+
+:root[data-theme="dark"] ::selection {
+	background: #355d83;
+	color: #ffffff;
+}

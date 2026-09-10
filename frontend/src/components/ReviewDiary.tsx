@@ -28,6 +28,7 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
+import { applyTheme } from '../lib/theme';
 
 type Props = {
 	config: BackendConfig | null;
@@ -685,6 +686,7 @@ function DailyViewpointSummary({ config, summary, regenerating, onRegenerate, on
 				useCORS: true,
 				windowWidth: 1600,
 				onclone: (_document, element) => {
+					applyTheme('light', _document);
 					element.classList.add('is-exporting');
 					if (modelReplacements.length > 0) replaceExportText(_document, element, modelReplacements);
 					if (authorMask) {

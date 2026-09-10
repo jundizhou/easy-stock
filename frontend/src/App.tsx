@@ -14,6 +14,7 @@ import {
 	Layers3,
 	LayoutDashboard,
 	LoaderCircle,
+	Moon,
 	Newspaper,
 	PanelLeftClose,
 	PanelLeftOpen,
@@ -24,6 +25,7 @@ import {
 	Settings,
 	ShieldAlert,
 	ShieldCheck,
+	Sun,
 	Target,
 	Wifi,
 	WalletCards,
@@ -71,6 +73,7 @@ import { StockAIAnalysisWorkspace, StockAIWorkspaceMode } from './components/Sto
 import { PortfolioInspectionWorkspace } from './components/PortfolioInspectionWorkspace';
 import { TokenUsageWorkspace } from './components/TokenUsageWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
+import { useTheme } from './lib/theme';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage';
@@ -84,6 +87,7 @@ const emptyStockPagination = (): ThemeScreenPagination => ({
 });
 
 export function App() {
+	const { theme, toggleTheme } = useTheme();
 	const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => {
 		if (window.location.hash === '#limit-up') return 'limit-up';
 		if (window.location.hash === '#mastery') return 'mastery';
@@ -727,6 +731,9 @@ export function App() {
 					</div>
 					<button type="button" className="icon-button" onClick={refreshAll} aria-label="刷新全部数据">
 						<RefreshCw size={18} aria-hidden="true" />
+					</button>
+					<button type="button" className="icon-button theme-toggle" onClick={toggleTheme} aria-label={theme === 'light' ? '切换至深色模式' : '切换至浅色模式'} title={theme === 'light' ? '切换至深色模式' : '切换至浅色模式'} aria-pressed={theme === 'dark'}>
+						{theme === 'light' ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}
 					</button>
 				</div>
 			</header>

@@ -388,7 +388,7 @@ function EmotionLineChart({ points }: { points: MarketEmotionPoint[] }) {
 		<div className="emotion-chart-wrap">
 			<svg className="emotion-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`最近${points.length}个交易日市场情绪分折线图`}>
 				<defs>
-					<linearGradient id="emotionAreaFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2476d2" stopOpacity="0.24" /><stop offset="1" stopColor="#2476d2" stopOpacity="0.02" /></linearGradient>
+					<linearGradient id="emotionAreaFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--blue)" stopOpacity="0.24" /><stop offset="1" stopColor="var(--blue)" stopOpacity="0.02" /></linearGradient>
 				</defs>
 				{grid.map((score) => <g key={score}><line x1={left} x2={width - right} y1={y(score)} y2={y(score)} /><text x={left - 8} y={y(score) + 4} textAnchor="end">{score}</text></g>)}
 				{area && <path className="emotion-area" d={area} />}

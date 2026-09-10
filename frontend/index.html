@@ -3,7 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#092c3f" />
+    <meta name="theme-color" content="#ffffff" />
+    <style>
+      html { background: #ffffff; color-scheme: light; }
+      html[data-theme="dark"] { background: #151719; color-scheme: dark; }
+    </style>
+    <script>
+      // Apply the saved appearance before the application or styles load.
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem('easy-stock.theme.v1') === 'dark' ? 'dark' : 'light';
+      } catch {
+        document.documentElement.dataset.theme = 'light';
+      }
+    </script>
     <meta name="description" content="easy-stock：AI 时代的 A 股行情分析与投研工作台" />
     <link rel="icon" type="image/svg+xml" href="/easy-stock-mark.svg" />
     <link rel="apple-touch-icon" href="/easy-stock-mark-180.png" />

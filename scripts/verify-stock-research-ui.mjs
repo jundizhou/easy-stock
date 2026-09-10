@@ -11,6 +11,10 @@ const sample = JSON.parse(await fs.readFile(process.env.RESEARCH_CASE_FILE || '.
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, permissions: ['clipboard-read', 'clipboard-write'], acceptDownloads: true });
+context.setDefaultTimeout(20000);
+if (process.env.RESEARCH_UI_THEME === 'dark') {
+  await context.addInitScript(() => localStorage.setItem('easy-stock.theme.v1', 'dark'));
+}
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
@@ -78,6 +82,7 @@ try {
   const download = await downloadWait;
   await download.saveAs(path.join(output, 'export.png'));
   assert.ok((await fs.stat(path.join(output, 'export.png'))).size > 10000);
+  if (process.env.RESEARCH_UI_THEME === 'dark') assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
   await page.getByRole('button', { name: '继续推演', exact: true }).click();
   await page.waitForURL('**/#ai');
   await page.waitForFunction(() => Object.values(localStorage).some((value) => value.includes('"analysis_id":"ui-fixture-report"')));
@@ -92,6 +97,10 @@ try {
   await page.getByLabel('研究周期', { exact: true }).selectOption('medium');
   await page.getByLabel('股票名称或代码', { exact: true }).fill('600519');
   await page.getByRole('button', { name: '完整分析', exact: true }).click();
+  const depthDialog = page.getByRole('dialog', { name: '选择分析深度' });
+  await depthDialog.waitFor();
+  await page.screenshot({ path: path.join(output, 'analysis-depth.png'), fullPage: false });
+  await depthDialog.getByRole('button', { name: '开始分析', exact: true }).click();
   await page.getByRole('button', { name: '停止本次研究', exact: true }).waitFor();
   assert.equal(submitted.purpose, 'holding'); assert.equal(submitted.horizon, 'medium'); assert.equal(submitted.cost_price, 123.45);
   await page.reload(); await page.getByRole('button', { name: '停止本次研究', exact: true }).click();

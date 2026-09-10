@@ -399,7 +399,10 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 				scale: Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2),
 				useCORS: true,
 				windowWidth: 1600,
-				onclone: (_document, element) => element.classList.add('is-exporting'),
+				onclone: (_document, element) => {
+					_document.documentElement.dataset.theme = 'light';
+					element.classList.add('is-exporting');
+				},
 			});
 			const blob = await canvasToPNGBlob(canvas);
 			const href = URL.createObjectURL(blob);

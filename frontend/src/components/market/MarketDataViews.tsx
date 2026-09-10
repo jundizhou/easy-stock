@@ -251,7 +251,7 @@ function MarginBalanceChart({ items }: { items: MarketMarginPoint[] }) {
 	};
 	return <div className="market-margin-chart-wrap">
 		<svg className="market-margin-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="融资融券余额折线图">
-			<defs><linearGradient id="marginBalanceArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2476d2" stopOpacity=".18" /><stop offset="1" stopColor="#2476d2" stopOpacity=".01" /></linearGradient></defs>
+			<defs><linearGradient id="marginBalanceArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--blue)" stopOpacity=".18" /><stop offset="1" stopColor="var(--blue)" stopOpacity=".01" /></linearGradient></defs>
 			{Array.from({ length: 5 }, (_, index) => {
 				const ratio = index / 4;
 				const y = top + ratio * plotHeight;

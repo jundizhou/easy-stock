@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { installRuntimeLogging } from './lib/runtime-log';
 import './styles.css';
+import './theme.css';
 
 installRuntimeLogging();
 
