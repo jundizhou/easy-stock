@@ -3,7 +3,7 @@
   "description": "easy-stock AI A-share research desktop application",
   "author": "easy-stock contributors",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "main.cjs",
   "scripts": {
     "dev": "node scripts/ensure-hermes-runtime.mjs && ELECTRON_RENDERER_URL=http://127.0.0.1:20073 electron .",
