@@ -6,7 +6,29 @@ export type BackendConfig = {
   token: string;
 };
 
-export type TokenUsageSummary = { rows: Array<{ date: string; module: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }>; modules: string[]; total: { prompt_tokens: number; completion_tokens: number; total_tokens: number } };
+export type TokenUsageSummary = {
+	rows: Array<{
+		date: string;
+		module: string;
+		model: string;
+		prompt_tokens: number;
+		completion_tokens: number;
+		total_tokens: number;
+		estimated_prompt_tokens: number;
+		estimated_completion_tokens: number;
+		estimated_total_tokens: number;
+	}>;
+	modules: string[];
+	models: string[];
+	total: {
+		prompt_tokens: number;
+		completion_tokens: number;
+		total_tokens: number;
+		estimated_prompt_tokens: number;
+		estimated_completion_tokens: number;
+		estimated_total_tokens: number;
+	};
+};
 
 export type BackendBridge = {
   getBackendConfig: () => Promise<BackendConfig>;

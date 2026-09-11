@@ -17,11 +17,15 @@ import (
 )
 
 type tokenUsageEntry struct {
-	Date       string `json:"date"`
-	Module     string `json:"module"`
-	Prompt     int    `json:"prompt_tokens"`
-	Completion int    `json:"completion_tokens"`
-	Total      int    `json:"total_tokens"`
+	Date                string `json:"date"`
+	Module              string `json:"module"`
+	Model               string `json:"model,omitempty"`
+	Prompt              int    `json:"prompt_tokens"`
+	Completion          int    `json:"completion_tokens"`
+	Total               int    `json:"total_tokens"`
+	EstimatedPrompt     int    `json:"estimated_prompt_tokens"`
+	EstimatedCompletion int    `json:"estimated_completion_tokens"`
+	EstimatedTotal      int    `json:"estimated_total_tokens"`
 }
 type tokenUsageStore struct {
 	mu      sync.Mutex
@@ -30,9 +34,11 @@ type tokenUsageStore struct {
 }
 type tokenUsageRequest struct {
 	Module     string `json:"module"`
+	Model      string `json:"model,omitempty"`
 	Prompt     int    `json:"prompt_tokens"`
 	Completion int    `json:"completion_tokens"`
 	Total      int    `json:"total_tokens"`
+	Estimated  bool   `json:"estimated"`
 }
 
 func newTokenUsageStore(settingsPath string) *tokenUsageStore {
@@ -58,16 +64,28 @@ func (s *tokenUsageStore) add(req tokenUsageRequest) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	date := time.Now().Format("2006-01-02")
+	model := strings.TrimSpace(req.Model)
+	apply := func(entry *tokenUsageEntry) {
+		if req.Estimated {
+			entry.EstimatedPrompt += req.Prompt
+			entry.EstimatedCompletion += req.Completion
+			entry.EstimatedTotal += req.Total
+			return
+		}
+		entry.Prompt += req.Prompt
+		entry.Completion += req.Completion
+		entry.Total += req.Total
+	}
 	for i := range s.Entries {
-		if s.Entries[i].Date == date && s.Entries[i].Module == req.Module {
-			s.Entries[i].Prompt += req.Prompt
-			s.Entries[i].Completion += req.Completion
-			s.Entries[i].Total += req.Total
+		if s.Entries[i].Date == date && s.Entries[i].Module == req.Module && s.Entries[i].Model == model {
+			apply(&s.Entries[i])
 			s.persist()
 			return
 		}
 	}
-	s.Entries = append(s.Entries, tokenUsageEntry{Date: date, Module: req.Module, Prompt: req.Prompt, Completion: req.Completion, Total: req.Total})
+	entry := tokenUsageEntry{Date: date, Module: req.Module, Model: model}
+	apply(&entry)
+	s.Entries = append(s.Entries, entry)
 	s.persist()
 }
 func (s *tokenUsageStore) persist() {
@@ -164,6 +182,7 @@ func (g *tokenUsageGateway) record(ctx context.Context, prompt string, result he
 		return
 	}
 	usage := result.Usage
+	estimated := usage.TotalTokens <= 0
 	if usage.TotalTokens <= 0 {
 		usage = estimateTokenUsage(prompt, result.Content)
 	}
@@ -174,11 +193,11 @@ func (g *tokenUsageGateway) record(ctx context.Context, prompt string, result he
 	if module == "" {
 		module = "other"
 	}
-	g.store.add(tokenUsageRequest{Module: module, Prompt: usage.PromptTokens, Completion: usage.CompletionTokens, Total: usage.TotalTokens})
+	g.store.add(tokenUsageRequest{Module: module, Model: usage.Model, Prompt: usage.PromptTokens, Completion: usage.CompletionTokens, Total: usage.TotalTokens, Estimated: estimated})
 }
 
-// Some compatible providers omit usage from their response. Keep the statistic
-// useful with a conservative text estimate until provider usage is available.
+// Some compatible providers omit usage from their response. Estimates stay in
+// dedicated fields so they never inflate the real provider-reported usage.
 func estimateTokenUsage(prompt, content string) hermes.TokenUsage {
 	promptTokens := estimateTextTokens(prompt)
 	completionTokens := estimateTextTokens(content)
@@ -204,44 +223,61 @@ func (s *Server) tokenUsageRecord(w http.ResponseWriter, r *http.Request) {
 func (s *Server) tokenUsageSummary(w http.ResponseWriter, r *http.Request) {
 	from, to := r.URL.Query().Get("from"), r.URL.Query().Get("to")
 	module := r.URL.Query().Get("module")
+	model := r.URL.Query().Get("model")
 	period := r.URL.Query().Get("period")
 	s.tokenUsage.mu.Lock()
 	defer s.tokenUsage.mu.Unlock()
 	type row struct {
-		Date       string `json:"date"`
-		Module     string `json:"module"`
-		Prompt     int    `json:"prompt_tokens"`
-		Completion int    `json:"completion_tokens"`
-		Total      int    `json:"total_tokens"`
+		Date                string `json:"date"`
+		Module              string `json:"module"`
+		Model               string `json:"model"`
+		Prompt              int    `json:"prompt_tokens"`
+		Completion          int    `json:"completion_tokens"`
+		Total               int    `json:"total_tokens"`
+		EstimatedPrompt     int    `json:"estimated_prompt_tokens"`
+		EstimatedCompletion int    `json:"estimated_completion_tokens"`
+		EstimatedTotal      int    `json:"estimated_total_tokens"`
 	}
 	rows := []row{}
 	index := map[string]int{}
 	modules := map[string]bool{}
+	models := map[string]bool{}
 	total := row{}
 	for _, e := range s.tokenUsage.Entries {
-		if from != "" && e.Date < from || to != "" && e.Date > to || module != "" && module != e.Module {
+		if from != "" && e.Date < from || to != "" && e.Date > to || module != "" && module != e.Module || model != "" && model != e.Model {
 			continue
 		}
 		date := e.Date
 		if period == "month" && len(date) >= 7 {
 			date = date[:7]
 		}
-		key := date + "\x00" + e.Module
+		key := date + "\x00" + e.Module + "\x00" + e.Model
 		if existing, ok := index[key]; ok {
 			rows[existing].Prompt += e.Prompt
 			rows[existing].Completion += e.Completion
 			rows[existing].Total += e.Total
+			rows[existing].EstimatedPrompt += e.EstimatedPrompt
+			rows[existing].EstimatedCompletion += e.EstimatedCompletion
+			rows[existing].EstimatedTotal += e.EstimatedTotal
 		} else {
 			index[key] = len(rows)
-			rows = append(rows, row{date, e.Module, e.Prompt, e.Completion, e.Total})
+			rows = append(rows, row{
+				Date: date, Module: e.Module, Model: e.Model,
+				Prompt: e.Prompt, Completion: e.Completion, Total: e.Total,
+				EstimatedPrompt: e.EstimatedPrompt, EstimatedCompletion: e.EstimatedCompletion, EstimatedTotal: e.EstimatedTotal,
+			})
 		}
 		modules[e.Module] = true
+		models[e.Model] = true
 		total.Prompt += e.Prompt
 		total.Completion += e.Completion
 		total.Total += e.Total
+		total.EstimatedPrompt += e.EstimatedPrompt
+		total.EstimatedCompletion += e.EstimatedCompletion
+		total.EstimatedTotal += e.EstimatedTotal
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Date < rows[j].Date })
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"rows": rows, "modules": sortedKeys(modules), "total": total}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"rows": rows, "modules": sortedKeys(modules), "models": sortedKeys(models), "total": total}})
 }
 func sortedKeys(values map[string]bool) []string {
 	out := make([]string, 0, len(values))

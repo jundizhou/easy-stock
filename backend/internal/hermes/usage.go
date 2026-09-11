@@ -7,9 +7,10 @@ import (
 )
 
 type TokenUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	Model            string `json:"model,omitempty"`
 }
 
 type usageModuleContextKey struct{}
@@ -51,19 +52,26 @@ func usageFromValue(value any) TokenUsage {
 			}
 		}
 	}
-	prompt := numberValue(object["prompt_tokens"])
-	if prompt == 0 {
-		prompt = numberValue(object["input_tokens"])
-	}
-	completion := numberValue(object["completion_tokens"])
-	if completion == 0 {
-		completion = numberValue(object["output_tokens"])
-	}
-	total := numberValue(object["total_tokens"])
+	prompt := firstNumberValue(object, "prompt_tokens", "input_tokens", "input", "prompt")
+	completion := firstNumberValue(object, "completion_tokens", "output_tokens", "output", "completion")
+	total := firstNumberValue(object, "total_tokens", "total")
 	if total == 0 {
 		total = prompt + completion
 	}
-	return TokenUsage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total}
+	if total <= 0 {
+		return TokenUsage{}
+	}
+	model, _ := object["model"].(string)
+	return TokenUsage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total, Model: strings.TrimSpace(model)}
+}
+
+func firstNumberValue(object map[string]any, keys ...string) int {
+	for _, key := range keys {
+		if value := numberValue(object[key]); value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func numberValue(value any) int {

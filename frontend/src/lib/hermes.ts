@@ -6,6 +6,19 @@ export type HermesStreamResult = {
 	hermesSessionID: string;
 };
 
+export type HermesUsage = {
+	prompt_tokens: number;
+	completion_tokens: number;
+	total_tokens: number;
+	model: string;
+};
+
+export type HermesClarifyRequest = {
+	question: string;
+	choices: string[];
+	requestID: string;
+};
+
 export type HermesStreamRequest = {
 	config: BackendConfig;
 	prompt: string;
@@ -16,8 +29,9 @@ export type HermesStreamRequest = {
 	onSession?: (sessionID: string) => void;
 	onStatus?: (status: { kind: string; text?: string }) => void;
 	module?: string;
-	onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+	onUsage?: (usage: HermesUsage) => void;
 	onApproval?: (approval: { patternKey?: string; description?: string; command?: string }, respond: (choice: 'once' | 'session' | 'deny') => void) => void;
+	onClarify?: (request: HermesClarifyRequest, respond: (answer: string) => void) => void;
 	signal?: AbortSignal;
 };
 
@@ -81,6 +95,10 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 		const respondApproval = (sessionID: string, choice: 'once' | 'session' | 'deny') => {
 			if (socket.readyState !== WebSocket.OPEN) return;
 			send('approval.respond', { session_id: sessionID, choice: choice === 'once' ? 'once' : choice });
+		};
+		const respondClarify = (requestID: string, answer: string) => {
+			if (socket.readyState !== WebSocket.OPEN) return;
+			send('clarify.respond', { request_id: requestID, answer });
 		};
 		const submitPrompt = () => {
 			submitRequestID = send('prompt.submit', { session_id: liveSessionID, text: request.prompt, ...(request.analysisID ? { analysis_id: request.analysisID } : {}) });
@@ -174,6 +192,16 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				}, (choice) => respondApproval(sessionID, choice));
 				return;
 			}
+			if (type === 'clarify.request') {
+				const payload = (frame.params?.payload && typeof frame.params.payload === 'object' ? frame.params.payload : {}) as Record<string, unknown>;
+				const requestID = stringValue(payload.request_id);
+				if (!requestID) return;
+				const choices = Array.isArray(payload.choices)
+					? payload.choices.map((choice) => stringValue(choice)).filter(Boolean)
+					: [];
+				request.onClarify?.({ question: stringValue(payload.question), choices, requestID }, (answer) => respondClarify(requestID, answer));
+				return;
+			}
 			if (type === 'status.update') {
 				const payload = (frame.params?.payload && typeof frame.params.payload === 'object' ? frame.params.payload : frame.params) as Record<string, unknown>;
 				request.onStatus?.({ kind: stringValue(payload.kind) || 'status', text: stringValue(payload.text) });
@@ -182,8 +210,10 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 			if (type === 'message.complete') {
 				const rawUsage = (frame.params?.payload && typeof frame.params.payload === 'object' ? frame.params.payload : frame.params) as Record<string, unknown>;
 				const usage = (rawUsage.usage && typeof rawUsage.usage === 'object' ? rawUsage.usage : rawUsage) as Record<string, unknown>;
-				const prompt_tokens = Number(usage.prompt_tokens || usage.input_tokens || 0); const completion_tokens = Number(usage.completion_tokens || usage.output_tokens || 0); const total_tokens = Number(usage.total_tokens || prompt_tokens + completion_tokens);
-				if (total_tokens > 0) request.onUsage?.({ prompt_tokens, completion_tokens, total_tokens });
+				const prompt_tokens = firstPositiveNumber(usage.prompt_tokens, usage.input_tokens, usage.input, usage.prompt);
+				const completion_tokens = firstPositiveNumber(usage.completion_tokens, usage.output_tokens, usage.output, usage.completion);
+				const total_tokens = firstPositiveNumber(usage.total_tokens, usage.total) || (prompt_tokens + completion_tokens);
+				if (total_tokens > 0) request.onUsage?.({ prompt_tokens, completion_tokens, total_tokens, model: stringValue(usage.model) });
 				const status = eventText(frame, 'status');
 				const content = (eventText(frame, 'content') || eventText(frame, 'text') || streamed).trim();
 				if (status === 'error' || status === 'failed') {
@@ -224,4 +254,12 @@ function eventText(frame: RPCFrame, key: string) {
 
 function stringValue(value: unknown) {
 	return typeof value === 'string' ? value : '';
+}
+
+function firstPositiveNumber(...values: unknown[]) {
+	for (const value of values) {
+		const parsed = Number(value);
+		if (Number.isFinite(parsed) && parsed > 0) return parsed;
+	}
+	return 0;
 }
