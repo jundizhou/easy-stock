@@ -3252,10 +3252,12 @@ a:focus-visible {
 	gap: 14px;
 	padding: 16px 20px 0;
 	overflow-y: auto;
+	min-height: 0;
 }
 
 .settings-security-note,
 .settings-section {
+	min-width: 0;
 	border: 1px solid var(--line);
 	border-radius: 12px;
 	background: var(--theme-surface, #ffffff);
@@ -3373,13 +3375,13 @@ a:focus-visible {
 .mcp-secret-map > div > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid var(--theme-blue-line, #a9c7e5); border-radius: 7px; background: var(--theme-surface-soft, #f6faff); color: var(--theme-blue, #175ea9); font-size: 11px; font-weight: 650; cursor: pointer; }
 .agent-settings-heading > button:hover,
 .mcp-secret-map > div > button:hover { background: var(--theme-blue-soft, #eaf4ff); }
-.skill-settings-list { display: grid; max-height: 250px; border: 1px solid var(--line); border-radius: 9px; background: var(--theme-surface, #ffffff); overflow-y: auto; }
-.skill-setting-item { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px !important; min-height: 54px; padding: 10px 11px; border-bottom: 1px solid var(--line-soft); cursor: pointer; }
+.skill-settings-list { display: grid; grid-auto-rows: max-content; align-content: start; max-height: 250px; border: 1px solid var(--line); border-radius: 9px; background: var(--theme-surface, #ffffff); overflow-y: auto; }
+.skill-setting-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px !important; min-height: 54px; padding: 10px 11px; border-bottom: 1px solid var(--line-soft); cursor: pointer; overflow: hidden; }
 .skill-setting-item:last-child { border-bottom: 0; }
 .skill-setting-item:hover { background: var(--theme-surface, #f8fbff); }
 .skill-setting-item > span { display: grid; gap: 3px; min-width: 0; }
 .skill-setting-item strong { overflow-wrap: anywhere; color: var(--text); font-size: 12px; }
-.skill-setting-item small { color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+.skill-setting-item small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .settings-section .skill-setting-item > input,
 .settings-section .mcp-server-card input[type="checkbox"],
 .settings-section .mcp-parallel-toggle > input { width: 16px; min-height: 16px; height: 16px; padding: 0; accent-color: var(--theme-blue, #2476d2); cursor: pointer; }
