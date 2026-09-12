@@ -35,19 +35,27 @@ type SnapshotProvider interface {
 // KlineLoader 按代码拉取日 K（由 httpapi 的主备 K 线链路注入）。
 type KlineLoader func(ctx context.Context, symbol string, limit int) ([]foundation.KLine, error)
 
+// ConceptLookup 批量返回代码到概念列表的映射（来自股票概念目录）。
+type ConceptLookup func(ctx context.Context, symbols []string) (map[string][]string, error)
+
 // Service 是策略选股执行引擎。
 type Service struct {
 	snapshots SnapshotProvider
 	loadKLine KlineLoader
+	// concepts 可选：注入后为命中结果补充所属概念标签。
+	concepts ConceptLookup
 }
 
-// NewService 构造引擎。两个依赖均不可为空。
-func NewService(snapshots SnapshotProvider, loadKLine KlineLoader) (*Service, error) {
+// NewService 构造引擎。前两个依赖不可为空，概念目录可选。
+func NewService(snapshots SnapshotProvider, loadKLine KlineLoader, concepts ConceptLookup) (*Service, error) {
 	if snapshots == nil || loadKLine == nil {
 		return nil, errors.New("screener service requires snapshot provider and kline loader")
 	}
-	return &Service{snapshots: snapshots, loadKLine: loadKLine}, nil
+	return &Service{snapshots: snapshots, loadKLine: loadKLine, concepts: concepts}, nil
 }
+
+// maxHitConcepts 是单只命中结果附带的概念数上限。
+const maxHitConcepts = 3
 
 // hitAcc 累计一只股票在多个策略下的命中信息。
 type hitAcc struct {
@@ -194,6 +202,28 @@ func (s *Service) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		return hits[i].Amount > hits[j].Amount
 	})
+	// 概念标签：目录不可用时静默跳过，不影响选股主流程。
+	if s.concepts != nil && len(hits) > 0 {
+		symbols := make([]string, 0, len(hits))
+		for _, hit := range hits {
+			symbols = append(symbols, hit.Symbol)
+		}
+		lookupCtx, lookupCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer lookupCancel()
+		if conceptMap, lookupErr := s.concepts(lookupCtx, symbols); lookupErr == nil {
+			for i := range hits {
+				if concepts := conceptMap[hits[i].Symbol]; len(concepts) > 0 {
+					if len(concepts) > maxHitConcepts {
+						concepts = concepts[:maxHitConcepts]
+					}
+					hits[i].Concepts = concepts
+				}
+			}
+		} else {
+			result.Warnings = append(result.Warnings, "概念目录不可用，结果未附概念标签")
+		}
+	}
+
 	result.Hits = hits
 	result.Matched = len(hits)
 	result.ElapsedMs = time.Since(started).Milliseconds()

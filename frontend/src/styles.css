@@ -8097,3 +8097,16 @@ circle.down-fill { fill: var(--down); }
 @media (max-width: 1100px) {
 	.scr-strategy-grid { grid-template-columns: 1fr; }
 }
+
+/* ─────────── 概念维度（梯队标签云 / 个股概念 / 选股概念列 / 自选概念） ─────────── */
+.limit-concept-cloud { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 10px; }
+.limit-concept-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--amber); font-size: 11px; }
+.limit-concept-tag em { color: var(--muted); font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; }
+.limit-concept-tag.hot { border-color: var(--amber); background: rgba(245, 158, 11, 0.1); }
+.limit-stock-concepts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.limit-stock-concept { padding: 2px 7px; border-radius: 999px; background: var(--surface-3, var(--surface)); border: 1px solid var(--line-soft); color: var(--muted); font-size: 10px; white-space: nowrap; }
+.scr-concepts { display: flex; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+.scr-concept { padding: 2px 7px; border-radius: 999px; background: rgba(245, 158, 11, 0.09); color: var(--amber); font-size: 10.5px; white-space: nowrap; }
+.scr-missing { color: var(--subtle); }
+.wb-quote-concepts { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
+.wb-quote-concepts em { padding: 1px 6px; border-radius: 999px; background: rgba(245, 158, 11, 0.09); color: var(--amber); font-size: 9.5px; font-style: normal; white-space: nowrap; }

@@ -449,7 +449,7 @@ func NewServer(config any) *Server {
 	// 策略选股引擎：复用东财全市场快照与主备 K 线链路。
 	if screenerSvc, screenerErr := screener.NewService(eastMoneyClient, func(ctx context.Context, symbol string, limit int) ([]foundation.KLine, error) {
 		return s.loadKLine(ctx, symbol, "day", limit)
-	}); screenerErr == nil {
+	}, s.lookupStockConcepts); screenerErr == nil {
 		s.screenerService = screenerSvc
 	}
 	s.routes()
@@ -630,6 +630,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/stocks/chanpy-analysis", s.chanScreenerAnalyze)
 	s.mux.HandleFunc("GET /api/v1/stocks/chan-screen-status", s.chanScreenerStatus)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
+	s.mux.HandleFunc("GET /api/v1/stocks/concepts", s.stockConceptsHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)

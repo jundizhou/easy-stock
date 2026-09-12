@@ -245,6 +245,7 @@ export function ScreenerWorkspace({ config, onOpenStockAnalysis }: Props) {
 										<th>换手</th>
 										<th>量比</th>
 										<th>流通市值</th>
+										<th>所属概念</th>
 										<th>命中策略与详情</th>
 									</tr>
 								</thead>
@@ -284,6 +285,7 @@ function ScreenerRow({ hit, index, nameOf, onOpen }: { hit: ScreenerHit; index: 
 			<td className="scr-num">{hit.turnover_rate > 0 ? `${hit.turnover_rate.toFixed(1)}%` : '--'}</td>
 			<td className="scr-num">{hit.volume_ratio > 0 ? hit.volume_ratio.toFixed(1) : '--'}</td>
 			<td className="scr-num">{hit.float_cap_yi > 0 ? `${hit.float_cap_yi.toFixed(0)} 亿` : '--'}</td>
+			<td>{(hit.concepts?.length ?? 0) > 0 ? <div className="scr-concepts">{hit.concepts?.map((concept) => <span className="scr-concept" key={concept}>{concept}</span>)}</div> : <span className="scr-missing">--</span>}</td>
 			<td>
 				<div className="scr-tags">
 					{hit.strategies.map((id) => (

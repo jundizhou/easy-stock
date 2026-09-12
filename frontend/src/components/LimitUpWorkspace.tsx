@@ -449,6 +449,40 @@ function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNo
 	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
 }
 
+/** 聚合一个梯队层级内所有股票的概念，按命中股数降序（对标概念标签云）。 */
+function levelConceptCloud(levels: LimitUpLadderLevel[], top = 12): Array<{ name: string; count: number }> {
+	const counter = new Map<string, number>();
+	for (const level of levels) {
+		for (const stock of level.stocks ?? []) {
+			const seen = new Set<string>();
+			for (const concept of stock.raw_concepts ?? []) {
+				const name = concept.trim();
+				if (!name || seen.has(name)) continue;
+				seen.add(name);
+				counter.set(name, (counter.get(name) ?? 0) + 1);
+			}
+		}
+	}
+	return [...counter.entries()]
+		.map(([name, count]) => ({ name, count }))
+		.sort((left, right) => right.count - left.count)
+		.slice(0, top);
+}
+
+function ConceptCloud({ tags }: { tags: Array<{ name: string; count: number }> }) {
+	if (tags.length === 0) return null;
+	const max = tags[0].count;
+	return (
+		<div className="limit-concept-cloud">
+			{tags.map((tag) => (
+				<span className={`limit-concept-tag ${tag.count >= Math.max(2, max * 0.6) ? 'hot' : ''}`} key={tag.name}>
+					{tag.name}<em>{tag.count}</em>
+				</span>
+			))}
+		</div>
+	);
+}
+
 function LadderRows({ levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
 	const [collapsedLevels, setCollapsedLevels] = useState<Set<number>>(() => new Set([1]));
 
@@ -481,8 +515,9 @@ function LadderRows({ levels, tradeDate, compact = false, showCurrentChange = fa
 						</div>
 						<ChevronDown size={17} aria-hidden="true" />
 					</summary>
-									<div className="limit-stock-grid">
-										{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
+					<ConceptCloud tags={levelConceptCloud([level])} />
+					<div className="limit-stock-grid">
+						{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
 					</div>
 				</details>
 			))}
@@ -513,6 +548,11 @@ function LadderStockChip({ stock, compact, showCurrentChange, onSelect, onSelect
 			</div>
 			<div className="limit-stock-theme"><span>主炒</span><strong>{primaryTheme}</strong>{stock.theme_confidence > 0 && <em>{Math.round(stock.theme_confidence * 100)}%</em>}</div>
 			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{secondary}</em></div>
+			{(stock.raw_concepts?.length ?? 0) > 0 && (
+				<div className="limit-stock-concepts">
+					{stock.raw_concepts.slice(0, compact ? 2 : 4).map((concept) => <span className="limit-stock-concept" key={concept}>{concept}</span>)}
+				</div>
+			)}
 			{!compact ? <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><button type="button" className="limit-billboard-button" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button></div> : <button type="button" className="limit-billboard-button compact" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>}
 		</article>
 	);

@@ -322,6 +322,7 @@ export type ScreenerHit = {
 	strategies: string[];
 	details?: Record<string, string>;
 	indicators?: Record<string, number>;
+	concepts?: string[];
 };
 
 export type ScreenerResult = {

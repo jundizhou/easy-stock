@@ -106,7 +106,7 @@ func fakeKlines(ctx context.Context, symbol string, limit int) ([]foundation.KLi
 }
 
 func TestRunSnapshotStrategiesFilterAndMatch(t *testing.T) {
-	svc, err := NewService(fakeSnapshots{rows: snapshotRows()}, fakeKlines)
+	svc, err := NewService(fakeSnapshots{rows: snapshotRows()}, fakeKlines, nil)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestRunSnapshotStrategiesFilterAndMatch(t *testing.T) {
 }
 
 func TestRunExcludeSTAndSuspended(t *testing.T) {
-	svc, _ := NewService(fakeSnapshots{rows: snapshotRows()}, fakeKlines)
+	svc, _ := NewService(fakeSnapshots{rows: snapshotRows()}, fakeKlines, nil)
 	result, err := svc.Run(context.Background(), Request{
 		StrategyIDs: []string{"vol_surge_up"},
 		Options:     Options{ExcludeST: true, MinAmountYi: 0.1},
@@ -154,7 +154,7 @@ func TestRunKlineStrategyWithUniverseCap(t *testing.T) {
 			Close: 10, ChangePercent: 1, Amount: float64(10-i) * 1e8, TurnoverRate: 2,
 		})
 	}
-	svc, _ := NewService(fakeSnapshots{rows: rows}, fakeKlines)
+	svc, _ := NewService(fakeSnapshots{rows: rows}, fakeKlines, nil)
 	result, err := svc.Run(context.Background(), Request{
 		StrategyIDs: []string{"ma_bull_align"},
 		Options:     Options{KlineUniverseLimit: 5},
@@ -180,7 +180,7 @@ func TestRunKlineStrategyWithUniverseCap(t *testing.T) {
 }
 
 func TestRunRejectsUnknownAndEmptyStrategies(t *testing.T) {
-	svc, _ := NewService(fakeSnapshots{rows: snapshotRows()}, fakeKlines)
+	svc, _ := NewService(fakeSnapshots{rows: snapshotRows()}, fakeKlines, nil)
 	if _, err := svc.Run(context.Background(), Request{StrategyIDs: []string{"nope"}}); err == nil {
 		t.Fatal("unknown strategy should error")
 	}

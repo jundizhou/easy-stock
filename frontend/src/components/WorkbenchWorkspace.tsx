@@ -136,6 +136,7 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 
 	const [quoteSymbols, setQuoteSymbols] = useState<string[]>(() => readStoredQuoteSymbols());
 	const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+	const [quoteConcepts, setQuoteConcepts] = useState<Record<string, string[]>>({});
 	const [quoteState, setQuoteState] = useState<LoadState>('idle');
 	const [quoteUpdatedAt, setQuoteUpdatedAt] = useState('');
 	const [quoteInput, setQuoteInput] = useState('');
@@ -282,6 +283,25 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 		} catch {
 			setQuoteState('error');
 		}
+	}, [config, quoteSymbols]);
+
+	// 自选股概念标签：随自选列表变化批量拉取（目录在东财客户端内缓存 3 分钟）。
+	useEffect(() => {
+		if (!config || quoteSymbols.length === 0) {
+			setQuoteConcepts({});
+			return;
+		}
+		let cancelled = false;
+		void (async () => {
+			try {
+				const payload = await requestJSON<{ data: Record<string, string[]> }>(
+					config,
+					`/api/v1/stocks/concepts?symbols=${encodeURIComponent(quoteSymbols.join(','))}&limit=3`,
+				);
+				if (!cancelled) setQuoteConcepts(payload.data ?? {});
+			} catch { /* 概念标签加载失败不影响行情展示 */ }
+		})();
+		return () => { cancelled = true; };
 	}, [config, quoteSymbols]);
 
 	const refreshAll = useCallback(async () => {
@@ -775,7 +795,14 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 									const quote = quotes[symbol];
 									return (
 										<div className="wb-quote-row" key={symbol}>
-											<span className="wb-quote-name"><strong>{quote?.name || '—'}</strong><small>{symbol}</small></span>
+											<span className="wb-quote-name">
+												<strong>{quote?.name || '—'}</strong><small>{symbol}</small>
+												{(quoteConcepts[symbol] ?? []).length > 0 && (
+													<span className="wb-quote-concepts">
+														{quoteConcepts[symbol].slice(0, 2).map((concept) => <em key={concept}>{concept}</em>)}
+													</span>
+												)}
+											</span>
 											<span className="wb-quote-price">{formatPrice(quote?.price)}</span>
 											<span className={`wb-quote-change ${toneForValue(quote?.change_percent)}`}>{formatPercent(quote?.change_percent)}</span>
 											<span className="wb-quote-actions">

@@ -72,6 +72,8 @@ type Hit struct {
 	Strategies    []string           `json:"strategies"`
 	Details       map[string]string  `json:"details,omitempty"`
 	Indicators    map[string]float64 `json:"indicators,omitempty"`
+	// Concepts 是该股所属概念（最多 3 个，来自股票概念目录）。
+	Concepts []string `json:"concepts,omitempty"`
 }
 
 // Result 是一次选股运行的输出。
