@@ -24,6 +24,12 @@ type IndustryMomentumSource interface {
 	IndustryMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error)
 }
 
+// ConceptMomentumSource supplies EastMoney concept boards, used to keep the
+// theme layer on today's data while the Kaipanla daily table lags.
+type ConceptMomentumSource interface {
+	ConceptMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error)
+}
+
 type IndustryConstituentSource interface {
 	IndustryStocks(ctx context.Context, industryCode string, limit int) ([]foundation.BoardStock, foundation.SourceMeta, error)
 }
@@ -32,14 +38,24 @@ type RadarProvider struct {
 	source            RadarSnapshotSource
 	industry          IndustryMomentumSource
 	industryStocks    IndustryConstituentSource
+	industryBreadth   IndustryMomentumSource
+	concepts          ConceptMomentumSource
 	fallback          RadarFallback
 	quotes            QuoteProvider
+	limitUp           LimitUpProvider
 	now               func() time.Time
 	fallbackFill      int
 	strengthTTL       time.Duration
 	strengthMu        sync.Mutex
 	strengthAttemptAt time.Time
 	strengthCache     map[string]themeStrengthScore
+	limitUpMu         sync.Mutex
+	limitUpFetchedAt  time.Time
+	limitUpStats      map[string]industryLimitUpStats
+	boardMu           sync.Mutex
+	boardFetchedAt    time.Time
+	boardIndustry     *boardIndex
+	boardCombined     *boardIndex
 	industryLeaderMu  sync.RWMutex
 	industryLeaders   map[string]radarIndustryLeader
 }
@@ -48,6 +64,9 @@ type RadarProviderConfig struct {
 	Now                 func() time.Time
 	IndustryMomentum    IndustryMomentumSource
 	IndustryStocks      IndustryConstituentSource
+	IndustryBreadth     IndustryMomentumSource
+	ConceptMomentum     ConceptMomentumSource
+	LimitUp             LimitUpProvider
 	FallbackFillLimit   int
 	RealtimeStrengthTTL time.Duration
 }
@@ -66,7 +85,8 @@ func NewRadarProvider(source RadarSnapshotSource, fallback RadarFallback, quotes
 		strengthTTL = 10 * time.Minute
 	}
 	return &RadarProvider{
-		source: source, industry: config.IndustryMomentum, industryStocks: config.IndustryStocks, fallback: fallback, quotes: quotes, now: now,
+		source: source, industry: config.IndustryMomentum, industryStocks: config.IndustryStocks, industryBreadth: config.IndustryBreadth,
+		concepts: config.ConceptMomentum, fallback: fallback, quotes: quotes, limitUp: config.LimitUp, now: now,
 		fallbackFill: fallbackFill, strengthTTL: strengthTTL,
 		strengthCache: map[string]themeStrengthScore{}, industryLeaders: map[string]radarIndustryLeader{},
 	}

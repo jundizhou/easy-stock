@@ -13,9 +13,12 @@ type MarketIndexSnapshot struct {
 	Price         float64    `json:"price"`
 	Change        float64    `json:"change"`
 	ChangePercent float64    `json:"change_percent"`
-	TradeTime     time.Time  `json:"trade_time,omitempty"`
-	Status        string     `json:"status"`
-	Meta          SourceMeta `json:"meta"`
+	// Amount 为指数当日成交额（元）。上证+深证相加即为「两市成交额」。
+	// 部分市场（海外指数）该字段可能为 0，前端需按 0 视为未知处理。
+	Amount    float64    `json:"amount"`
+	TradeTime time.Time  `json:"trade_time,omitempty"`
+	Status    string     `json:"status"`
+	Meta      SourceMeta `json:"meta"`
 }
 
 type MarketIndexSeries struct {

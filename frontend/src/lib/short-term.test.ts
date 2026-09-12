@@ -169,16 +169,199 @@ function stock(symbol: string, name: string, changePercent: number, amount: numb
 	};
 }
 
-function makeHistory(symbol: string, changes: number[], amount: number): KLine[] {
+function makeHistory(symbol: string, changes: number[], amount: number, options: { turnover?: number } = {}): KLine[] {
 	let close = 10;
 	return changes.map((change, index) => {
 		const previous = close;
 		close = previous * (1 + change / 100);
 		const time = new Date(Date.UTC(2026, 0, index + 1)).toISOString();
+		// 涨停日按「收盘封死」形态生成（close == high），与真实涨停 K 线一致；
+		// 非涨停日保留 1% 上影线。
+		const high = change >= 10 ? close : Math.max(previous, close) * 1.01;
 		return {
-			symbol, time, open: previous, high: Math.max(previous, close) * 1.01,
+			symbol, time, open: previous, high,
 			low: Math.min(previous, close) * 0.99, close, volume: 1_000_000,
-			amount, turnover_rate: 5, change_percent: change, meta,
+			amount, turnover_rate: options.turnover ?? 5, change_percent: change, meta,
 		};
 	});
+}
+
+// 缠论结构维度的语义是「结构是否支持继续领涨」，与 czsc 的多空分不同：
+// 前者关心高位动能是否衰竭，后者只回答看多看空。
+describe('limit-up event archive', () => {
+	it('uses archived event dates over the daily-return approximation', () => {
+		const map = themeMap([stock('600001.SH', '事件确认股', 5, 200_000_000)], []);
+		// 日K 涨幅达到阈值且封板，但事件库只确认其中一天涨停：以事件为准。
+		const histories = {
+			'600001.SH': makeHistory('600001.SH', [...Array(18).fill(0), 10, 10], 200_000_000),
+		};
+		const coverage = new Set(histories['600001.SH'].map((line) => line.time.slice(0, 10)));
+		const withArchive = buildThemeStocks(map, {}, histories, {}, {
+			'600001.SH': { limitDates: new Set([[...coverage][0]]), coveredDates: new Set([...coverage].slice(0, 18)) },
+		});
+		const withoutArchive = buildThemeStocks(map, {}, histories);
+		// 覆盖窗口不足 5 天：仍视为无档案，回退近似判定为 2 连板。
+		expect(withArchive[0].metrics.max_limit_streak_20d).toBe(2);
+		expect(withoutArchive[0].metrics.max_limit_streak_20d).toBe(2);
+
+		// 覆盖天数足够时，事件库确认只有 1 天涨停 → 连板高度以档案为准。
+		const limitDatesSet = new Set([[...coverage][18]]);
+		const fullCoverage = buildThemeStocks(map, {}, histories, {}, {
+			'600001.SH': { limitDates: limitDatesSet, coveredDates: coverage },
+		});
+		expect(fullCoverage[0].metrics.limit_events_covered).toBe(true);
+		expect(fullCoverage[0].metrics.max_limit_streak_20d).toBe(1);
+		expect(fullCoverage[0].confidence).toBeGreaterThan(withoutArchive[0].confidence);
+	});
+
+	it('flags near-limit closes without sealing as non-limit days', () => {
+		const map = themeMap([stock('000001.SZ', '大阳未封板', 5, 100_000_000)], []);
+		const rises = [...Array(23).fill(0), 9.8, 0];
+		const histories = { '000001.SZ': makeHistory('000001.SZ', rises, 100_000_000) };
+		const result = buildThemeStocks(map, {}, histories);
+		// 9.8% 大阳线带 1% 上影线：涨幅达标但未封板，不计入涨停序列。
+		expect(result[0].metrics.max_limit_streak_20d).toBe(0);
+	});
+});
+
+describe('chan structure dimension', () => {
+	it('scores above-pivot uptrend structure higher than below-pivot downtrend', () => {
+		const strong = buildThemeStocks(
+			themeMap([stock('600001.SH', '结构强势股', 6, 500_000_000)]),
+			{},
+			{ '600001.SH': makeHistory('600001.SH', [...Array(20).fill(0), 6], 500_000_000) },
+			{ '600001.SH': chanAnalysis({ zsState: '中枢上方', biDirection: '向上', progress: 0.4 }) },
+		)[0];
+		const weak = buildThemeStocks(
+			themeMap([stock('600001.SH', '结构弱势股', 6, 500_000_000)]),
+			{},
+			{ '600001.SH': makeHistory('600001.SH', [...Array(20).fill(0), 6], 500_000_000) },
+			{ '600001.SH': chanAnalysis({ zsState: '中枢下方', biDirection: '向下', progress: 0.4 }) },
+		)[0];
+
+		expect(strong.structure.available).toBe(true);
+		expect(strong.structure.score).toBeGreaterThan(weak.structure.score);
+		expect(strong.leader_score).toBeGreaterThan(weak.leader_score);
+	});
+
+	it('penalises a top divergence even when the pivot position is still strong', () => {
+		const withoutDivergence = buildThemeStocks(
+			themeMap([stock('600002.SH', '无背驰', 5, 400_000_000)]),
+			{},
+			{ '600002.SH': makeHistory('600002.SH', [...Array(20).fill(0), 5], 400_000_000) },
+			{ '600002.SH': chanAnalysis({ zsState: '中枢上方', biDirection: '向上', progress: 0.4 }) },
+		)[0];
+		const withDivergence = buildThemeStocks(
+			themeMap([stock('600002.SH', '顶背驰', 5, 400_000_000)]),
+			{},
+			{ '600002.SH': makeHistory('600002.SH', [...Array(20).fill(0), 5], 400_000_000) },
+			{ '600002.SH': chanAnalysis({ zsState: '中枢上方', biDirection: '向上', progress: 0.4, divergence: { kind: '顶背驰', decay: 0.3, price: 12 } }) },
+		)[0];
+
+		expect(withDivergence.structure.score).toBeLessThan(withoutDivergence.structure.score);
+		expect(withDivergence.structure.reasons.some((item) => item.includes('顶背驰'))).toBe(true);
+	});
+
+	it('discounts a late-stage uptrend stroke that is nearly finished', () => {
+		const early = buildThemeStocks(
+			themeMap([stock('600003.SH', '笔初段', 4, 300_000_000)]),
+			{},
+			{ '600003.SH': makeHistory('600003.SH', [...Array(20).fill(0), 4], 300_000_000) },
+			{ '600003.SH': chanAnalysis({ zsState: '中枢上方', biDirection: '向上', progress: 0.3 }) },
+		)[0];
+		const late = buildThemeStocks(
+			themeMap([stock('600003.SH', '笔末段', 4, 300_000_000)]),
+			{},
+			{ '600003.SH': makeHistory('600003.SH', [...Array(20).fill(0), 4], 300_000_000) },
+			{ '600003.SH': chanAnalysis({ zsState: '中枢上方', biDirection: '向上', progress: 0.95 }) },
+		)[0];
+
+		expect(late.structure.score).toBeLessThan(early.structure.score);
+		expect(late.structure.reasons.some((item) => item.includes('接近笔终点'))).toBe(true);
+	});
+
+	it('leaves the leadership score untouched when no chan result is available', () => {
+		const map = themeMap([stock('600004.SH', '无缠论', 5, 300_000_000)]);
+		const histories = { '600004.SH': makeHistory('600004.SH', [...Array(20).fill(0), 5], 300_000_000) };
+		const withoutChan = buildThemeStocks(map, {}, histories)[0];
+		const withNullChan = buildThemeStocks(map, {}, histories, { '600004.SH': null })[0];
+
+		expect(withoutChan.structure.available).toBe(false);
+		expect(withoutChan.leader_score).toBe(withNullChan.leader_score);
+		expect(withoutChan.breakdown.structure).toBe(0);
+	});
+
+	it('adjusts the server-supplied rank score by structure instead of ignoring it', () => {
+		const ranked = { ...stock('600010.SH', '全池龙头', 2, 300_000_000), rank_score: 70, rank_role: '核心候选' as const };
+		const build = (analysis: ReturnType<typeof chanAnalysis> | null) => buildThemeStocks(
+			themeMap([ranked]),
+			{},
+			{ '600010.SH': makeHistory('600010.SH', [...Array(20).fill(0), 2], 300_000_000) },
+			{ '600010.SH': analysis },
+		)[0];
+
+		const neutral = build(null);
+		expect(neutral.leader_score).toBe(70);
+
+		const supported = build(chanAnalysis({ zsState: '中枢上方', biDirection: '向上', progress: 0.3 }));
+		expect(supported.leader_score).toBeGreaterThan(70);
+
+		const pressured = build(chanAnalysis({ zsState: '中枢下方', biDirection: '向下', progress: 0.3 }));
+		expect(pressured.leader_score).toBeLessThan(70);
+	});
+
+	it('reports availability gaps explicitly instead of a generic warning', () => {
+		const complete = buildThemeStocks(
+			themeMap([withLimitData(stock('600005.SH', '数据完整', 5, 300_000_000))]),
+			{},
+			{ '600005.SH': makeHistory('600005.SH', [...Array(20).fill(0), 5], 300_000_000) },
+		)[0];
+		expect(complete.availability.complete).toBe(true);
+
+		const noTurnover = buildThemeStocks(
+			themeMap([withLimitData(stock('600006.SH', '缺换手', 5, 300_000_000))]),
+			{},
+			{ '600006.SH': makeHistory('600006.SH', [...Array(20).fill(0), 5], 300_000_000, { turnover: 0 }) },
+		)[0];
+		expect(noTurnover.availability.complete).toBe(false);
+		expect(noTurnover.availability.missing).toContain('换手率');
+		expect(noTurnover.risks.some((item) => item.includes('换手率') && item.includes('缺失'))).toBe(true);
+	});
+});
+
+// withLimitData 补上涨停事件字段，让 hasExactLimitData 为真。
+function withLimitData<T extends ReturnType<typeof stock>>(item: T) {
+	return { ...item, limit_up_streak: 1, limit_up_days: 1, limit_up_count: 1, last_limit_date: '2026-01-05' };
+}
+
+// chanAnalysis 构造一份最小可用的缠论结果，只填本组测试关心的结构字段。
+function chanAnalysis(options: {
+	zsState: string;
+	biDirection: string;
+	progress: number;
+	divergence?: { kind: string; decay: number; price: number };
+}) {
+	return {
+		symbol: '600001.SH',
+		freq: '日线',
+		generated_at: '2026-01-24T00:00:00Z',
+		elapsed_ms: 1200,
+		range: { start: '2026-01-01', end: '2026-01-24', bars: 240 },
+		structure: {
+			counts: { bars: 240, fx: 12, bi: 6, zs: 2 },
+			last_close: 12,
+			fx: [], bi: [], zs: [],
+			current_bi: {
+				direction: options.biDirection, start: { time: '2026-01-10', price: 10 },
+				end: { time: '2026-01-24', price: 12 }, bars: 8, power: 2, slope: 0.25,
+				is_sure: true, progress: options.progress, sure: true,
+			},
+			zs_position: { state: options.zsState, zone: { start: '', end: '', zg: 11, zd: 10, gg: 11.5, dd: 9.5, amplitude: 15 }, note: '' },
+			divergence: options.divergence
+				? [{ direction: '向上', kind: options.divergence.kind, time: '2026-01-24', price: options.divergence.price, prev_slope: 0.4, slope: 0.2, decay: options.divergence.decay }]
+				: [],
+		},
+		summary: { score: 55, stance: '中性', tone: 'flat', reasons: [], conclusion: '' },
+		signals: [],
+	} as unknown as Parameters<typeof buildThemeStocks>[3] extends Record<string, infer V> ? NonNullable<V> : never;
 }

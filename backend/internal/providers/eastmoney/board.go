@@ -223,7 +223,9 @@ func (c *Client) boardStocksFromBaseURL(ctx context.Context, baseURL string, boa
 
 	start := time.Now()
 	var payload boardStocksPayload
-	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
+	// Host rotation is owned by BoardStocks (it records which mirror served the
+	// response in the returned meta), so this request stays on the given host.
+	if err := c.getJSONWithRetrySingleHost(ctx, requestURL, &payload); err != nil {
 		return nil, err
 	}
 	if payload.RC != 0 {

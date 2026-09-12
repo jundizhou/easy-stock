@@ -7,13 +7,17 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/chananalysis"
+	"easy-stock/backend/internal/dailyanalysis"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
 	"easy-stock/backend/internal/portfolioinspection"
+	"easy-stock/backend/internal/providers/xueqiu"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/strategy/inflection"
+	"easy-stock/backend/internal/tradejournal"
 )
 
 type RealtimeProvider interface {
@@ -118,17 +122,22 @@ type Config struct {
 	HotStocks            HotStockProvider
 	FuturesPosition      FuturesPositionProvider
 	MarketOverview       MarketOverviewProvider
+	Xueqiu               *xueqiu.Client
 	Inflection           InflectionEvaluator
 	ReviewDBPath         string
 	PortfolioDBPath      string
 	MarketEmotionDBPath  string
 	ThemeRadarDBPath     string
+	DailyAnalysisDBPath  string
+	TradeJournalDBPath   string
 	DuanxianxiaBaseURL   string
 	WeChatAPIURL         string
 	ReviewHTTP           *http.Client
 	ReviewStore          *review.Store
 	PortfolioStore       *portfolioinspection.Store
 	MarketEmotionStore   *marketemotion.Store
+	DailyAnalysisStore   *dailyanalysis.Store
+	TradeJournalStore    *tradejournal.Store
 	ReviewImporter       ReviewImporter
 	SettingsPath         string
 	SettingsStore        *appsettings.Store
@@ -137,6 +146,7 @@ type Config struct {
 	RemoteDailySync      *review.RemoteDailySync
 	HermesGateway        hermes.Gateway
 	MasteryLibrary       *methodology.Library
+	ChanAnalysis         *chananalysis.Service
 	Logger               *log.Logger
 	StrictPersistence    bool
 }

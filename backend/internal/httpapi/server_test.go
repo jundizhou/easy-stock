@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/foundation"
+	"easy-stock/backend/internal/providers/eastmoney"
 	"github.com/gorilla/websocket"
 )
 
@@ -509,6 +511,8 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 		DuanxianxiaBaseURL: remote.URL,
 		ThemeRadarFallback: fakeServerRadarFallback{},
 	})
+	// Windows 下 t.TempDir() 清理要求先释放 SQLite 文件句柄。
+	defer func() { _ = server.Close() }()
 	overviewRequest := httptest.NewRequest(http.MethodGet, "/api/v1/themes/overview", nil)
 	overviewRecorder := httptest.NewRecorder()
 	server.ServeHTTP(overviewRecorder, overviewRequest)
@@ -575,6 +579,82 @@ func TestServerReturnsBatchKLines(t *testing.T) {
 	}
 	if len(payload.Data) != 2 || payload.Data["000001.SZ"][0].Close != 10 || payload.Data["600000.SH"][0].Close != 10 {
 		t.Fatalf("unexpected batch payload: %+v", payload.Data)
+	}
+}
+
+// 主源不可达时会兜底到新浪，而新浪日线没有成交额与换手率。验证补口能把这两个
+// 字段回填到最后一根 K 线，否则前端会把「字段没取到」误判成「可交易性差」。
+func TestLoadKLineBackfillsAvailabilityWhenFallingBackToSina(t *testing.T) {
+	primary := &availabilityKLineProvider{
+		err:   errors.New("eastmoney push2his unreachable"),
+		lines: nil,
+		snapshots: map[string]eastmoney.QuoteAvailability{
+			"000001.SZ": {Symbol: "000001.SZ", Amount: 1_022_543_914.24, TurnoverRate: 0.45},
+		},
+	}
+	fallback := &availabilityKLineProvider{
+		lines: []foundation.KLine{
+			{Symbol: "000001.SZ", Time: time.Date(2026, 9, 9, 0, 0, 0, 0, time.Local), Close: 11.7, Volume: 800_000},
+			{Symbol: "000001.SZ", Time: time.Date(2026, 9, 10, 0, 0, 0, 0, time.Local), Close: 11.85, Volume: 867_632},
+		},
+	}
+	server := NewServer(Config{KLinePrimary: primary, KLineFallback: fallback})
+
+	lines, err := server.loadKLine(context.Background(), "000001.SZ", "day", 40)
+	if err != nil {
+		t.Fatalf("loadKLine: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("lines len=%d, want 2", len(lines))
+	}
+	last := lines[len(lines)-1]
+	if last.Amount != 1_022_543_914.24 {
+		t.Fatalf("amount=%v, want backfilled snapshot amount", last.Amount)
+	}
+	if last.TurnoverRate != 0.45 {
+		t.Fatalf("turnover_rate=%v, want backfilled snapshot turnover", last.TurnoverRate)
+	}
+	// 历史 K 线不能用当日快照冒充，只有最后一根允许被补。
+	if lines[0].Amount != 0 || lines[0].TurnoverRate != 0 {
+		t.Fatalf("historical bar must stay untouched: %+v", lines[0])
+	}
+	if primary.batchCalls != 1 || len(primary.batchSymbols) != 1 || primary.batchSymbols[0] != "000001.SZ" {
+		t.Fatalf("batch calls=%d symbols=%v, want one call for the symbol", primary.batchCalls, primary.batchSymbols)
+	}
+}
+
+// 主源成功时不应额外打快照请求。
+func TestLoadKLineSkipsBackfillWhenPrimarySucceeds(t *testing.T) {
+	primary := &availabilityKLineProvider{
+		lines: []foundation.KLine{
+			{Symbol: "600150.SH", Time: time.Date(2026, 9, 10, 0, 0, 0, 0, time.Local), Close: 40.82, Amount: 7_144_558_405, TurnoverRate: 2.34},
+		},
+		snapshots: map[string]eastmoney.QuoteAvailability{},
+	}
+	server := NewServer(Config{KLinePrimary: primary, KLineFallback: &availabilityKLineProvider{}})
+
+	if _, err := server.loadKLine(context.Background(), "600150.SH", "day", 40); err != nil {
+		t.Fatalf("loadKLine: %v", err)
+	}
+	if primary.batchCalls != 0 {
+		t.Fatalf("batch calls=%d, want 0 when primary already carries the fields", primary.batchCalls)
+	}
+}
+
+// 快照失败不应让 K 线整体失败 —— 缺字段只是降级，不是错误。
+func TestLoadKLineToleratesSnapshotFailure(t *testing.T) {
+	primary := &availabilityKLineProvider{err: errors.New("unreachable"), snapshotErr: errors.New("ulist rejected")}
+	fallback := &availabilityKLineProvider{
+		lines: []foundation.KLine{{Symbol: "000001.SZ", Time: time.Now(), Close: 11.85, Volume: 867_632}},
+	}
+	server := NewServer(Config{KLinePrimary: primary, KLineFallback: fallback})
+
+	lines, err := server.loadKLine(context.Background(), "000001.SZ", "day", 40)
+	if err != nil {
+		t.Fatalf("loadKLine must tolerate a failed backfill: %v", err)
+	}
+	if len(lines) != 1 || lines[0].Amount != 0 {
+		t.Fatalf("unexpected lines: %+v", lines)
 	}
 }
 
@@ -901,6 +981,33 @@ type fakeKLineProvider struct{}
 
 func (fakeKLineProvider) KLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
 	return []foundation.KLine{{Symbol: symbol, Time: time.Now(), Open: 9, High: 11, Low: 8, Close: 10, Amount: 1000}}, nil
+}
+
+// availabilityKLineProvider 既可当 K 线主/备源，也能充当批量快照补口，
+// 用来分别验证「兜底补数」与「主源成功不补数」两条路径。
+type availabilityKLineProvider struct {
+	lines        []foundation.KLine
+	err          error
+	snapshots    map[string]eastmoney.QuoteAvailability
+	snapshotErr  error
+	batchCalls   int
+	batchSymbols []string
+}
+
+func (p *availabilityKLineProvider) KLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.lines, nil
+}
+
+func (p *availabilityKLineProvider) QuoteAvailabilityBatch(ctx context.Context, symbols []string) (map[string]eastmoney.QuoteAvailability, error) {
+	p.batchCalls++
+	p.batchSymbols = append(p.batchSymbols, symbols...)
+	if p.snapshotErr != nil {
+		return nil, p.snapshotErr
+	}
+	return p.snapshots, nil
 }
 
 type fakeSectorMapProvider struct{}

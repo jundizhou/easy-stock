@@ -36,10 +36,12 @@ import {
 	Target,
 	Trash2,
 	TrendingUp,
+	UsersRound,
 	WalletCards,
 	Zap,
 } from 'lucide-react';
 import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChanWorkspace } from './ChanWorkspace';
 import {
 	BackendConfig,
 	StockAIActionPriceZone,
@@ -56,6 +58,9 @@ import {
 	HotStockRankEntry,
 	HotStockRankSource,
 	requestJSON,
+	XueqiuDiscussionPost,
+	XueqiuSentiment,
+	XueqiuHotUser,
 } from '../lib/backend';
 import {
 	analysisTone,
@@ -66,7 +71,7 @@ import {
 	signedPercent,
 } from '../lib/stock-analysis';
 
-export type StockAIWorkspaceMode = 'analysis' | 'expectation' | 'risk';
+export type StockAIWorkspaceMode = 'analysis' | 'expectation' | 'risk' | 'chan';
 
 type Props = {
 	config: BackendConfig | null;
@@ -239,6 +244,25 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 		setState('ready');
 	};
 
+	// selectSymbol 用于人气股侧栏：缠论模式下无需触发 AI 分析，只切换标的即可，
+	// 避免用户在缠论页点击人气股时被迫等待 5—10 分钟的 AI 流程。
+	const selectSymbol = useCallback((symbol: string) => {
+		if (mode === 'chan') {
+			setQuery(symbol);
+			window.localStorage.setItem(symbolStorageKey, symbol);
+			return;
+		}
+		void runAnalysis(symbol);
+	}, [mode, runAnalysis]);
+
+	// 缠论视图的标的：优先用已完成分析的标的，其次用搜索框的输入。用户可能先
+	// 输入代码再切到缠论页，因此这里做一次目录归一化。
+	const chanSymbol = useMemo(() => {
+		const raw = analysis?.symbol || query;
+		if (!raw) return '';
+		return resolveStockDirectorySymbol(raw, directory) || raw;
+	}, [analysis?.symbol, query, directory]);
+
 	const removeHistory = (symbol: string) => {
 		setHistory((current) => {
 			const next = current.filter((item) => item.symbol !== symbol);
@@ -292,18 +316,21 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 		<section className="stock-ai-workspace">
 			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading'} />
 			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
-				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void runAnalysis(symbol)} />
+				<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => void selectSymbol(symbol)} />
 				<div className="stock-ai-main">
 					{history.length > 0 && <AnalysisHistory items={history} activeSymbol={analysis?.symbol} onSelect={selectHistory} onRemove={removeHistory} />}
 
-					{state === 'loading' && (
+					{/* 缠论视图只依赖 K 线与 czsc，不等待 AI 分析，因此整体独立渲染。 */}
+					{mode === 'chan' && <ChanWorkspace config={config} symbol={chanSymbol} name={analysis?.name} />}
+
+					{mode !== 'chan' && state === 'loading' && (
 						<div className="stock-ai-loading" role="status" aria-live="polite">
 							<LoaderCircle className="spin" size={30} />
-							<div><strong>正在建立完整决策画像</strong><span>为了保证分析的全面性和准确性，easy-stock 将获取行情、题材、公告、研报等完整数据，并进行多轮 AI 分析，预计耗时 5–10 分钟，请耐心等待。</span></div>
+							<div><strong>正在建立完整决策画像</strong><span>为了保证分析的全面性和准确性，KKION 将获取行情、题材、公告、研报等完整数据，并进行多轮 AI 分析，预计耗时 5–10 分钟，请耐心等待。</span></div>
 						</div>
 					)}
 
-					{state === 'error' && (
+					{mode !== 'chan' && state === 'error' && (
 						<div className="stock-ai-error">
 							<CircleAlert size={22} />
 							<div><strong>分析没有完成</strong><span>{error}</span></div>
@@ -311,13 +338,13 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 						</div>
 					)}
 
-					{state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => void runAnalysis(symbol)} />}
-					{state !== 'loading' && analysis && (
+					{mode !== 'chan' && state !== 'loading' && !analysis && state !== 'error' && <StockAIEmpty onSelect={(symbol) => void runAnalysis(symbol)} />}
+					{mode !== 'chan' && state !== 'loading' && analysis && (
 						<div className="stock-ai-result">
 							<div className="stock-ai-export-sheet" ref={exportRef}>
 								<AnalysisExportHeader analysis={analysis} mode={mode} />
 								<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => void runAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
-								{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
+								{mode === 'analysis' && <FullAnalysisView analysis={analysis} config={config} />}
 								{mode === 'expectation' && <ExpectationView analysis={analysis} />}
 								{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
 								<AnalysisExportFooter analysis={analysis} />
@@ -407,14 +434,14 @@ function formatHotRankTime(value: string) {
 
 function AnalysisExportHeader({ analysis, mode }: { analysis: StockAIAnalysis; mode: StockAIWorkspaceMode }) {
 	return <header className="stock-ai-export-header">
-		<div className="stock-ai-export-brand"><span><BrainCircuit size={24} /></span><div><strong>easy-stock</strong><small>AI STOCK DECISION SYSTEM</small><em>开源 · 免费使用</em></div></div>
+		<div className="stock-ai-export-brand"><span><BrainCircuit size={24} /></span><div><strong>KKION</strong><small>AI STOCK DECISION SYSTEM</small><em>开源 · 免费使用</em></div></div>
 		<div><span>{workspaceModeLabel(mode)}</span><strong>{analysis.name} · {analysis.symbol}</strong><small>分析生成于 {formatExportDate(analysis.generated_at)}</small></div>
 	</header>;
 }
 
 function AnalysisExportFooter({ analysis }: { analysis: StockAIAnalysis }) {
 	return <footer className="stock-ai-export-footer">
-		<div><strong>easy-stock</strong><span>让数据、逻辑与 AI 一起服务于交易决策</span></div>
+		<div><strong>KKION</strong><span>让数据、逻辑与 AI 一起服务于交易决策</span></div>
 		<div className="stock-ai-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><b>微信公众号：easy只吃番茄</b><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>数据截至 {formatExportDate(analysis.generated_at)}</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;
@@ -437,6 +464,7 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 		analysis: '自动路由新股价格发现、趋势容量、成长趋势、情绪短线与风险结构，形成与样本成熟度匹配的结论。',
 		expectation: '将确定性预测改为可验证的隔日情景，覆盖高开承接、平开确认、低开修复与破位失效。',
 		risk: '依据结构失效位、账户风险预算和仓位上限，反推可执行股数、止盈与纪律清单。',
+		chan: '基于 czsc 的缠论结构拆解：分型 / 笔 / 中枢识别、背驰力度衰竭、形态信号取值，并支持信号权重回测。',
 	};
 	const chooseSuggestion = (stock: StockDirectoryEntry) => {
 		onQuery(stock.symbol);
@@ -599,7 +627,7 @@ function NewListingNotice({ analysis }: { analysis: StockAIAnalysis }) {
 	</section>;
 }
 
-function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
+function FullAnalysisView({ analysis, config }: { analysis: StockAIAnalysis; config: BackendConfig | null }) {
 	const isNewListing = analysis.profile.primary_type === 'new_listing';
 	const theme = normalizeStockAITheme(analysis.theme);
 	const themeSource = stockThemeSourceLabel(theme.source);
@@ -635,6 +663,8 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<NewsAnalysisPanel eyebrow="个股资讯" title="近期个股新闻分析" item={analysis.stock_news} icon={<Newspaper size={19} />} />
 				<NewsAnalysisPanel eyebrow="题材催化" title="近期题材新闻分析" item={analysis.theme_news} icon={<Zap size={19} />} />
 			</div>
+
+			<XueqiuCommunityPanel symbol={analysis.symbol} config={config} />
 
 			<div className="stock-ai-main-grid">
 				<section className="stock-ai-panel stock-ai-chart-panel">
@@ -753,6 +783,101 @@ function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; ti
 			<footer>新闻与公告仅作信息参考，需结合事件落地和价格反应验证，不构成买卖建议。</footer>
 		</> : <div className="stock-ai-panel-empty">旧版分析记录未包含新闻数据，请重新分析后查看</div>}
 	</section>;
+}
+
+function XueqiuCommunityPanel({ symbol, config }: { symbol: string; config: BackendConfig | null }) {
+	const [posts, setPosts] = useState<XueqiuDiscussionPost[]>([]);
+	const [sentiment, setSentiment] = useState<XueqiuSentiment | null>(null);
+	const [fallbackUsers, setFallbackUsers] = useState<XueqiuHotUser[]>([]);
+	const [mode, setMode] = useState<'loading' | 'discussions' | 'kol' | 'unavailable'>('loading');
+
+	useEffect(() => {
+		let cancelled = false;
+		setPosts([]);
+		setSentiment(null);
+		setFallbackUsers([]);
+		setMode('loading');
+		const load = window.setTimeout(async () => {
+			if (!config) return;
+			const query = encodeURIComponent(symbol);
+			// 优先讨论帖（含情绪归纳）；被雪球风控拦截时回退热议 KOL 列表。
+			try {
+				const payload = await requestJSON<{ data: { posts: XueqiuDiscussionPost[]; sentiment: XueqiuSentiment } }>(config, `/api/v1/xueqiu/discussions?symbol=${query}&count=12`);
+				if (cancelled) return;
+				setPosts(payload.data.posts ?? []);
+				setSentiment(payload.data.sentiment ?? null);
+				setMode('discussions');
+				return;
+			} catch { /* 落入 KOL 回退 */ }
+			try {
+				const payload = await requestJSON<{ data: XueqiuHotUser[] }>(config, `/api/v1/xueqiu/hot-users?symbol=${query}&count=8`);
+				if (cancelled) return;
+				setFallbackUsers(payload.data ?? []);
+				setMode('kol');
+			} catch {
+				if (cancelled) return;
+				setMode('unavailable');
+			}
+		}, 400);
+		return () => { cancelled = true; window.clearTimeout(load); };
+	}, [symbol, config]);
+
+	const total = sentiment ? sentiment.bullish + sentiment.neutral + sentiment.bearish : 0;
+	const share = (count: number) => (total > 0 ? Math.round((count / total) * 100) : 0);
+
+	return <section className="stock-ai-panel stock-ai-xueqiu-panel">
+		<header><div><span>社区情绪证据</span><h3>雪球社区讨论</h3></div><UsersRound size={19} /></header>
+		{mode === 'loading' ? <div className="stock-ai-panel-empty"><LoaderCircle className="spin" size={14} /> 正在读取雪球社区数据…</div>
+			: mode === 'unavailable' ? <div className="stock-ai-panel-empty">雪球社区数据暂不可用（匿名访问限流或网络受限），不影响本页其它分析。</div>
+			: mode === 'kol' ? <>
+				<div className="stock-ai-panel-empty">讨论帖暂受雪球风控限制，已展示该股热议用户。</div>
+				<div className="stock-ai-xueqiu-list">
+					{fallbackUsers.map((user) => <article key={user.screen_name}>
+						<div className="stock-ai-xueqiu-avatar">{user.screen_name.slice(0, 1)}</div>
+						<div className="stock-ai-xueqiu-main">
+							<header><strong>{user.screen_name}</strong>{user.verified && <span className="stock-ai-xueqiu-verified">认证</span>}</header>
+							{user.description && <small>{user.description.slice(0, 60)}</small>}
+						</div>
+						<em>{formatXueqiuFollowers(user.followers_count)}粉丝</em>
+					</article>)}
+				</div>
+			</>
+			: <>
+				{sentiment && total > 0 && <div className="stock-ai-xueqiu-sentiment">
+					<div className="stock-ai-xueqiu-bar">
+						<i className="bull" style={{ width: `${share(sentiment.bullish)}%` }} />
+						<i className="neutral" style={{ width: `${share(sentiment.neutral)}%` }} />
+						<i className="bear" style={{ width: `${share(sentiment.bearish)}%` }} />
+					</div>
+					<div className="stock-ai-xueqiu-legend">
+						<span className="bull">看多 {share(sentiment.bullish)}%</span>
+						<span>中性 {share(sentiment.neutral)}%</span>
+						<span className="bear">看空 {share(sentiment.bearish)}%</span>
+						<small>{sentiment.source === 'hermes-ai' ? 'AI 归纳' : '关键词规则'} · {total} 条样本</small>
+					</div>
+					<p>{sentiment.summary}</p>
+				</div>}
+				<div className="stock-ai-xueqiu-posts">
+					{posts.map((post) => <article key={post.id}>
+						<p>{post.text}</p>
+						<footer>
+							<span>{post.user_name || '雪球用户'}{post.user_followers ? `（${formatXueqiuFollowers(post.user_followers)}粉）` : ''}</span>
+							<span>回复 {post.reply_count}</span>
+							{post.view_count > 0 && <span>浏览 {formatXueqiuFollowers(post.view_count)}</span>}
+							{post.url && <a href={post.url} target="_blank" rel="noreferrer" title="查看原帖"><ExternalLink size={12} /></a>}
+						</footer>
+					</article>)}
+				</div>
+				<footer>帖子来自雪球社区公开讨论，情绪归纳仅代表社区言论倾向，不构成买卖建议。</footer>
+			</>}
+	</section>;
+}
+
+function formatXueqiuFollowers(count: number): string {
+	if (!Number.isFinite(count) || count <= 0) return '--';
+	if (count >= 100_000_000) return `${(count / 100_000_000).toFixed(1)}亿`;
+	if (count >= 10_000) return `${(count / 10_000).toFixed(1)}万`;
+	return String(count);
 }
 
 function ScorecardPanel({ analysis }: { analysis: StockAIAnalysis }) {
@@ -1302,6 +1427,7 @@ function sanitizeFilename(value: string) {
 function workspaceModeLabel(mode: StockAIWorkspaceMode) {
 	if (mode === 'expectation') return '隔日预期';
 	if (mode === 'risk') return '风险与执行';
+	if (mode === 'chan') return '缠论结构';
 	return '个股 AI 分析';
 }
 

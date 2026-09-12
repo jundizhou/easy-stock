@@ -5,9 +5,11 @@ import {
 	BookMarked,
 	BookOpen,
 	BrainCircuit,
+	CalendarClock,
 	ChevronRight,
 	Clock3,
 	Database,
+	FileSpreadsheet,
 	Flame,
 	Gauge,
 	History,
@@ -24,6 +26,7 @@ import {
 	Settings,
 	ShieldAlert,
 	ShieldCheck,
+	Sigma,
 	Target,
 	Wifi,
 	WalletCards,
@@ -31,7 +34,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
+	ChanAnalysis,
 	KLine,
+	LimitUpEventsPayload,
 	NewsItem,
 	Quote,
 	SectorMap,
@@ -51,6 +56,8 @@ import {
 	resolveBackendConfig,
 } from './lib/backend';
 import {
+	ChanLookup,
+	LimitEventLookup,
 	QuoteLookup,
 	KLineLookup,
 	StockRole,
@@ -67,12 +74,16 @@ import { SettingsDrawer } from './components/SettingsDrawer';
 import { AIChatWorkspace } from './components/AIChatWorkspace';
 import { MarketOverviewWorkspace } from './components/MarketOverviewWorkspace';
 import { TradingMastery } from './components/TradingMastery';
+import { ChanWorkspace } from './components/ChanWorkspace';
 import { StockAIAnalysisWorkspace, StockAIWorkspaceMode } from './components/StockAIAnalysisWorkspace';
 import { PortfolioInspectionWorkspace } from './components/PortfolioInspectionWorkspace';
+import { DailyReportWorkspace } from './components/DailyReportWorkspace';
+import { TradeJournalWorkspace } from './components/TradeJournalWorkspace';
+import { WorkbenchWorkspace } from './components/WorkbenchWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market';
+type WorkspaceMode = 'workbench' | 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'daily-report' | 'trade-journal' | 'ai' | 'market';
 
 const emptyStockPagination = (): ThemeScreenPagination => ({
 	page: 1,
@@ -89,9 +100,12 @@ export function App() {
 		if (window.location.hash === '#reviews') return 'reviews';
 		if (window.location.hash === '#stock-ai') return 'stock-ai';
 		if (window.location.hash === '#portfolio-inspection') return 'portfolio-inspection';
+		if (window.location.hash === '#daily-report') return 'daily-report';
+		if (window.location.hash === '#trade-journal') return 'trade-journal';
 		if (window.location.hash === '#ai') return 'ai';
 		if (window.location.hash.startsWith('#market')) return 'market';
-		return 'themes';
+		if (window.location.hash === '#themes') return 'themes';
+		return 'workbench';
 	});
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [config, setConfig] = useState<BackendConfig | null>(null);
@@ -105,6 +119,13 @@ export function App() {
 	const [hasManualStockSelection, setHasManualStockSelection] = useState(false);
 	const [liveQuotes, setLiveQuotes] = useState<QuoteLookup>({});
 	const [leadershipHistories, setLeadershipHistories] = useState<KLineLookup>({});
+	const [limitEventLookup, setLimitEventLookup] = useState<LimitEventLookup>({});
+	const limitEventSymbolsRef = useRef<Set<string>>(new Set());
+	// 缠论分析结果按标的缓存。czsc 是串行子进程，只对当前选中股按需拉取，
+	// 因此这里通常只会有少数几只，不做整梯队的预取。
+	const [chanAnalyses, setChanAnalyses] = useState<ChanLookup>({});
+	const [chanLoadingSymbol, setChanLoadingSymbol] = useState('');
+	const chanFlightsRef = useRef<Map<string, Promise<void>>>(new Map());
 	const [historyLoadingSymbols, setHistoryLoadingSymbols] = useState<Set<string>>(() => new Set());
 	const [historyErrorSymbols, setHistoryErrorSymbols] = useState<Set<string>>(() => new Set());
 	const [kLines, setKLines] = useState<KLine[]>([]);
@@ -132,6 +153,9 @@ export function App() {
 	const [masteryRefreshKey, setMasteryRefreshKey] = useState(0);
 	const [stockAIRefreshKey, setStockAIRefreshKey] = useState(0);
 	const [portfolioInspectionRefreshKey, setPortfolioInspectionRefreshKey] = useState(0);
+	const [dailyReportRefreshKey, setDailyReportRefreshKey] = useState(0);
+	const [tradeJournalRefreshKey, setTradeJournalRefreshKey] = useState(0);
+	const [workbenchRefreshKey, setWorkbenchRefreshKey] = useState(0);
 	const [stockAIWorkspaceMode, setStockAIWorkspaceMode] = useState<StockAIWorkspaceMode>('analysis');
 	const [stockAIInitialAnalysis, setStockAIInitialAnalysis] = useState<StockAIAnalysis | null>(null);
 	const [aiRefreshKey, setAIRefreshKey] = useState(0);
@@ -155,8 +179,8 @@ export function App() {
 	const activeSnapshotID = activeOverview?.snapshot_id || '';
 	const baseThemeStocks = useMemo(() => buildThemeStocks(sectorMap), [sectorMap]);
 	const themeStocks = useMemo(
-		() => buildThemeStocks(sectorMap, liveQuotes, leadershipHistories),
-		[leadershipHistories, liveQuotes, sectorMap],
+		() => buildThemeStocks(sectorMap, liveQuotes, leadershipHistories, chanAnalyses, limitEventLookup),
+		[chanAnalyses, leadershipHistories, limitEventLookup, liveQuotes, sectorMap],
 	);
 	const visibleStocks = useMemo(() => [...themeStocks].sort((a, b) => {
 		switch (stockSort) {
@@ -272,6 +296,32 @@ export function App() {
 				pending.forEach((symbol) => next.delete(symbol));
 				return next;
 			});
+			// 涨停事件档案与 K 线同批拉取：池子快照已在后端持久化积累，
+			// 事件序列用于逐日精确判定连板，替代"日K涨幅近似"。
+			const eventPending = pending.filter((symbol) => !limitEventSymbolsRef.current.has(symbol));
+			if (eventPending.length) {
+				eventPending.forEach((symbol) => limitEventSymbolsRef.current.add(symbol));
+				requestJSON<{ data: LimitUpEventsPayload }>(
+					config,
+					`/api/v1/short-term/limit-up-events?symbols=${encodeURIComponent(eventPending.join(','))}&days=20`,
+				)
+					.then((eventPayload) => {
+						setLimitEventLookup((current) => {
+							const next = { ...current };
+							for (const [symbol, events] of Object.entries(eventPayload.data.events || {})) {
+								next[symbol] = {
+									limitDates: new Set(events.map((event) => event.date)),
+									coveredDates: new Set(eventPayload.data.covered_dates || []),
+								};
+							}
+							return next;
+						});
+					})
+					.catch(() => {
+						// 事件库失败时静默回退到日K近似，不阻塞梯队数据。
+						eventPending.forEach((symbol) => limitEventSymbolsRef.current.delete(symbol));
+					});
+			}
 			let batchPromise!: Promise<void>;
 			batchPromise = requestJSON<{ data: KLineLookup; errors?: Record<string, string> }>(
 				config,
@@ -313,6 +363,42 @@ export function App() {
 		}
 		await Promise.allSettled(waits);
 	}, [config]);
+
+	// loadChanAnalysis 按需拉单只股票的缠论结构。
+	// czsc 计算是串行的 CPU 密集任务，所以只对当前选中股触发，并且每个标的
+	// 只拉一次（结果在 chanAnalyses 里缓存）。失败不写缓存，留待下次重试。
+	const loadChanAnalysis = useCallback(async (symbol: string) => {
+		if (!config || !symbol) return;
+		const existing = chanFlightsRef.current.get(symbol);
+		if (existing) {
+			await existing;
+			return;
+		}
+		setChanLoadingSymbol(symbol);
+		const flight = (async () => {
+			try {
+				const payload = await requestJSON<{ data: ChanAnalysis }>(config, '/api/v1/stocks/chan-analysis', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ symbol, period: 'day', limit: 240 }),
+				});
+				setChanAnalyses((current) => ({ ...current, [symbol]: payload.data }));
+			} catch {
+				// 缠论是增益信息：拉不到就让结构维度缺席，不影响龙头身份主体。
+			} finally {
+				chanFlightsRef.current.delete(symbol);
+				setChanLoadingSymbol((current) => (current === symbol ? '' : current));
+			}
+		})();
+		chanFlightsRef.current.set(symbol, flight);
+		await flight;
+	}, [config]);
+
+	useEffect(() => {
+		if (workspaceMode !== 'themes' || !selectedSymbol) return;
+		if (chanAnalyses[selectedSymbol] !== undefined) return;
+		void loadChanAnalysis(selectedSymbol);
+	}, [chanAnalyses, loadChanAnalysis, selectedSymbol, workspaceMode]);
 
 	useEffect(() => {
 		if (workspaceMode === 'themes') {
@@ -593,6 +679,14 @@ export function App() {
 			setPortfolioInspectionRefreshKey((current) => current + 1);
 			return;
 		}
+		if (workspaceMode === 'daily-report') {
+			setDailyReportRefreshKey((current) => current + 1);
+			return;
+		}
+		if (workspaceMode === 'trade-journal') {
+			setTradeJournalRefreshKey((current) => current + 1);
+			return;
+		}
 		if (workspaceMode === 'ai') {
 			setAIRefreshKey((current) => current + 1);
 			return;
@@ -607,7 +701,7 @@ export function App() {
 
 	const switchWorkspace = (mode: WorkspaceMode) => {
 		setWorkspaceMode(mode);
-		window.history.replaceState(null, '', mode === 'limit-up' ? '#limit-up' : mode === 'mastery' ? '#mastery' : mode === 'reviews' ? '#reviews' : mode === 'stock-ai' ? '#stock-ai' : mode === 'portfolio-inspection' ? '#portfolio-inspection' : mode === 'ai' ? '#ai' : mode === 'market' ? '#market/pulse' : '#themes');
+		window.history.replaceState(null, '', mode === 'workbench' ? '#workbench' : mode === 'limit-up' ? '#limit-up' : mode === 'mastery' ? '#mastery' : mode === 'reviews' ? '#reviews' : mode === 'stock-ai' ? '#stock-ai' : mode === 'portfolio-inspection' ? '#portfolio-inspection' : mode === 'daily-report' ? '#daily-report' : mode === 'trade-journal' ? '#trade-journal' : mode === 'ai' ? '#ai' : mode === 'market' ? '#market/pulse' : '#themes');
 	};
 
 	const askMasteryAI = (traderName: string) => {
@@ -648,43 +742,57 @@ export function App() {
 		setActiveTheme(theme);
 	};
 
-	const currentLoadState = workspaceMode === 'limit-up' ? limitUpState : workspaceMode === 'mastery' || workspaceMode === 'reviews' || workspaceMode === 'stock-ai' || workspaceMode === 'portfolio-inspection' || workspaceMode === 'ai' || workspaceMode === 'market' ? 'ready' : foundationState;
-	const currentStatusText = workspaceMode === 'limit-up'
+	const currentLoadState = workspaceMode === 'workbench' ? 'ready' : workspaceMode === 'limit-up' ? limitUpState : workspaceMode === 'mastery' || workspaceMode === 'reviews' || workspaceMode === 'stock-ai' || workspaceMode === 'portfolio-inspection' || workspaceMode === 'daily-report' || workspaceMode === 'trade-journal' || workspaceMode === 'ai' || workspaceMode === 'market' ? 'ready' : foundationState;
+	const themeIntradayCalibrated = Boolean(overviewMeta?.fallback_reason?.includes('东财概念'));
+	const themeSnapshotNotice = overviewMeta?.stale || overviewMeta?.carry_forward
+		? `题材快照沿用 ${overviewMeta?.trade_date || '上一交易日'}${themeIntradayCalibrated ? ' · 当日强度按东财概念实时校准' : ''}`
+		: '';
+	const currentStatusText = workspaceMode === 'workbench'
+		? '工作台数据层已连接'
+		: workspaceMode === 'themes' && themeSnapshotNotice
+		? themeSnapshotNotice
+		: workspaceMode === 'limit-up'
 		? limitUpState === 'loading' ? '同步连板梯队' : limitUpState === 'error' ? '连板数据异常' : '连板结构已更新'
-		: workspaceMode === 'mastery' ? '游资心法库已连接' : workspaceMode === 'reviews' ? '复盘资料库已连接' : workspaceMode === 'stock-ai' ? '个股分析引擎已连接' : workspaceMode === 'portfolio-inspection' ? '持仓巡检引擎已连接' : workspaceMode === 'ai' ? 'AI 助手已连接' : workspaceMode === 'market' ? '行情数据层已连接' : statusText;
+		: workspaceMode === 'mastery' ? '游资心法库已连接' : workspaceMode === 'reviews' ? '复盘资料库已连接' : workspaceMode === 'stock-ai' ? '个股分析引擎已连接' : workspaceMode === 'portfolio-inspection' ? '持仓巡检引擎已连接' : workspaceMode === 'daily-report' ? '日报引擎已连接' : workspaceMode === 'trade-journal' ? '交易复盘引擎已连接' : workspaceMode === 'ai' ? 'AI 助手已连接' : workspaceMode === 'market' ? '行情数据层已连接' : statusText;
 	const themeSourceStatus = overviewMeta?.source === 'theme-radar:fusion'
 		? overviewMeta.carry_forward ? '行业趋势 · 开盘啦衰减融合' : '行业趋势 · 开盘啦融合'
 		: overviewMeta?.source === 'duanxianxia:kaipanla'
 			? overviewMeta.carry_forward ? '沿用 ' + (overviewMeta.trade_date || '上一交易日') + ' 开盘啦' : (overviewMeta.trade_date || '当日') + ' 开盘啦'
 			: '行业趋势强度';
-	const currentSubStatus = workspaceMode === 'limit-up'
+	const currentSubStatus = workspaceMode === 'workbench'
+		? '市场情绪 · 核心指数 · 两市量能 · 自选行情 · 财联社电报'
+		: workspaceMode === 'limit-up'
 		? limitUpData ? `${limitUpData.current.trade_date} · ${limitUpData.session_status} · ${limitUpData.meta.source.includes('duanxianxia') ? '开盘啦涨停池' : '东方财富兜底'} · ${limitUpData.concept_status === 'ready' ? '题材已归因' : '题材降级'}` : '开盘啦涨停池优先'
-		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Hermes 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '逐股分析 · 组合风险 · 后台任务' : workspaceMode === 'ai' ? '本机 Hermes AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : themeSourceStatus + ' · ' + streamStatus;
-	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '个股 AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : 'AI 对话';
-	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Hermes 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '多周期评分、隔日情景推演与账户级风控执行工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : '像 Codex 一样持续协作、拆解问题并形成可执行结果';
+		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Hermes 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '逐股分析 · 组合风险 · 后台任务' : workspaceMode === 'daily-report' ? '技术指标 · 决策评分 · 定时推送' : workspaceMode === 'trade-journal' ? '交割单导入 · FIFO 配对 · 行为诊断' : workspaceMode === 'ai' ? '本机 Hermes AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : themeSourceStatus + ' · ' + streamStatus;
+	const topbarTitle = workspaceMode === 'workbench' ? '工作台' : workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '个股 AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'daily-report' ? '自选股日报' : workspaceMode === 'trade-journal' ? '交易复盘' : workspaceMode === 'market' ? '行情总览' : 'AI 对话';
+	// 顶栏副标题固定为交易纪律箴言，不随板块变化——每个板块都能看到同一句提醒。
+	const topbarDescription = '错过不产生实际损失，偏离纪律会产生实际代价';
 
 	return (
 		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
 			<aside className="app-sidebar" aria-label="功能导航">
-				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>{sidebarExpanded && <div><strong>easy-stock</strong><span>AI STOCK LAB</span></div>}</div>
+				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}kkion-avatar-180.png`} alt="KKION" /></div>{sidebarExpanded && <div><strong>KKION</strong><span>给命运一次转动齿轮的机会</span></div>}</div>
 				<nav>
+					<button type="button" className={workspaceMode === 'workbench' ? 'active' : ''} onClick={() => switchWorkspace('workbench')} title="工作台"><Gauge size={18} /><span>工作台</span></button>
 					<button type="button" className={workspaceMode === 'reviews' ? 'active' : ''} onClick={() => switchWorkspace('reviews')} title="大V复盘日记"><BookOpen size={18} /><span>大V复盘日记</span></button>
 					<button type="button" className={workspaceMode === 'stock-ai' ? 'active' : ''} onClick={() => switchWorkspace('stock-ai')} title="个股分析"><BrainCircuit size={18} /><span>个股分析</span></button>
 					<button type="button" className={workspaceMode === 'portfolio-inspection' ? 'active' : ''} onClick={() => switchWorkspace('portfolio-inspection')} title="持仓AI巡检"><WalletCards size={18} /><span>持仓AI巡检</span></button>
+					<button type="button" className={workspaceMode === 'daily-report' ? 'active' : ''} onClick={() => switchWorkspace('daily-report')} title="自选股日报"><CalendarClock size={18} /><span>自选股日报</span></button>
+					<button type="button" className={workspaceMode === 'trade-journal' ? 'active' : ''} onClick={() => switchWorkspace('trade-journal')} title="交易复盘"><FileSpreadsheet size={18} /><span>交易复盘</span></button>
 					<button type="button" className={workspaceMode === 'limit-up' ? 'active' : ''} onClick={() => switchWorkspace('limit-up')} title="短线连板"><Flame size={18} /><span>短线连板</span></button>
 					<button type="button" className={workspaceMode === 'themes' ? 'active' : ''} onClick={() => switchWorkspace('themes')} title="趋势题材"><LayoutDashboard size={18} /><span>趋势题材</span></button>
 					<button type="button" className={workspaceMode === 'market' ? 'active' : ''} onClick={() => switchWorkspace('market')} title="行情总览"><BarChart3 size={18} /><span>行情总览</span></button>
 					<button type="button" className={workspaceMode === 'mastery' ? 'active' : ''} onClick={() => switchWorkspace('mastery')} title="游资心法"><BookMarked size={18} /><span>游资心法</span></button>
 					<button type="button" className={workspaceMode === 'ai' ? 'active' : ''} onClick={() => switchWorkspace('ai')} title="AI 对话"><Bot size={18} /><span>AI 对话</span></button>
 				</nav>
-				<div className="sidebar-guidance">{sidebarExpanded && <><strong>{workspaceMode === 'ai' ? '对话模型' : '数据口径'}</strong><span>{workspaceMode === 'themes' ? '概念共振与趋势归因' : workspaceMode === 'limit-up' ? '封板梯队与概念归因' : workspaceMode === 'mastery' ? '上游原文缓存与 Hermes 知识同步' : workspaceMode === 'reviews' ? '多平台原文与本地归档' : workspaceMode === 'stock-ai' ? '300日趋势 · 基准强弱 · 情景风控' : workspaceMode === 'portfolio-inspection' ? '持仓权重 · 题材集中 · 风险贡献' : workspaceMode === 'market' ? '指数、资金、榜单与研究证据统一聚合' : '复用系统设置中的模型连接'}</span></>}</div>
+				<div className="sidebar-guidance">{sidebarExpanded && <><strong>{workspaceMode === 'ai' ? '对话模型' : '数据口径'}</strong><span>{workspaceMode === 'workbench' ? '开盘啦情绪 · 东财指数 · 财联社电报' : workspaceMode === 'themes' ? '概念共振与趋势归因' : workspaceMode === 'limit-up' ? '封板梯队与概念归因' : workspaceMode === 'mastery' ? '上游原文缓存与 Hermes 知识同步' : workspaceMode === 'reviews' ? '多平台原文与本地归档' : workspaceMode === 'stock-ai' ? '300日趋势 · 基准强弱 · 情景风控' : workspaceMode === 'portfolio-inspection' ? '持仓权重 · 题材集中 · 风险贡献' : workspaceMode === 'daily-report' ? '东方财富/新浪K线 · 本地指标引擎' : workspaceMode === 'trade-journal' ? '本机 SQLite · FIFO 配对 · 四类偏差诊断' : workspaceMode === 'market' ? '指数、资金、榜单与研究证据统一聚合' : '复用系统设置中的模型连接'}</span></>}</div>
 				<button type="button" className="sidebar-settings" onClick={() => setSettingsOpen(true)} aria-label="打开系统设置" title="系统设置"><Settings size={17} />{sidebarExpanded && <span>系统设置</span>}</button>
 				<button type="button" className="sidebar-toggle" onClick={() => setSidebarExpanded((value) => !value)} aria-label={sidebarExpanded ? '收起侧边栏' : '展开侧边栏'}>{sidebarExpanded ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />} {sidebarExpanded && <span>收起侧栏</span>}</button>
 			</aside>
 			<div className="app-shell">
 			<header className="topbar">
 				<div className="brand-block">
-					<div className="brand-mark"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>
+					<div className="brand-mark"><img src={`${import.meta.env.BASE_URL}kkion-avatar-180.png`} alt="KKION" /></div>
 					<div>
 						<h1>{topbarTitle}</h1>
 						<p>{topbarDescription}</p>
@@ -693,6 +801,7 @@ export function App() {
 				<nav className="mode-nav" aria-label="工作台模式">
 					{workspaceMode === 'stock-ai' ? <>
 						<button type="button" className={stockAIWorkspaceMode === 'analysis' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('analysis')}><BrainCircuit size={16} aria-hidden="true" />个股分析</button>
+						<button type="button" className={stockAIWorkspaceMode === 'chan' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('chan')}><Sigma size={16} aria-hidden="true" />缠论</button>
 						<button type="button" className={stockAIWorkspaceMode === 'expectation' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('expectation')}><Target size={16} aria-hidden="true" />隔日预期</button>
 						<button type="button" className={stockAIWorkspaceMode === 'risk' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('risk')}><ShieldCheck size={16} aria-hidden="true" />风控执行</button>
 					</> : <>
@@ -712,7 +821,7 @@ export function App() {
 				</div>
 			</header>
 
-			{workspaceMode === 'themes' ? <>
+			{workspaceMode === 'workbench' ? <WorkbenchWorkspace config={config} refreshKey={workbenchRefreshKey} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'themes' ? <>
 			<section className="market-strip" aria-label="市场概览">
 				<div><Activity size={16} aria-hidden="true" /><span>主线平均热度</span><strong>{marketPulse.average || '--'}</strong></div>
 				<div><Flame size={16} aria-hidden="true" /><span>活跃主线</span><strong>{marketPulse.active}</strong></div>
@@ -741,7 +850,7 @@ export function App() {
 						</div>
 					</div>
 				</div>
-				<div><Clock3 size={16} aria-hidden="true" /><span>题材快照</span><strong>{overviewMeta?.trade_date || formatTime(overviewMeta?.fetched_at)}</strong></div>
+				<div><Clock3 size={16} aria-hidden="true" /><span>题材快照</span><strong>{`${overviewMeta?.trade_date || formatTime(overviewMeta?.fetched_at)}${overviewMeta?.stale ? ' · 沿用' : ''}`}</strong></div>
 			</section>
 
 			<div className="trading-layout">
@@ -750,6 +859,7 @@ export function App() {
 						<div className="rail-heading-copy">
 							<span>近期主线</span>
 							<strong>按{themeStrengthWindow === 'daily' ? '当日' : '5日'}强度排序</strong>
+							<span className="rail-note">行业 / 题材交替展示，同类最多连续 2 个</span>
 							<div className="strength-window-toggle" role="group" aria-label="趋势强度周期">
 								<button type="button" title="按题材成分股实时涨跌计算，最多每10分钟更新一次" className={themeStrengthWindow === 'daily' ? 'active' : ''} aria-pressed={themeStrengthWindow === 'daily'} onClick={() => setThemeStrengthWindow('daily')}>当日强度</button>
 								<button type="button" title="按题材成分股近5个交易日累计涨跌计算，最多每10分钟更新一次" className={themeStrengthWindow === 'five_day' ? 'active' : ''} aria-pressed={themeStrengthWindow === 'five_day'} onClick={() => setThemeStrengthWindow('five_day')}>5日强度</button>
@@ -772,7 +882,7 @@ export function App() {
 										<span className="theme-name-line">
 											<strong>{theme.name}</strong>
 										</span>
-										<small>{emotion.stage} · {theme.leaders?.[0] || theme.top_node || '等待主线证据'}</small>
+										<small>{themeFamilyLabel(theme.source) ? `${themeFamilyLabel(theme.source)} · ` : ''}{emotion.stage} · {theme.leaders?.[0] || theme.top_node || '等待主线证据'}</small>
 										<span className="theme-meter"><i style={{ width: `${emotion.score}%` }} /></span>
 									</span>
 									<span className={`emotion-score ${emotion.tone}`}>{emotion.score}</span>
@@ -803,9 +913,9 @@ export function App() {
 						</div>
 						<div className="theme-metrics">
 							<Metric label={isKaipanlaOverview ? '领涨股均涨幅' : isTrendOverview ? '活跃股均涨幅' : '板块均涨幅'} value={formatPercent(activeOverview?.change_percent)} tone={toneForValue(activeOverview?.change_percent)} />
-							<Metric label="上涨广度" value={activeOverview ? `${activeOverview.rising_nodes}/${activeOverview.matched_nodes}` : '--'} sub={activeEmotion ? formatRatio(activeEmotion.breadth) : undefined} />
-							<Metric label={isKaipanlaOverview ? '领涨股 / 强度' : isTrendOverview ? '涨停 / 连板' : '主力净流入'} value={isKaipanlaOverview ? `${activeOverview?.leaders?.length || 0} / ${formatSourceStrength(activeOverview?.source_strength)}` : isTrendOverview ? `${activeOverview?.limit_up_count || 0} / ${activeOverview?.board_count || 0}` : formatMoney(activeOverview?.main_net_inflow)} tone={isTrendOverview ? 'flat' : toneForValue(activeOverview?.main_net_inflow)} />
-							<Metric label={isKaipanlaOverview ? '上榜 / 原排名' : isTrendOverview ? '延续 / 高度' : '数据覆盖'} value={isKaipanlaOverview ? `${activeOverview?.active_days || 0}日 / #${activeOverview?.provider_rank || '--'}` : isTrendOverview ? `${activeOverview?.active_days || 0}日 / ${activeOverview?.max_streak || 0}板` : activeOverview ? `${activeOverview.matched_nodes}/${activeOverview.total_nodes}` : '--'} sub={isKaipanlaOverview ? activeOverview?.carry_forward ? `沿用 ${activeOverview.trade_date}` : '开盘啦板块' : isTrendOverview ? `昨日 ${activeOverview?.previous_count || 0} 家` : activeEmotion ? formatRatio(activeEmotion.coverage) : undefined} />
+							<Metric label="上涨广度" value={formatBreadth(activeOverview)} sub={isTrendOverview ? breadthRatio(activeOverview) : activeEmotion ? formatRatio(activeEmotion.breadth) : undefined} />
+							<Metric label={isKaipanlaOverview ? '领涨股 / 强度' : isTrendOverview ? '涨停 / 连板' : '主力净流入'} value={isKaipanlaOverview ? `${activeOverview?.leaders?.length || 0} / ${formatSourceStrength(activeOverview?.source_strength)}` : isTrendOverview ? formatLimitUpPair(activeOverview) : formatMoney(activeOverview?.main_net_inflow)} tone={isTrendOverview ? 'flat' : toneForValue(activeOverview?.main_net_inflow)} />
+							<Metric label={isKaipanlaOverview ? '上榜 / 原排名' : isTrendOverview ? '延续 / 高度' : '数据覆盖'} value={isKaipanlaOverview ? `${activeOverview?.active_days || 0}日 / #${activeOverview?.provider_rank || '--'}` : isTrendOverview ? formatActiveHeight(activeOverview) : activeOverview ? `${activeOverview.matched_nodes}/${activeOverview.total_nodes}` : '--'} sub={isKaipanlaOverview ? activeOverview?.carry_forward ? `沿用 ${activeOverview.trade_date}` : '开盘啦板块' : isTrendOverview ? formatPreviousCount(activeOverview) : activeEmotion ? formatRatio(activeEmotion.coverage) : undefined} />
 						</div>
 					</header>
 
@@ -920,11 +1030,19 @@ export function App() {
 									<LeadershipScore label="置信度" value={Math.round(selectedStock.confidence * 100)} suffix="%" icon={<ShieldCheck size={14} />} />
 								</div>
 								<LeadershipBreakdown stock={selectedStock} />
+								<ChanStructurePanel stock={selectedStock} loading={chanLoadingSymbol === selectedStock.symbol} />
 								<div className="evidence-section">
 									<strong>支持证据</strong>
 									<ul>{selectedStock.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
 								</div>
-								<div className="identity-tags">{selectedStock.nodes.map((node) => <span key={node}>{node}</span>)}</div>
+								<div className={`identity-tags availability-${selectedStock.availability.complete ? 'complete' : 'partial'}`}>
+									{selectedStock.nodes.map((node) => <span key={node}>{node}</span>)}
+									<span className="availability-badge">
+										{selectedStock.availability.complete
+											? '成交额 · 换手率 · 涨停事件 完整'
+											: `缺 ${selectedStock.availability.missing.join('、')}`}
+									</span>
+								</div>
 								<div className="risk-section">
 									<strong><ShieldAlert size={14} aria-hidden="true" />确认限制</strong>
 									<ul>{selectedStock.risks.map((item) => <li key={item}>{item}</li>)}</ul>
@@ -945,11 +1063,11 @@ export function App() {
 					</section>
 				</aside>
 			</div>
-			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} onInitialPromptConsumed={() => setAIPrefill('')} onOpenSettings={() => setSettingsOpen(true)} />}
+			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'daily-report' ? <DailyReportWorkspace config={config} refreshKey={dailyReportRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'trade-journal' ? <TradeJournalWorkspace config={config} refreshKey={tradeJournalRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} onInitialPromptConsumed={() => setAIPrefill('')} onOpenSettings={() => setSettingsOpen(true)} />}
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>
-					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'mastery' ? '来源：trading-mastery/游资心法 · 每日缓存 · 同步至 Hermes Skill 与本地记忆索引' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '行情与K线：东方财富/新浪 · 涨停与题材：开盘啦/东方财富 · AI只基于结构化证据总结' : workspaceMode === 'portfolio-inspection' ? '逐股分析复用个股引擎 · 组合指标由本地程序计算 · AI只基于结构化证据汇总' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
+					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'workbench' ? '市场情绪与连板：开盘啦/东方财富 · 指数与成交额：东方财富 · 自选行情：新浪 · 电报：财联社 · 成交额预估为按时段线性外推，仅供参考' : workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'mastery' ? '来源：trading-mastery/游资心法 · 每日缓存 · 同步至 Hermes Skill 与本地记忆索引' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '行情与K线：东方财富/新浪 · 涨停与题材：开盘啦/东方财富 · AI只基于结构化证据总结' : workspaceMode === 'portfolio-inspection' ? '逐股分析复用个股引擎 · 组合指标由本地程序计算 · AI只基于结构化证据汇总' : workspaceMode === 'daily-report' ? 'K线：东方财富/新浪 · 指标与评分由本地引擎计算 · 推送走企业微信/飞书 Webhook · 仅供参考不构成投资建议' : workspaceMode === 'trade-journal' ? '交割单仅存本机 · FIFO 配对与画像由本地程序计算 · 诊断结论仅为交易行为参考' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
 			</footer>
 			</div>
 			<SettingsDrawer config={config} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={() => { setAIRefreshKey((current) => current + 1); setStockAIRefreshKey((current) => current + 1); }} />
@@ -1044,6 +1162,42 @@ function LeadershipBreakdown({ stock }: { stock: ThemeStock }) {
 			{dimensions.map(([label, value]) => (
 				<div key={label}><span>{label}</span><i><b style={{ width: `${value}%` }} /></i><strong>{value}</strong></div>
 			))}
+			{stock.structure.available && (
+				<div className="chan-dimension">
+					<span>缠论结构</span>
+					<i><b style={{ width: `${stock.structure.score}%` }} /></i>
+					<strong>{stock.structure.score}</strong>
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ChanStructurePanel 展示选中股的缠论结构判断。结构维度只在拿到 czsc 结果后
+// 才出现在总分里，所以这里要把「为什么是这个分」逐条摊开。
+function ChanStructurePanel({ stock, loading }: { stock: ThemeStock; loading: boolean }) {
+	if (!stock.structure.available) {
+		return (
+			<div className="chan-structure-panel pending">
+				<div className="chan-structure-head">
+					<span>缠论结构</span>
+					<em>{loading ? '正在计算' : '未取得'}</em>
+				</div>
+				<p>{loading ? '缠论结构由 czsc 逐笔计算，需要数秒。' : '该标的暂无缠论结果，结构维度未计入领导力总分。'}</p>
+			</div>
+		);
+	}
+	const tone = stock.structure.score >= 70 ? 'up' : stock.structure.score <= 40 ? 'down' : 'flat';
+	return (
+		<div className={`chan-structure-panel ${tone}`}>
+			<div className="chan-structure-head">
+				<span>缠论结构</span>
+				<em>{stock.structure.label}</em>
+				<b className={`tone-${tone}`}>{stock.structure.score}</b>
+			</div>
+			{stock.structure.reasons.length > 0 && (
+				<ul>{stock.structure.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+			)}
 		</div>
 	);
 }
@@ -1155,6 +1309,61 @@ function formatPercent(value?: number) {
 
 function formatRatio(value: number) {
 	return `${Math.round(value * 100)}%`;
+}
+
+// Industry-sourced overviews carry no breadth/limit-up fields at all. Showing
+// them as 0/0 reads like real data, so surface "--" until the field is filled.
+function formatBreadth(overview?: ThemeOverview | null) {
+	if (!overview || !overview.matched_nodes) {
+		return '--';
+	}
+	return `${overview.rising_nodes}/${overview.matched_nodes}`;
+}
+
+function breadthRatio(overview?: ThemeOverview | null) {
+	if (!overview || !overview.matched_nodes) {
+		return undefined;
+	}
+	return formatRatio(overview.rising_nodes / overview.matched_nodes);
+}
+
+function formatLimitUpPair(overview?: ThemeOverview | null) {
+	if (!overview || (!overview.limit_up_count && !overview.board_count)) {
+		return '--';
+	}
+	return `${overview.limit_up_count ?? 0} / ${overview.board_count ?? 0}`;
+}
+
+function formatActiveHeight(overview?: ThemeOverview | null) {
+	if (!overview || (!overview.active_days && !overview.max_streak)) {
+		return '--';
+	}
+	return `${overview.active_days ? `${overview.active_days}日` : '--'} / ${overview.max_streak ? `${overview.max_streak}板` : '--'}`;
+}
+
+function formatPreviousCount(overview?: ThemeOverview | null) {
+	if (!overview) {
+		return undefined;
+	}
+	return overview.previous_count ? `昨日 ${overview.previous_count} 家` : '昨日 --';
+}
+
+// 榜单是行业与题材两类交替展示（后端限制同类连续不超过 2 个），
+// 标注来源后用户才能理解为什么相邻两项的分数不是严格递减。
+function themeFamilyLabel(source?: string) {
+	if (!source) {
+		return '';
+	}
+	if (source.startsWith('market:industry')) {
+		return '行业';
+	}
+	if (source.startsWith('duanxianxia')) {
+		return '题材';
+	}
+	if (source.startsWith('theme-radar')) {
+		return '融合';
+	}
+	return '';
 }
 
 function formatMoney(value?: number) {

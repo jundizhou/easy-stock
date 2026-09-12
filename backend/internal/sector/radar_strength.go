@@ -161,6 +161,22 @@ func (p *RadarProvider) realtimeStrengthQuoteLookup(ctx context.Context, symbols
 	return result
 }
 
+// themeConstituentSamples is the sample size at which a theme's average
+// return counts fully. Smaller pools are shrunk toward neutral because a
+// three-stock board is trivially moved by one limit-up, which used to let
+// thin boards outrank broad, genuinely strong ones.
+const themeConstituentSamples = 12
+
+// themeStrengthWeights lead with breadth: "how many members joined" is the
+// question a short-term reader asks, and it is immune to a single outlier
+// member distorting the average.
+const (
+	themeWeightBreadth = 0.50
+	themeWeightReturn  = 0.25
+	themeWeightStrong  = 0.15
+	themeWeightLimit   = 0.10
+)
+
 func calculateThemeStrength(
 	stocks []foundation.BoardStock,
 	changes map[string]stockStrengthChange,
@@ -176,7 +192,7 @@ func calculateThemeStrength(
 			continue
 		}
 		// IPO and malformed outliers must not dominate a whole theme. Ratios
-		// still retain the direction while the mean is further winsorized.
+		// still retain the direction while the central tendency is robust.
 		change = clampFloat(change, -30, 30)
 		values = append(values, change)
 		if change > 0 {
@@ -193,14 +209,49 @@ func calculateThemeStrength(
 		return 0
 	}
 
-	meanScore := normalizeStrengthRange(trimmedWinsorizedMean(values), -3, 5)
+	// Median instead of a winsorized mean: in a seven-stock board one limit-up
+	// at +10% must not lift the whole theme's central reading. The confidence
+	// factor then discounts thin pools, which otherwise score as strongly as
+	// broad ones on the strength of a single member.
 	valid := float64(len(values))
+	confidence := constituentConfidence(len(values))
+	returnScore := normalizeStrengthRange(medianChange(values), -3, 5) * confidence
 	breadthScore := float64(rising) / valid * 100
 	strongScore := float64(strong) / valid * 100
+	// A lone limit-up in a four-stock board is 25% of the pool, far above the
+	// 8% saturation point, so this ratio needs the same sample discount.
 	limitRatio := float64(limitLike) / valid
-	limitScore := math.Min(limitRatio/0.08, 1) * 100
-	score := meanScore*0.40 + breadthScore*0.30 + strongScore*0.20 + limitScore*0.10
+	limitScore := math.Min(limitRatio/0.08, 1) * 100 * confidence
+	score := returnScore*themeWeightReturn + breadthScore*themeWeightBreadth +
+		strongScore*themeWeightStrong + limitScore*themeWeightLimit
 	return int(math.Round(clampFloat(score, 0, 100)))
+}
+
+// constituentConfidence discounts a theme's return reading by how few members
+// it is based on. 7 members keep ~37%, 30 ~71%, 100 ~89%: statistically the
+// same average move means less when it rests on a handful of stocks.
+func constituentConfidence(size int) float64 {
+	if size <= 0 {
+		return 0
+	}
+	n := float64(size)
+	return n / (n + themeConstituentSamples)
+}
+
+// medianChange returns the median of the raw constituent changes. An even
+// count averages the two central values.
+func medianChange(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	items := make([]float64, len(values))
+	copy(items, values)
+	sort.Float64s(items)
+	middle := len(items) / 2
+	if len(items)%2 == 1 {
+		return items[middle]
+	}
+	return (items[middle-1] + items[middle]) / 2
 }
 
 func calculateRealtimeThemeStrength(stocks []foundation.BoardStock, quotes map[string]foundation.Quote) int {
@@ -218,27 +269,6 @@ func calculateRealtimeThemeStrength(stocks []foundation.BoardStock, quotes map[s
 	return calculateThemeStrength(stocks, changes, func(change stockStrengthChange) (float64, bool) {
 		return change.daily, change.dailyValid
 	})
-}
-
-func trimmedWinsorizedMean(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	items := make([]float64, len(values))
-	for index, value := range values {
-		items[index] = clampFloat(value, -10, 10)
-	}
-	sort.Float64s(items)
-	trim := 0
-	if len(items) >= 10 {
-		trim = len(items) / 10
-	}
-	items = items[trim : len(items)-trim]
-	total := 0.0
-	for _, value := range items {
-		total += value
-	}
-	return total / float64(len(items))
 }
 
 func normalizeStrengthRange(value float64, minimum float64, maximum float64) float64 {

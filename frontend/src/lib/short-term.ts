@@ -1,4 +1,13 @@
-import { BoardStock, KLine, Quote, SectorMap, ThemeOverview } from './backend';
+import { BoardStock, ChanAnalysis, KLine, Quote, SectorMap, ThemeOverview } from './backend';
+
+/** 单只个股的涨停事件档案：limitDates 是该股的涨停日，coveredDates 是事件库确认覆盖（可精确判定"没涨停"）的交易日。 */
+export type LimitEventCoverageEntry = {
+	limitDates: Set<string>;
+	coveredDates: Set<string>;
+};
+
+/** symbol → 事件档案的查找表；缺省时回退到日 K 近似。 */
+export type LimitEventLookup = Record<string, LimitEventCoverageEntry>;
 
 export type EmotionTone = 'hot' | 'warm' | 'mixed' | 'cool' | 'cold';
 
@@ -36,6 +45,8 @@ export type LeadershipMetrics = {
 	strong_days_10d: number;
 	limit_up_days_20d: number;
 	max_limit_streak_20d: number;
+	/** 近20日窗口内有多少天被涨停事件库覆盖；覆盖日的事件判定是精确的。 */
+	limit_events_covered?: boolean;
 	start_lag_days?: number;
 	first_strong_date?: string;
 	avg_amount_5d: number;
@@ -54,6 +65,28 @@ export type LeadershipBreakdown = {
 	influence_proxy: number;
 	resilience: number;
 	purity: number;
+	structure: number;
+};
+
+// 缠论结构维度的打分依据，供前端展示「为什么是这个分」。
+export type StructureAssessment = {
+	score: number;
+	// available 为 false 表示该股票没有可用的缠论结果（未分析 / czsc 不可用），
+	// 此时 structure 维度不参与 leader_score 的加权，避免用 0 分误伤。
+	available: boolean;
+	label: string;
+	reasons: string[];
+};
+
+// 可交易性数据的完整性快照：把「缺什么」显式讲清楚，而不是笼统说「数据不完整」。
+// 缺字段会让置信度按权重扣分，同时也该让用户知道扣的是哪一项。
+export type AvailabilityIntegrity = {
+	amount: boolean;
+	turnover: boolean;
+	limitData: boolean;
+	// missing 是按中文可读顺序排好的缺失项名称，供前端直接展示。
+	missing: string[];
+	complete: boolean;
 };
 
 export type ThemeStock = BoardStock & {
@@ -70,12 +103,16 @@ export type ThemeStock = BoardStock & {
 	risks: string[];
 	metrics: LeadershipMetrics;
 	breakdown: LeadershipBreakdown;
+	structure: StructureAssessment;
+	availability: AvailabilityIntegrity;
 	limit_regime: '10cm' | '20cm' | '30cm';
 	live: boolean;
 };
 
 export type QuoteLookup = Record<string, Pick<Quote, 'price' | 'change' | 'change_percent'>>;
 export type KLineLookup = Record<string, KLine[]>;
+// 缠论分析结果按标的索引；缺失表示该标的没有可用结果，此时结构维度不参与打分。
+export type ChanLookup = Record<string, ChanAnalysis | null | undefined>;
 
 type BaseThemeStock = BoardStock & { nodes: string[]; occurrence: number; live: boolean };
 
@@ -86,6 +123,7 @@ type RawLeadership = {
 	metrics: LeadershipMetrics;
 	latestRangePercent: number;
 	lockedLimit: boolean;
+	structure: StructureAssessment;
 };
 
 export function calculateThemeEmotion(theme: ThemeOverview, scoreOverride?: number): ThemeEmotion {
@@ -161,6 +199,8 @@ export function buildThemeStocks(
 	map: SectorMap | null,
 	liveQuotes: QuoteLookup = {},
 	histories: KLineLookup = {},
+	chanAnalyses: ChanLookup = {},
+	limitEvents: LimitEventLookup = {},
 ): ThemeStock[] {
 	const baseStocks = flattenThemeStocks(map, liveQuotes);
 	if (!baseStocks.length) {
@@ -182,15 +222,23 @@ export function buildThemeStocks(
 	const rawItems = baseStocks.map<RawLeadership>((stock) => {
 		const history = historyBySymbol.get(stock.symbol) || [];
 		const dailyReturns = dailyReturnsBySymbol.get(stock.symbol) || [];
-		const metrics = calculateLeadershipMetrics(stock, history, dailyReturns, themeDailyReturns, tradingDates, themeStartDate);
+		const metrics = calculateLeadershipMetrics(stock, history, dailyReturns, themeDailyReturns, tradingDates, themeStartDate, limitEvents[stock.symbol]);
 		const latest = history.at(-1);
 		const latestRangePercent = latest?.close ? ((latest.high - latest.low) / latest.close) * 100 : 0;
 		const lockedLimit = Boolean(
 			latest
-			&& metrics.latest_return >= approximateLimitThreshold(stock.symbol)
+			&& metrics.latest_return >= approximateLimitThreshold(stock.symbol, stock.name)
 			&& Math.abs(latest.high - latest.low) < 0.001,
 		);
-		return { stock, history, dailyReturns, metrics, latestRangePercent, lockedLimit };
+		return {
+			stock,
+			history,
+			dailyReturns,
+			metrics,
+			latestRangePercent,
+			lockedLimit,
+			structure: assessChanStructure(chanAnalyses[stock.symbol]),
+		};
 	});
 
 	const peers = buildPeerRanks(rawItems);
@@ -248,13 +296,26 @@ function calculateLeadershipMetrics(
 	themeDailyReturns: Map<string, number>,
 	tradingDates: string[],
 	themeStartDate?: string,
+	limitEvents?: LimitEventCoverageEntry,
 ): LeadershipMetrics {
 	const recent20 = history.slice(-20);
 	const recent10Returns = dailyReturns.slice(-10);
 	const recent5 = history.slice(-5);
 	const recent5Returns = dailyReturns.slice(-5);
-	const threshold = approximateLimitThreshold(stock.symbol);
-	const limitFlags = dailyReturns.slice(-20).map((item) => item.value >= threshold);
+	const threshold = approximateLimitThreshold(stock.symbol, stock.name);
+	// 优先用涨停事件库存档逐日判定；池子未覆盖的日期回退到
+	// 「日涨幅达标 + 收盘封死」近似，减少大涨未停板的误判。
+	const recent20Returns = dailyReturns.slice(-20);
+	const limitFlags = recent20Returns.map((item, index) => {
+		const line = recent20[index];
+		if (limitEvents?.coveredDates.has(item.date)) {
+			return limitEvents.limitDates.has(item.date);
+		}
+		return item.value >= threshold && Boolean(line && line.high > 0 && line.close + 1e-6 >= line.high);
+	});
+	// 覆盖天数至少 5 天才认定事件库有效：刚部署时池子只积累了一两天，
+	// 此时宣称"精确"反而掩盖了窗口内大部分日期仍是近似的事实。
+	const hasCoveredHistory = recent20Returns.filter((item) => limitEvents?.coveredDates.has(item.date)).length >= 5;
 	const kLineFirstStrong = dailyReturns.slice(-20).find((item) => item.value >= 5)?.date;
 	const firstStrong = earliestDate(kLineFirstStrong, stock.first_limit_date);
 	const lastLine = history.at(-1);
@@ -277,6 +338,7 @@ function calculateLeadershipMetrics(
 		strong_days_10d: recent10Returns.filter((item) => item.value >= 3).length,
 		limit_up_days_20d: Math.max(limitFlags.filter(Boolean).length, stock.limit_up_count || stock.limit_up_days || 0),
 		max_limit_streak_20d: Math.max(maxBooleanStreak(limitFlags), stock.limit_up_streak || 0),
+		limit_events_covered: hasCoveredHistory,
 		start_lag_days: calculateStartLag(firstStrong, themeStartDate, tradingDates),
 		first_strong_date: firstStrong,
 		avg_amount_5d: average(recent5.map((line) => line.amount || 0)),
@@ -340,6 +402,7 @@ function scoreLeadership(
 		[metrics.previous_return < -1 && metrics.latest_return > 2 ? 85 : 50, 0.35],
 	]);
 	const purity = clamp(45 + stock.occurrence * 15, 45, 90);
+	const structure = item.structure;
 	const breakdown: LeadershipBreakdown = {
 		height: Math.round(height),
 		timing: Math.round(timing),
@@ -348,18 +411,28 @@ function scoreLeadership(
 		influence_proxy: Math.round(influenceProxy),
 		resilience: Math.round(resilience),
 		purity: Math.round(purity),
+		structure: structure.available ? structure.score : 0,
 	};
-	let computedLeaderScore = height * 0.2
-		+ timing * 0.15
-		+ persistence * 0.15
-		+ attention * 0.15
-		+ influenceProxy * 0.2
-		+ resilience * 0.1
-		+ purity * 0.05;
+	// 基础分沿用原有七维加权（权重保持原比例，仅整体缩放到 0.94 给缠论留出空间）。
+	const baseScore = weightedAverage([
+		[height, 0.188],
+		[timing, 0.141],
+		[persistence, 0.141],
+		[attention, 0.141],
+		[influenceProxy, 0.188],
+		[resilience, 0.094],
+		[purity, 0.047],
+	]);
+	let computedLeaderScore = baseScore;
 	if (metrics.history_days < 15) computedLeaderScore -= 8;
 	if (stock.change_percent < -3 && metrics.relative_strength_5d < 0) computedLeaderScore -= 6;
 	computedLeaderScore = Math.round(clamp(computedLeaderScore, 0, 100));
-	const leaderScore = typeof stock.rank_score === 'number' ? stock.rank_score : computedLeaderScore;
+
+	// 榜单接口已经下发 rank_score，本地七维只作兜底。但缠论结构是服务端算不到的
+	// 增量信息，所以无论走哪条路径都要作为后置调整叠加上去，否则梯队列表里
+	// 排序靠服务端分数的那批股票会让缠论维度完全失效。
+	const localScore = typeof stock.rank_score === 'number' ? stock.rank_score : computedLeaderScore;
+	const leaderScore = applyStructureAdjustment(localScore, structure);
 
 	let tradabilityScore = attention * 0.55
 		+ (hasTurnover ? percentileScore(peers.turnover, metrics.avg_turnover_5d) : 35) * 0.2
@@ -368,15 +441,18 @@ function scoreLeadership(
 	if (metrics.position_20d >= 95) tradabilityScore -= 8;
 	tradabilityScore = Math.round(clamp(tradabilityScore, 0, 100));
 
-	const hasExactLimitData = Boolean(stock.limit_up_streak || stock.last_limit_date);
+	// 事件库覆盖近20日窗口时视为精确数据（覆盖日的"未涨停"也是确认结论）；
+	// 否则要求个股带有涨停池字段才不算缺失。
+	const hasExactLimitData = Boolean(metrics.limit_events_covered || stock.limit_up_streak || stock.last_limit_date);
 	const confidence = calculateConfidence(stock, metrics, hasAmount, hasTurnover, hasExactLimitData);
+	const availability = buildAvailability(hasAmount, hasTurnover, hasExactLimitData);
 	const confirmation = confirmationLevel(leaderScore, confidence);
 	const state = leadershipState(stock, metrics);
 	const role = isStockRole(stock.rank_role)
 		? stock.rank_role
 		: classifyLeadershipRole(item, lanePeers, leaderScore, attention, timing);
-	const evidence = buildEvidence(stock, metrics, breakdown);
-	const risks = buildRisks(item, hasAmount, hasTurnover, confidence, hasExactLimitData);
+	const evidence = buildEvidence(stock, metrics, breakdown, structure);
+	const risks = buildRisks(item, availability, confidence);
 	const latestHistory = history.at(-1);
 
 	return {
@@ -394,8 +470,26 @@ function scoreLeadership(
 		risks,
 		metrics,
 		breakdown,
+		structure,
+		availability,
 		limit_regime: regime,
 	};
+}
+
+// applyStructureAdjustment 把缠论结构作为后置修正叠加到领导力分上。
+//
+// 用「围绕 50 的偏离按比例折算」而不是直接把结构分加权平均：结构分 50 表示中性，
+// 不该改变原分数；越偏离 50 影响越大。这样一份 85 分的结构能把龙头分最多拉动
+// ±6 分，足以在排名接近时改变次序，又不至于让结构单一维度盖过七维基本面。
+const STRUCTURE_ADJUSTMENT_RANGE = 6;
+
+function applyStructureAdjustment(baseScore: number, structure: StructureAssessment): number {
+	if (!structure.available) {
+		return baseScore;
+	}
+	const deviation = (structure.score - 50) / 50;
+	const adjusted = baseScore + deviation * STRUCTURE_ADJUSTMENT_RANGE;
+	return Math.round(clamp(adjusted, 0, 100));
 }
 
 function isStockRole(value?: string): value is StockRole {
@@ -452,6 +546,81 @@ function classifyLeadershipRole(
 	return '低位观察';
 }
 
+// assessChanStructure 把缠论结果折算成「结构是否支持继续领涨」的 0-100 分。
+//
+// 与 czsc 的 Summary.score 语义不同：那个分数回答「看多还是看空」，这里回答
+// 「结构位置是否支持它继续担任龙头」。两者会分叉 —— 一只已经涨到高位、出现
+// 顶背驰的票，多空分可能还在偏多区，但继续领涨的结构支撑已经转弱，这里就该扣分。
+//
+// 基准 50 分，逐项加减：
+//   - 现价相对最近中枢：上方 +18（离开成本区，上方无套牢盘）、下方 -18（已破位）
+//   - 当前笔方向：向上 +12、向下 -12
+//   - 顶背驰 -16（动能衰竭，高位分歧风险）、底背驰 +10（下跌动能衰减，有修复基础）
+//   - 笔的推进位置：刚过半的向上笔仍有余量，接近终点的向上笔则需警惕转折
+function assessChanStructure(analysis?: ChanAnalysis | null): StructureAssessment {
+	if (!analysis?.structure) {
+		return { score: 50, available: false, label: '未分析', reasons: [] };
+	}
+	const structure = analysis.structure;
+	let score = 50;
+	const reasons: string[] = [];
+
+	const zsPosition = structure.zs_position;
+	if (zsPosition) {
+		if (zsPosition.state === '中枢上方') {
+			score += 18;
+			reasons.push('运行于中枢上方，处于结构强势区');
+		} else if (zsPosition.state === '中枢下方') {
+			score -= 18;
+			reasons.push('已跌破中枢下沿，结构转弱');
+		} else {
+			reasons.push('在中枢内部震荡，结构方向未明');
+		}
+	} else {
+		reasons.push('尚无有效中枢，结构样本不足');
+	}
+
+	const currentBi = structure.current_bi;
+	if (currentBi) {
+		if (currentBi.direction === '向上') {
+			score += 12;
+			// 向上笔推进到中后段时，继续领涨的余量在收窄。
+			if (currentBi.progress >= 0.8) {
+				score -= 6;
+				reasons.push(`当前向上笔已推进${Math.round(currentBi.progress * 100)}%，接近笔终点`);
+			} else {
+				reasons.push('当前处于向上笔，结构支持继续走强');
+			}
+		} else {
+			score -= 12;
+			reasons.push('当前处于向下笔，结构尚未修复');
+		}
+		if (!currentBi.sure) reasons.push('该笔尚未被确认，结构判断需留有余地');
+	}
+
+	// 只取最近一次背驰计入 —— 更早的背驰早已被后续结构消化。
+	const latestDivergence = structure.divergence.at(-1);
+	if (latestDivergence) {
+		const decay = Math.max(0, Math.min(latestDivergence.decay || 0, 1));
+		const weight = Math.max(0.4, Math.min(decay / 0.3, 1));
+		if (latestDivergence.kind === '顶背驰') {
+			score -= 16 * weight;
+			reasons.push(`出现顶背驰（动能衰减${Math.round(decay * 100)}%），继续领涨的动能存疑`);
+		} else {
+			score += 10 * weight;
+			reasons.push(`出现底背驰（动能衰减${Math.round(decay * 100)}%），有结构修复基础`);
+		}
+	}
+
+	score = Math.round(clamp(score, 0, 100));
+	return {
+		score,
+		available: true,
+		label: score >= 70 ? '结构支撑' : score <= 40 ? '结构承压' : '结构中性',
+		reasons: reasons.slice(0, 3),
+	};
+}
+
 function leadershipState(stock: BaseThemeStock, metrics: LeadershipMetrics): LeadershipState {
 	const current = stock.change_percent;
 	if (current <= -3 && metrics.return_5d < 0) return '退潮';
@@ -479,6 +648,20 @@ function calculateConfidence(
 	return Number(Math.min(confidence, 0.82).toFixed(2));
 }
 
+function buildAvailability(hasAmount: boolean, hasTurnover: boolean, hasExactLimitData: boolean): AvailabilityIntegrity {
+	const missing: string[] = [];
+	if (!hasAmount) missing.push('成交额');
+	if (!hasTurnover) missing.push('换手率');
+	if (!hasExactLimitData) missing.push('涨停事件');
+	return {
+		amount: hasAmount,
+		turnover: hasTurnover,
+		limitData: hasExactLimitData,
+		missing,
+		complete: missing.length === 0,
+	};
+}
+
 function confirmationLevel(score: number, confidence: number): ConfirmationLevel {
 	if (score >= 78 && confidence >= 0.85) return '已确认';
 	if (score >= 72 && confidence >= 0.68) return '强候选';
@@ -486,13 +669,17 @@ function confirmationLevel(score: number, confidence: number): ConfirmationLevel
 	return '观察';
 }
 
-function buildEvidence(stock: BaseThemeStock, metrics: LeadershipMetrics, breakdown: LeadershipBreakdown): string[] {
+function buildEvidence(stock: BaseThemeStock, metrics: LeadershipMetrics, breakdown: LeadershipBreakdown, structure: StructureAssessment): string[] {
 	const evidence: string[] = [];
 	if (stock.limit_up_streak) {
 		evidence.push(`${limitRegimeForStock(stock)}涨停池确认：最高${stock.limit_up_streak}连板，近${stock.limit_up_days || stock.limit_up_count || stock.limit_up_streak}日${stock.limit_up_count || stock.limit_up_streak}板`);
 	}
 	if (metrics.return_5d >= 3) evidence.push(`近5日累计${signedPercent(metrics.return_5d)}，持续性高于单日涨幅信号`);
 	if (metrics.max_limit_streak_20d > 0) evidence.push(`近20日识别到最高${metrics.max_limit_streak_20d}连板、${metrics.limit_up_days_20d}个涨停日`);
+	if (structure.available && structure.score >= 60) {
+		const structureReason = structure.reasons[0];
+		evidence.push(structureReason ? `缠论结构${structure.score}分：${structureReason}` : `缠论结构${structure.score}分，结构支撑继续走强`);
+	}
 	if (metrics.start_lag_days !== undefined) {
 		if (metrics.start_lag_days <= 0) evidence.push('强势启动不晚于题材集体启动，具备先锋时序');
 		else evidence.push(`较题材启动晚${metrics.start_lag_days}个交易日，需按补涨路径观察`);
@@ -507,17 +694,18 @@ function buildEvidence(stock: BaseThemeStock, metrics: LeadershipMetrics, breakd
 
 function buildRisks(
 	item: RawLeadership,
-	hasAmount: boolean,
-	hasTurnover: boolean,
+	availability: AvailabilityIntegrity,
 	confidence: number,
-	hasExactLimitData: boolean,
 ): string[] {
 	const risks = ['尚未接入分钟级领涨—跟随关系，板块带动力使用日线代理'];
-	if (item.metrics.limit_up_days_20d > 0 && !hasExactLimitData) risks.push('连板高度由日K涨幅近似识别，待涨停事件流校准');
+	if (item.metrics.limit_up_days_20d > 0 && !availability.limitData) risks.push('连板高度由日K涨幅近似识别，待涨停事件流校准');
 	if (item.metrics.history_days < 15) risks.push('历史样本不足15个交易日');
-	if (!hasAmount || !hasTurnover) risks.push('成交额或换手率数据不完整，可交易性置信度受限');
+	if (!availability.complete) {
+		risks.push(`${availability.missing.join('、')}数据缺失，可交易性置信度已相应扣减`);
+	}
 	if (item.lockedLimit) risks.push('最新涨停接近无换手状态，市场地位与可交易性需分开');
 	if (item.metrics.position_20d >= 92) risks.push('价格处于20日区间高位，分歧风险上升');
+	if (item.structure.available && item.structure.score <= 40) risks.push(`缠论结构${item.structure.score}分：${item.structure.reasons[0] || '结构承压，继续领涨缺乏支撑'}`);
 	if (confidence < 0.5) risks.push('当前只能作为观察标签，不能确认龙头身份');
 	return risks.slice(0, 4);
 }
@@ -609,13 +797,18 @@ function calculateAverageNextPremium(
 ): number {
 	const premiums: number[] = [];
 	for (let index = 0; index < history.length - 1; index++) {
-		if ((dailyReturns[index]?.value || 0) < threshold || history[index].close <= 0) continue;
+		const line = history[index];
+		// 涨停次日溢价样本要求「涨幅达标 + 收盘封死」，避免把大阳线误算进溢价。
+		if ((dailyReturns[index]?.value || 0) < threshold || line.close <= 0) continue;
+		if (line.high <= 0 || line.close + 1e-6 < line.high) continue;
 		premiums.push(((history[index + 1].open / history[index].close) - 1) * 100);
 	}
 	return premiums.length ? average(premiums) : 0;
 }
 
-function approximateLimitThreshold(symbol: string): number {
+function approximateLimitThreshold(symbol: string, name?: string): number {
+	// ST 主板 ±5%，名称带 ST 即按 5% 档近似（*ST 同理）。
+	if (name && name.toUpperCase().includes('ST')) return 4.5;
 	const code = symbol.slice(0, 6);
 	if (code.startsWith('30') || code.startsWith('68')) return 19.3;
 	if (code.startsWith('8') || code.startsWith('4')) return 29.2;

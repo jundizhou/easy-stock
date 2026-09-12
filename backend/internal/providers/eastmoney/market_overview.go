@@ -72,7 +72,8 @@ func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.
 	params := url.Values{}
 	params.Set("fltt", "2")
 	params.Set("secids", strings.Join(secids, ","))
-	params.Set("fields", "f12,f13,f14,f2,f3,f4,f124")
+	// f6 = 成交额（元）：上证/深证相加即「两市成交额」。
+	params.Set("fields", "f12,f13,f14,f2,f3,f4,f6,f124")
 	requestURL := endpoint + "?" + params.Encode()
 	start := time.Now()
 	var payload struct {
@@ -103,7 +104,8 @@ func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.
 		items = append(items, foundation.MarketIndexSnapshot{
 			ID: definition.ID, SecID: definition.SecID, Code: asString(raw["f12"]), Name: firstString(asString(raw["f14"]), definition.Name),
 			Region: definition.Region, Market: definition.Market, Currency: definition.Currency,
-			Price: asFloat(raw["f2"]), ChangePercent: asFloat(raw["f3"]), Change: asFloat(raw["f4"]), TradeTime: tradeTime,
+			Price: asFloat(raw["f2"]), ChangePercent: asFloat(raw["f3"]), Change: asFloat(raw["f4"]),
+			Amount: asFloat(raw["f6"]), TradeTime: tradeTime,
 			Status: indexStatus(tradeTime, time.Now()), Meta: meta,
 		})
 	}
@@ -177,54 +179,112 @@ func (c *Client) IndustryMomentum(ctx context.Context, limit int) ([]foundation.
 	if limit <= 0 {
 		limit = 50
 	}
-	endpoint := c.quoteBaseURL + "/api/qt/clist/get"
-	params := standardListParams(limit)
-	params.Set("fid", "f3")
-	params.Set("fs", "m:90+t:2+f:!50")
-	params.Set("fields", "f12,f14,f3,f8,f62,f104,f105,f128,f136,f109,f160,f24")
-	requestURL := endpoint + "?" + params.Encode()
-	start := time.Now()
-	var payload struct {
-		RC   int `json:"rc"`
-		Data struct {
-			Diff []map[string]any `json:"diff"`
-		} `json:"data"`
-	}
-	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil || payload.RC != 0 || len(payload.Data.Diff) == 0 {
-		boards, fallbackErr := c.boardsFromFundFlow(ctx, "", limit, firstError(err, fmt.Errorf("eastmoney industry momentum unavailable")))
-		if fallbackErr != nil {
-			return nil, foundation.SourceMeta{}, fallbackErr
-		}
-		items := make([]foundation.MarketIndustryMomentum, 0, len(boards))
-		for _, board := range boards {
-			if len(items) >= limit {
-				break
-			}
-			items = append(items, foundation.MarketIndustryMomentum{Code: board.Code, Name: board.Name, MainNetInflow: board.MainNetInflow, Score: scoreMomentum(0, 0, 0, board.MainNetInflow, 0, 0), Meta: board.Meta})
-		}
-		meta := boards[0].Meta
-		meta.AvailableFields = eastmoneyMainNetOnlyFields
-		meta.FallbackReason = "实时行业强度不可用，仅保留资金净流入"
-		for index := range items {
-			items[index].Meta = meta
-		}
+	items, meta, err := c.boardMomentum(ctx, "m:90+t:2+f:!50", "eastmoney:industry-momentum", limit)
+	if err == nil {
 		return items, meta, nil
 	}
-	meta := foundation.SourceMeta{Source: "eastmoney:industry-momentum", SourceURL: requestURL, AvailableFields: eastmoneyIndustryMomentumFields, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds()}
-	items := make([]foundation.MarketIndustryMomentum, 0, len(payload.Data.Diff))
-	for _, raw := range payload.Data.Diff {
-		change := asFloat(raw["f3"])
-		fiveDay := asFloat(raw["f109"])
-		twentyDay := asFloat(raw["f24"])
-		rising := int(asFloat(raw["f104"]))
-		falling := int(asFloat(raw["f105"]))
-		flow := asFloat(raw["f62"])
-		items = append(items, foundation.MarketIndustryMomentum{
-			Code: asString(raw["f12"]), Name: asString(raw["f14"]), ChangePercent: change, FiveDayChangePercent: fiveDay,
-			TwentyDayChange: twentyDay, TurnoverRate: asFloat(raw["f8"]), RisingCount: rising, FallingCount: falling,
-			MainNetInflow: flow, LeaderName: asString(raw["f128"]), LeaderChangePercent: asFloat(raw["f136"]),
-			Score: scoreMomentum(change, fiveDay, twentyDay, flow, rising, falling), Meta: meta,
-		})
+	boards, fallbackErr := c.boardsFromFundFlow(ctx, "", limit, err)
+	if fallbackErr != nil {
+		return nil, foundation.SourceMeta{}, fallbackErr
+	}
+	items = make([]foundation.MarketIndustryMomentum, 0, len(boards))
+	for _, board := range boards {
+		if len(items) >= limit {
+			break
+		}
+		items = append(items, foundation.MarketIndustryMomentum{Code: board.Code, Name: board.Name, MainNetInflow: board.MainNetInflow, Score: scoreMomentum(0, 0, 0, board.MainNetInflow, 0, 0), Meta: board.Meta})
+	}
+	meta = boards[0].Meta
+	meta.AvailableFields = eastmoneyMainNetOnlyFields
+	meta.FallbackReason = "实时行业强度不可用，仅保留资金净流入"
+	for index := range items {
+		items[index].Meta = meta
+	}
+	return items, meta, nil
+}
+
+// ConceptMomentum lists EastMoney concept boards (m:90+t:3) with today's move,
+// rising/falling counts and the leading stock. It is the intraday reference that
+// keeps the theme layer on today's data while Kaipanla's daily table still shows
+// the previous session.
+func (c *Client) ConceptMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {
+	return c.boardMomentum(ctx, "m:90+t:3+f:!50", "eastmoney:concept-momentum", limit)
+}
+
+// boardMomentum fetches an EastMoney board list (industry or concept).
+// EastMoney caps pz at 100 per request while the concept family has ~500 boards,
+// so the list is paged; a small pause between pages keeps the request rate well
+// under the endpoint's rate limit.
+func (c *Client) boardMomentum(ctx context.Context, boardFilter string, source string, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {
+	const pageSize = 100
+	const maxPages = 8
+	if limit <= 0 {
+		limit = pageSize
+	}
+	pages := (limit + pageSize - 1) / pageSize
+	if pages < 1 {
+		pages = 1
+	}
+	if pages > maxPages {
+		pages = maxPages
+	}
+	endpoint := c.quoteBaseURL + "/api/qt/clist/get"
+	items := make([]foundation.MarketIndustryMomentum, 0, min(limit, pageSize*pages))
+	meta := foundation.SourceMeta{Source: source, AvailableFields: eastmoneyIndustryMomentumFields}
+	start := time.Now()
+	var lastErr error
+	for page := 1; page <= pages; page++ {
+		if page > 1 {
+			select {
+			case <-time.After(250 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, foundation.SourceMeta{}, ctx.Err()
+			}
+		}
+		params := standardListParams(pageSize)
+		params.Set("pn", strconv.Itoa(page))
+		params.Set("fid", "f3")
+		params.Set("fs", boardFilter)
+		params.Set("fields", "f12,f14,f3,f8,f62,f104,f105,f128,f136,f109,f160,f24")
+		requestURL := endpoint + "?" + params.Encode()
+		var payload struct {
+			RC   int `json:"rc"`
+			Data struct {
+				Diff []map[string]any `json:"diff"`
+			} `json:"data"`
+		}
+		if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil || payload.RC != 0 || len(payload.Data.Diff) == 0 {
+			lastErr = firstError(err, fmt.Errorf("eastmoney %s unavailable", source))
+			break
+		}
+		if page == 1 {
+			meta.SourceURL = requestURL
+			meta.FetchedAt = time.Now()
+		}
+		for _, raw := range payload.Data.Diff {
+			change := asFloat(raw["f3"])
+			fiveDay := asFloat(raw["f109"])
+			twentyDay := asFloat(raw["f24"])
+			rising := int(asFloat(raw["f104"]))
+			falling := int(asFloat(raw["f105"]))
+			flow := asFloat(raw["f62"])
+			items = append(items, foundation.MarketIndustryMomentum{
+				Code: asString(raw["f12"]), Name: asString(raw["f14"]), ChangePercent: change, FiveDayChangePercent: fiveDay,
+				TwentyDayChange: twentyDay, TurnoverRate: asFloat(raw["f8"]), RisingCount: rising, FallingCount: falling,
+				MainNetInflow: flow, LeaderName: asString(raw["f128"]), LeaderChangePercent: asFloat(raw["f136"]),
+				Score: scoreMomentum(change, fiveDay, twentyDay, flow, rising, falling), Meta: meta,
+			})
+		}
+		if len(payload.Data.Diff) < pageSize || len(items) >= limit {
+			break
+		}
+	}
+	if len(items) == 0 {
+		return nil, foundation.SourceMeta{}, lastErr
+	}
+	meta.LatencyMS = time.Since(start).Milliseconds()
+	for index := range items {
+		items[index].Meta = meta
 	}
 	return items, meta, nil
 }

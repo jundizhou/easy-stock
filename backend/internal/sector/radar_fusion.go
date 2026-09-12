@@ -20,6 +20,26 @@ const (
 	radarScoreGap       = 10
 )
 
+// 开盘啦题材的「当日强度」权重。开盘啦的快照是**日频**的（当天盘中拿不到当天列，
+// 见 docs 里对 duanxianxia 的说明），所以它的排名/热度描述的其实是**上一个交易日**。
+// 若让它们继续主导，页面就会出现「昨天第一名今天照样排第一」的滞后。
+// 因此当日口径以今天能观测到的东西为主：成分股实时强弱 + 东财概念板块的当日涨幅/家数。
+const (
+	kaipanlaDailyWeightRank        = 0.15 // 开盘啦昨日排名，仅作背景
+	kaipanlaDailyWeightSourceScore = 0.10 // 开盘啦昨日热度值
+	kaipanlaDailyWeightPersistence = 0.10 // 历史连续上榜天数
+	kaipanlaDailyWeightStrength    = 0.65 // 成分股当日强度（本次修复的主角）
+)
+
+// 五日口径仍以多日延续性为主 —— 问的是「这几天是不是持续有资金在做」，
+// 开盘啦的历史排名在这里是有效信息，不该一起压低。
+const (
+	kaipanlaFiveDayWeightRank        = 0.35
+	kaipanlaFiveDayWeightSourceScore = 0.15
+	kaipanlaFiveDayWeightPersistence = 0.20
+	kaipanlaFiveDayWeightStrength    = 0.30
+)
+
 type radarWindowScores struct {
 	daily   int
 	fiveDay int
@@ -46,9 +66,10 @@ func (p *RadarProvider) fusedOverviews(
 		snapshotErr = fmt.Errorf("开盘啦题材快照已超过两个交易日")
 	}
 
+	industryBoards, themeBoards := p.eastMoneyBoards(ctx)
 	industryItems := []foundation.ThemeOverview{}
 	if industryErr == nil {
-		industryItems = buildIndustryRadarOverviews(industries, industryMeta, p.now())
+		industryItems = buildIndustryRadarOverviews(industries, industryMeta, p.now(), p.industryLimitUpStatsByIndustry(ctx), industryBreadthByBoard(industryBoards))
 		p.rememberIndustryLeaders(industries)
 	}
 
@@ -61,22 +82,37 @@ func (p *RadarProvider) fusedOverviews(
 		}
 		quoteLookup := p.quoteLookup(ctx, themes)
 		strengthScores := p.realtimeStrengthScores(ctx, themes)
-		kaipanlaItems = p.buildKaipanlaRadarOverviews(snapshot, themes, quoteLookup, strengthScores, tradeAge)
+		kaipanlaItems = p.buildKaipanlaRadarOverviews(snapshot, themes, quoteLookup, strengthScores, tradeAge, themeBoards)
 	}
 
 	items := mergeRadarOverviews(industryItems, kaipanlaItems)
 	items = rankAndSelectRadarOverviews(items, p.fallbackFill)
+	intradayCalibrated := 0
+	for _, item := range kaipanlaItems {
+		if item.Provisional {
+			intradayCalibrated++
+		}
+	}
 	meta := fusedRadarMeta(p.now(), snapshot, fetchMeta, snapshotErr, industryMeta, industryErr, len(kaipanlaItems) > 0, len(industryItems) > 0)
+	if intradayCalibrated > 0 {
+		note := fmt.Sprintf("盘中已用东财概念板块校准 %d 个题材的当日强度", intradayCalibrated)
+		if strings.TrimSpace(meta.FallbackReason) == "" {
+			meta.FallbackReason = note
+		} else {
+			meta.FallbackReason += "；" + note
+		}
+	}
 	if len(items) == 0 {
 		return nil, meta, fmt.Errorf("趋势题材雷达不可用：%s", joinRadarErrors(snapshotErr, industryErr))
 	}
 	return items, meta, nil
 }
 
-func buildIndustryRadarOverviews(items []foundation.MarketIndustryMomentum, meta foundation.SourceMeta, now time.Time) []foundation.ThemeOverview {
+func buildIndustryRadarOverviews(items []foundation.MarketIndustryMomentum, meta foundation.SourceMeta, now time.Time, limitUpStats map[string]industryLimitUpStats, breadthByIndustry map[string]industryBreadth) []foundation.ThemeOverview {
 	if len(items) == 0 {
 		return nil
 	}
+	items = applyIndustryBreadth(items, breadthByIndustry)
 	dailyChange := industryMetricPercentiles(items, func(item foundation.MarketIndustryMomentum) (float64, bool) {
 		return item.ChangePercent, industryFieldAvailable(item.Meta, "change_percent")
 	})
@@ -96,25 +132,27 @@ func buildIndustryRadarOverviews(items []foundation.MarketIndustryMomentum, meta
 
 	result := make([]foundation.ThemeOverview, 0, len(items))
 	for index, item := range items {
+		// 「当日强度」必须由当日主导：多日涨幅只在五日口径里占大权重，
+		// 否则一个今天走平但五日大涨的板块会顶掉今天真正领涨的板块。
 		dailyComposite, dailyOK := weightedRadarScore(
-			radarMetric{dailyChange[index], dailyChange[index] >= 0, .45},
-			radarMetric{fiveDayChange[index], fiveDayChange[index] >= 0, .25},
-			radarMetric{twentyDayChange[index], twentyDayChange[index] >= 0, .15},
-			radarMetric{breadth[index], breadth[index] >= 0, .10},
+			radarMetric{dailyChange[index], dailyChange[index] >= 0, .55},
+			radarMetric{breadth[index], breadth[index] >= 0, .20},
+			radarMetric{fiveDayChange[index], fiveDayChange[index] >= 0, .15},
+			radarMetric{twentyDayChange[index], twentyDayChange[index] >= 0, .05},
 			radarMetric{leader[index], leader[index] >= 0, .05},
 		)
 		fiveDayComposite, fiveDayOK := weightedRadarScore(
-			radarMetric{dailyChange[index], dailyChange[index] >= 0, .15},
 			radarMetric{fiveDayChange[index], fiveDayChange[index] >= 0, .45},
 			radarMetric{twentyDayChange[index], twentyDayChange[index] >= 0, .25},
+			radarMetric{dailyChange[index], dailyChange[index] >= 0, .15},
 			radarMetric{breadth[index], breadth[index] >= 0, .10},
 			radarMetric{leader[index], leader[index] >= 0, .05},
 		)
-		dailyScore := blendProviderAndComposite(item.Score, dailyComposite, dailyOK)
+		dailyScore := blendProviderAndComposite(radarDailyProviderScore(item.ChangePercent), dailyComposite, dailyOK)
 		fiveDayScore := blendProviderAndComposite(item.Score, fiveDayComposite, fiveDayOK)
 		tradeDate := firstNonEmptyRadar(item.Meta.TradeDate, meta.TradeDate, shanghaiDate(now))
 		matched := item.RisingCount + item.FallingCount
-		result = append(result, foundation.ThemeOverview{
+		result = append(result, enrichIndustryLimitUp(foundation.ThemeOverview{
 			Theme:                radarIndustryThemeID(item.Code, item.Name),
 			Name:                 item.Name,
 			ChangePercent:        item.ChangePercent,
@@ -132,9 +170,32 @@ func buildIndustryRadarOverviews(items []foundation.MarketIndustryMomentum, meta
 			IndustryDailyScore:   dailyScore,
 			IndustryFiveDayScore: fiveDayScore,
 			TradeDate:            tradeDate,
-		})
+		}, item, limitUpStats))
 	}
 	return uniqueIndustryOverviews(result)
+}
+
+// enrichIndustryLimitUp fills the limit-up fields that industry momentum data
+// does not carry (limit-up count, board height, previous-day count and how many
+// consecutive sessions the industry stayed active) from the limit-up pool.
+func enrichIndustryLimitUp(overview foundation.ThemeOverview, item foundation.MarketIndustryMomentum, limitUpStats map[string]industryLimitUpStats) foundation.ThemeOverview {
+	if len(limitUpStats) == 0 {
+		return overview
+	}
+	names := []string{item.Name}
+	if mapping, ok := lookupRadarIndustryMapping(item.Code, item.Name); ok && mapping.EastMoneyBoardName != "" {
+		names = append(names, mapping.EastMoneyBoardName)
+	}
+	stats, ok := lookupIndustryLimitUp(limitUpStats, names...)
+	if !ok {
+		return overview
+	}
+	overview.LimitUpCount = stats.LimitUpCount
+	overview.BoardCount = stats.MaxStreak
+	overview.MaxStreak = stats.MaxStreak
+	overview.PreviousCount = stats.PreviousCount
+	overview.ActiveDays = stats.ActiveDays
+	return overview
 }
 
 func (p *RadarProvider) buildKaipanlaRadarOverviews(
@@ -143,6 +204,7 @@ func (p *RadarProvider) buildKaipanlaRadarOverviews(
 	quotes map[string]foundation.Quote,
 	strengths map[string]themeStrengthScore,
 	tradeAge int,
+	themeBoards *boardIndex,
 ) []foundation.ThemeOverview {
 	if len(themes) == 0 {
 		return nil
@@ -168,23 +230,41 @@ func (p *RadarProvider) buildKaipanlaRadarOverviews(
 		rankScore := rankAbsolute*.6 + rankPercentiles[index]*.4
 		persistence := float64(min(len(theme.History), 5)) * 20
 		daily, _ := weightedRadarScore(
-			radarMetric{rankScore, true, .45},
-			radarMetric{strengthPercentiles[index], hasSourceStrength, .15},
-			radarMetric{persistence, len(theme.History) > 0, .15},
-			radarMetric{float64(strength.daily), strengthAvailable, .25},
+			radarMetric{rankScore, true, kaipanlaDailyWeightRank},
+			radarMetric{strengthPercentiles[index], hasSourceStrength, kaipanlaDailyWeightSourceScore},
+			radarMetric{persistence, len(theme.History) > 0, kaipanlaDailyWeightPersistence},
+			radarMetric{float64(strength.daily), strengthAvailable, kaipanlaDailyWeightStrength},
 		)
 		fiveDay, _ := weightedRadarScore(
-			radarMetric{rankScore, true, .35},
-			radarMetric{strengthPercentiles[index], hasSourceStrength, .15},
-			radarMetric{persistence, len(theme.History) > 0, .20},
-			radarMetric{float64(strength.fiveDay), strengthAvailable, .30},
+			radarMetric{rankScore, true, kaipanlaFiveDayWeightRank},
+			radarMetric{strengthPercentiles[index], hasSourceStrength, kaipanlaFiveDayWeightSourceScore},
+			radarMetric{persistence, len(theme.History) > 0, kaipanlaFiveDayWeightPersistence},
+			radarMetric{float64(strength.fiveDay), strengthAvailable, kaipanlaFiveDayWeightStrength},
 		)
 		dailyScore := roundedRadarScore(daily * freshness)
 		fiveDayScore := roundedRadarScore(fiveDay * freshness)
+		provisional := false
+		intradayChange := 0.0
+		if tradeAge > 0 {
+			// 快照不是今天的（盘中最常见）：Kaipanla 的排名还是上一个交易日，
+			// 用东财概念板块的当日涨幅+家数校准当日强度，避免"昨天第一名"顶掉今天的领涨题材。
+			if intraday, change, _, ok := intradayThemeSignal(theme, themeBoards); ok {
+				blended := float64(intraday)*radarIntradayBlend + float64(dailyScore)*(1-radarIntradayBlend)
+				dailyScore = roundedRadarScore(blended)
+				provisional = true
+				intradayChange = change
+			}
+		}
 		overview := p.themeOverview(snapshot, theme, quotes, tradeAge > 0, strength)
 		overview.TrendScore = dailyScore
 		overview.KaipanlaDailyScore = dailyScore
 		overview.KaipanlaFiveDayScore = fiveDayScore
+		overview.Provisional = provisional
+		if provisional {
+			// 校准后涨跌幅与分数同源（映射板块的加权涨幅），否则同一行里
+			// 「涨跌幅来自龙头股、分数来自板块」会自相矛盾。
+			overview.ChangePercent = intradayChange
+		}
 		result = append(result, overview)
 	}
 	return result
@@ -218,6 +298,14 @@ func blendProviderAndComposite(provider float64, composite float64, compositeOK 
 		return roundedRadarScore(provider)
 	}
 	return roundedRadarScore(provider*.6 + composite*.4)
+}
+
+// radarDailyProviderScore maps today's board move onto the providers' 0-100
+// scale. It intentionally ignores five/twenty-day gains: those belong to the
+// five-day window, and folding them in here let boards that were flat today
+// (+0.2%) outrank the session's actual leaders.
+func radarDailyProviderScore(changePercent float64) float64 {
+	return clampFloat(50+changePercent*8, 0, 100)
 }
 
 func industryMetricPercentiles(

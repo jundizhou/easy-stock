@@ -4,10 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#092c3f" />
-    <meta name="description" content="easy-stock：AI 时代的 A 股行情分析与投研工作台" />
-    <link rel="icon" type="image/svg+xml" href="/easy-stock-mark.svg" />
-    <link rel="apple-touch-icon" href="/easy-stock-mark-180.png" />
-    <title>easy-stock · AI A股投研工作台 · 仅限个人非商业使用</title>
+    <meta name="description" content="KKION：AI 时代的 A 股行情分析与投研工作台" />
+    <link rel="icon" type="image/png" href="/kkion-avatar-72.png" />
+    <link rel="apple-touch-icon" href="/kkion-avatar-180.png" />
+    <title>KKION · AI A股投研工作台 · 仅限个人非商业使用</title>
+    <script>
+      // 首屏前定主题，避免刷新时闪一下浅色。与 src/lib/theme.ts 的
+      // THEME_BOOTSTRAP_SCRIPT 保持一致（键名 easy-stock.theme）。
+      (function () {
+        try {
+          var pref = localStorage.getItem('easy-stock.theme');
+          if (pref !== 'light' && pref !== 'dark') pref = 'system';
+          var dark = pref === 'dark' || (pref === 'system' &&
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var el = document.documentElement;
+          el.dataset.theme = dark ? 'dark' : 'light';
+          el.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) { /* 首屏兜底：读不到偏好就走 CSS 默认浅色 */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

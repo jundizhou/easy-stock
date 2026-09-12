@@ -789,14 +789,14 @@ function USMarketSectorList({ title, items, tone, changeLabel }: { title: string
 
 function ReviewSummaryExportBrand({ summary }: { summary: ReviewDailySummary }) {
 	return <header className="review-summary-export-brand">
-		<div><span><BrainCircuit size={24} /></span><div><strong>easy-stock</strong><small>AI A股复盘工作台</small><em>开源 · 免费使用</em></div></div>
+		<div><span><BrainCircuit size={24} /></span><div><strong>KKION</strong><small>AI A股复盘工作台</small><em>开源 · 免费使用</em></div></div>
 		<div><span>大V复盘日记 · AI 总结</span><strong>{summary.trade_date} 市场综合复盘</strong><small>{summary.author_count} 位作者 · {summary.article_count} 篇有效文章</small></div>
 	</header>;
 }
 
 function ReviewSummaryExportFooter({ summary }: { summary: ReviewDailySummary }) {
 	return <footer className="review-summary-export-footer">
-		<div><strong>easy-stock</strong><span>AI 时代的 A 股行情分析软件</span></div>
+		<div><strong>KKION</strong><span>AI 时代的 A 股行情分析软件</span></div>
 		<div className="review-summary-export-promo"><span><Github size={13} />个人非商业免费 · 欢迎 Star</span><b>微信公众号：easy只吃番茄</b><strong>github.com/jundizhou/easy-stock</strong></div>
 		<div><span>{formatDateTime(summary.generated_at)} 生成</span><strong>仅供研究参考，不构成任何投资建议</strong></div>
 	</footer>;

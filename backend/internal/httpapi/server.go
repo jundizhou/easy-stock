@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/catalyst"
+	"easy-stock/backend/internal/chananalysis"
+	"easy-stock/backend/internal/dailyanalysis"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/marketemotion"
@@ -27,10 +30,12 @@ import (
 	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
 	"easy-stock/backend/internal/providers/sina"
 	"easy-stock/backend/internal/providers/tencent"
+	"easy-stock/backend/internal/providers/xueqiu"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/sector"
 	"easy-stock/backend/internal/strategy/inflection"
+	"easy-stock/backend/internal/tradejournal"
 )
 
 type Server struct {
@@ -62,15 +67,23 @@ type Server struct {
 	portfolioStore        *portfolioinspection.Store
 	portfolioInspection   *portfolioinspection.Service
 	portfolioExpectation  *portfolioinspection.ExpectationService
+	dailyAnalysisStore    *dailyanalysis.Store
+	dailyAnalysis         *dailyanalysis.Service
+	tradeJournalStore     *tradejournal.Store
 	reviewImporter        ReviewImporter
 	wechatAPIURL          string
 	settingsStore         *appsettings.Store
 	reviewAutomation      *review.Automation
 	remoteDailySync       *review.RemoteDailySync
 	hermesGateway         hermes.Gateway
+	catalystSelector      catalyst.Selector
 	masteryLibrary        *methodology.Library
+	chanAnalysisService   *chananalysis.Service
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
+	xueqiu                *xueqiu.Client
+	sourceProbes          []sourceProbe
+	sourceHealth          *sourceHealthCache
 	startupError          error
 	logger                *log.Logger
 }
@@ -85,6 +98,9 @@ func NewServer(config any) *Server {
 	eastMoneyClient := eastmoney.NewClient()
 	tencentClient := tencent.NewClient()
 	clsClient := cls.NewClient()
+	if cfg.Xueqiu == nil {
+		cfg.Xueqiu = xueqiu.NewClient()
+	}
 	if cfg.Realtime == nil {
 		cfg.Realtime = sinaClient
 	}
@@ -98,9 +114,11 @@ func NewServer(config any) *Server {
 		cfg.News = clsClient
 	}
 	var kaipanlaService *duanxianxia.Service
+	var kaipanlaClient *duanxianxia.Client
 	if strings.TrimSpace(cfg.ThemeRadarDBPath) != "" {
 		if store, err := duanxianxia.OpenStore(cfg.ThemeRadarDBPath); err == nil {
 			client := duanxianxia.NewClient(duanxianxia.ClientConfig{BaseURL: cfg.DuanxianxiaBaseURL})
+			kaipanlaClient = client
 			kaipanlaService = duanxianxia.NewService(client, store, duanxianxia.ServiceConfig{
 				RefreshInterval:  5 * time.Minute,
 				LeaderThemeLimit: 3,
@@ -152,6 +170,9 @@ func NewServer(config any) *Server {
 		radar := sector.NewRadarProvider(radarSource, radarFallback, cfg.Realtime, sector.RadarProviderConfig{
 			IndustryMomentum:  cfg.MarketOverview,
 			IndustryStocks:    tencentClient,
+			IndustryBreadth:   eastMoneyClient,
+			ConceptMomentum:   eastMoneyClient,
+			LimitUp:           cfg.LimitUp,
 			FallbackFillLimit: 16,
 		})
 		defaultSectorMap = radar
@@ -197,6 +218,28 @@ func NewServer(config any) *Server {
 			cfg.PortfolioStore, _ = portfolioinspection.OpenStore(":memory:")
 		}
 	}
+	if cfg.DailyAnalysisStore == nil {
+		store, err := dailyanalysis.OpenStore(cfg.DailyAnalysisDBPath)
+		if err == nil {
+			cfg.DailyAnalysisStore = store
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open daily analysis database: %w", err))
+			cfg.DailyAnalysisStore, _ = dailyanalysis.OpenStore(":memory:")
+		} else {
+			cfg.DailyAnalysisStore, _ = dailyanalysis.OpenStore(":memory:")
+		}
+	}
+	if cfg.TradeJournalStore == nil {
+		store, err := tradejournal.OpenStore(cfg.TradeJournalDBPath)
+		if err == nil {
+			cfg.TradeJournalStore = store
+		} else if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open trade journal database: %w", err))
+			cfg.TradeJournalStore, _ = tradejournal.OpenStore(":memory:")
+		} else {
+			cfg.TradeJournalStore, _ = tradejournal.OpenStore(":memory:")
+		}
+	}
 	if cfg.ReviewHTTP == nil {
 		cfg.ReviewHTTP = &http.Client{Timeout: 90 * time.Second}
 	}
@@ -212,7 +255,7 @@ func NewServer(config any) *Server {
 		}
 	}
 	if cfg.HotStocks == nil {
-		cfg.HotStocks = hotstock.NewClient()
+		cfg.HotStocks = hotstock.NewClient(hotstock.WithExtraSource(xueqiuHotSourceLoader(cfg.Xueqiu)))
 	}
 	if cfg.FuturesPosition == nil {
 		cfg.FuturesPosition = futurespositionprovider.NewClient()
@@ -256,6 +299,86 @@ func NewServer(config any) *Server {
 			Client:  cfg.ReviewHTTP,
 		})
 	}
+	// 数据源状态：真实探测（并发执行 + 60s 缓存），不再返回硬编码结论。
+	// 探测都选各源最轻的一次真实请求，失败原因原样反馈给前端。
+	sourceProbes := []sourceProbe{
+		{ID: "duanxianxia", Name: "短线侠 / 开盘啦", Category: "theme,leaders,limit-up,concept", Check: func(ctx context.Context) error {
+			if kaipanlaClient == nil {
+				return errSourceProbeUnavailable
+			}
+			pool, err := kaipanlaClient.FetchLimitUpPool(ctx)
+			if err != nil {
+				return err
+			}
+			if len(pool.Events) == 0 {
+				return sourceProbeError("开盘啦涨停池")
+			}
+			return nil
+		}},
+		{ID: "eastmoney", Name: "东方财富", Category: "quote,kline,f10,report", Check: func(ctx context.Context) error {
+			items, _, err := eastMoneyClient.IndustryMomentum(ctx, 1)
+			if err != nil {
+				return err
+			}
+			if len(items) == 0 {
+				return sourceProbeError("东财行业板块")
+			}
+			return nil
+		}},
+		{ID: "sina", Name: "新浪财经", Category: "quote,kline,money-flow", Check: func(ctx context.Context) error {
+			quotes, err := sinaClient.Realtime(ctx, []string{"600519.SH"})
+			if err != nil {
+				return err
+			}
+			if len(quotes) == 0 {
+				return sourceProbeError("新浪实时行情")
+			}
+			return nil
+		}},
+		{ID: "tencent", Name: "腾讯财经", Category: "quote,index,hk", Check: func(ctx context.Context) error {
+			items, _, err := tencentClient.IndustryMomentum(ctx, 1)
+			if err != nil {
+				return err
+			}
+			if len(items) == 0 {
+				return sourceProbeError("腾讯行业强度")
+			}
+			return nil
+		}},
+		{ID: "cls", Name: "财联社", Category: "news,calendar", Check: func(ctx context.Context) error {
+			items, err := clsClient.LatestNews(ctx, 1)
+			if err != nil {
+				return err
+			}
+			if len(items) == 0 {
+				return sourceProbeError("财联社电报")
+			}
+			return nil
+		}},
+		{ID: "tradingview", Name: "TradingView", Category: "news", Check: func(ctx context.Context) error {
+			// 该源目前没有任何代码路径在调用，如实标注而不是假装正常。
+			return errors.New("未接入")
+		}},
+		{ID: "tushare", Name: "Tushare", Category: "basic,daily,index", Check: func(ctx context.Context) error {
+			if cfg.SettingsStore == nil || strings.TrimSpace(cfg.SettingsStore.Snapshot().Credentials.TushareToken) == "" {
+				return errors.New("requires token")
+			}
+			return nil
+		}},
+		{ID: "xueqiu", Name: "雪球", Category: "hot,news,kol", Check: func(ctx context.Context) error {
+			if cfg.Xueqiu == nil {
+				return errors.New("未初始化")
+			}
+			hot, err := cfg.Xueqiu.HotStocks(ctx, 1)
+			if err != nil {
+				return err
+			}
+			if len(hot) == 0 {
+				return sourceProbeError("雪球热榜")
+			}
+			return nil
+		}},
+	}
 	s := &Server{
 		mux:                   http.NewServeMux(),
 		token:                 cfg.Token,
@@ -280,16 +403,23 @@ func NewServer(config any) *Server {
 		hotStockRanks:         newHotStockRankCache(2 * time.Minute),
 		marketSnapshots:       newMarketOverviewCache(45 * time.Second),
 		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
+		sourceProbes:          sourceProbes,
+		sourceHealth:          newSourceHealthCache(sourceHealthCacheTTL),
 		reviewStore:           cfg.ReviewStore,
 		portfolioStore:        cfg.PortfolioStore,
+		dailyAnalysisStore:    cfg.DailyAnalysisStore,
+		tradeJournalStore:     cfg.TradeJournalStore,
 		reviewImporter:        cfg.ReviewImporter,
 		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
 		settingsStore:         cfg.SettingsStore,
 		reviewAutomation:      cfg.ReviewAutomation,
 		remoteDailySync:       cfg.RemoteDailySync,
 		hermesGateway:         cfg.HermesGateway,
+		catalystSelector:      catalystSelectorFor(cfg.HermesGateway),
 		masteryLibrary:        cfg.MasteryLibrary,
+		chanAnalysisService:   cfg.ChanAnalysis,
 		marketEmotionStore:    cfg.MarketEmotionStore,
+		xueqiu:                cfg.Xueqiu,
 		startupError:          errors.Join(startupErrors...),
 		logger:                cfg.Logger,
 	}
@@ -306,6 +436,9 @@ func NewServer(config any) *Server {
 	)
 	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
 	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, cfg.HermesGateway, s.analyzeStock, cfg.Logger)
+	s.dailyAnalysis = dailyanalysis.NewService(cfg.DailyAnalysisStore, cfg.HermesGateway, s.loadKLine, func(ctx context.Context, symbols []string) ([]foundation.Quote, error) {
+		return s.realtimeProvider.Realtime(ctx, symbols)
+	}, cfg.Logger)
 	s.routes()
 	return s
 }
@@ -330,6 +463,12 @@ func (s *Server) Close() error {
 	}
 	if s.portfolioStore != nil {
 		closeErrors = append(closeErrors, s.portfolioStore.Close())
+	}
+	if s.dailyAnalysisStore != nil {
+		closeErrors = append(closeErrors, s.dailyAnalysisStore.Close())
+	}
+	if s.tradeJournalStore != nil {
+		closeErrors = append(closeErrors, s.tradeJournalStore.Close())
 	}
 	if s.themeRadarStore != nil {
 		closeErrors = append(closeErrors, s.themeRadarStore.Close())
@@ -376,6 +515,14 @@ func (s *Server) RunMarketEmotionScheduler(ctx context.Context) {
 	if s.marketEmotion != nil {
 		s.logSchedulerLifecycle(ctx, "short-term", "market_emotion", func() {
 			s.marketEmotion.runScheduler(ctx, s.logger)
+		})
+	}
+}
+
+func (s *Server) RunDailyAnalysisScheduler(ctx context.Context) {
+	if s.dailyAnalysis != nil {
+		s.logSchedulerLifecycle(ctx, "daily-analysis", "auto_report", func() {
+			s.dailyAnalysis.RunScheduler(ctx, s.logger)
 		})
 	}
 }
@@ -429,6 +576,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/quotes/kline", s.kline)
 	s.mux.HandleFunc("GET /api/v1/quotes/kline/batch", s.klineBatch)
 	s.mux.HandleFunc("GET /api/v1/market/news", s.news)
+	s.mux.HandleFunc("GET /api/v1/market/catalysts", s.marketCatalysts)
 	s.mux.HandleFunc("GET /api/v1/market/indexes", s.marketIndexesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/index-series", s.marketIndexSeriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/industries", s.marketIndustriesHandler)
@@ -446,16 +594,35 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/themes/screen", s.themeScreenHandler)
 	s.mux.HandleFunc("GET /api/v1/sector-map", s.sectorMapHandler)
 	s.mux.HandleFunc("GET /api/v1/short-term/limit-up-ladder", s.limitUpLadderHandler)
+	s.mux.HandleFunc("GET /api/v1/xueqiu/hot-stocks", s.xueqiuHotStocks)
+	s.mux.HandleFunc("GET /api/v1/xueqiu/hot-users", s.xueqiuHotUsers)
+	s.mux.HandleFunc("GET /api/v1/xueqiu/discussions", s.xueqiuDiscussions)
+	s.mux.HandleFunc("GET /api/v1/short-term/limit-up-events", s.limitUpEvents)
 	s.mux.HandleFunc("GET /api/v1/short-term/emotion-history", s.marketEmotionHistoryHandler)
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery", s.masteryIndex)
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery/trader", s.masteryTrader)
 	s.mux.HandleFunc("POST /api/v1/short-term/mastery/refresh", s.masteryRefresh)
 	s.mux.HandleFunc("POST /api/v1/stocks/ai-analysis", s.stockAIAnalysis)
+	s.mux.HandleFunc("GET /api/v1/stocks/chan-analysis", s.chanAnalysis)
+	s.mux.HandleFunc("POST /api/v1/stocks/chan-analysis", s.chanAnalysis)
+	s.mux.HandleFunc("GET /api/v1/stocks/chan-signals", s.chanSignalCatalog)
+	s.mux.HandleFunc("GET /api/v1/stocks/chan-status", s.chanStatus)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)
+	s.mux.HandleFunc("GET /api/v1/daily-analysis", s.dailyAnalysisList)
+	s.mux.HandleFunc("POST /api/v1/daily-analysis", s.dailyAnalysisStart)
+	s.mux.HandleFunc("GET /api/v1/daily-analysis/{id}", s.dailyAnalysisGet)
+	s.mux.HandleFunc("POST /api/v1/daily-analysis/{id}/push", s.dailyAnalysisPush)
+	s.mux.HandleFunc("GET /api/v1/daily-analysis/config", s.dailyAnalysisConfigGet)
+	s.mux.HandleFunc("PUT /api/v1/daily-analysis/config", s.dailyAnalysisConfigUpdate)
+	s.mux.HandleFunc("GET /api/v1/daily-analysis/correlations", s.dailyAnalysisCorrelations)
+	s.mux.HandleFunc("POST /api/v1/trade-journal/analyze", s.tradeJournalAnalyze)
+	s.mux.HandleFunc("GET /api/v1/trade-journal", s.tradeJournalList)
+	s.mux.HandleFunc("GET /api/v1/trade-journal/{id}", s.tradeJournalGet)
+	s.mux.HandleFunc("DELETE /api/v1/trade-journal/{id}", s.tradeJournalDelete)
 	s.mux.HandleFunc("POST /api/v1/reviews/portfolio-expectations", s.portfolioExpectationCreate)
 	s.mux.HandleFunc("GET /api/v1/reviews/portfolio-expectations/latest", s.portfolioExpectationLatest)
 	s.mux.HandleFunc("GET /api/v1/reviews/portfolio-expectations/{id}", s.portfolioExpectationGet)
@@ -507,15 +674,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"sources": []foundation.SourceHealth{
-			{ID: "duanxianxia", Name: "短线侠 / 开盘啦", Category: "theme,leaders,limit-up,concept", OK: true, CheckedAt: time.Now()},
-			{ID: "eastmoney", Name: "东方财富", Category: "quote,kline,f10,report", OK: true, CheckedAt: time.Now()},
-			{ID: "sina", Name: "新浪财经", Category: "quote,kline,money-flow", OK: true, CheckedAt: time.Now()},
-			{ID: "tencent", Name: "腾讯财经", Category: "quote,index,hk", OK: true, CheckedAt: time.Now()},
-			{ID: "cls", Name: "财联社", Category: "news,calendar", OK: true, CheckedAt: time.Now()},
-			{ID: "tradingview", Name: "TradingView", Category: "news", OK: true, CheckedAt: time.Now()},
-			{ID: "tushare", Name: "Tushare", Category: "basic,daily,index", OK: false, Message: "requires token", CheckedAt: time.Now()},
-		},
+		"sources": s.sourceHealth.load(r.Context(), s.sourceProbes),
 	})
 }
 
@@ -638,7 +797,58 @@ func (s *Server) loadKLine(ctx context.Context, symbol string, period string, li
 	if err != nil {
 		return nil, err
 	}
-	return normalizeKLinePeriod(lines, period), nil
+	lines = normalizeKLinePeriod(lines, period)
+	s.backfillAvailability(ctx, lines)
+	return lines, nil
+}
+
+// availabilityBackfiller 由具备批量快照能力的行情源实现（东财）。
+type availabilityBackfiller interface {
+	QuoteAvailabilityBatch(ctx context.Context, symbols []string) (map[string]eastmoney.QuoteAvailability, error)
+}
+
+// backfillAvailability 给兜底 K 线补上成交额与换手率。
+//
+// 主源（东财 push2his）返回的日线自带 amount 与 turnover_rate，但它在部分网络
+// 下不可达，此时会兜底到新浪；新浪日线只有 volume，字段缺失会让前端把「数据没
+// 取到」误读成「可交易性差」，进而压低龙头身份的置信度。这里用一次批量快照把
+// 最近交易日的成交额与换手率补回最后一根 K 线，只补不回改历史，避免用当日快照
+// 冒充历史值。
+func (s *Server) backfillAvailability(ctx context.Context, lines []foundation.KLine) {
+	if len(lines) == 0 {
+		return
+	}
+	backfiller, ok := s.kLinePrimary.(availabilityBackfiller)
+	if !ok {
+		return
+	}
+	last := &lines[len(lines)-1]
+	if last.Amount > 0 && last.TurnoverRate > 0 {
+		return
+	}
+	symbol := last.Symbol
+	if strings.TrimSpace(symbol) == "" {
+		return
+	}
+	snapshotCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	snapshots, err := backfiller.QuoteAvailabilityBatch(snapshotCtx, []string{symbol})
+	if err != nil {
+		return
+	}
+	snapshot, ok := snapshots[symbol]
+	if !ok {
+		return
+	}
+	if last.Amount <= 0 && snapshot.Amount > 0 {
+		last.Amount = snapshot.Amount
+	}
+	if last.TurnoverRate <= 0 && snapshot.TurnoverRate > 0 {
+		last.TurnoverRate = snapshot.TurnoverRate
+	}
+	if last.Meta.FallbackReason == "" {
+		last.Meta.FallbackReason = "东方财富日线不可用，已用新浪日线兜底，并以东方财富快照补齐成交额与换手率"
+	}
 }
 
 func normalizeKLinePeriod(lines []foundation.KLine, period string) []foundation.KLine {
@@ -691,7 +901,7 @@ func (s *Server) news(w http.ResponseWriter, r *http.Request) {
 	if source == "" {
 		source = "cls"
 	}
-	if source != "cls" {
+	if source != "cls" && source != "xueqiu" {
 		writeError(w, http.StatusBadRequest, "unsupported news source")
 		return
 	}
@@ -704,12 +914,93 @@ func (s *Server) news(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
+	if source == "xueqiu" {
+		if s.xueqiu == nil {
+			writeError(w, http.StatusServiceUnavailable, "雪球快讯源不可用")
+			return
+		}
+		entries, newsErr := s.xueqiu.News(r.Context(), limit)
+		if newsErr != nil {
+			writeError(w, http.StatusBadGateway, newsErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": xueqiuNewsItems(entries), "meta": map[string]string{"source": "xueqiu:livenews"}})
+		return
+	}
 	items, err := s.newsProvider.LatestNews(r.Context(), limit)
+	if err != nil && s.xueqiu != nil {
+		// 财联社失败时自动切换雪球 7×24 快讯兜底，并在 meta 里透出降级原因。
+		if entries, newsErr := s.xueqiu.News(r.Context(), limit); newsErr == nil && len(entries) > 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"data": xueqiuNewsItems(entries),
+				"meta": map[string]string{"source": "xueqiu:livenews", "fallback_reason": "财联社不可用：" + err.Error()},
+			})
+			return
+		}
+	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+// marketCatalysts 从财联社电报流里筛出真正影响个股/板块情绪的重大消息。
+//
+// 口径见 internal/catalyst：规则层先砍噪音并排序，模型层再逐条判断「有没有
+// 新增的可交易事实」。没有合格消息时返回空数组——这是被鼓励的结果，不是故障。
+func (s *Server) marketCatalysts(w http.ResponseWriter, r *http.Request) {
+	if s.newsProvider == nil {
+		writeError(w, http.StatusServiceUnavailable, "新闻源不可用")
+		return
+	}
+	// 扫描窗口比输出上限大得多：催化是稀有事件，只看最近 30 条会大面积漏掉。
+	scanLimit := catalystScanLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("scan")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 300 {
+			scanLimit = parsed
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), catalystRequestTimeout)
+	defer cancel()
+
+	items, err := s.newsProvider.LatestNews(ctx, scanLimit)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var meta foundation.SourceMeta
+	if len(items) > 0 {
+		meta = items[0].Meta
+	}
+	candidates, filtered := catalyst.PreFilter(items, catalyst.MaxCandidates)
+	result := catalyst.Enrich(candidates, filtered, meta, s.catalystSelector, ctx)
+	result.Meta.Scanned = len(items)
+	result.Meta.UpdatedAt = time.Now().Format(time.RFC3339)
+	writeJSON(w, http.StatusOK, map[string]any{"data": result.Items, "meta": result.Meta})
+}
+
+const (
+	// catalystScanLimit 是每次扫描的电报条数。财联社单次缓存接口约能给出上百条，
+	// 取 120 条约覆盖最近几小时，兼顾召回与响应时间。
+	catalystScanLimit = 120
+	// catalystRequestTimeout 给模型精筛留足时间；规则降级路径远快于此。
+	catalystRequestTimeout = 120 * time.Second
+)
+
+// catalystSelectorFor 只在模型底座确实可用时才装配精筛器。
+//
+// 未配置模型时若仍装配，每次请求都要等一次必然失败的调用；这里提前判空，
+// 让请求直接走规则降级路径。
+func catalystSelectorFor(gateway hermes.Gateway) catalyst.Selector {
+	if gateway == nil {
+		return nil
+	}
+	selector := catalyst.NewHermesSelector(gateway, catalystRequestTimeout-15*time.Second)
+	if !selector.Available() {
+		return nil
+	}
+	return selector
 }
 
 func (s *Server) sectorMapHandler(w http.ResponseWriter, r *http.Request) {

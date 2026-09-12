@@ -27,11 +27,26 @@ WebSocket 可以通过 query 传 token：
 | `GET` | `/api/v1/quotes/kline/batch?symbols=000001.SZ,600000.SH&period=day&limit=40` | Batch K-line histories for up to 30 symbols, with per-symbol fallback and error reporting. |
 | `GET` | `/api/v1/market/margin-balance?limit=120` | Aggregated Shanghai, Shenzhen, and Beijing margin-financing and securities-lending balances by trading day. |
 | `GET` | `/api/v1/market/news?source=cls&limit=20` | Market news. Current implementation supports `cls`. |
+| `GET` | `/api/v1/market/catalysts?scan=120` | Sentiment catalysts filtered out of the CLS telegraph feed: at most 10 items that materially change stock or sector expectations, with impact direction, strength, affected sectors/stocks, and a one-line rationale. Two-stage filtering (rule pre-filter plus Hermes review). Returns an empty array when nothing qualifies — that is the intended outcome, not a failure. `meta` reports scanned/candidates/filtered counts and whether AI review ran. |
 | `GET` | `/api/v1/stocks/directory` | Cached A-share stock names and codes for local fuzzy search. |
 | `GET` | `/api/v1/stocks/hot-ranks` | Deduplicated union of the Tonghuashun and EastMoney A-share hot-stock Top 100 lists, including each source rank. |
 | `GET` | `/api/v1/themes/overview` | One-snapshot overview of all configured themes, including average change, breadth, fund flow, and strongest node. |
 | `GET` | `/api/v1/sector-map?theme=semiconductor_materials` | Industry chain map. Current implementation uses a local theme rule layer, EastMoney board quotes, and EastMoney board constituents. |
 | `POST` | `/api/v1/strategy/inflections/evaluate` | Evaluate one market snapshot for old anchors, new carriers, and big/small inflection signals. |
+| `GET` | `/api/v1/daily-analysis` | List recent watchlist daily-report jobs (`?limit=`, 1-30). |
+| `POST` | `/api/v1/daily-analysis` | Start a daily-report job for a watchlist (`symbols`, optional `ai_enhance`). Returns 202 with the job; 409 when one is already running. |
+| `GET` | `/api/v1/daily-analysis/{id}` | Poll one daily-report job, including progress, report, and push results. |
+| `POST` | `/api/v1/daily-analysis/{id}/push` | Re-send a finished report to the configured WeCom / Feishu webhooks. |
+| `GET` | `/api/v1/daily-analysis/config` | Read watchlist, auto-run schedule, AI switch, and webhook configuration. |
+| `PUT` | `/api/v1/daily-analysis/config` | Replace the daily-report configuration. Symbols are normalized to `600519.SH` form. |
+| `GET` | `/api/v1/daily-analysis/correlations?symbols=600519,000001&days=60` | Pearson correlation matrix of daily returns for 2-20 symbols. |
+| `POST` | `/api/v1/trade-journal/analyze` | Parse a broker CSV (`csv_content`, optional `filename`), FIFO-match round trips, and return profile plus behavioral-bias diagnosis. |
+| `GET` | `/api/v1/trade-journal?limit=` | List saved trade-journal entries (metadata only). |
+| `GET` | `/api/v1/trade-journal/{id}` | Read one saved trade-journal entry with its full analysis. |
+| `DELETE` | `/api/v1/trade-journal/{id}` | Delete one saved trade-journal entry. |
+| `GET` | `/api/v1/xueqiu/hot-stocks?size=20` | Xueqiu A-share community heat ranking; merged into `/api/v1/stocks/hot-ranks` as a third source. |
+| `GET` | `/api/v1/xueqiu/hot-users?symbol=600519.SH&count=8` | Hottest Xueqiu users (KOL) discussing one A-share stock. |
+| `GET` | `/api/v1/market/news?source=xueqiu&limit=20` | Xueqiu 7×24 news feed; also serves as the automatic fallback when the CLS feed fails. || `GET` | `/api/v1/short-term/limit-up-events?symbols=600519,000001&days=20` | Per-symbol daily limit-up event archive plus the trade dates the pool covers; the front end uses it to replace the daily-K limit approximation. |
 | `GET` | `/api/v1/ws/stream?symbols=000001.SZ,600000.SH&interval_ms=3000` | WebSocket stream for quote snapshots. |
 
 ## Response Shape

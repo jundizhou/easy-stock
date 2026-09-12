@@ -115,7 +115,10 @@ func NewClient(opts ...Option) *Client {
 	c := &Client{
 		baseURL:             "https://push2his.eastmoney.com",
 		quoteBaseURL:        "https://push2.eastmoney.com",
-		quoteFallbackURLs:   []string{"https://82.push2.eastmoney.com", "https://90.push2.eastmoney.com"},
+		// push2delay is the delayed-quote mirror of push2 and is reachable from
+		// networks where push2 (and its 82/90 shards) reset the connection, so it
+		// is tried before the numbered shards.
+		quoteFallbackURLs:   []string{"https://push2delay.eastmoney.com", "https://82.push2.eastmoney.com", "https://90.push2.eastmoney.com"},
 		dataBaseURL:         "https://data.eastmoney.com",
 		topicBaseURL:        "https://push2ex.eastmoney.com",
 		datacenterBaseURL:   "https://datacenter-web.eastmoney.com",
@@ -188,7 +191,148 @@ func (c *Client) KLine(ctx context.Context, symbol string, period string, limit 
 	return items, nil
 }
 
+// QuoteAvailability 是一次轻量批量快照里的可交易性字段。
+// 新浪日线只返回 volume，拿不到成交额与换手率，因此 K 线兜底到新浪时需要用
+// 东财快照把这些字段补回来，否则前端的可交易性置信度会被无谓地压低。
+type QuoteAvailability struct {
+	Symbol       string
+	Amount       float64
+	TurnoverRate float64
+}
+
+// QuoteAvailabilityBatch 批量拉取最近一个交易日的成交额（f6）与换手率（f8）。
+// 走 ulist.np 接口，一次请求可覆盖多只标的，避免逐股请求。
+func (c *Client) QuoteAvailabilityBatch(ctx context.Context, symbols []string) (map[string]QuoteAvailability, error) {
+	if len(symbols) == 0 {
+		return map[string]QuoteAvailability{}, nil
+	}
+	secIDs := make([]string, 0, len(symbols))
+	canonical := make(map[string]string, len(symbols))
+	seen := make(map[string]bool, len(symbols))
+	for _, symbol := range symbols {
+		normalized, err := foundation.NormalizeSymbol(symbol)
+		if err != nil {
+			continue
+		}
+		if seen[normalized.EastMoneySecID] {
+			continue
+		}
+		seen[normalized.EastMoneySecID] = true
+		secIDs = append(secIDs, normalized.EastMoneySecID)
+		canonical[normalized.EastMoneySecID] = normalized.Canonical
+	}
+	if len(secIDs) == 0 {
+		return map[string]QuoteAvailability{}, nil
+	}
+
+	endpoint := c.quoteBaseURL + "/api/qt/ulist.np/get"
+	params := url.Values{}
+	params.Set("fltt", "2")
+	params.Set("invt", "2")
+	params.Set("secids", strings.Join(secIDs, ","))
+	params.Set("fields", "f12,f13,f14,f6,f8")
+	params.Set("ut", "fa5fd1943c7b386f172d6893dbfba10b")
+	params.Set("_", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	requestURL := endpoint + "?" + params.Encode()
+
+	var payload struct {
+		RC   int `json:"rc"`
+		Data struct {
+			Diff []struct {
+				Code         string        `json:"f12"`
+				Market       flexibleFloat `json:"f13"`
+				Amount       flexibleFloat `json:"f6"`
+				TurnoverRate flexibleFloat `json:"f8"`
+			} `json:"diff"`
+		} `json:"data"`
+	}
+	// 与实时行情同族，复用主机轮换以绕开单节点限流。
+	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
+		return nil, err
+	}
+	if payload.RC != 0 {
+		return nil, fmt.Errorf("eastmoney ulist rc=%d", payload.RC)
+	}
+
+	result := make(map[string]QuoteAvailability, len(payload.Data.Diff))
+	for _, raw := range payload.Data.Diff {
+		market := int(raw.Market)
+		if market != 0 && market != 1 {
+			continue
+		}
+		key := fmt.Sprintf("%d.%s", market, raw.Code)
+		symbol := canonical[key]
+		if symbol == "" {
+			continue
+		}
+		result[symbol] = QuoteAvailability{
+			Symbol:       symbol,
+			Amount:       float64(raw.Amount),
+			TurnoverRate: float64(raw.TurnoverRate),
+		}
+	}
+	return result, nil
+}
+
 func (c *Client) getJSONWithRetry(ctx context.Context, requestURL string, target any) error {
+	// push2 quote hosts are sharded and not equally reachable from every
+	// network (some ISPs reset connections to push2/82.push2/90.push2 while
+	// push2delay answers normally). Rotate across the configured hosts so a
+	// single dead host does not take the whole quote family offline.
+	variants := c.quoteRequestVariants(requestURL)
+	if len(variants) > 1 {
+		var lastErr error
+		for _, variant := range variants {
+			if err := c.getJSONWithRetrySingleHost(ctx, variant, target); err != nil {
+				lastErr = err
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				continue
+			}
+			return nil
+		}
+		return lastErr
+	}
+	return c.getJSONWithRetrySingleHost(ctx, requestURL, target)
+}
+
+// quoteRequestVariants returns the same request pointed at every configured
+// quote host, starting with the URL's own host. Non-quote requests (datacenter,
+// reportapi, push2his, ...) are returned unchanged.
+func (c *Client) quoteRequestVariants(requestURL string) []string {
+	parsed, err := url.Parse(requestURL)
+	if err != nil || parsed.Host == "" {
+		return []string{requestURL}
+	}
+	hosts := append([]string{c.quoteBaseURL}, c.quoteFallbackURLs...)
+	known := false
+	for _, host := range hosts {
+		if hostURL, hostErr := url.Parse(host); hostErr == nil && strings.EqualFold(hostURL.Host, parsed.Host) {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return []string{requestURL}
+	}
+	variants := []string{requestURL}
+	seen := map[string]bool{strings.ToLower(parsed.Host): true}
+	for _, host := range hosts {
+		hostURL, hostErr := url.Parse(host)
+		if hostErr != nil || hostURL.Host == "" || seen[strings.ToLower(hostURL.Host)] {
+			continue
+		}
+		seen[strings.ToLower(hostURL.Host)] = true
+		clone := *parsed
+		clone.Scheme = hostURL.Scheme
+		clone.Host = hostURL.Host
+		variants = append(variants, clone.String())
+	}
+	return variants
+}
+
+func (c *Client) getJSONWithRetrySingleHost(ctx context.Context, requestURL string, target any) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {

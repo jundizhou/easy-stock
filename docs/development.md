@@ -152,6 +152,8 @@ Electron 桌面模式
 | `A_STOCK_REVIEW_DB` | 复盘文章 SQLite 路径 |
 | `A_STOCK_MARKET_EMOTION_DB` | 市场情绪历史 SQLite 路径 |
 | `A_STOCK_THEME_RADAR_DB` | 趋势题材与短线侠快照 SQLite 路径 |
+| `A_STOCK_DAILY_ANALYSIS_DB` | 自选股日报与配置 SQLite 路径；缺失时落在数据目录下的 `daily-analysis.db` |
+| `A_STOCK_TRADE_JOURNAL_DB` | 交易复盘历史 SQLite 路径；缺失时落在数据目录下的 `trade-journal.db` |
 | `A_STOCK_MASTERY_CACHE` | 游资心法缓存目录 |
 | `A_STOCK_LOG_DIR` | 运行日志目录；桌面端默认使用用户数据目录下的 `logs` |
 | `A_STOCK_DUANXIANXIA_BASE_URL` | 短线侠服务地址覆盖，主要用于测试 |

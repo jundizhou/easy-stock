@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -25,7 +26,8 @@ func TestStorePersistsSecretsWithPrivatePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat settings: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows 的文件权限由 ACL 决定，os.FileMode 无法表达 0600，仅在 POSIX 平台断言。
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("settings permissions = %o, want 600", info.Mode().Perm())
 	}
 	reopened, err := Open(path)

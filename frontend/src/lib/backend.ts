@@ -269,6 +269,8 @@ export type MarketIndexSnapshot = {
 	price: number;
 	change: number;
 	change_percent: number;
+	/** 指数当日成交额（元）。上证+深证相加 = 两市成交额；0 表示该市场未提供。 */
+	amount: number;
 	trade_time?: string;
 	status: string;
 	meta: SourceMeta;
@@ -495,7 +497,7 @@ export type StockDirectoryData = {
 	stale: boolean;
 };
 
-export type HotStockRankSource = 'ths' | 'eastmoney';
+export type HotStockRankSource = 'ths' | 'eastmoney' | 'xueqiu';
 
 export type HotStockRankEntry = {
 	symbol: string;
@@ -504,6 +506,41 @@ export type HotStockRankEntry = {
 	source_count: number;
 	consensus_score: number;
 	ranks: Partial<Record<HotStockRankSource, number>>;
+};
+
+export type XueqiuHotUser = {
+	screen_name: string;
+	followers_count: number;
+	verified: boolean;
+	description?: string;
+};
+
+export type XueqiuDiscussionPost = {
+	id: string;
+	text: string;
+	reply_count: number;
+	view_count: number;
+	created_at?: string;
+	user_name?: string;
+	user_followers?: number;
+	url?: string;
+};
+
+export type XueqiuSentiment = {
+	bullish: number;
+	neutral: number;
+	bearish: number;
+	summary: string;
+	source: 'hermes-ai' | 'local-rules' | string;
+};
+
+export type XueqiuHotStock = {
+	rank: number;
+	symbol: string;
+	name: string;
+	price: number;
+	percent: number;
+	rank_change: number;
 };
 
 export type HotStockRankSourceStatus = {
@@ -929,6 +966,136 @@ export type StockAITrendPoint = {
 	ma120?: number;
 };
 
+// ── 缠论（czsc）分析 ──────────────────────────────────────────────
+// 字段与后端 chananalysis 包一一对应；中枢沿用 czsc 原生命名
+// （zg/zd 为中枢上下沿，gg/dd 为中枢内最高/最低）。
+
+export type ChanFractal = {
+	time: string;
+	price: number;
+	mark: string;
+	kind: string;
+};
+
+export type ChanPoint = {
+	time: string;
+	price: number;
+};
+
+export type ChanStroke = {
+	direction: string;
+	start: ChanPoint;
+	end: ChanPoint;
+	bars: number;
+	power: number;
+	slope: number;
+	is_sure: boolean;
+};
+
+export type ChanCurrentStroke = ChanStroke & {
+	progress: number;
+	sure: boolean;
+};
+
+export type ChanPivot = {
+	start: string;
+	end: string;
+	zg: number;
+	zd: number;
+	gg: number;
+	dd: number;
+	amplitude: number;
+};
+
+export type ChanZsPosition = {
+	state: '中枢上方' | '中枢内部' | '中枢下方' | string;
+	zone: ChanPivot;
+	note: string;
+};
+
+export type ChanDivergence = {
+	direction: string;
+	kind: '顶背驰' | '底背驰' | string;
+	time: string;
+	price: number;
+	prev_slope: number;
+	slope: number;
+	decay: number;
+};
+
+export type ChanSignal = {
+	name: string;
+	label: string;
+	category?: string;
+	value?: string;
+	glossary?: string;
+	params?: Record<string, unknown>;
+	ok: boolean;
+	error?: string;
+};
+
+export type ChanSummary = {
+	score: number;
+	stance: '偏多' | '偏空' | '中性' | string;
+	tone: 'up' | 'down' | 'flat' | string;
+	reasons: string[];
+	conclusion: string;
+};
+
+export type ChanBacktest = {
+	signal: string;
+	signal_value?: string;
+	stats: Record<string, number | string>;
+	all_keys?: string[];
+	ok: boolean;
+	error?: string;
+};
+
+export type ChanChart = {
+	ok: boolean;
+	path?: string;
+	html?: string;
+	size: number;
+	error?: string;
+};
+
+export type ChanAnalysis = {
+	symbol: string;
+	freq: string;
+	source?: string;
+	generated_at: string;
+	elapsed_ms: number;
+	range: { start: string; end: string; bars: number };
+	structure: {
+		counts: { bars: number; fx: number; bi: number; zs: number };
+		last_close: number;
+		fx: ChanFractal[];
+		bi: ChanStroke[];
+		zs: ChanPivot[];
+		current_bi: ChanCurrentStroke | null;
+		zs_position: ChanZsPosition | null;
+		divergence: ChanDivergence[];
+	};
+	summary: ChanSummary;
+	signals: ChanSignal[];
+	backtest?: ChanBacktest | null;
+	chart?: ChanChart | null;
+};
+
+export type ChanSignalMeta = {
+	name: string;
+	namespace?: string;
+	category?: string;
+	param_template?: string;
+	param_keys?: string[];
+};
+
+export type ChanStatus = {
+	available: boolean;
+	script?: string;
+	reason?: string;
+};
+
 export type StockAIAnalysis = {
 	symbol: string;
 	name: string;
@@ -1156,6 +1323,33 @@ export type NewsItem = {
   published_at?: string;
   tags?: string[];
 	meta: SourceMeta;
+};
+
+/**
+ * 情绪催化条目：从财联社电报流里筛出的、可能实质影响个股/板块预期的重大消息。
+ *
+ * 与 NewsItem 的区别是它带上了筛选结论——影响方向、强度、传导板块与入选理由。
+ * 后端在没有合格消息时会返回空数组，这是正常结果而非故障（宁缺毋滥）。
+ */
+export type CatalystItem = NewsItem & {
+	impact: 'bullish' | 'bearish' | 'neutral';
+	strength: number;
+	sectors?: string[];
+	stocks?: string[];
+	why?: string;
+	horizon?: 'immediate' | 'short' | 'medium';
+	score: number;
+};
+
+/** 催化筛选的口径与执行情况，用于界面解释「为什么是空的」。 */
+export type CatalystMeta = {
+	scanned: number;
+	candidates: number;
+	filtered: number;
+	model_used: boolean;
+	note?: string;
+	source_url?: string;
+	updated_at?: string;
 };
 
 export type BoardStock = {
@@ -1926,3 +2120,209 @@ function normalizeConfig(config: BackendConfig): BackendConfig {
     token: config.token || '',
   };
 }
+
+// ===== 自选股日报（移植 daily_stock_analysis 决策仪表盘）=====
+
+export type DailyAnalysisPushConfig = {
+	enabled: boolean;
+	wecom_webhook?: string;
+	feishu_webhook?: string;
+};
+
+export type DailyAnalysisConfig = {
+	watchlist: string[];
+	auto_run: boolean;
+	run_hour: number;
+	run_minute: number;
+	ai_enhance: boolean;
+	push: DailyAnalysisPushConfig;
+};
+
+export type DailyIndicators = {
+	ma5: number; ma10: number; ma20: number; ma60: number;
+	macd_dif: number; macd_dea: number; macd_hist: number;
+	kdj_k: number; kdj_d: number; kdj_j: number;
+	rsi6: number; rsi14: number;
+	boll_upper: number; boll_mid: number; boll_lower: number;
+	volume_ratio: number;
+	support: number; resistance: number;
+	twenty_day_low: number; twenty_day_high: number;
+};
+
+export type DailyStockReport = {
+	symbol: string;
+	name: string;
+	status: string;
+	error?: string;
+	trade_date?: string;
+	price: number;
+	change_percent: number;
+	score: number;
+	action: string;
+	trend: string;
+	trend_detail: string;
+	indicators: DailyIndicators;
+	signals: string[];
+	risks: string[];
+	checklist: string[];
+	commentary?: string;
+};
+
+export type DailyMarketSummary = {
+	bull_count: number;
+	neutral_count: number;
+	bear_count: number;
+	failed_count: number;
+	average_score: number;
+	bias: string;
+	highlights: string[];
+};
+
+export type DailyPushResult = { channel: string; ok: boolean; message?: string };
+
+export type DailyAnalysisReport = {
+	id: string;
+	trade_date: string;
+	trigger: string;
+	prompt_version: string;
+	ai_enhanced: boolean;
+	stocks: DailyStockReport[];
+	summary: DailyMarketSummary;
+	generated_at: string;
+};
+
+export type DailyAnalysisJob = {
+	id: string;
+	status: string;
+	stage: string;
+	trigger: string;
+	request: { symbols: string[]; ai_enhance: boolean };
+	total_stocks: number;
+	completed_stocks: number;
+	current_symbols: string[] | null;
+	message: string;
+	error?: string;
+	started_at?: string;
+	updated_at?: string;
+	completed_at?: string;
+	report_available: boolean;
+	report?: DailyAnalysisReport;
+	push_results?: DailyPushResult[];
+};
+
+export type CorrelationPair = {
+	left_symbol: string;
+	right_symbol: string;
+	correlation: number;
+	sample_days: number;
+};
+
+export type CorrelationMatrix = {
+	symbols: string[];
+	days: number;
+	pairs: CorrelationPair[];
+	errors?: Record<string, string>;
+};
+
+// ===== 交易复盘（移植 Vibe-Trading Trade Journal）=====
+
+export type JournalRoundTrip = {
+	symbol: string;
+	name?: string;
+	open_date: string;
+	close_date: string;
+	holding_days: number;
+	direction: string;
+	volume: number;
+	open_price: number;
+	close_price: number;
+	net_profit: number;
+	profit_rate: number;
+	fees: number;
+	outcome: string;
+};
+
+export type JournalCurvePoint = { index: number; close_date: string; cumulative: number };
+
+export type JournalStatistics = {
+	total_trades: number;
+	win_count: number;
+	loss_count: number;
+	win_rate: number;
+	avg_win: number;
+	avg_loss: number;
+	profit_factor: number;
+	payoff_ratio: number;
+	expectancy: number;
+	total_net_profit: number;
+	max_drawdown: number;
+	max_drawdown_pct: number;
+	avg_holding_days: number;
+	max_holding_days: number;
+	trade_per_week: number;
+	active_days: number;
+	best_trade?: JournalRoundTrip;
+	worst_trade?: JournalRoundTrip;
+	profit_curve: JournalCurvePoint[];
+};
+
+export type JournalBias = {
+	id: string;
+	label: string;
+	severity: string;
+	score: number;
+	evidence: string;
+	suggestion: string;
+};
+
+export type JournalOpenPosition = {
+	symbol: string;
+	name?: string;
+	volume: number;
+	open_price: number;
+	open_date: string;
+};
+
+export type JournalAnalysis = {
+	algorithm_version: string;
+	filename?: string;
+	imported: number;
+	skipped: number;
+	parsed_range: [string, string];
+	trades: JournalRoundTrip[];
+	statistics: JournalStatistics;
+	biases: JournalBias[];
+	open_positions: JournalOpenPosition[];
+	analyzed_at: string;
+};
+
+export type JournalHistoryEntry = {
+	id: string;
+	filename?: string;
+	imported: number;
+	trades: number;
+	win_rate: number;
+	total_profit: number;
+	max_drawdown_pct: number;
+	bias_count: number;
+	analyzed_at: string;
+	result?: JournalAnalysis;
+};
+
+// ===== 涨停事件流（个股级逐日档案）=====
+
+export type LimitUpEventSummary = {
+	date: string;
+	streak: number;
+	first_limit_time?: string;
+	open_count?: number;
+	change_percent?: number;
+	primary_theme?: string;
+};
+
+export type LimitUpEventsPayload = {
+	events: Record<string, LimitUpEventSummary[]>;
+	covered_dates: string[];
+	lookback_days: number;
+	fallback?: boolean;
+};

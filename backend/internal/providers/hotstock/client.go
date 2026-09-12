@@ -24,8 +24,9 @@ type Client struct {
 	httpClient   *http.Client
 	thsURL       string
 	eastMoneyURL string
+	// extraSources 是可注入的附加热榜源（如雪球），与内置源并行加载、同等参与综合排名。
+	extraSources []func(context.Context, int) foundation.HotStockRankList
 }
-
 type Option func(*Client)
 
 func WithHTTPClient(client *http.Client) Option {
@@ -36,6 +37,15 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
+// WithExtraSource 追加一个外部热榜源 loader（雪球等）。loader 返回失败时给出
+// 带 Source 标识的错误列表，综合逻辑会把它标为不可用而不是静默丢弃。
+func WithExtraSource(loader func(context.Context, int) foundation.HotStockRankList) Option {
+	return func(target *Client) {
+		if loader != nil {
+			target.extraSources = append(target.extraSources, loader)
+		}
+	}
+}
 func WithSourceURLs(thsURL, eastMoneyURL string) Option {
 	return func(target *Client) {
 		if strings.TrimSpace(thsURL) != "" {
@@ -71,6 +81,7 @@ func (client *Client) HotStockRanks(ctx context.Context, limit int) []foundation
 		client.loadTHS,
 		client.loadEastMoney,
 	}
+	loaders = append(loaders, client.extraSources...)
 	results := make(chan result, len(loaders))
 	var group sync.WaitGroup
 	for index, loader := range loaders {

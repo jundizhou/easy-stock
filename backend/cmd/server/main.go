@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"easy-stock/backend/internal/chananalysis"
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/httpapi"
 	"easy-stock/backend/internal/methodology"
@@ -26,6 +28,8 @@ func main() {
 	portfolioDBPath := os.Getenv("A_STOCK_PORTFOLIO_DB")
 	marketEmotionDBPath := os.Getenv("A_STOCK_MARKET_EMOTION_DB")
 	themeRadarDBPath := os.Getenv("A_STOCK_THEME_RADAR_DB")
+	dailyAnalysisDBPath := os.Getenv("A_STOCK_DAILY_ANALYSIS_DB")
+	tradeJournalDBPath := os.Getenv("A_STOCK_TRADE_JOURNAL_DB")
 	settingsPath := os.Getenv("A_STOCK_SETTINGS_PATH")
 	masteryCacheDir := os.Getenv("A_STOCK_MASTERY_CACHE")
 	dataDir := ""
@@ -46,6 +50,12 @@ func main() {
 	}
 	if themeRadarDBPath == "" {
 		themeRadarDBPath = dataPath(dataDir, "theme-radar.db")
+	}
+	if dailyAnalysisDBPath == "" {
+		dailyAnalysisDBPath = dataPath(dataDir, "daily-analysis.db")
+	}
+	if tradeJournalDBPath == "" {
+		tradeJournalDBPath = dataPath(dataDir, "trade-journal.db")
 	}
 	if masteryCacheDir == "" {
 		masteryCacheDir = dataPath(dataDir, "trading-mastery")
@@ -81,6 +91,18 @@ func main() {
 		CacheDir:   masteryCacheDir,
 		HermesHome: hermesHome,
 	})
+	// 缠论分析走独立的 Python 环境（a-stock-data venv + czsc），与 Hermes 的
+	// 运行时解释器分开，避免两边的依赖互相污染。
+	chanAnalysisService := chananalysis.NewService(chananalysis.Config{
+		PythonPath: os.Getenv("A_STOCK_CZSC_PYTHON"),
+		ScriptPath: os.Getenv("A_STOCK_CZSC_SCRIPT"),
+		WorkDir:    os.Getenv("A_STOCK_CZSC_WORKDIR"),
+	})
+	// 脚本需要回调本后端拉 K 线，因此把实际监听地址回填给它。监听地址可能是
+	// :20081 这类省略主机的形式，需补成可直连的地址。
+	chanAnalysisService.SetBackendURL(backendSelfURL(addr))
+	// 后端启用鉴权时，脚本的回调请求也必须带上同一个令牌。
+	chanAnalysisService.SetToken(os.Getenv("A_STOCK_TOKEN"))
 	server := httpapi.NewServer(httpapi.Config{
 		Token:                os.Getenv("A_STOCK_TOKEN"),
 		ReviewDBPath:         reviewDBPath,
@@ -88,11 +110,14 @@ func main() {
 		RemoteDailyReviewURL: os.Getenv("A_STOCK_DAILY_REVIEW_BASE_URL"),
 		MarketEmotionDBPath:  marketEmotionDBPath,
 		ThemeRadarDBPath:     themeRadarDBPath,
+		DailyAnalysisDBPath:  dailyAnalysisDBPath,
+		TradeJournalDBPath:   tradeJournalDBPath,
 		DuanxianxiaBaseURL:   os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
 		WeChatAPIURL:         os.Getenv("A_STOCK_WECHAT_API_URL"),
 		SettingsPath:         settingsPath,
 		HermesGateway:        hermesGateway,
 		MasteryLibrary:       masteryLibrary,
+		ChanAnalysis:         chanAnalysisService,
 		Logger:               log.Default(),
 		StrictPersistence:    true,
 	})
@@ -105,6 +130,7 @@ func main() {
 	go server.RunRemoteDailyReviewScheduler(ctx)
 	go server.RunMarketEmotionScheduler(ctx)
 	go server.RunMasteryScheduler(ctx)
+	go server.RunDailyAnalysisScheduler(ctx)
 	httpServer := &http.Server{Addr: addr, Handler: server}
 	go func() {
 		<-ctx.Done()
@@ -150,6 +176,25 @@ func dataPath(dataDir, name string) string {
 		return ""
 	}
 	return filepath.Join(dataDir, name)
+}
+
+// backendSelfURL 把监听地址转成可被本机子进程回调的 URL。监听地址可能是
+// ":20081" / "0.0.0.0:20081" 这类通配形式，直接访问会失败，因此统一补成
+// 127.0.0.1。也允许通过 A_STOCK_SELF_URL 显式覆盖（例如反向代理后部署）。
+func backendSelfURL(addr string) string {
+	if configured := strings.TrimSpace(os.Getenv("A_STOCK_SELF_URL")); configured != "" {
+		return strings.TrimRight(configured, "/")
+	}
+	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		// addr 可能是不含端口的纯端口或纯主机，退回默认端口。
+		return "http://127.0.0.1:20081"
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 func resolveHermesRuntimeRoot() string {

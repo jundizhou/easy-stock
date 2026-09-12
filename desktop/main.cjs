@@ -35,6 +35,11 @@ const { resolveUpdateFeedURL } = require('./update-feed.cjs');
 const { createRotatingLogger } = require('./runtime-logger.cjs');
 
 app.setName('easy-stock');
+// 显式配置数据目录时先重定向，避免 Electron 在默认位置创建空目录。
+const configuredUserDataPath = String(process.env.A_STOCK_USER_DATA_DIR || '').trim();
+if (configuredUserDataPath) {
+  app.setPath('userData', path.resolve(configuredUserDataPath));
+}
 const defaultUserDataPath = app.getPath('userData');
 const selectedUserDataPath = resolveUserDataPath({
   appDataPath: app.getPath('appData'),
@@ -349,6 +354,8 @@ function buildRuntimeEnv(resourcesRoot) {
     A_STOCK_PORTFOLIO_DB: path.join(userData, 'portfolio-inspections.db'),
     A_STOCK_MARKET_EMOTION_DB: path.join(userData, 'market-emotion.db'),
     A_STOCK_THEME_RADAR_DB: path.join(userData, 'theme-radar.db'),
+    A_STOCK_DAILY_ANALYSIS_DB: path.join(userData, 'daily-analysis.db'),
+    A_STOCK_TRADE_JOURNAL_DB: path.join(userData, 'trade-journal.db'),
     A_STOCK_MASTERY_CACHE: path.join(userData, 'trading-mastery'),
     A_STOCK_HERMES_HOME: hermesHome,
     A_STOCK_HERMES_WORKDIR: hermesWorkDir,

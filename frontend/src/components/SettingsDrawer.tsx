@@ -18,14 +18,27 @@ import {
 	Save,
 	Server,
 	ShieldCheck,
+	Sun,
+	Moon,
+	Monitor,
 	Trash2,
 	X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, RuntimeLogStatus, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
 import { llmProviderDefinition, llmProviders } from '../lib/llm-providers';
+import { THEME_LABELS, ThemePreference, themeIconName, useTheme } from '../lib/theme';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { HermesAgentSettingsPanel } from './HermesAgentSettingsPanel';
+
+/** 主题图标：轻量映射，避免在 JSX 里堆条件分支。 */
+const THEME_ICONS = { sun: Sun, moon: Moon, monitor: Monitor } as const;
+
+const THEME_OPTIONS: { value: ThemePreference; label: string; hint: string }[] = [
+	{ value: 'light', label: THEME_LABELS.light, hint: '明亮底色，适合白天使用' },
+	{ value: 'dark', label: THEME_LABELS.dark, hint: '深色底，长时间盯盘更护眼' },
+	{ value: 'system', label: THEME_LABELS.system, hint: '跟随 Windows 深色模式自动切换' },
+];
 
 type Props = {
 	config: BackendConfig | null;
@@ -52,6 +65,7 @@ const emptySecrets = (): Record<SecretKey, string> => ({
 });
 
 export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
+	const { preference: themePreference, resolved: resolvedTheme, setPreference: setThemePreference } = useTheme();
 	const [settings, setSettings] = useState<AppSettings | null>(null);
 	const [llmProfiles, setLLMProfiles] = useState<LLMProfile[]>([]);
 	const [activeLLMProfileID, setActiveLLMProfileID] = useState('');
@@ -479,6 +493,42 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 							<ShieldCheck size={19} />
 							<div><strong>模型密钥由 Hermes 管理</strong><span>API Key 只写入 Hermes 的本机 .env；页面仅读取是否已配置，不会取回密钥原文。</span></div>
 							<em>{configuredCount} 项已配置</em>
+						</section>
+
+						<section className="settings-section">
+							<div className="settings-section-title">
+								{(() => { const Icon = THEME_ICONS[themeIconName(themePreference)]; return <Icon size={18} />; })()}
+								<div><h3>外观</h3><p>选择界面配色，深色模式更适合长时间盯盘。</p></div>
+							</div>
+							<div className="theme-picker" role="radiogroup" aria-label="外观主题">
+								{THEME_OPTIONS.map((option) => {
+									const Icon = THEME_ICONS[themeIconName(option.value)];
+									const active = themePreference === option.value;
+									return (
+										<button
+											type="button"
+											key={option.value}
+											role="radio"
+											aria-checked={active}
+											className={`theme-option${active ? ' active' : ''}`}
+											onClick={() => setThemePreference(option.value)}
+										>
+											<span className={`theme-option-preview ${option.value}`} aria-hidden="true">
+												<span /><span /><span />
+											</span>
+											<span className="theme-option-body">
+												<strong><Icon size={14} />{option.label}</strong>
+												<small>{option.hint}</small>
+											</span>
+											{active && <CheckCircle2 size={15} className="theme-option-check" />}
+										</button>
+									);
+								})}
+							</div>
+							<small className="theme-current">
+								当前生效：{resolvedTheme === 'dark' ? '深色' : '浅色'}
+								{themePreference === 'system' ? '（跟随系统）' : ''}
+							</small>
 						</section>
 
 						<HermesAgentSettingsPanel config={config} open={open} />
