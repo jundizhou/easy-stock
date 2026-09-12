@@ -3376,13 +3376,17 @@ a:focus-visible {
 .agent-settings-heading > button:hover,
 .mcp-secret-map > div > button:hover { background: var(--theme-blue-soft, #eaf4ff); }
 .skill-settings-list { display: grid; grid-auto-rows: max-content; align-content: start; max-height: 250px; border: 1px solid var(--line); border-radius: 9px; background: var(--theme-surface, #ffffff); overflow-y: auto; }
-.skill-setting-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px !important; min-height: 54px; padding: 10px 11px; border-bottom: 1px solid var(--line-soft); cursor: pointer; overflow: hidden; }
+.skill-setting-item { display: flex; align-items: center; gap: 8px; min-height: 54px; padding: 10px 11px; border-bottom: 1px solid var(--line-soft); overflow: hidden; }
 .skill-setting-item:last-child { border-bottom: 0; }
 .skill-setting-item:hover { background: var(--theme-surface, #f8fbff); }
+.skill-setting-item > label { display: grid; flex: 1; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; cursor: pointer; }
+.skill-item-delete { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted, #7b8ca0); cursor: pointer; }
+.skill-item-delete:hover { background: var(--theme-red-soft, #f9ebe7); color: var(--theme-red, #b3442c); }
+.skill-item-delete:disabled { opacity: .5; cursor: default; }
 .skill-setting-item > span { display: grid; gap: 3px; min-width: 0; }
 .skill-setting-item strong { overflow-wrap: anywhere; color: var(--text); font-size: 12px; }
 .skill-setting-item small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.settings-section .skill-setting-item > input,
+.settings-section .skill-setting-item label > input,
 .settings-section .mcp-server-card input[type="checkbox"],
 .settings-section .mcp-parallel-toggle > input { width: 16px; min-height: 16px; height: 16px; padding: 0; accent-color: var(--theme-blue, #2476d2); cursor: pointer; }
 .mcp-server-list { display: grid; gap: 10px; }
@@ -3656,7 +3660,6 @@ a:focus-visible {
 
 @media (max-width: 420px) {
 	.mcp-server-card { margin-inline: -5px; padding: 10px; }
-	.skill-setting-item { align-items: flex-start; }
 	.mcp-secret-row { grid-template-columns: minmax(0, 1fr); }
 	.mcp-secret-row > input:first-child { grid-column: auto; }
 	.mcp-secret-row > button { min-height: 34px; }

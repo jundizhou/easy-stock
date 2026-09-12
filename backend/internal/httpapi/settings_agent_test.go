@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,6 +55,44 @@ func TestSkillMarketSources(t *testing.T) {
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "skillhub-cn") || !strings.Contains(rec.Body.String(), "skills.sh") {
 		t.Fatalf("unexpected market sources response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentSettingsAPIDeletesSkill(t *testing.T) {
+	store, _ := appsettings.Open("")
+	gateway := &fakeHermesGateway{agentSettings: hermes.AgentSettings{ReasoningEffort: "medium"}}
+	server := NewServer(Config{SettingsStore: store, HermesGateway: gateway})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/agent/skills/delete", strings.NewReader(`{"name":" demo-skill "}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "demo-skill") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(gateway.deletedSkills) != 1 || gateway.deletedSkills[0] != "demo-skill" {
+		t.Fatalf("unexpected delete calls: %v", gateway.deletedSkills)
+	}
+}
+
+func TestAgentSettingsAPIRejectsInvalidSkillDelete(t *testing.T) {
+	store, _ := appsettings.Open("")
+	gateway := &fakeHermesGateway{agentSettings: hermes.AgentSettings{ReasoningEffort: "medium"}, deleteErr: errors.New("未找到 Skill: ghost")}
+	server := NewServer(Config{SettingsStore: store, HermesGateway: gateway})
+	for _, body := range []string{`{"name":""}`, `{"name":"ghost","extra":true}`, `not json`} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/agent/skills/delete", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d want 400", body, rec.Code)
+		}
+	}
+	if len(gateway.deletedSkills) != 0 {
+		t.Fatalf("invalid requests should not reach the gateway: %v", gateway.deletedSkills)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/agent/skills/delete", strings.NewReader(`{"name":"ghost"}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "未找到 Skill: ghost") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

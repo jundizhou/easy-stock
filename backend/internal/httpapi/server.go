@@ -523,6 +523,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/settings/agent", s.settingsAgentGet)
 	s.mux.HandleFunc("PUT /api/v1/settings/agent", s.settingsAgentUpdate)
 	s.mux.HandleFunc("POST /api/v1/settings/agent/skills/import", s.settingsAgentSkillImport)
+	s.mux.HandleFunc("POST /api/v1/settings/agent/skills/delete", s.settingsAgentSkillDelete)
 	s.mux.HandleFunc("POST /api/v1/settings/agent/skills/install-git", s.settingsAgentSkillInstallGit)
 	s.mux.HandleFunc("GET /api/v1/settings/agent/skills/market", s.settingsAgentSkillMarket)
 	s.mux.HandleFunc("GET /api/v1/settings/agent/skills/market/sources", s.settingsAgentSkillMarketSources)

@@ -24,6 +24,8 @@ type fakeHermesGateway struct {
 	lastLLM       appsettings.LLM
 	lastKey       *string
 	agentSettings hermes.AgentSettings
+	deletedSkills []string
+	deleteErr     error
 }
 
 func (g *fakeHermesGateway) Status() hermes.Status { return g.status }
@@ -70,6 +72,10 @@ func (g *fakeHermesGateway) AgentSettings() (hermes.AgentSettings, error) {
 func (g *fakeHermesGateway) SyncAgentSettings(settings hermes.AgentSettings) error {
 	g.agentSettings = settings
 	return nil
+}
+func (g *fakeHermesGateway) DeleteSkill(name string) error {
+	g.deletedSkills = append(g.deletedSkills, name)
+	return g.deleteErr
 }
 
 func stringsConfigured(cfg appsettings.LLM, hasKey bool) bool {

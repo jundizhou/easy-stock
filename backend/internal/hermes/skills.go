@@ -122,6 +122,78 @@ type stagedSkill struct {
 	Dir string
 }
 
+// DeleteSkill removes an installed skill directory from <home>/skills and
+// drops the skill from the config disabled list so the next settings read no
+// longer reports it.
+func (r *Runtime) DeleteSkill(name string) error {
+	name = strings.TrimSpace(name)
+	if strings.TrimSpace(r.home) == "" {
+		return errors.New("Hermes Home 未配置")
+	}
+	if name == "" || len(name) > 160 || strings.ContainsAny(name, "/\\") {
+		return fmt.Errorf("Skill 名称无效: %s", name)
+	}
+	root := filepath.Join(r.home, "skills")
+	target := ""
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || target != "" || entry.IsDir() || entry.Name() != "SKILL.md" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		frontName, _ := skillFrontmatter(string(data))
+		if frontName == "" {
+			frontName = filepath.Base(filepath.Dir(path))
+		}
+		if frontName == name {
+			target = filepath.Dir(path)
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("查找 Skill 失败: %w", err)
+	}
+	if target == "" {
+		return fmt.Errorf("未找到 Skill: %s", name)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("删除 Skill 目录失败: %w", err)
+	}
+	// The category folder is left behind by RemoveAll; clean it up when the
+	// deleted skill was its last resident.
+	_ = os.Remove(filepath.Dir(target))
+
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+	config, err := r.readConfigMap()
+	if err != nil {
+		return err
+	}
+	skills, _ := stringMap(config["skills"])
+	if skills == nil {
+		return nil
+	}
+	disabled := stringSlice(skills["disabled"])
+	kept := make([]string, 0, len(disabled))
+	changed := false
+	for _, entry := range disabled {
+		if strings.TrimSpace(entry) == name {
+			changed = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !changed {
+		return nil
+	}
+	skills["disabled"] = kept
+	config["skills"] = skills
+	return r.writeConfigMap(config)
+}
+
 func expandSkillZip(file SkillImportFile) ([]SkillImportFile, error) {
 	if len(file.Data) > maxSkillArchiveBytes {
 		return nil, errors.New("ZIP 文件超过 128 MB 限制")

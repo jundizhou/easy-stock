@@ -58,6 +58,10 @@ type skillImporter interface {
 	ImportSkills([]hermes.SkillImportFile) ([]hermes.InstalledSkill, error)
 }
 
+type skillRemover interface {
+	DeleteSkill(name string) error
+}
+
 type skillMarketEntry struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -220,6 +224,38 @@ func (s *Server) settingsAgentSkillImport(w http.ResponseWriter, r *http.Request
 
 func (s *Server) settingsAgentSkillMarket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": curatedSkillMarket})
+}
+
+func (s *Server) settingsAgentSkillDelete(w http.ResponseWriter, r *http.Request) {
+	remover, ok := s.hermesGateway.(skillRemover)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "Hermes Skill 删除服务不可用")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	var request struct {
+		Name string `json:"name"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "无效的 Skill 删除请求: "+err.Error())
+		return
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name := strings.TrimSpace(request.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "请提供要删除的 Skill 名称")
+		return
+	}
+	if err := remover.DeleteSkill(name); err != nil {
+		writeError(w, http.StatusBadRequest, "删除 Skill 失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"name": name}})
 }
 
 func (s *Server) settingsAgentSkillMarketSources(w http.ResponseWriter, r *http.Request) {

@@ -152,6 +152,23 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 
 	const marketInstalled = (entry: HermesSkillMarketEntry) => skills.some((skill) => skill.name === entry.path.split('/').pop());
 
+	const deleteSkill = async (name: string) => {
+		if (!config) return;
+		if (!window.confirm(`确定删除 Skill「${name}」？将同时移除本机 Skill 文件。`)) return;
+		setState('saving');
+		setMessage('');
+		try {
+			await requestJSON(config, '/api/v1/settings/agent/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+			const refreshed = await requestJSON<{ data: HermesAgentSettings }>(config, '/api/v1/settings/agent');
+			setSkills(refreshed.data.skills || []);
+			setState('saved');
+			setMessage(`已删除 Skill「${name}」。`);
+		} catch (error) {
+			setState('error');
+			setMessage(error instanceof Error ? error.message : '删除 Skill 失败');
+		}
+	};
+
 	const save = async () => {
 		if (!config) return;
 		setState('saving');
@@ -186,7 +203,7 @@ export function HermesAgentSettingsPanel({ config, open }: Props) {
 					{marketSkills.length > 0 && <div className="skill-market"><div className="skill-market-title"><strong>A 股精选 Skill</strong><span>easy-stock 投研目录</span></div><div className="skill-market-grid">{marketSkills.map((entry) => <article className="skill-market-card" key={entry.id}><div><strong>{entry.name}</strong><small>{entry.category}</small></div><p>{entry.description}</p><button type="button" disabled={marketInstalled(entry) || state === 'saving'} onClick={() => void installGitSkillFromMarket(entry)}>{marketInstalled(entry) ? '已安装' : '安装'}</button></article>)}</div></div>}
 					{marketSources.length > 0 && <div className="skill-market-sources"><div className="skill-market-title"><strong>更多市场</strong><span>打开目录浏览后，可复制仓库地址或下载 ZIP 导入</span></div><div className="skill-market-source-list">{marketSources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}><span><strong>{source.name}</strong><small>{source.region}</small></span><em>{source.description}</em></a>)}</div></div>}
 					<div className="skill-settings-list">
-						{filteredSkills.map((skill) => <label className="skill-setting-item" key={skill.name}><span><strong>{skill.name}</strong><small>{skill.category} · {skill.description || '暂无描述'}</small></span><input type="checkbox" checked={skill.enabled} onChange={(event) => setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, enabled: event.target.checked } : item))} /></label>)}
+						{filteredSkills.map((skill) => <div className="skill-setting-item" key={skill.name}><label><span><strong>{skill.name}</strong><small>{skill.category} · {skill.description || '暂无描述'}</small></span><input type="checkbox" checked={skill.enabled} onChange={(event) => setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, enabled: event.target.checked } : item))} /></label><button type="button" className="skill-item-delete" title={`删除 ${skill.name}`} aria-label={`删除 ${skill.name}`} disabled={state === 'saving'} onClick={() => void deleteSkill(skill.name)}><Trash2 size={13} /></button></div>)}
 						{!filteredSkills.length && <div className="agent-settings-empty">没有匹配的本机 Skill</div>}
 					</div>
 				</div>
