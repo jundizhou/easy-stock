@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/chananalysis"
+	"easy-stock/backend/internal/chanscreener"
 	"easy-stock/backend/internal/hermes"
 	"easy-stock/backend/internal/httpapi"
 	"easy-stock/backend/internal/methodology"
@@ -103,6 +104,16 @@ func main() {
 	chanAnalysisService.SetBackendURL(backendSelfURL(addr))
 	// 后端启用鉴权时，脚本的回调请求也必须带上同一个令牌。
 	chanAnalysisService.SetToken(os.Getenv("A_STOCK_TOKEN"))
+
+	// chan.py 缠论引擎（选股 + 买卖点分析）与 czsc 引擎并列，独立探测脚本与
+	// 解释器；脚本同样回调本后端拉K线。
+	chanScreenerService := chanscreener.NewService(chanscreener.Config{
+		PythonPath: os.Getenv("A_STOCK_CHANPY_PYTHON"),
+		ScriptPath: os.Getenv("A_STOCK_CHANPY_SCRIPT"),
+		WorkDir:    os.Getenv("A_STOCK_CHANPY_WORKDIR"),
+	})
+	chanScreenerService.SetBackendURL(backendSelfURL(addr))
+	chanScreenerService.SetToken(os.Getenv("A_STOCK_TOKEN"))
 	server := httpapi.NewServer(httpapi.Config{
 		Token:                os.Getenv("A_STOCK_TOKEN"),
 		ReviewDBPath:         reviewDBPath,
@@ -118,6 +129,7 @@ func main() {
 		HermesGateway:        hermesGateway,
 		MasteryLibrary:       masteryLibrary,
 		ChanAnalysis:         chanAnalysisService,
+		ChanScreener:         chanScreenerService,
 		Logger:               log.Default(),
 		StrictPersistence:    true,
 	})

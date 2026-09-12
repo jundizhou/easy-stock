@@ -16,6 +16,7 @@ import (
 	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/catalyst"
 	"easy-stock/backend/internal/chananalysis"
+	"easy-stock/backend/internal/chanscreener"
 	"easy-stock/backend/internal/dailyanalysis"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/hermes"
@@ -79,6 +80,7 @@ type Server struct {
 	catalystSelector      catalyst.Selector
 	masteryLibrary        *methodology.Library
 	chanAnalysisService   *chananalysis.Service
+	chanScreenerService   *chanscreener.Service
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
 	xueqiu                *xueqiu.Client
@@ -418,6 +420,7 @@ func NewServer(config any) *Server {
 		catalystSelector:      catalystSelectorFor(cfg.HermesGateway),
 		masteryLibrary:        cfg.MasteryLibrary,
 		chanAnalysisService:   cfg.ChanAnalysis,
+		chanScreenerService:   cfg.ChanScreener,
 		marketEmotionStore:    cfg.MarketEmotionStore,
 		xueqiu:                cfg.Xueqiu,
 		startupError:          errors.Join(startupErrors...),
@@ -607,6 +610,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/stocks/chan-analysis", s.chanAnalysis)
 	s.mux.HandleFunc("GET /api/v1/stocks/chan-signals", s.chanSignalCatalog)
 	s.mux.HandleFunc("GET /api/v1/stocks/chan-status", s.chanStatus)
+	s.mux.HandleFunc("GET /api/v1/stocks/chan-screen", s.chanScreenerScreen)
+	s.mux.HandleFunc("POST /api/v1/stocks/chan-screen", s.chanScreenerScreen)
+	s.mux.HandleFunc("GET /api/v1/stocks/chanpy-analysis", s.chanScreenerAnalyze)
+	s.mux.HandleFunc("POST /api/v1/stocks/chanpy-analysis", s.chanScreenerAnalyze)
+	s.mux.HandleFunc("GET /api/v1/stocks/chan-screen-status", s.chanScreenerStatus)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)

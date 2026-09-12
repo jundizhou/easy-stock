@@ -7825,3 +7825,106 @@ circle.down-fill { fill: var(--down); }
 .stock-ai-xueqiu-posts footer { display: flex; gap: 12px; align-items: center; margin-top: 6px; color: var(--subtle); font-size: 11px; }
 .stock-ai-xueqiu-posts footer a { color: var(--subtle); display: inline-flex; }
 .stock-ai-xueqiu-posts footer a:hover { color: var(--blue); }
+
+/* ─────────── 缠论选股（chan.py 引擎） ─────────── */
+.cs-workspace { display: grid; gap: 12px; min-width: 0; }
+.cs-empty { display: grid; place-items: center; gap: 6px; min-height: 220px; padding: 26px; text-align: center; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.cs-empty strong { font-size: 15px; }
+.cs-empty span { color: var(--muted); font-size: 12.5px; }
+.cs-empty small { color: var(--subtle); font-size: 11.5px; }
+.cs-empty svg { color: var(--amber); }
+
+/* 股票池 */
+.cs-pool { display: grid; gap: 10px; padding: 12px 15px; }
+.cs-pool-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cs-pool-tabs button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.cs-pool-tabs button:hover { border-color: var(--blue); color: var(--blue); }
+.cs-pool-tabs button.active { border-color: transparent; background: var(--blue); color: #fff; }
+.cs-pool-count { margin-left: auto; color: var(--muted); font-size: 12px; }
+.cs-pool-input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--text); font-size: 12.5px; font-family: var(--mono, monospace); line-height: 1.6; resize: vertical; }
+.cs-pool-input:focus { outline: none; border-color: var(--blue); }
+
+/* 条件区 */
+.cs-conditions { display: flex; flex-wrap: wrap; gap: 18px 26px; padding: 12px 15px; }
+.cs-condition-group { display: flex; flex-direction: column; gap: 7px; }
+.cs-condition-label { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.cs-segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.cs-segmented button { padding: 5px 12px; border: none; background: var(--surface-2); color: var(--muted); font-size: 12px; cursor: pointer; }
+.cs-segmented button + button { border-left: 1px solid var(--line); }
+.cs-segmented button.active { background: var(--blue); color: #fff; }
+.cs-bs-types { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-bs-type { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 12px; cursor: pointer; user-select: none; }
+.cs-bs-type input { accent-color: var(--blue); }
+.cs-bs-type:has(input:checked) { border-color: var(--blue); color: var(--blue); background: var(--up-soft); }
+.cs-inline-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.cs-inline-select select { padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.cs-score-slider { gap: 10px; }
+.cs-score-slider input[type="range"] { width: 130px; accent-color: var(--blue); }
+
+/* 结果表 */
+.cs-meta-row { display: flex; flex-wrap: wrap; gap: 14px; padding: 9px 15px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 11.5px; }
+.cs-hit-count { font-style: normal; color: var(--up); }
+.cs-failed-count { margin-left: 6px; color: var(--subtle); font-size: 12px; font-weight: 400; }
+.cs-table-wrap { overflow-x: auto; }
+.cs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cs-table thead th { position: sticky; top: 0; padding: 8px 12px; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .05em; text-align: left; white-space: nowrap; }
+.cs-table tbody td { padding: 9px 12px; border-top: 1px solid var(--line-soft); vertical-align: middle; }
+.cs-row { cursor: pointer; }
+.cs-row:hover { background: var(--surface-2); }
+.cs-row.matched { background: var(--up-soft); }
+.cs-row.matched:hover, .cs-row.active { background: var(--up-soft); box-shadow: inset 3px 0 0 var(--blue); }
+.cs-cell-symbol strong { display: block; font-size: 12.5px; }
+.cs-cell-symbol span { display: block; color: var(--muted); font-size: 11px; }
+.cs-score { display: flex; align-items: center; gap: 7px; min-width: 90px; }
+.cs-score i { flex: 1; height: 5px; min-width: 46px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.cs-score b { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
+.cs-score.up b { background: var(--up); }
+.cs-score.down b { background: var(--down); }
+.cs-score span { min-width: 24px; text-align: right; font-variant-numeric: tabular-nums; }
+.cs-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.cs-tag { padding: 2px 7px; border-radius: 999px; font-size: 11px; font-style: normal; }
+.cs-tag.buy { background: var(--up-soft); color: var(--up); }
+.cs-tag.sell { background: var(--down-soft); color: var(--down); }
+.cs-miss { color: var(--subtle); }
+.cs-zs-state { font-size: 12px; white-space: nowrap; }
+.cs-zs-state.above { color: var(--up); }
+.cs-zs-state.below { color: var(--down); }
+.cs-direction { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.cs-direction.up { color: var(--up); }
+.cs-direction.down { color: var(--down); }
+.cs-reason-cell { color: var(--muted); font-size: 12px; max-width: 300px; }
+
+/* 个股结构详情 */
+.cs-detail { display: grid; gap: 14px; padding: 14px 15px; }
+.cs-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.cs-detail-block { border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-2); padding: 11px 13px; }
+.cs-detail-block > header { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; color: var(--muted); font-size: 12px; }
+.cs-detail-block > header strong { color: var(--text); font-size: 12.5px; }
+.cs-detail-empty { color: var(--subtle); font-size: 12px; padding: 8px 0; }
+.cs-detail-zs-pos { margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+.cs-detail-zs-pos strong { margin: 0 4px; }
+.cs-detail-zs-pos strong.up { color: var(--up); }
+.cs-detail-zs-pos strong.down { color: var(--down); }
+.cs-bsp-list { display: grid; gap: 6px; }
+.cs-bsp-row { display: flex; align-items: center; gap: 10px; padding: 6px 9px; border-radius: 8px; background: var(--surface); font-size: 12px; }
+.cs-bsp-row > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 1; }
+.cs-bsp-row em { padding: 2px 7px; border-radius: 999px; font-size: 11px; font-style: normal; }
+.cs-bsp-row.buy em { background: var(--up-soft); color: var(--up); }
+.cs-bsp-row.sell em { background: var(--down-soft); color: var(--down); }
+.cs-bsp-row i { color: var(--amber); font-size: 10.5px; font-style: normal; }
+.cs-bsp-row span { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.cs-bsp-row strong { font-variant-numeric: tabular-nums; }
+.cs-bi-list { display: grid; gap: 6px; }
+.cs-bi-row { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 8px; background: var(--surface); font-size: 12px; }
+.cs-bi-row span { min-width: 46px; }
+.cs-bi-row.up span { color: var(--up); }
+.cs-bi-row.down span { color: var(--down); }
+.cs-bi-row i { color: var(--subtle); font-style: normal; }
+.cs-bi-row small { flex: 1; color: var(--muted); font-size: 11px; }
+.cs-bi-row strong { font-variant-numeric: tabular-nums; }
+.cs-bi-row strong.up { color: var(--up); }
+.cs-bi-row strong.down { color: var(--down); }
+.cs-zs-list { display: grid; gap: 6px; }
+.cs-zs-list article { padding: 6px 9px; border-radius: 8px; background: var(--surface); }
+.cs-zs-list strong { display: block; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cs-zs-list small { color: var(--muted); font-size: 11px; }

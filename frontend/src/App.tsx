@@ -21,6 +21,7 @@ import {
 	PanelLeftOpen,
 	Radio,
 	RefreshCw,
+	ScanSearch,
 	Search,
 	Server,
 	Settings,
@@ -75,6 +76,7 @@ import { AIChatWorkspace } from './components/AIChatWorkspace';
 import { MarketOverviewWorkspace } from './components/MarketOverviewWorkspace';
 import { TradingMastery } from './components/TradingMastery';
 import { ChanWorkspace } from './components/ChanWorkspace';
+import { ChanScreenerWorkspace } from './components/ChanScreenerWorkspace';
 import { StockAIAnalysisWorkspace, StockAIWorkspaceMode } from './components/StockAIAnalysisWorkspace';
 import { PortfolioInspectionWorkspace } from './components/PortfolioInspectionWorkspace';
 import { DailyReportWorkspace } from './components/DailyReportWorkspace';
@@ -83,7 +85,7 @@ import { WorkbenchWorkspace } from './components/WorkbenchWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-type WorkspaceMode = 'workbench' | 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'daily-report' | 'trade-journal' | 'ai' | 'market';
+type WorkspaceMode = 'workbench' | 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'daily-report' | 'trade-journal' | 'ai' | 'market' | 'chan-screen';
 
 const emptyStockPagination = (): ThemeScreenPagination => ({
 	page: 1,
@@ -102,6 +104,7 @@ export function App() {
 		if (window.location.hash === '#portfolio-inspection') return 'portfolio-inspection';
 		if (window.location.hash === '#daily-report') return 'daily-report';
 		if (window.location.hash === '#trade-journal') return 'trade-journal';
+		if (window.location.hash === '#chan-screen') return 'chan-screen';
 		if (window.location.hash === '#ai') return 'ai';
 		if (window.location.hash.startsWith('#market')) return 'market';
 		if (window.location.hash === '#themes') return 'themes';
@@ -701,7 +704,7 @@ export function App() {
 
 	const switchWorkspace = (mode: WorkspaceMode) => {
 		setWorkspaceMode(mode);
-		window.history.replaceState(null, '', mode === 'workbench' ? '#workbench' : mode === 'limit-up' ? '#limit-up' : mode === 'mastery' ? '#mastery' : mode === 'reviews' ? '#reviews' : mode === 'stock-ai' ? '#stock-ai' : mode === 'portfolio-inspection' ? '#portfolio-inspection' : mode === 'daily-report' ? '#daily-report' : mode === 'trade-journal' ? '#trade-journal' : mode === 'ai' ? '#ai' : mode === 'market' ? '#market/pulse' : '#themes');
+		window.history.replaceState(null, '', mode === 'workbench' ? '#workbench' : mode === 'limit-up' ? '#limit-up' : mode === 'mastery' ? '#mastery' : mode === 'reviews' ? '#reviews' : mode === 'stock-ai' ? '#stock-ai' : mode === 'portfolio-inspection' ? '#portfolio-inspection' : mode === 'daily-report' ? '#daily-report' : mode === 'trade-journal' ? '#trade-journal' : mode === 'chan-screen' ? '#chan-screen' : mode === 'ai' ? '#ai' : mode === 'market' ? '#market/pulse' : '#themes');
 	};
 
 	const askMasteryAI = (traderName: string) => {
@@ -780,6 +783,7 @@ export function App() {
 					<button type="button" className={workspaceMode === 'daily-report' ? 'active' : ''} onClick={() => switchWorkspace('daily-report')} title="自选股日报"><CalendarClock size={18} /><span>自选股日报</span></button>
 					<button type="button" className={workspaceMode === 'trade-journal' ? 'active' : ''} onClick={() => switchWorkspace('trade-journal')} title="交易复盘"><FileSpreadsheet size={18} /><span>交易复盘</span></button>
 					<button type="button" className={workspaceMode === 'limit-up' ? 'active' : ''} onClick={() => switchWorkspace('limit-up')} title="短线连板"><Flame size={18} /><span>短线连板</span></button>
+					<button type="button" className={workspaceMode === 'chan-screen' ? 'active' : ''} onClick={() => switchWorkspace('chan-screen')} title="缠论选股"><ScanSearch size={18} /><span>缠论选股</span></button>
 					<button type="button" className={workspaceMode === 'themes' ? 'active' : ''} onClick={() => switchWorkspace('themes')} title="趋势题材"><LayoutDashboard size={18} /><span>趋势题材</span></button>
 					<button type="button" className={workspaceMode === 'market' ? 'active' : ''} onClick={() => switchWorkspace('market')} title="行情总览"><BarChart3 size={18} /><span>行情总览</span></button>
 					<button type="button" className={workspaceMode === 'mastery' ? 'active' : ''} onClick={() => switchWorkspace('mastery')} title="游资心法"><BookMarked size={18} /><span>游资心法</span></button>
@@ -1063,7 +1067,7 @@ export function App() {
 					</section>
 				</aside>
 			</div>
-			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'daily-report' ? <DailyReportWorkspace config={config} refreshKey={dailyReportRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'trade-journal' ? <TradeJournalWorkspace config={config} refreshKey={tradeJournalRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} onInitialPromptConsumed={() => setAIPrefill('')} onOpenSettings={() => setSettingsOpen(true)} />}
+			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'chan-screen' ? <ChanScreenerWorkspace config={config} refreshKey={0} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'daily-report' ? <DailyReportWorkspace config={config} refreshKey={dailyReportRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'trade-journal' ? <TradeJournalWorkspace config={config} refreshKey={tradeJournalRefreshKey} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} onInitialPromptConsumed={() => setAIPrefill('')} onOpenSettings={() => setSettingsOpen(true)} />}
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>

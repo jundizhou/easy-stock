@@ -8,6 +8,7 @@ import (
 
 	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/chananalysis"
+	"easy-stock/backend/internal/chanscreener"
 	"easy-stock/backend/internal/dailyanalysis"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/hermes"
@@ -147,6 +148,7 @@ type Config struct {
 	HermesGateway        hermes.Gateway
 	MasteryLibrary       *methodology.Library
 	ChanAnalysis         *chananalysis.Service
+	ChanScreener         *chanscreener.Service
 	Logger               *log.Logger
 	StrictPersistence    bool
 }

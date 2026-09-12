@@ -1096,6 +1096,127 @@ export type ChanStatus = {
 	reason?: string;
 };
 
+// ===== chan.py 缠论引擎（选股 + 买卖点分析，Vespa314/chan.py 集成）=====
+
+export type ChanPyStroke = {
+	direction: 'up' | 'down' | string;
+	start_time: string;
+	end_time: string;
+	start_price: number;
+	end_price: number;
+	change_percent: number;
+	bars: number;
+	amp: number;
+	is_sure: boolean;
+};
+
+export type ChanPyPivot = {
+	begin: string;
+	end: string;
+	zd: number;
+	zg: number;
+	gg: number;
+	dd: number;
+	bi_count: number;
+	is_sure: boolean;
+};
+
+export type ChanPyBSPoint = {
+	is_buy: boolean;
+	types: string[];
+	labels: string[];
+	type_str: string;
+	time: string;
+	price: number;
+	bar_index: number;
+	is_sure: boolean;
+	is_segbsp: boolean;
+	relate_bsp1_time: string;
+	bi_direction: string;
+};
+
+export type ChanPyStructure = {
+	bars: number;
+	bi_count: number;
+	zs_count: number;
+	seg_count: number;
+	bsp_count: number;
+	last_close: number;
+	bi: ChanPyStroke[];
+	zs: ChanPyPivot[];
+	bsp: ChanPyBSPoint[];
+	last_bi: ChanPyStroke | null;
+	zs_position: { state: 'above' | 'inside' | 'below' | string; zone: ChanPyPivot } | null;
+};
+
+export type ChanPySummary = {
+	score: number;
+	stance: string;
+	tone: 'up' | 'down' | 'flat' | string;
+	reasons: string[];
+	conclusion: string;
+};
+
+export type ChanPyAnalyze = {
+	ok: boolean;
+	symbol: string;
+	name?: string;
+	period: string;
+	range: { start: string; end: string; bars: number };
+	structure: ChanPyStructure;
+	summary: ChanPySummary;
+	elapsed_ms: number;
+	generated_at: string;
+	engine: string;
+};
+
+export type ChanPyScreenItem = {
+	symbol: string;
+	name?: string;
+	last_close: number;
+	matched: boolean;
+	match_reasons: string[];
+	score: number;
+	stance: string;
+	last_bsp: ChanPyBSPoint | null;
+	zs_state: '' | 'above' | 'inside' | 'below' | string;
+	bi_direction: 'up' | 'down' | string;
+	bi_count: number;
+	zs_count: number;
+	reasons: string[];
+};
+
+export type ChanPyScreenResult = {
+	ok: boolean;
+	period: string;
+	filters: Record<string, unknown>;
+	scanned: number;
+	matched: number;
+	failed: number;
+	errors: Array<{ symbol: string; error: string }>;
+	results: ChanPyScreenItem[];
+	elapsed_ms: number;
+	generated_at: string;
+	engine: string;
+};
+
+export type ChanPyStatus = {
+	available: boolean;
+	script?: string;
+	engine?: string;
+	reason?: string;
+};
+
+export type ChanPyScreenFilters = {
+	side?: 'buy' | 'sell' | 'any';
+	bs_types?: string[];
+	zs_state?: '' | 'above' | 'inside' | 'below';
+	bi_direction?: '' | 'up' | 'down';
+	bsp_recent_bars?: number;
+	min_score?: number;
+	require_sure?: boolean;
+};
+
 export type StockAIAnalysis = {
 	symbol: string;
 	name: string;
