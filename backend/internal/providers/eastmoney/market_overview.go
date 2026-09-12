@@ -272,7 +272,8 @@ func (c *Client) boardMomentum(ctx context.Context, boardFilter string, source s
 				Code: asString(raw["f12"]), Name: asString(raw["f14"]), ChangePercent: change, FiveDayChangePercent: fiveDay,
 				TwentyDayChange: twentyDay, TurnoverRate: asFloat(raw["f8"]), RisingCount: rising, FallingCount: falling,
 				MainNetInflow: flow, LeaderName: asString(raw["f128"]), LeaderChangePercent: asFloat(raw["f136"]),
-				Score: scoreMomentum(change, fiveDay, twentyDay, flow, rising, falling), Meta: meta,
+				LeaderSymbol: normalizeEastSymbol(asString(raw["f140"])),
+				Score:        scoreMomentum(change, fiveDay, twentyDay, flow, rising, falling), Meta: meta,
 			})
 		}
 		if len(payload.Data.Diff) < pageSize || len(items) >= limit {
@@ -923,6 +924,21 @@ func asFloat(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+// normalizeEastSymbol 把东财板块领涨股代码（SZ000001/SH600519）转成 easy-stock
+// 规范形（000001.SZ/600519.SH）；空串与其他形态返回空串。
+func normalizeEastSymbol(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) <= 2 {
+		return ""
+	}
+	suffix, code := raw[:2], raw[2:]
+	switch strings.ToUpper(suffix) {
+	case "SZ", "SH", "BJ":
+		return code + "." + strings.ToUpper(suffix)
+	}
+	return ""
 }
 
 func asString(value any) string {

@@ -14,12 +14,12 @@ import (
 // limitUpEventSummary 是个股级涨停事件的精简投影：前端只需要逐日判定
 // 「哪天涨停、几连板」，完整的行情字段留在事件流接口里。
 type limitUpEventSummary struct {
-	Date          string `json:"date"`
-	Streak        int    `json:"streak"`
-	FirstLimit    string `json:"first_limit_time,omitempty"`
-	OpenCount     int    `json:"open_count,omitempty"`
+	Date          string  `json:"date"`
+	Streak        int     `json:"streak"`
+	FirstLimit    string  `json:"first_limit_time,omitempty"`
+	OpenCount     int     `json:"open_count,omitempty"`
 	ChangePercent float64 `json:"change_percent,omitempty"`
-	PrimaryTheme  string `json:"primary_theme,omitempty"`
+	PrimaryTheme  string  `json:"primary_theme,omitempty"`
 }
 
 type limitUpEventsPayload struct {

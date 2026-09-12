@@ -113,8 +113,8 @@ func WithHTTPClient(httpClient *http.Client) Option {
 
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		baseURL:             "https://push2his.eastmoney.com",
-		quoteBaseURL:        "https://push2.eastmoney.com",
+		baseURL:      "https://push2his.eastmoney.com",
+		quoteBaseURL: "https://push2.eastmoney.com",
 		// push2delay is the delayed-quote mirror of push2 and is reachable from
 		// networks where push2 (and its 82/90 shards) reset the connection, so it
 		// is tried before the numbered shards.

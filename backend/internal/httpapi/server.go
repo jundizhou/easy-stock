@@ -81,6 +81,7 @@ type Server struct {
 	masteryLibrary        *methodology.Library
 	chanAnalysisService   *chananalysis.Service
 	chanScreenerService   *chanscreener.Service
+	marketBreadth         marketBreadthProvider
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
 	xueqiu                *xueqiu.Client
@@ -421,6 +422,7 @@ func NewServer(config any) *Server {
 		masteryLibrary:        cfg.MasteryLibrary,
 		chanAnalysisService:   cfg.ChanAnalysis,
 		chanScreenerService:   cfg.ChanScreener,
+		marketBreadth:         eastMoneyClient,
 		marketEmotionStore:    cfg.MarketEmotionStore,
 		xueqiu:                cfg.Xueqiu,
 		startupError:          errors.Join(startupErrors...),
@@ -590,6 +592,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/futures-position", s.marketFuturesPositionHandler)
 	s.mux.HandleFunc("GET /api/v1/market/futures-members", s.marketFuturesMembersHandler)
 	s.mux.HandleFunc("GET /api/v1/market/futures-consensus", s.marketFuturesConsensusHandler)
+	s.mux.HandleFunc("GET /api/v1/market/breadth", s.marketBreadthHandler)
+	s.mux.HandleFunc("GET /api/v1/market/concepts", s.marketConceptsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/announcements", s.marketAnnouncementsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/institution-reports", s.marketInstitutionReportsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/industries", s.marketIndustryResearchHandler)
@@ -808,6 +812,13 @@ func (s *Server) loadKLine(ctx context.Context, symbol string, period string, li
 	lines = normalizeKLinePeriod(lines, period)
 	s.backfillAvailability(ctx, lines)
 	return lines, nil
+}
+
+// marketBreadthProvider 由具备全市场快照与板块动量能力的行情源实现（东方财富），
+// 供工作台看板的广度统计与概念热度使用。
+type marketBreadthProvider interface {
+	MarketSnapshot(ctx context.Context) (foundation.MarketBreadth, error)
+	ConceptMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error)
 }
 
 // availabilityBackfiller 由具备批量快照能力的行情源实现（东财）。

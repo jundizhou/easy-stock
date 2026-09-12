@@ -292,9 +292,51 @@ export type MarketIndustryMomentum = {
 	rising_count: number;
 	falling_count: number;
 	main_net_inflow: number;
+	leader_symbol?: string;
 	leader_name?: string;
 	leader_change_percent: number;
 	score: number;
+	meta: SourceMeta;
+};
+
+// ===== 全市场广度快照（工作台看板，东方财富分页聚合）=====
+
+export type MarketSnapshotStock = {
+	symbol: string;
+	name: string;
+	close: number;
+	change_percent: number;
+	amount: number;
+	turnover_rate: number;
+};
+
+export type MarketDistributionBucket = {
+	label: string;
+	count: number;
+	positive: boolean;
+};
+
+export type MarketBreadth = {
+	total: number;
+	up: number;
+	flat: number;
+	down: number;
+	up_ratio: number;
+	strong_up: number;
+	strong_down: number;
+	avg_pct: number;
+	median_pct: number;
+	distribution: MarketDistributionBucket[];
+	total_amount: number;
+	avg_amount: number;
+	avg_turnover: number;
+	high_turnover: number;
+	high_vol_count: number;
+	top_gainers: MarketSnapshotStock[];
+	top_losers: MarketSnapshotStock[];
+	turnover_leaders: MarketSnapshotStock[];
+	active_leaders: MarketSnapshotStock[];
+	as_of: string;
 	meta: SourceMeta;
 };
 

@@ -4,6 +4,7 @@ import {
 	BarChart3,
 	Clock3,
 	Flame,
+	Gauge,
 	LoaderCircle,
 	Newspaper,
 	Plus,
@@ -21,9 +22,13 @@ import {
 	KLine,
 	LimitUpLadderData,
 	LimitUpLadderStock,
+	MarketBreadth,
+	MarketDistributionBucket,
 	MarketEmotionHistory,
 	MarketIndexSeries,
 	MarketIndexSnapshot,
+	MarketIndustryMomentum,
+	MarketSnapshotStock,
 	NewsItem,
 	Quote,
 	SourceMeta,
@@ -110,6 +115,12 @@ const formatSignedAmount = (value: number) => {
 export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: Props) {
 	const [emotion, setEmotion] = useState<MarketEmotionHistory | null>(null);
 	const [emotionState, setEmotionState] = useState<LoadState>('idle');
+	const [breadth, setBreadth] = useState<MarketBreadth | null>(null);
+	const [breadthState, setBreadthState] = useState<LoadState>('idle');
+	const [concepts, setConcepts] = useState<MarketIndustryMomentum[]>([]);
+	const [conceptState, setConceptState] = useState<LoadState>('idle');
+	const [industries, setIndustries] = useState<MarketIndustryMomentum[]>([]);
+	const [industryState, setIndustryState] = useState<LoadState>('idle');
 	const [indexes, setIndexes] = useState<MarketIndexSnapshot[]>([]);
 	const [indexLines, setIndexLines] = useState<Record<string, KLine[]>>({});
 	const [indexState, setIndexState] = useState<LoadState>('idle');
@@ -150,6 +161,37 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 			setEmotionState('error');
 			setError(loadError instanceof Error ? loadError.message : '市场情绪加载失败');
 		}
+	}, [config]);
+
+	// ── 看板：全市场广度快照 + 概念/行业板块动量 ──
+	// breadth 冷启动需后端分页拉全市场（约 3 秒，服务端缓存 45 秒），首屏允许较慢。
+	const loadBreadth = useCallback(async () => {
+		if (!config) return;
+		try {
+			const payload = await requestJSON<{ data: MarketBreadth }>(config, '/api/v1/market/breadth');
+			setBreadth(payload.data ?? null);
+			setBreadthState('ready');
+		} catch {
+			setBreadthState('error');
+		}
+	}, [config]);
+
+	const loadBoards = useCallback(async () => {
+		if (!config) return;
+		const load = async (path: string): Promise<MarketIndustryMomentum[] | null> => {
+			try {
+				const payload = await requestJSON<{ data: MarketIndustryMomentum[] }>(config, path);
+				return payload.data ?? [];
+			} catch {
+				return null;
+			}
+		};
+		const [conceptRows, industryRows] = await Promise.all([
+			load('/api/v1/market/concepts?limit=50'),
+			load('/api/v1/market/industries?limit=50'),
+		]);
+		if (conceptRows) { setConcepts(conceptRows); setConceptState('ready'); } else setConceptState('error');
+		if (industryRows) { setIndustries(industryRows); setIndustryState('ready'); } else setIndustryState('error');
 	}, [config]);
 
 	// ── 指数：先取快照，再为上证/深证取日线，供量能卡计算近 20 日成交口径 ──
@@ -245,9 +287,9 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 	const refreshAll = useCallback(async () => {
 		setEmotionState((current) => (current === 'ready' ? current : 'loading'));
 		setIndexState((current) => (current === 'ready' ? current : 'loading'));
-		await Promise.all([loadEmotion(), loadIndexes(), loadHotRanks(), loadNews(), loadQuotes(), loadCatalysts()]);
+		await Promise.all([loadEmotion(), loadIndexes(), loadHotRanks(), loadNews(), loadQuotes(), loadCatalysts(), loadBreadth(), loadBoards()]);
 		setLastSync(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-	}, [loadEmotion, loadIndexes, loadHotRanks, loadNews, loadQuotes, loadCatalysts]);
+	}, [loadEmotion, loadIndexes, loadHotRanks, loadNews, loadQuotes, loadCatalysts, loadBreadth, loadBoards]);
 
 	useEffect(() => { void refreshAll(); }, [refreshAll, refreshKey]);
 
@@ -279,6 +321,8 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 				void loadIndexes();
 				void loadQuotes();
 				void loadEmotion();
+				void loadBreadth();
+				void loadBoards();
 				scheduleQuoteRefresh();
 			}, quoteRefreshInterval());
 		};
@@ -290,7 +334,7 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 			window.clearInterval(newsTimer);
 			window.clearInterval(catalystTimer);
 		};
-	}, [config, loadIndexes, loadQuotes, loadNews, loadEmotion, loadCatalysts]);
+	}, [config, loadIndexes, loadQuotes, loadNews, loadEmotion, loadCatalysts, loadBreadth, loadBoards]);
 
 	// ── 派生数据 ──
 	const latest = emotion?.latest;
@@ -300,9 +344,6 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 	const amount = raw ? raw.limit_up_count : 0;
 	const broken = raw ? raw.broken_count : 0;
 	const breakRate = raw ? brokenRate(amount, broken) : undefined;
-
-	const advanceCount = raw?.advance_rate ? Math.round(raw.advance_rate * 100) : undefined;
-	const declineCount = advanceCount !== undefined ? Math.max(0, 100 - advanceCount) : undefined;
 
 	/**
 	 * 近 20 个交易日两市量能（上证 + 深证 日K 相加），按「旧 → 新」排列。
@@ -390,6 +431,64 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 		}
 		return null;
 	}, [limitUp]);
+
+	// ── 看板派生：封板率 / 涨停梯队 / 情绪雷达维度 ──
+	const sealRate = raw ? Math.max(0, 100 - (breakRate ?? 0)) : undefined;
+
+	const ladderLevels = useMemo(
+		() => [...(limitUp?.current?.levels ?? [])].sort((a, b) => b.level - a.level),
+		[limitUp],
+	);
+	const ladderTop = useMemo(() => ladderLevels.filter((level) => level.level >= 2).slice(0, 6), [ladderLevels]);
+
+	const radarScore = latest?.emotion_score ?? 50;
+	/**
+	 * 情绪雷达 6 维（0-100，越高越强）。
+	 * 上涨占比优先用全市场快照的真实宽度；快照未就绪时退回情绪原始字段
+	 * （该字段历史值恒为 0.5，仅兜底展示，不参与评分口径）。
+	 */
+	const radarDims = useMemo(() => {
+		if (!raw) return [];
+		const pctOrFrac = (value: number | undefined) => {
+			if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+			return value <= 1 ? value * 100 : Math.min(value, 100);
+		};
+		const advance = breadth ? breadth.up_ratio : pctOrFrac(raw.advance_rate);
+		const premium = typeof raw.previous_limit_up_return === 'number'
+			? ((raw.previous_limit_up_return + 2) / 8) * 100
+			: 0;
+		return [
+			{ key: 'limitup', label: '涨停家数', value: Math.min(100, (raw.limit_up_count / 120) * 100) },
+			{ key: 'streak', label: '连板高度', value: Math.min(100, (raw.max_streak / 9) * 100) },
+			{ key: 'advance', label: '上涨占比', value: Math.max(0, Math.min(100, advance)) },
+			{ key: 'reopen', label: '打板胜率', value: pctOrFrac(raw.reopen_success_rate) },
+			{ key: 'premium', label: '昨涨停溢价', value: Math.max(0, Math.min(100, premium)) },
+			{ key: 'focus', label: '题材聚焦', value: pctOrFrac(raw.theme_focus) },
+		];
+	}, [raw, breadth]);
+
+	// 概念/行业领涨股多数只有名称：挂载时取一次股票目录，用名称映射代码。
+	useEffect(() => {
+		if (!config || directoryRef.current) return;
+		let cancelled = false;
+		void (async () => {
+			try {
+				const payload = await requestJSON<StockDirectoryData>(config, '/api/v1/stocks/directory');
+				if (!cancelled) directoryRef.current = payload.stocks ?? [];
+			} catch {
+				directoryRef.current = [];
+			}
+		})();
+		return () => { cancelled = true; };
+	}, [config]);
+
+	const leaderSymbolOf = useCallback((row: MarketIndustryMomentum): string => {
+		if (row.leader_symbol) return row.leader_symbol;
+		const name = row.leader_name?.trim();
+		if (!name) return '';
+		const hit = (directoryRef.current ?? []).find((entry) => entry.name === name);
+		return hit?.symbol ?? '';
+	}, []);
 
 	const hotRows = useMemo(() => (hotRanks?.stocks ?? []).slice(0, 20), [hotRanks]);
 
@@ -581,55 +680,77 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 					</section>
 
 					{/* ── 市场情绪 KPI 条 ── */}
-					<section className="wb-card wb-emotion-card">
+					{/* ── 市场看板：KPI 行 + 分布/雷达/梯队 三列 ── */}
+					<section className="wb-card">
 						<div className="wb-card-head">
-							<h3><Activity size={16} /> 市场情绪 <small>{latest?.trade_date || '--'} · {latest?.phase || '待同步'}</small></h3>
-							<button type="button" className="portfolio-btn secondary" disabled={emotionState === 'loading'} onClick={() => void refreshAll()}>
-								{emotionState === 'loading' ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />} 刷新
+							<h3><Gauge size={15} /> 市场看板 <small>{latest?.trade_date || '--'} · {breadth ? `${breadth.total} 只全市场` : '全市场快照加载中'}</small></h3>
+							<button type="button" className="portfolio-btn secondary" onClick={() => void loadBreadth()}>
+								<RefreshCw size={14} /> 刷新
 							</button>
 						</div>
-						<div className="wb-kpi-grid">
-							<div className="wb-kpi">
-								<span>涨 / 跌家数</span>
-								<strong><b className="up">{advanceCount ?? '--'}</b> / <b className="down">{declineCount ?? '--'}</b></strong>
-								<small>按涨停家数口径归一</small>
-							</div>
-							<div className="wb-kpi wb-kpi-accent">
-								<span>涨停 / 跌停</span>
-								<strong><b className="up">{raw?.limit_up_count ?? '--'}</b> / <b className="down">{raw?.limit_down_count ?? '--'}</b></strong>
-								<small>{raw?.board_count ?? 0} 只连板 · 首板 {raw?.first_board_count ?? '--'}</small>
-							</div>
-							<div className="wb-kpi">
-								<span>炸板率</span>
-								<strong>{breakRate === undefined ? '--' : `${breakRate.toFixed(1)}%`}</strong>
-								<small>{broken} 只开板</small>
-							</div>
-							<div className="wb-kpi">
-								<span>最高连板</span>
-								<strong className="up">{raw?.max_streak ? `${raw.max_streak}板` : '--'}</strong>
-								<small>{topStreakStock ? `${topStreakStock.name} · ${topStreakStock.streak_label || `第${topStreakStock.days}天`}` : '无连板'}</small>
-							</div>
-							<div className="wb-kpi">
-								<span>昨涨停今溢价</span>
-								<strong className={toneForValue(raw?.previous_limit_up_return)}>{raw ? formatPercent(raw.previous_limit_up_return) : '--'}</strong>
-								<small className={toneForValue(raw?.previous_board_return)}>连板 {raw ? formatPercent(raw.previous_board_return) : '--'}</small>
-							</div>
-							<div className="wb-kpi">
-								<span>情绪总分</span>
-								<strong className={latest ? (latest.emotion_score >= 60 ? 'up' : latest.emotion_score <= 40 ? 'down' : undefined) : undefined}>{latest?.emotion_score ?? '--'}</strong>
-								<small>热度 {latest?.scores?.heat ?? '--'} · 结构 {latest?.scores?.structure ?? '--'}</small>
-							</div>
+						<div className="wb-dash-kpis">
+							<DashKpi label="强势 / 弱势" value={<><b className="up">{breadth?.strong_up ?? '--'}</b><span className="wb-dash-sep">/</span><b className="down">{breadth?.strong_down ?? '--'}</b></>} sub="涨跌幅 ≥3%" />
+							<DashKpi label="涨停 / 跌停" value={<><b className="up">{raw?.limit_up_count ?? '--'}</b><span className="wb-dash-sep">/</span><b className="down">{raw?.limit_down_count ?? '--'}</b></>} sub={sealRate !== undefined ? `封板率 ${sealRate.toFixed(0)}%` : undefined} />
+							<DashKpi label="最高连板" value={raw?.max_streak ? `${raw.max_streak}板` : '--'} sub={topStreakStock ? `${topStreakStock.name} · ${topStreakStock.streak_label || `第${topStreakStock.days}天`}` : '无连板'} accent />
+							<DashKpi label="首板 / 连板" value={<><b className="up">{raw?.first_board_count ?? '--'}</b><span className="wb-dash-sep">/</span>{raw?.board_count ?? '--'}</>} sub={`炸板 ${broken} 只`} />
+							<DashKpi label="昨涨停溢价" value={<span className={toneForValue(raw?.previous_limit_up_return)}>{raw ? formatPercent(raw.previous_limit_up_return) : '--'}</span>} sub={<>连板 {raw ? formatPercent(raw.previous_board_return) : '--'}</>} />
+							<DashKpi label="平均换手" value={breadth ? `${breadth.avg_turnover.toFixed(1)}%` : '--'} sub={breadth ? `高换手 ${breadth.high_turnover} 只` : undefined} accent />
 						</div>
-						{intraday && (
-							<div className="wb-emotion-foot">
-								<span className={`wb-chip ${intraday.risk_score >= 60 ? 'danger' : intraday.risk_score >= 40 ? 'warn' : 'ok'}`}>风险 {intraday.risk_score}</span>
-								<span className="wb-chip">{intraday.session_status || '盘中'}</span>
-								<span className="wb-chip">{intraday.breadth || '--'}</span>
-								{intraday.summary && <em className="wb-emotion-summary">{intraday.summary}</em>}
-								{syncMeta?.stale && <span className="wb-chip warn">数据可能滞后</span>}
-							</div>
-						)}
+
+						<div className="wb-dash-grid">
+							<section className="wb-dash-cell">
+								<div className="wb-dash-title"><BarChart3 size={14} /> 涨跌分布 / 广度 <small>{breadth ? `${breadth.total} 只` : ''}</small></div>
+								{breadth ? (
+									<>
+										<DistributionBars rows={breadth.distribution} />
+										<div className="wb-dash-gap" />
+										<BreadthBar up={breadth.up} flat={breadth.flat} down={breadth.down} />
+										<div className="wb-dash-mini-row">
+											<MiniMetric label="平均涨跌" value={formatPercent(breadth.avg_pct)} tone={toneForValue(breadth.avg_pct)} />
+											<MiniMetric label="中位涨跌" value={formatPercent(breadth.median_pct)} tone={toneForValue(breadth.median_pct)} />
+											<MiniMetric label="上涨率" value={`${breadth.up_ratio.toFixed(1)}%`} tone="accent" />
+										</div>
+									</>
+								) : breadthState === 'error' ? (
+									<div className="wb-dash-skeleton">全市场快照不可用 <button type="button" className="wb-link" onClick={() => void loadBreadth()}>重试</button></div>
+								) : (
+									<div className="wb-dash-skeleton"><LoaderCircle className="spin" size={16} /> 正在聚合全市场快照…</div>
+								)}
+							</section>
+
+							<section className="wb-dash-cell wb-radar-cell" style={{ borderColor: scoreColor(radarScore) }}>
+								<div className="wb-dash-title"><Sparkles size={14} /> 情绪雷达 <small>{latest?.phase || '待同步'} · {radarScore.toFixed(0)}</small></div>
+								<EmotionRadar dims={radarDims} score={radarScore} />
+								{intraday && (
+									<div className="wb-emotion-foot">
+										<span className={`wb-chip ${intraday.risk_score >= 60 ? 'danger' : intraday.risk_score >= 40 ? 'warn' : 'ok'}`}>风险 {intraday.risk_score}</span>
+										<span className="wb-chip">{intraday.session_status || '盘中'}</span>
+										{intraday.summary && <em className="wb-emotion-summary">{intraday.summary}</em>}
+										{syncMeta?.stale && <span className="wb-chip warn">数据可能滞后</span>}
+									</div>
+								)}
+							</section>
+
+							<section className="wb-dash-cell">
+								<div className="wb-dash-title"><Flame size={14} /> 涨停梯队 <small>2 板以上 {ladderTop.length} 档</small></div>
+								<LadderMini levels={ladderTop} />
+							</section>
+						</div>
 					</section>
+
+					{/* ── 概念 / 行业热度 ── */}
+					<div className="wb-dash-ranks">
+						<RankCard title="概念热度" rows={concepts} state={conceptState} leaderSymbolOf={leaderSymbolOf} onOpenStock={(symbol) => void openStockAnalysis(symbol)} />
+						<RankCard title="行业热度" rows={industries} state={industryState} leaderSymbolOf={leaderSymbolOf} onOpenStock={(symbol) => void openStockAnalysis(symbol)} />
+					</div>
+
+					{/* ── 四列榜单 ── */}
+					<div className="wb-dash-lists">
+						<StockListCard title="涨幅榜" rows={breadth?.top_gainers ?? []} mode="gain" loading={!breadth} onOpenStock={(symbol) => void openStockAnalysis(symbol)} />
+						<StockListCard title="跌幅榜" rows={breadth?.top_losers ?? []} mode="loss" loading={!breadth} onOpenStock={(symbol) => void openStockAnalysis(symbol)} />
+						<StockListCard title="成交额榜" rows={breadth?.turnover_leaders ?? []} mode="amount" loading={!breadth} onOpenStock={(symbol) => void openStockAnalysis(symbol)} />
+						<StockListCard title="活跃换手" rows={breadth?.active_leaders ?? []} mode="active" loading={!breadth} onOpenStock={(symbol) => void openStockAnalysis(symbol)} />
+					</div>
 
 					{/* ── 自选股实时行情 ── */}
 					<section className="wb-card">
@@ -817,3 +938,252 @@ export function WorkbenchWorkspace({ config, refreshKey, onOpenStockAnalysis }: 
 	);
 }
 
+
+// ===== 看板子组件（布局参考 tick-stock-panel 的市场看板页）=====
+
+/** A 股配色惯例：强势=红、弱势=绿，按情绪评分分档取色。 */
+function scoreColor(value: number): string {
+	if (value >= 70) return '#e33b46';
+	if (value >= 55) return '#fb923c';
+	if (value >= 45) return '#f59e0b';
+	if (value >= 30) return '#84cc16';
+	return '#14865f';
+}
+
+function DashKpi({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: React.ReactNode; accent?: boolean }) {
+	return (
+		<div className={`wb-dash-kpi${accent ? ' accent' : ''}`}>
+			<span>{label}</span>
+			<strong>{value}</strong>
+			{sub !== undefined && <small>{sub}</small>}
+		</div>
+	);
+}
+
+function MiniMetric({ label, value, tone }: { label: string; value: string; tone?: string }) {
+	return (
+		<div className="wb-dash-mini">
+			<span>{label}</span>
+			<strong className={tone}>{value}</strong>
+		</div>
+	);
+}
+
+/** 涨跌幅分布直方图：左跌右涨，柱高按档位计数归一。 */
+function DistributionBars({ rows }: { rows: MarketDistributionBucket[] }) {
+	const max = Math.max(...rows.map((row) => row.count), 1);
+	return (
+		<div className="wb-dash-dist">
+			{rows.map((row) => (
+				<div className="wb-dash-dist-col" key={row.label} title={`${row.label}: ${row.count} 只`}>
+					<small>{row.count || ''}</small>
+					<i className={row.positive ? 'up' : 'down'} style={{ height: `${Math.max(4, (row.count / max) * 86)}%` }} />
+					<span>{row.label}</span>
+				</div>
+			))}
+		</div>
+	);
+}
+
+/** 涨平跌广度横条：左侧跌（绿）右侧涨（红），对齐 A 股阅读习惯。 */
+function BreadthBar({ up, flat, down }: { up: number; flat: number; down: number }) {
+	const total = Math.max(up + flat + down, 1);
+	const downW = (down / total) * 100;
+	const upW = (up / total) * 100;
+	const flatW = Math.max(0, 100 - downW - upW);
+	return (
+		<div className="wb-dash-breadth">
+			<div className="wb-dash-breadth-bar">
+				<i className="down" style={{ width: `${downW}%` }} />
+				<i className="flat" style={{ width: `${flatW}%` }} />
+				<i className="up" style={{ width: `${upW}%` }} />
+			</div>
+			<div className="wb-dash-breadth-legend">
+				<span className="down">跌 <b>{down}</b></span>
+				<span className="flat">平 <b>{flat}</b></span>
+				<span className="up">涨 <b>{up}</b></span>
+			</div>
+		</div>
+	);
+}
+
+/** 情绪雷达：6 维 SVG，中心为情绪总分。 */
+function EmotionRadar({ dims, score }: { dims: Array<{ key: string; label: string; value: number }>; score: number }) {
+	const size = 220;
+	const cx = size / 2;
+	const cy = size / 2;
+	const maxR = 74;
+	const color = scoreColor(score);
+	if (dims.length === 0) {
+		return <div className="wb-dash-skeleton">情绪数据加载中…</div>;
+	}
+	const points = dims.map((dim, index) => {
+		const angle = -Math.PI / 2 + (index * 2 * Math.PI) / dims.length;
+		const radius = (maxR * Math.max(0, Math.min(100, dim.value))) / 100;
+		return {
+			...dim,
+			x: cx + Math.cos(angle) * radius,
+			y: cy + Math.sin(angle) * radius,
+			gx: cx + Math.cos(angle) * maxR,
+			gy: cy + Math.sin(angle) * maxR,
+			lx: cx + Math.cos(angle) * (maxR + 22),
+			ly: cy + Math.sin(angle) * (maxR + 22),
+		};
+	});
+	const polygon = points.map((p) => `${p.x},${p.y}`).join(' ');
+	const grids = [1, 0.66, 0.33].map((level, index) => ({
+		level,
+		index,
+		points: dims.map((_, i) => {
+			const angle = -Math.PI / 2 + (i * 2 * Math.PI) / dims.length;
+			return `${cx + Math.cos(angle) * maxR * level},${cy + Math.sin(angle) * maxR * level}`;
+		}).join(' '),
+	}));
+	return (
+		<div className="wb-dash-radar">
+			<svg viewBox={`0 0 ${size} ${size}`}>
+				<defs>
+					<radialGradient id="wbRadarFill" cx="50%" cy="45%" r="70%">
+						<stop offset="0%" stopColor={`${color}57`} />
+						<stop offset="100%" stopColor={`${color}1f`} />
+					</radialGradient>
+				</defs>
+				{grids.map((grid) => (
+					<polygon key={grid.level} points={grid.points} fill="none" stroke="var(--line)" strokeWidth={grid.level === 1 ? 1.2 : 0.7} opacity={grid.level === 1 ? 0.9 : 0.5} />
+				))}
+				{points.map((p) => <line key={p.key} x1={cx} y1={cy} x2={p.gx} y2={p.gy} stroke="var(--line)" strokeWidth="0.6" opacity="0.6" />)}
+				<polygon points={polygon} fill="url(#wbRadarFill)" stroke={color} strokeWidth="1.8" />
+				{points.map((p) => <circle key={p.key} cx={p.x} cy={p.y} r="2.6" fill={color} stroke="var(--surface)" strokeWidth="1" />)}
+				<text x={cx} y={cy + 7} textAnchor="middle" fontSize="22" fontWeight="700" fill="var(--text)" fontFamily="var(--mono, monospace)">{score.toFixed(0)}</text>
+				{points.map((p) => (
+					<text key={`${p.key}-label`} x={p.lx} y={p.ly + 4} textAnchor="middle" fontSize="10" fill="var(--muted)">{p.label}</text>
+				))}
+			</svg>
+		</div>
+	);
+}
+
+type LimitUpLadderLevelLite = { level: number; count: number; stocks?: Array<{ symbol: string; name?: string }> };
+
+/** 连板梯队迷你视图：层级条 + 个股名（最多 3 只）。 */
+function LadderMini({ levels }: { levels: LimitUpLadderLevelLite[] }) {
+	if (levels.length === 0) {
+		return <div className="wb-dash-skeleton">暂无 2 板以上</div>;
+	}
+	return (
+		<div className="wb-dash-ladder">
+			{levels.map((level) => {
+				const stocks = (level.stocks ?? []).slice(0, 3);
+				return (
+					<div className="wb-dash-ladder-row" key={level.level}>
+						<span className={`wb-dash-ladder-level ${level.level >= 5 ? 'hot' : level.level >= 3 ? 'warm' : ''}`}>{level.level}板</span>
+						<div className="wb-dash-ladder-bar"><i style={{ width: `${Math.min(100, level.count * 14)}%` }} /></div>
+						<b>{level.count}</b>
+						{stocks.length > 0 && (
+							<small>{stocks.map((stock) => stock.name || stock.symbol).join(' · ')}</small>
+						)}
+					</div>
+				);
+			})}
+		</div>
+	);
+}
+
+/** 概念/行业热度卡：领涨/领跌 Top5，板块行可点领涨股直达个股分析。 */
+function RankCard({ title, rows, state, leaderSymbolOf, onOpenStock }: {
+	title: string;
+	rows: MarketIndustryMomentum[];
+	state: LoadState;
+	leaderSymbolOf: (row: MarketIndustryMomentum) => string;
+	onOpenStock: (symbol: string) => void;
+}) {
+	const sorted = [...rows].sort((left, right) => right.change_percent - left.change_percent);
+	const leading = sorted.slice(0, 5);
+	const lagging = sorted.slice(-5).reverse();
+	return (
+		<section className="wb-card wb-dash-rank-card">
+			<div className="wb-card-head">
+				<h3><Flame size={15} /> {title} <small>领涨 / 领跌 · 点击领涨股直达分析</small></h3>
+			</div>
+			{state === 'idle' || state === 'loading' ? (
+				<div className="wb-dash-skeleton"><LoaderCircle className="spin" size={14} /> 加载板块动量…</div>
+			) : rows.length === 0 ? (
+				<p className="wb-muted">暂无板块数据</p>
+			) : (
+				<div className="wb-dash-rank-grid">
+					<RankColumn title="领涨" rows={leading} leaderSymbolOf={leaderSymbolOf} onOpenStock={onOpenStock} />
+					<RankColumn title="领跌" rows={lagging} leaderSymbolOf={leaderSymbolOf} onOpenStock={onOpenStock} />
+				</div>
+			)}
+		</section>
+	);
+}
+
+function RankColumn({ title, rows, leaderSymbolOf, onOpenStock }: {
+	title: string;
+	rows: MarketIndustryMomentum[];
+	leaderSymbolOf: (row: MarketIndustryMomentum) => string;
+	onOpenStock: (symbol: string) => void;
+}) {
+	const bull = title === '领涨';
+	return (
+		<div className="wb-dash-rank-col">
+			<div className={`wb-dash-rank-title ${bull ? 'up' : 'down'}`}>{title}</div>
+			{rows.map((row, index) => {
+				const leaderSymbol = leaderSymbolOf(row);
+				return (
+					<div className="wb-dash-rank-row" key={`${title}-${row.code}-${index}`}>
+						<span className="wb-dash-rank-index">{index + 1}</span>
+						<div className="wb-dash-rank-main">
+							<strong title={row.name}>{row.name}</strong>
+							<small>
+								{row.rising_count + row.falling_count > 0 && <>{row.rising_count + row.falling_count} 只</>}
+								{row.leader_name && (
+									leaderSymbol
+										? <button type="button" className="wb-dash-leader" onClick={() => onOpenStock(leaderSymbol)}>{row.leader_name} <em className={toneForValue(row.leader_change_percent)}>{formatPercent(row.leader_change_percent)}</em></button>
+										: <em>{row.leader_name} <b className={toneForValue(row.leader_change_percent)}>{formatPercent(row.leader_change_percent)}</b></em>
+								)}
+							</small>
+						</div>
+						<span className={`wb-dash-rank-pct ${toneForValue(row.change_percent)}`}>{formatPercent(row.change_percent)}</span>
+					</div>
+				);
+			})}
+			{rows.length === 0 && <div className="wb-dash-skeleton">暂无数据</div>}
+		</div>
+	);
+}
+
+/** 四列榜单卡：涨幅/跌幅/成交额/活跃换手，行点击直达个股分析。 */
+function StockListCard({ title, rows, mode, loading, onOpenStock }: {
+	title: string;
+	rows: MarketSnapshotStock[];
+	mode: 'gain' | 'loss' | 'amount' | 'active';
+	loading: boolean;
+	onOpenStock: (symbol: string) => void;
+}) {
+	return (
+		<section className="wb-card wb-dash-list-card">
+			<div className="wb-dash-title"><TrendingUp size={14} /> {title} <small>TOP {Math.min(rows.length, 8)}</small></div>
+			{loading ? (
+				<div className="wb-dash-skeleton"><LoaderCircle className="spin" size={14} /> 加载中…</div>
+			) : rows.length === 0 ? (
+				<div className="wb-dash-skeleton">暂无数据</div>
+			) : (
+				<div className="wb-dash-list">
+					{rows.slice(0, 8).map((row, index) => (
+						<button type="button" className="wb-dash-list-row" key={`${row.symbol}-${index}`} onClick={() => onOpenStock(row.symbol)} title={`${row.name}（${row.symbol}）→ 个股分析`}>
+							<span className="wb-dash-list-index">{index + 1}</span>
+							<span className="wb-dash-list-name"><strong>{row.name || row.symbol}</strong><small>{row.symbol}</small></span>
+							<span className="wb-dash-list-value">
+								{mode === 'amount' && <><strong>{formatAmountShort(row.amount)}</strong><small className={toneForValue(row.change_percent)}>{formatPercent(row.change_percent)}</small></>}
+								{mode === 'active' && <><strong>{row.turnover_rate.toFixed(1)}%</strong><small className={toneForValue(row.change_percent)}>{formatPercent(row.change_percent)}</small></>}
+								{(mode === 'gain' || mode === 'loss') && <><strong className={toneForValue(row.change_percent)}>{formatPercent(row.change_percent)}</strong><small>{formatPrice(row.close)}</small></>}
+							</span>
+						</button>
+					))}
+				</div>
+			)}
+		</section>
+	);
+}

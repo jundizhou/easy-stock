@@ -334,6 +334,39 @@ func marketOverviewList[T any](s *Server, w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
 }
 
+// marketBreadthHandler 返回全市场快照聚合：广度、涨跌分布、成交与四个榜单。
+// 冷启动需分页拉取全市场（约 56 页），由 45 秒服务端缓存摊薄。
+func (s *Server) marketBreadthHandler(w http.ResponseWriter, r *http.Request) {
+	if s.marketBreadth == nil {
+		writeError(w, http.StatusServiceUnavailable, "market breadth provider is unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	breadth, meta, err := loadMarketOverview(ctx, s.marketSnapshots, "market-breadth", func(loadCtx context.Context) (foundation.MarketBreadth, foundation.SourceMeta, error) {
+		value, loadErr := s.marketBreadth.MarketSnapshot(loadCtx)
+		return value, value.Meta, loadErr
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": breadth, "meta": meta})
+}
+
+// marketConceptsHandler 返回东财概念板块动量（领涨股、涨跌家数、资金流），
+// 与 /api/v1/market/industries（行业维度）互为看板的概念/行业热度数据源。
+func (s *Server) marketConceptsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, err := marketLimitQuery(r, 50, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	marketOverviewList(s, w, r, fmt.Sprintf("concepts:%d", limit), func(ctx context.Context) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {
+		return s.marketBreadth.ConceptMomentum(ctx, limit)
+	})
+}
+
 func marketLimitQuery(r *http.Request, fallback int, maximum int) (int, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
 	if raw == "" {

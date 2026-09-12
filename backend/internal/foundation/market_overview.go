@@ -3,16 +3,16 @@ package foundation
 import "time"
 
 type MarketIndexSnapshot struct {
-	ID            string     `json:"id"`
-	SecID         string     `json:"secid"`
-	Code          string     `json:"code"`
-	Name          string     `json:"name"`
-	Region        string     `json:"region"`
-	Market        string     `json:"market"`
-	Currency      string     `json:"currency"`
-	Price         float64    `json:"price"`
-	Change        float64    `json:"change"`
-	ChangePercent float64    `json:"change_percent"`
+	ID            string  `json:"id"`
+	SecID         string  `json:"secid"`
+	Code          string  `json:"code"`
+	Name          string  `json:"name"`
+	Region        string  `json:"region"`
+	Market        string  `json:"market"`
+	Currency      string  `json:"currency"`
+	Price         float64 `json:"price"`
+	Change        float64 `json:"change"`
+	ChangePercent float64 `json:"change_percent"`
 	// Amount 为指数当日成交额（元）。上证+深证相加即为「两市成交额」。
 	// 部分市场（海外指数）该字段可能为 0，前端需按 0 视为未知处理。
 	Amount    float64    `json:"amount"`
@@ -173,4 +173,52 @@ type MarketResearchItem struct {
 	PublishedAt    time.Time  `json:"published_at"`
 	URL            string     `json:"url"`
 	Meta           SourceMeta `json:"meta"`
+}
+
+// MarketSnapshotStock 是全市场快照榜单里的一只股票。
+type MarketSnapshotStock struct {
+	Symbol        string  `json:"symbol"`
+	Name          string  `json:"name"`
+	Close         float64 `json:"close"`
+	ChangePercent float64 `json:"change_percent"`
+	Amount        float64 `json:"amount"`
+	TurnoverRate  float64 `json:"turnover_rate"`
+}
+
+// MarketDistributionBucket 是涨跌幅分布直方图的一档。
+type MarketDistributionBucket struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
+	// Positive 标记该档属于上涨侧（涨红跌绿着色用）。
+	Positive bool `json:"positive"`
+}
+
+// MarketBreadth 是全市场快照的聚合结果：广度、分布、成交与四个榜单。
+// 数据来自东方财富全市场分页快照，服务端缓存约 45 秒，供工作台看板使用。
+type MarketBreadth struct {
+	Total      int     `json:"total"`
+	Up         int     `json:"up"`
+	Flat       int     `json:"flat"`
+	Down       int     `json:"down"`
+	UpRatio    float64 `json:"up_ratio"`
+	StrongUp   int     `json:"strong_up"`
+	StrongDown int     `json:"strong_down"`
+	AvgPct     float64 `json:"avg_pct"`
+	MedianPct  float64 `json:"median_pct"`
+
+	Distribution []MarketDistributionBucket `json:"distribution"`
+
+	TotalAmount  float64 `json:"total_amount"`
+	AvgAmount    float64 `json:"avg_amount"`
+	AvgTurnover  float64 `json:"avg_turnover"`
+	HighTurnover int     `json:"high_turnover"`
+	HighVolCount int     `json:"high_vol_count"`
+
+	TopGainers      []MarketSnapshotStock `json:"top_gainers"`
+	TopLosers       []MarketSnapshotStock `json:"top_losers"`
+	TurnoverLeaders []MarketSnapshotStock `json:"turnover_leaders"`
+	ActiveLeaders   []MarketSnapshotStock `json:"active_leaders"`
+
+	AsOf time.Time  `json:"as_of"`
+	Meta SourceMeta `json:"meta"`
 }
