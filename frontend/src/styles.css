@@ -8045,3 +8045,55 @@ circle.down-fill { fill: var(--down); }
 @media (max-width: 860px) {
 	.wb-dash-grid, .wb-dash-ranks, .wb-dash-lists, .wb-dash-kpis { grid-template-columns: 1fr; }
 }
+
+/* ─────────── 策略选股板块 ─────────── */
+.scr-workspace { display: grid; gap: 12px; min-width: 0; }
+.scr-intro { display: flex; align-items: center; gap: 10px; padding: 26px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); color: var(--muted); }
+.scr-intro strong { display: block; color: var(--text); font-size: 14px; }
+.scr-intro span { display: block; margin-top: 4px; font-size: 12px; }
+.scr-intro svg:last-child { margin-left: auto; color: var(--subtle); }
+
+/* 策略目录 */
+.scr-catalog { display: grid; gap: 14px; padding: 12px 15px; }
+.scr-category-title { margin-bottom: 7px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.scr-strategy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 7px; }
+.scr-strategy { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); cursor: pointer; user-select: none; }
+.scr-strategy:hover { border-color: var(--blue); }
+.scr-strategy.active { border-color: var(--blue); background: var(--up-soft); }
+.scr-strategy input { margin-top: 2px; accent-color: var(--blue); }
+.scr-strategy span { min-width: 0; }
+.scr-strategy strong { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 12.5px; }
+.scr-strategy small { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+.scr-kind-tag { padding: 1px 5px; border-radius: 999px; background: var(--down-soft); color: var(--down); font-size: 9.5px; font-style: normal; font-weight: 600; }
+
+.scr-options { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 15px; border-top: 1px solid var(--line-soft); }
+.scr-options label.chan-check { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.scr-options label.chan-check input { accent-color: var(--blue); }
+.scr-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.scr-inline select { padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.scr-option-note { margin-left: auto; color: var(--subtle); font-size: 10.5px; }
+
+/* 结果表 */
+.scr-hit-count { font-style: normal; color: var(--up); }
+.scr-kline-meta { margin-left: 8px; color: var(--subtle); font-size: 11.5px; font-weight: 400; }
+.scr-warning { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 15px; border-bottom: 1px solid var(--line-soft); color: var(--amber); font-size: 11.5px; }
+.scr-table-wrap { overflow-x: auto; }
+.scr-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.scr-table thead th { position: sticky; top: 0; padding: 8px 12px; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .05em; text-align: left; white-space: nowrap; }
+.scr-table tbody td { padding: 9px 12px; border-top: 1px solid var(--line-soft); vertical-align: middle; }
+.scr-row { cursor: pointer; }
+.scr-row:hover { background: var(--surface-2); }
+.scr-index { color: var(--subtle); font-variant-numeric: tabular-nums; }
+.scr-cell-symbol strong { display: block; font-size: 12.5px; }
+.scr-cell-symbol small { display: block; color: var(--muted); font-size: 10.5px; }
+.scr-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scr-num.up { color: var(--up); }
+.scr-num.down { color: var(--down); }
+.scr-tags { display: flex; flex-wrap: wrap; gap: 5px; max-width: 460px; }
+.scr-tag { display: inline-flex; flex-direction: column; gap: 1px; padding: 3px 8px; border-radius: 7px; background: var(--up-soft); color: var(--up); font-size: 11px; font-style: normal; }
+.scr-tag i { color: var(--muted); font-size: 10px; font-style: normal; }
+.scr-footnote { margin: 0; padding: 9px 15px; color: var(--subtle); font-size: 11px; }
+
+@media (max-width: 1100px) {
+	.scr-strategy-grid { grid-template-columns: 1fr; }
+}

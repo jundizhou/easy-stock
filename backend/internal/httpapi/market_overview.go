@@ -351,6 +351,8 @@ func (s *Server) marketBreadthHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// Rows 供策略选股二次筛选（screener 内部走缓存副本），看板响应不回传全量明细。
+	breadth.Rows = nil
 	writeJSON(w, http.StatusOK, map[string]any{"data": breadth, "meta": meta})
 }
 

@@ -175,6 +175,25 @@ type MarketResearchItem struct {
 	Meta           SourceMeta `json:"meta"`
 }
 
+// MarketQuoteRow 是全市场快照里一只股票的完整筛选字段
+// （东财 clist：f12/f14/f2/f3/f6/f8/f10/f20/f21/f9/f23/f62/f109/f24）。
+type MarketQuoteRow struct {
+	Symbol        string  `json:"symbol"`
+	Name          string  `json:"name"`
+	Close         float64 `json:"close"`
+	ChangePercent float64 `json:"change_percent"`
+	Amount        float64 `json:"amount"`
+	TurnoverRate  float64 `json:"turnover_rate"`
+	VolumeRatio   float64 `json:"volume_ratio"`
+	TotalCapYi    float64 `json:"total_cap_yi"`
+	FloatCapYi    float64 `json:"float_cap_yi"`
+	PE            float64 `json:"pe"`
+	PB            float64 `json:"pb"`
+	MainInflow    float64 `json:"main_inflow"`
+	FiveDayPct    float64 `json:"five_day_pct"`
+	SixtyDayPct   float64 `json:"sixty_day_pct"`
+}
+
 // MarketSnapshotStock 是全市场快照榜单里的一只股票。
 type MarketSnapshotStock struct {
 	Symbol        string  `json:"symbol"`
@@ -221,4 +240,7 @@ type MarketBreadth struct {
 
 	AsOf time.Time  `json:"as_of"`
 	Meta SourceMeta `json:"meta"`
+
+	// Rows 是全市场明细行（供策略选股二次筛选；看板前端可忽略）。
+	Rows []MarketQuoteRow `json:"rows,omitempty"`
 }

@@ -299,6 +299,47 @@ export type MarketIndustryMomentum = {
 	meta: SourceMeta;
 };
 
+// ===== 策略选股引擎（内置策略目录 + 两级执行）=====
+
+export type ScreenerStrategy = {
+	id: string;
+	name: string;
+	category: string;
+	kind: 'snapshot' | 'kline' | string;
+	description: string;
+	params?: Array<{ key: string; label: string; default: number; min: number; max: number; step: number; unit?: string }>;
+};
+
+export type ScreenerHit = {
+	symbol: string;
+	name: string;
+	close: number;
+	change_percent: number;
+	amount: number;
+	turnover_rate: number;
+	volume_ratio: number;
+	float_cap_yi: number;
+	strategies: string[];
+	details?: Record<string, string>;
+	indicators?: Record<string, number>;
+};
+
+export type ScreenerResult = {
+	strategies: string[];
+	options: { exclude_st: boolean; exclude_new: boolean; min_amount_yi: number; kline_universe_limit: number };
+	scanned: number;
+	matched: number;
+	kline_count: number;
+	kline_failed: number;
+	snapshot_ms: number;
+	kline_ms: number;
+	elapsed_ms: number;
+	hits: ScreenerHit[];
+	failed_stocks?: Array<{ symbol: string; error: string }>;
+	generated_at: string;
+	warnings?: string[];
+};
+
 // ===== 全市场广度快照（工作台看板，东方财富分页聚合）=====
 
 export type MarketSnapshotStock = {

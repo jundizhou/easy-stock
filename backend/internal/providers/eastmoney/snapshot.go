@@ -19,10 +19,19 @@ type marketQuoteRow struct {
 	changePct    float64
 	amount       float64
 	turnoverRate float64
+	volumeRatio  float64
+	totalCapYi   float64
+	floatCapYi   float64
+	pe           float64
+	pb           float64
+	mainInflow   float64
+	fiveDayPct   float64
+	sixtyDayPct  float64
 }
 
-// snapshotFields 是全市场快照请求的字段清单：代码/名称/现价/涨跌幅/成交额/换手率。
-const snapshotFields = "f12,f14,f2,f3,f6,f8"
+// snapshotFields 是全市场快照请求的字段清单：
+// 代码/名称/现价/涨跌幅/成交额/换手率/量比/总市值/流通市值/PE/PB/主力净流入/5日涨幅/60日涨幅。
+const snapshotFields = "f12,f14,f2,f3,f6,f8,f10,f20,f21,f9,f23,f62,f109,f24"
 
 // MarketSnapshot 拉取沪深 A 股全市场快照并聚合为看板所需的广度统计。
 //
@@ -149,6 +158,14 @@ func parseSnapshotRows(diff []map[string]any) []marketQuoteRow {
 			changePct:    change,
 			amount:       asFloat(raw["f6"]),
 			turnoverRate: asFloat(raw["f8"]),
+			volumeRatio:  asFloat(raw["f10"]),
+			totalCapYi:   asFloat(raw["f20"]) / 1e8,
+			floatCapYi:   asFloat(raw["f21"]) / 1e8,
+			pe:           asFloat(raw["f9"]),
+			pb:           asFloat(raw["f23"]),
+			mainInflow:   asFloat(raw["f62"]),
+			fiveDayPct:   asFloat(raw["f109"]),
+			sixtyDayPct:  asFloat(raw["f24"]),
 		})
 	}
 	return rows
@@ -244,7 +261,42 @@ func aggregateSnapshot(rows []marketQuoteRow, meta foundation.SourceMeta) founda
 	copy(sorted, rows)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].turnoverRate > sorted[j].turnoverRate })
 	breadth.ActiveLeaders = snapshotTop(sorted, 8)
+	breadth.Rows = toQuoteRows(rows)
 	return breadth
+}
+
+// toQuoteRows 把内部行转换为对外的全量筛选行。
+func toQuoteRows(rows []marketQuoteRow) []foundation.MarketQuoteRow {
+	out := make([]foundation.MarketQuoteRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, foundation.MarketQuoteRow{
+			Symbol:        row.symbol,
+			Name:          row.name,
+			Close:         row.close,
+			ChangePercent: row.changePct,
+			Amount:        row.amount,
+			TurnoverRate:  row.turnoverRate,
+			VolumeRatio:   row.volumeRatio,
+			TotalCapYi:    row.totalCapYi,
+			FloatCapYi:    row.floatCapYi,
+			PE:            row.pe,
+			PB:            row.pb,
+			MainInflow:    row.mainInflow,
+			FiveDayPct:    row.fiveDayPct,
+			SixtyDayPct:   row.sixtyDayPct,
+		})
+	}
+	return out
+}
+
+// MarketSnapshotRows 返回全市场快照的完整筛选字段行，供策略选股引擎使用。
+// 行数据与 MarketSnapshot 同源（一次拉取同时供聚合与筛选）。
+func (c *Client) MarketSnapshotRows(ctx context.Context) ([]foundation.MarketQuoteRow, error) {
+	breadth, err := c.MarketSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return breadth.Rows, nil
 }
 
 func snapshotTop(rows []marketQuoteRow, limit int) []foundation.MarketSnapshotStock {

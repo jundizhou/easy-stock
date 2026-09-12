@@ -34,6 +34,7 @@ import (
 	"easy-stock/backend/internal/providers/xueqiu"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
+	"easy-stock/backend/internal/screener"
 	"easy-stock/backend/internal/sector"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/tradejournal"
@@ -82,6 +83,7 @@ type Server struct {
 	chanAnalysisService   *chananalysis.Service
 	chanScreenerService   *chanscreener.Service
 	marketBreadth         marketBreadthProvider
+	screenerService       *screener.Service
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
 	xueqiu                *xueqiu.Client
@@ -444,6 +446,12 @@ func NewServer(config any) *Server {
 	s.dailyAnalysis = dailyanalysis.NewService(cfg.DailyAnalysisStore, cfg.HermesGateway, s.loadKLine, func(ctx context.Context, symbols []string) ([]foundation.Quote, error) {
 		return s.realtimeProvider.Realtime(ctx, symbols)
 	}, cfg.Logger)
+	// 策略选股引擎：复用东财全市场快照与主备 K 线链路。
+	if screenerSvc, screenerErr := screener.NewService(eastMoneyClient, func(ctx context.Context, symbol string, limit int) ([]foundation.KLine, error) {
+		return s.loadKLine(ctx, symbol, "day", limit)
+	}); screenerErr == nil {
+		s.screenerService = screenerSvc
+	}
 	s.routes()
 	return s
 }
@@ -594,6 +602,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/futures-consensus", s.marketFuturesConsensusHandler)
 	s.mux.HandleFunc("GET /api/v1/market/breadth", s.marketBreadthHandler)
 	s.mux.HandleFunc("GET /api/v1/market/concepts", s.marketConceptsHandler)
+	s.mux.HandleFunc("GET /api/v1/screener/strategies", s.screenerStrategies)
+	s.mux.HandleFunc("POST /api/v1/screener/run", s.screenerRun)
 	s.mux.HandleFunc("GET /api/v1/research/announcements", s.marketAnnouncementsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/institution-reports", s.marketInstitutionReportsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/industries", s.marketIndustryResearchHandler)
