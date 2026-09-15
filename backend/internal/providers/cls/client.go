@@ -103,10 +103,7 @@ func (c *Client) LatestNews(ctx context.Context, limit int) ([]foundation.NewsIt
 				tags = append(tags, subject.Name)
 			}
 		}
-		id := fmt.Sprint(raw.ID)
-		if id == "" || id == "<nil>" {
-			id = strconv.FormatInt(raw.CTime, 10)
-		}
+		id := formatID(raw.ID, raw.CTime)
 		item := foundation.NewsItem{
 			ID:          id,
 			Title:       firstNonEmpty(raw.Title, raw.Content),
@@ -117,7 +114,8 @@ func (c *Client) LatestNews(ctx context.Context, limit int) ([]foundation.NewsIt
 			Meta:        meta,
 		}
 		if item.URL == "" && id != "" {
-			item.URL = "https://www.cls.cn/telegraph/" + id
+			// cls.cn 改版后 telegraph 路径已 404，详情页统一为 /detail/{id}
+			item.URL = "https://www.cls.cn/detail/" + id
 		}
 		if item.Title == "" {
 			continue
@@ -140,4 +138,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// formatID 提取快讯 ID。json.Decoder 把数字解码成 float64，
+// 直接 fmt.Sprint 大整数会变成科学计数法（如 2.483495e+06），导致详情 URL 404。
+func formatID(value any, fallbackTime int64) string {
+	switch v := value.(type) {
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case string:
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	case json.Number:
+		return v.String()
+	}
+	return strconv.FormatInt(fallbackTime, 10)
 }
