@@ -26,6 +26,22 @@ const (
 	InflectionBig   InflectionType = "big"
 )
 
+// TurningPointKind keeps the distinct setups in the meeting framework. A
+// signal may carry more than one kind (for example, a sector rotation can be
+// both a sentiment repair and a high-low switch).
+type TurningPointKind string
+
+const (
+	TurningPointMarketExhaustion  TurningPointKind = "market_exhaustion"   // 大拐点：旧周期出清
+	TurningPointSentimentRepair   TurningPointKind = "sentiment_repair"    // 情绪冰点后的修复
+	TurningPointHighLowSwitch     TurningPointKind = "high_low_switch"     // 旧核心到低位新方向
+	TurningPointSectorRotation    TurningPointKind = "sector_rotation"     // 题材/板块资金切换
+	TurningPointIndividualReverse TurningPointKind = "individual_reversal" // 个股被动转主动
+	TurningPointTrendReverse      TurningPointKind = "trend_reversal"      // 趋势结构拐点
+	TurningPointIndexReverse      TurningPointKind = "index_reversal"      // 指数级别拐点
+	TurningPointExpectationGap    TurningPointKind = "expectation_gap"     // 预期差驱动
+)
+
 type SignalStatus string
 
 const (
@@ -136,16 +152,17 @@ type AnchorSelection struct {
 }
 
 type SignalEvaluation struct {
-	Type             InflectionType `json:"type"`
-	Status           SignalStatus   `json:"status"`
-	Setup            SmallSetup     `json:"setup,omitempty"`
-	Scope            Scope          `json:"scope"`
-	Score            float64        `json:"score"`
-	OldAnchorSymbol  string         `json:"old_anchor_symbol,omitempty"`
-	NewCarrierSymbol string         `json:"new_carrier_symbol,omitempty"`
-	Factors          []FactorScore  `json:"factors"`
-	Evidence         []string       `json:"evidence,omitempty"`
-	Risks            []string       `json:"risks,omitempty"`
+	Type             InflectionType     `json:"type"`
+	Status           SignalStatus       `json:"status"`
+	Setup            SmallSetup         `json:"setup,omitempty"`
+	Kinds            []TurningPointKind `json:"kinds,omitempty"`
+	Scope            Scope              `json:"scope"`
+	Score            float64            `json:"score"`
+	OldAnchorSymbol  string             `json:"old_anchor_symbol,omitempty"`
+	NewCarrierSymbol string             `json:"new_carrier_symbol,omitempty"`
+	Factors          []FactorScore      `json:"factors"`
+	Evidence         []string           `json:"evidence,omitempty"`
+	Risks            []string           `json:"risks,omitempty"`
 }
 
 type Evaluation struct {

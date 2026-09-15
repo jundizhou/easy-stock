@@ -46,6 +46,8 @@ func (e *Engine) Evaluate(request EvaluationRequest) (Evaluation, error) {
 		anchorByKind,
 	)
 	small := e.evaluateSmall(request.Market.Scope, marketStress, environmentTurn, anchorByKind)
+	big.Kinds = classifyTurningPoints(request.Market, big, marketStress, environmentTurn)
+	small.Kinds = classifyTurningPoints(request.Market, small, marketStress, environmentTurn)
 
 	primary := InflectionNone
 	if big.Status == StatusConfirmed {
@@ -84,6 +86,50 @@ func (e *Engine) Evaluate(request EvaluationRequest) (Evaluation, error) {
 		PrimarySignal:        primary,
 		Warnings:             warnings,
 	}, nil
+}
+
+func classifyTurningPoints(m MarketSnapshot, signal SignalEvaluation, stress, turn float64) []TurningPointKind {
+	var kinds []TurningPointKind
+	if signal.Status == StatusNone {
+		return kinds
+	}
+	if signal.Type == InflectionBig {
+		kinds = append(kinds, TurningPointMarketExhaustion)
+	}
+	if turn >= 55 && stress >= 55 {
+		kinds = append(kinds, TurningPointSentimentRepair)
+	}
+	if signal.Setup == SmallSetupHighLowSwitch {
+		kinds = append(kinds, TurningPointHighLowSwitch, TurningPointSectorRotation)
+	}
+	if signal.Setup == SmallSetupIndividualReversal {
+		kinds = append(kinds, TurningPointIndividualReverse)
+	}
+	if m.Scope == ScopeSector {
+		kinds = append(kinds, TurningPointSectorRotation)
+	}
+	if m.Scope == ScopeStock {
+		kinds = append(kinds, TurningPointTrendReverse)
+	}
+	if m.Scope == ScopeMarket {
+		kinds = append(kinds, TurningPointIndexReverse)
+	}
+	if signal.NewCarrierSymbol != "" {
+		kinds = append(kinds, TurningPointExpectationGap)
+	}
+	return uniqueTurningPoints(kinds)
+}
+
+func uniqueTurningPoints(in []TurningPointKind) []TurningPointKind {
+	seen := make(map[TurningPointKind]bool, len(in))
+	out := make([]TurningPointKind, 0, len(in))
+	for _, k := range in {
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func validateRequest(request EvaluationRequest) error {
