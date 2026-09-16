@@ -76,6 +76,9 @@ export function prepareHermesRuntime({
 	if (!fs.existsSync(python)) throw new Error(`Hermes runtime Python not found: ${python}`);
 	run(python, ['-c', 'import hermes_cli, tui_gateway'], runtimeRoot, { PYTHONNOUSERSITE: '1' });
 	const installedVersion = readHermesVersion(python, runtimeRoot);
+	if (installedVersion !== HERMES_AGENT_VERSION) {
+		throw new Error(`Hermes runtime installed ${installedVersion}; expected ${HERMES_AGENT_VERSION}. Refusing to package a different version.`);
+	}
 	const manifest = {
 		schema_version: 1,
 		package: 'hermes-agent',
@@ -86,7 +89,6 @@ export function prepareHermesRuntime({
 		target_arch: arch,
 		created_at: new Date().toISOString(),
 	};
-	if (installedVersion !== HERMES_AGENT_VERSION) manifest.requested_version = HERMES_AGENT_VERSION;
 	fs.writeFileSync(path.join(runtimeRoot, 'runtime-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 	return manifest;
 }

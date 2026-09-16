@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -69,6 +71,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -102,6 +106,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:mac
 
+      - name: Verify Hermes inside the macOS updater ZIP
+        run: |
+          verify_root="$RUNNER_TEMP/easy-stock-zip-check"
+          mkdir -p "$verify_root"
+          ditto -x -k "desktop/dist/release/easy-stock-${RELEASE_TAG}-macos-${{ matrix.arch }}.zip" "$verify_root"
+          node desktop/scripts/verify-release-package.mjs "$verify_root/easy-stock.app" macos
+
       - name: Verify macOS updater metadata
         run: node desktop/scripts/verify-updater-artifacts.mjs desktop/dist/release latest-mac.yml
 
@@ -123,6 +134,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -153,6 +166,20 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npm run release:windows
 
+      - name: Verify Hermes inside the Windows installer
+        shell: pwsh
+        run: |
+          $verifyRoot = Join-Path $env:RUNNER_TEMP 'easy-stock-installer-check'
+          $installer = "desktop/dist/release/easy-stock-$env:RELEASE_TAG-windows-x64-setup.exe"
+          7z x $installer "-o$verifyRoot/installer" -y
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Windows installer' }
+          $payload = @(Get-ChildItem "$verifyRoot/installer" -Recurse -Filter 'app-64.7z')
+          if ($payload.Count -ne 1) { throw 'Expected exactly one x64 application payload in the installer' }
+          7z x $payload[0].FullName "-o$verifyRoot/app" -y
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Windows application payload' }
+          node desktop/scripts/verify-release-package.mjs "$verifyRoot/app" windows
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer verification failed' }
+
       - name: Verify Windows updater metadata
         run: node desktop/scripts/verify-updater-artifacts.mjs desktop/dist/release latest.yml
 
@@ -174,6 +201,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Download release assets
         uses: actions/download-artifact@v4

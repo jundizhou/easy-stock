@@ -75,6 +75,8 @@ Electron 开发模式同样读取这两个变量。若 `desktop/resources/hermes
 
 桌面开发启动默认使用 0.21.3；低于 0.21.3 的 `HERMES_AGENT_VERSION` 或精确安装规格会被忽略，避免旧命令清空当前运行目录后把 Hermes 降级到不兼容版本。
 
+准备 Runtime 时会核对真实安装版本，复制的旧 Runtime 也不能绕过该检查。发布校验会运行安装包内的 Python，确认 `hermes-agent` 分发包版本、manifest 版本和构建目标一致，并检查 `hermes_cli`、`tui_gateway` 均从包内加载。CI 还会解压 macOS 更新 ZIP 和 Windows 安装器进行同样的检查；macOS DMG 在挂载后检查。任一校验失败都会阻止上传发布产物。
+
 AI 对话将 `reasoning.delta` 和 `message.complete.payload.reasoning` 单独保存到消息的 `reasoning` 字段，在正文上方的「思考过程」中展示。生成时默认展开，完成后默认折叠，本地历史刷新后仍可查看；模型未返回 reasoning 时不生成思考内容。0.21.3 的 `thinking.delta` 用于等待状态，`reasoning.available` 在当前上游实现中还会携带助手正文预览，因此这两类事件显示为进度提示，不混入思考正文。历史消息若此前没有保存 reasoning，不会自动回填。
 
 macOS 准备脚本会复制 uv 托管的基础 Python，并把 Runtime 内的符号链接实体化；Windows 准备脚本会复制完整的 uv 托管 Python 到 `hermes-runtime/python`，再把构建用 venv 的 `site-packages` 合并进去并删除带有构建机绝对路径的 venv。两个平台都会拒绝指向 Runtime 目录之外的链接，安装后的应用不依赖 GitHub Actions runner 或开发机上的 Python。
