@@ -4,6 +4,7 @@ export type ChatMessage = {
 	id: string;
 	role: ChatRole;
 	content: string;
+	reasoning?: string;
 	created_at: string;
 	error?: boolean;
 };
@@ -115,6 +116,7 @@ function isMessage(value: unknown): value is ChatMessage {
 	return typeof item.id === 'string'
 		&& (item.role === 'user' || item.role === 'assistant')
 		&& typeof item.content === 'string'
+		&& (item.reasoning === undefined || typeof item.reasoning === 'string')
 		&& typeof item.created_at === 'string'
 		&& (item.error === undefined || typeof item.error === 'boolean');
 }

@@ -29,6 +29,7 @@ import {
 } from '../lib/chat';
 import { streamHermesPrompt, type HermesClarifyRequest } from '../lib/hermes';
 import { MessageContent } from './MarkdownContent';
+import { AIThinkingPanel } from './AIThinkingPanel';
 
 type Props = {
 	config: BackendConfig | null;
@@ -434,10 +435,13 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, initialAnal
 				onDelta: (nextContent) => setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
 					? { ...conversation, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, content: nextContent } : message) }
 					: conversation)),
+				onReasoning: (reasoning) => setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
+					? { ...conversation, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, reasoning } : message) }
+					: conversation)),
 			});
 			const completedAt = new Date().toISOString();
 			setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
-				? { ...conversation, hermes_session_id: result.hermesSessionID || conversation.hermes_session_id, hermes_model_key: modelKey, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, content: result.content, created_at: completedAt } : message), updated_at: completedAt }
+				? { ...conversation, hermes_session_id: result.hermesSessionID || conversation.hermes_session_id, hermes_model_key: modelKey, messages: conversation.messages.map((message) => message.id === assistantID ? { ...message, content: result.content, reasoning: result.reasoning || message.reasoning, created_at: completedAt } : message), updated_at: completedAt }
 				: conversation));
 			setModelState('ready');
 		} catch (error) {
@@ -448,7 +452,7 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, initialAnal
 					: conversation));
 			} else {
 				setConversations((items) => items.map((conversation) => conversation.id === pendingConversation.id
-					? { ...conversation, messages: conversation.messages.filter((message) => message.id !== assistantID) }
+					? { ...conversation, messages: conversation.messages.filter((message) => message.id !== assistantID || message.content || message.reasoning) }
 					: conversation));
 			}
 		} finally {
@@ -534,9 +538,10 @@ export function AIChatWorkspace({ config, refreshKey, initialPrompt, initialAnal
 									<div className="ai-message-avatar">{message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}</div>
 									<div className="ai-message-body">
 										<header><strong>{message.role === 'user' ? '你' : 'AI 助手'}</strong><time>{formatMessageTime(message.created_at)}</time></header>
+										{message.role === 'assistant' && <AIThinkingPanel content={message.reasoning} pending={pending} />}
 										{message.content && <MessageContent content={message.content} markdown={message.role === 'assistant' && !message.error} />}
-										{pending && <div className="ai-answering" role="status" aria-live="polite"><span className="ai-answering-bars" aria-hidden="true"><i /><i /><i /><i /></span><strong>{clarifyRequest ? '等待你的选择' : approvalRequest ? '等待授权' : 'AI 正在回答'}</strong><small>{approvalRequest ? '执行此操作需要你的确认' : (message.content ? activityStatus : activityStatus)}</small></div>}
-										{!pending && <button type="button" className="ai-copy-message" onClick={() => void copyMessage(message)}>{copiedID === message.id ? <Check size={13} /> : <Copy size={13} />}{copiedID === message.id ? '已复制' : '复制'}</button>}
+										{pending && <div className="ai-answering" role="status" aria-live="polite"><span className="ai-answering-bars" aria-hidden="true"><i /><i /><i /><i /></span><strong>{clarifyRequest ? '等待你的选择' : approvalRequest ? '等待授权' : 'AI 正在回答'}</strong><small>{approvalRequest ? '执行此操作需要你的确认' : activityStatus}</small></div>}
+										{!pending && message.content && <button type="button" className="ai-copy-message" onClick={() => void copyMessage(message)}>{copiedID === message.id ? <Check size={13} /> : <Copy size={13} />}{copiedID === message.id ? '已复制' : '复制'}</button>}
 									</div>
 								</article>
 								);

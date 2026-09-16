@@ -306,6 +306,61 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"message.compl
 	}
 }
 
+func TestRuntimePromptAnswersHermes021ServerApprovalRequest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test gateway fixture uses a POSIX shell")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".env"), []byte(modelAPIKeyEnvName+"=test-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(root, "approval.json")
+	launcher := filepath.Join(root, "gateway-fixture.sh")
+	fixture := `#!/bin/sh
+printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"gateway.ready","payload":{}}}'
+IFS= read -r create
+printf '%s\n' '{"jsonrpc":"2.0","id":"1","result":{"session_id":"server-request-session"}}'
+IFS= read -r submit
+printf '%s\n' '{"jsonrpc":"2.0","id":"srq-approval","method":"approval","params":{"session_id":"server-request-session","request_id":"approval-1","description":"执行命令"}}'
+IFS= read -r approval
+printf '%s' "$approval" > "$APPROVAL_CAPTURE_PATH"
+printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"message.complete","payload":{"content":"{\"ok\":true}"}}}'
+`
+	if err := os.WriteFile(launcher, []byte(fixture), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("APPROVAL_CAPTURE_PATH", capturePath)
+	runtime := NewRuntime(Config{Home: home, WorkDir: root, PythonPath: launcher})
+	runtime.configured = true
+	runtime.hasAPIKey = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	result, err := runtime.PromptWithOptions(ctx, "test", PromptOptions{Sandbox: true, AutoApprove: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != `{"ok":true}` {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	approvalData, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approval map[string]any
+	if err := json.Unmarshal(approvalData, &approval); err != nil {
+		t.Fatalf("invalid approval response: %v\n%s", err, approvalData)
+	}
+	resultMap, _ := stringMap(approval["result"])
+	if stringValue(approval["id"]) != "srq-approval" || stringValue(resultMap["choice"]) != "session" || approval["method"] != nil {
+		t.Fatalf("unexpected approval response: %s", approvalData)
+	}
+}
+
 func strconvQuote(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data)

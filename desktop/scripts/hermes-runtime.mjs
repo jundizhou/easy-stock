@@ -2,7 +2,20 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const HERMES_AGENT_VERSION = process.env.HERMES_AGENT_VERSION || '0.19.0';
+const MIN_HERMES_AGENT_VERSION = '0.21.3';
+const requestedHermesVersion = process.env.HERMES_AGENT_VERSION || MIN_HERMES_AGENT_VERSION;
+const requestedHermesVersionParts = requestedHermesVersion.split('.').map(Number);
+const minimumHermesVersionParts = MIN_HERMES_AGENT_VERSION.split('.').map(Number);
+const versionIsAtLeastMinimum = requestedHermesVersionParts.length === 3
+	&& requestedHermesVersionParts.every(Number.isFinite)
+	&& requestedHermesVersionParts[0] >= minimumHermesVersionParts[0]
+	&& (requestedHermesVersionParts[0] > minimumHermesVersionParts[0]
+		|| requestedHermesVersionParts[1] > minimumHermesVersionParts[1]
+		|| (requestedHermesVersionParts[1] === minimumHermesVersionParts[1] && requestedHermesVersionParts[2] >= minimumHermesVersionParts[2]));
+export const HERMES_AGENT_VERSION = versionIsAtLeastMinimum ? requestedHermesVersion : MIN_HERMES_AGENT_VERSION;
+export const HERMES_AGENT_TAG = (versionIsAtLeastMinimum && process.env.HERMES_AGENT_TAG) || 'v2026.9.14';
+export const HERMES_AGENT_SOURCE = process.env.HERMES_AGENT_SOURCE
+	|| `https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz`;
 
 export function hermesRuntimePython(runtimeRoot, platform = process.platform) {
 	return platform === 'win32'
@@ -41,7 +54,18 @@ export function prepareHermesRuntime({
 		fs.mkdirSync(runtimeRoot, { recursive: true });
 		run(uv, ['venv', path.join(runtimeRoot, 'venv'), '--python', process.env.HERMES_RUNTIME_PYTHON || '3.11', '--managed-python', '--relocatable', '--link-mode', 'copy'], runtimeRoot);
 		const venvPython = hermesVenvPython(runtimeRoot, platform);
-		run(uv, ['pip', 'install', '--python', venvPython, '--link-mode', 'copy', `hermes-agent[all]==${HERMES_AGENT_VERSION}`], runtimeRoot);
+		// 0.21.x is published from GitHub releases but is not available on PyPI.
+		// Install the exact tagged source archive so the desktop build follows the
+		// GitHub release instead of silently falling back to the older PyPI package.
+		const requestedPackage = process.env.HERMES_AGENT_PACKAGE || '';
+		const packageVersionMatch = requestedPackage.match(/==\s*(\d+)\.(\d+)\.(\d+)/);
+		const packageVersionIsSupported = !packageVersionMatch || versionAtLeast(
+			packageVersionMatch.slice(1).map(Number), minimumHermesVersionParts,
+		);
+		const packageSpec = requestedPackage && packageVersionIsSupported
+			? requestedPackage
+			: `hermes-agent[all] @ ${HERMES_AGENT_SOURCE}`;
+		run(uv, ['pip', 'install', '--python', venvPython, '--link-mode', 'copy', packageSpec], runtimeRoot, { HERMES_NIX_BUILD: '1' });
 		vendorRuntimePython(runtimeRoot, platform);
 	}
 
@@ -56,6 +80,7 @@ export function prepareHermesRuntime({
 		schema_version: 1,
 		package: 'hermes-agent',
 		version: installedVersion,
+		source: HERMES_AGENT_SOURCE,
 		mode,
 		target_platform: platform,
 		target_arch: arch,
@@ -64,6 +89,13 @@ export function prepareHermesRuntime({
 	if (installedVersion !== HERMES_AGENT_VERSION) manifest.requested_version = HERMES_AGENT_VERSION;
 	fs.writeFileSync(path.join(runtimeRoot, 'runtime-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 	return manifest;
+}
+
+function versionAtLeast(actual, minimum) {
+	for (let index = 0; index < minimum.length; index += 1) {
+		if (actual[index] !== minimum[index]) return actual[index] > minimum[index];
+	}
+	return true;
 }
 
 function readHermesVersion(python, cwd) {

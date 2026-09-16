@@ -42,7 +42,7 @@ func TestAIChatRelaysHermesJSONRPCOverWebSocket(t *testing.T) {
 	if frame := readFrame(); frame["method"] != "event" {
 		t.Fatalf("first frame = %+v, want gateway.ready event", frame)
 	}
-	if err := connection.WriteJSON(map[string]any{"jsonrpc": "2.0", "id": "1", "method": "session.create", "params": map[string]any{"client": "test"}}); err != nil {
+	if err := connection.WriteJSON(map[string]any{"jsonrpc": "2.0", "id": "1", "method": "session.create", "params": map[string]any{"cwd": t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}
 	if frame := readFrame(); frame["id"] != "1" {

@@ -3,6 +3,7 @@ import { logRuntimeEvent, runtimeErrorDetails } from './runtime-log';
 
 export type HermesStreamResult = {
 	content: string;
+	reasoning?: string;
 	hermesSessionID: string;
 };
 
@@ -19,6 +20,13 @@ export type HermesClarifyRequest = {
 	requestID: string;
 };
 
+type HermesBatchClarifyQuestion = {
+	qid: string;
+	question: string;
+	choices?: string[];
+	multi_select?: boolean;
+};
+
 export type HermesStreamRequest = {
 	config: BackendConfig;
 	prompt: string;
@@ -26,6 +34,7 @@ export type HermesStreamRequest = {
 	hermesSessionID?: string;
 	seedMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	onDelta?: (content: string) => void;
+	onReasoning?: (content: string) => void;
 	onSession?: (sessionID: string) => void;
 	onStatus?: (status: { kind: string; text?: string }) => void;
 	module?: string;
@@ -64,7 +73,10 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 		let storedSessionID = request.hermesSessionID || '';
 		let nextID = 1;
 		let streamed = '';
+		const reasoningBlocks: string[] = [];
+		let nextReasoningBlock = true;
 		let timeout: ReturnType<typeof setTimeout> | undefined;
+		let batchClarify: { frameID: string; questions: HermesBatchClarifyQuestion[]; answers: Record<string, string>; index: number } | undefined;
 
 		const cleanup = () => {
 			if (timeout) clearTimeout(timeout);
@@ -81,7 +93,7 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				}
 				reject(error);
 			}
-			else resolve({ content, hermesSessionID: storedSessionID });
+			else resolve({ content, hermesSessionID: storedSessionID, ...(reasoningBlocks.length ? { reasoning: reasoningBlocks.join('\n\n') } : {}) });
 		};
 		const armTimeout = (message: string) => {
 			if (timeout) clearTimeout(timeout);
@@ -92,6 +104,25 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 			socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
 			return id;
 		};
+		const updateReasoning = (text: string, complete = false) => {
+			if (!text) return;
+			const last = reasoningBlocks.length - 1;
+			const current = reasoningBlocks[last] || '';
+			if (complete) {
+				// message.complete contains only the LAST model round's reasoning.
+				// Reconcile its snapshot without duplicating streamed text or losing earlier rounds.
+				const snapshot = text.trim();
+				if (!snapshot || current.trim().startsWith(snapshot)) return;
+				if (current && snapshot.startsWith(current.trim())) reasoningBlocks[last] = text;
+				else reasoningBlocks.push(text);
+			} else if (nextReasoningBlock || last < 0) {
+				reasoningBlocks.push(text);
+			} else {
+				reasoningBlocks[last] += text;
+			}
+			nextReasoningBlock = false;
+			request.onReasoning?.(reasoningBlocks.join('\n\n'));
+		};
 		const respondApproval = (sessionID: string, choice: 'once' | 'session' | 'deny') => {
 			if (socket.readyState !== WebSocket.OPEN) return;
 			send('approval.respond', { session_id: sessionID, choice: choice === 'once' ? 'once' : choice });
@@ -99,6 +130,30 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 		const respondClarify = (requestID: string, answer: string) => {
 			if (socket.readyState !== WebSocket.OPEN) return;
 			send('clarify.respond', { request_id: requestID, answer });
+		};
+		const respondServerRequest = (requestID: string, result: Record<string, unknown>) => {
+			if (socket.readyState !== WebSocket.OPEN) return;
+			socket.send(JSON.stringify({ jsonrpc: '2.0', id: requestID, result }));
+		};
+		const presentBatchClarifyQuestion = () => {
+			if (!batchClarify) return;
+			const question = batchClarify.questions[batchClarify.index];
+			if (!question) {
+				respondServerRequest(batchClarify.frameID, { answers: batchClarify.answers });
+				batchClarify = undefined;
+				return;
+			}
+			const frameID = batchClarify.frameID;
+			request.onClarify?.({
+				question: question.question,
+				choices: question.choices || [],
+				requestID: `${frameID}:${question.qid}`,
+			}, (answer) => {
+				if (!batchClarify || batchClarify.frameID !== frameID) return;
+				batchClarify.answers[question.qid] = answer;
+				batchClarify.index += 1;
+				presentBatchClarifyQuestion();
+			});
 		};
 		const submitPrompt = () => {
 			submitRequestID = send('prompt.submit', { session_id: liveSessionID, text: request.prompt, ...(request.analysisID ? { analysis_id: request.analysisID } : {}) });
@@ -108,7 +163,6 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 			setupRequestID = method === 'session.resume'
 				? send(method, { session_id: request.hermesSessionID })
 				: send(method, {
-					client: 'easy-stock-frontend',
 					...(request.seedMessages?.length ? { messages: request.seedMessages } : {}),
 				});
 			armTimeout(method === 'session.resume' ? '恢复 Hermes 对话超时' : '创建 Hermes 对话超时');
@@ -137,6 +191,7 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 		armTimeout('连接 Hermes 运行时超时');
 
 		socket.onmessage = (event) => {
+			if (settled) return;
 			let frame: RPCFrame;
 			try {
 				frame = JSON.parse(String(event.data)) as RPCFrame;
@@ -176,9 +231,50 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				finish(new Error(frame.error.message || 'Hermes 提交提示词失败'));
 				return;
 			}
+			if (frame.method === 'approval' && frame.id) {
+				const params = frame.params || {};
+				request.onApproval?.({
+					patternKey: stringValue(params.pattern_key),
+					description: stringValue(params.description),
+					command: stringValue(params.command),
+				}, (choice) => respondServerRequest(frame.id as string, { choice }));
+				return;
+			}
+			if (frame.method === 'clarify' && frame.id) {
+				const params = frame.params || {};
+				const questions = Array.isArray(params.questions)
+					? params.questions.filter((item): item is HermesBatchClarifyQuestion => Boolean(item && typeof item === 'object' && stringValue((item as Record<string, unknown>).qid)))
+					: [];
+				if (questions.length > 0) {
+					batchClarify = { frameID: frame.id, questions, answers: {}, index: 0 };
+					presentBatchClarifyQuestion();
+				} else {
+					const choices = Array.isArray(params.choices) ? params.choices.map((choice) => stringValue(choice)).filter(Boolean) : [];
+					request.onClarify?.({ question: stringValue(params.question), choices, requestID: frame.id }, (answer) => respondServerRequest(frame.id as string, { answer }));
+				}
+				return;
+			}
+			if (type === 'reasoning.delta') {
+				updateReasoning(eventText(frame, 'text') || eventText(frame, 'delta'));
+				request.onStatus?.({ kind: 'reasoning', text: '正在思考…' });
+				return;
+			}
+			if (type === 'thinking.delta' || type === 'reasoning.available') {
+				// Hermes 0.21 uses thinking.delta for spinner/wait notices and
+				// reasoning.available for assistant-text previews, not reasoning tokens.
+				request.onStatus?.({ kind: 'process', text: eventText(frame, 'text') || '等待模型回复…' });
+				return;
+			}
+			if (type === 'tool.start' || type === 'tool.complete') {
+				nextReasoningBlock = true;
+				request.onStatus?.({ kind: 'process', text: type === 'tool.start' ? `正在调用 ${eventText(frame, 'name') || '工具'}…` : '工具调用完成，继续处理…' });
+				return;
+			}
 			if (type === 'message.delta') {
+				nextReasoningBlock = true;
 				streamed += eventText(frame, 'delta') || eventText(frame, 'text');
 				request.onDelta?.(streamed);
+				request.onStatus?.({ kind: 'answer', text: '正在生成回复…' });
 				return;
 			}
 			if (type === 'approval.request') {
@@ -208,6 +304,7 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				return;
 			}
 			if (type === 'message.complete') {
+				updateReasoning(eventText(frame, 'reasoning'), true);
 				const rawUsage = (frame.params?.payload && typeof frame.params.payload === 'object' ? frame.params.payload : frame.params) as Record<string, unknown>;
 				const usage = (rawUsage.usage && typeof rawUsage.usage === 'object' ? rawUsage.usage : rawUsage) as Record<string, unknown>;
 				const prompt_tokens = firstPositiveNumber(usage.prompt_tokens, usage.input_tokens, usage.input, usage.prompt);
@@ -228,7 +325,7 @@ export function streamHermesPrompt(request: HermesStreamRequest): Promise<Hermes
 				finish(undefined, content);
 				return;
 			}
-			if (type === 'gateway.error' || type === 'message.error' || type === 'session.error' || type === 'run.error') {
+			if (type === 'error' || type === 'gateway.error' || type === 'message.error' || type === 'session.error' || type === 'run.error') {
 				finish(new Error(eventText(frame, 'message') || 'Hermes 执行失败'));
 			}
 		};

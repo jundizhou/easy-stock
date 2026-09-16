@@ -684,6 +684,15 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, o
 		_, writeErr := process.Input().Write(data)
 		return writeErr
 	}
+	writeRPCResult := func(id string, result map[string]any) error {
+		data, marshalErr := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		data = append(data, '\n')
+		_, writeErr := process.Input().Write(data)
+		return writeErr
+	}
 
 	created := false
 	submitted := false
@@ -716,7 +725,7 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, o
 			if eventType(frame) == "gateway.ready" && !created {
 				created = true
 				sessionWorkDir := firstNonEmpty(processOptions.workDir, r.workDir)
-				if err := writeRPC("1", "session.create", map[string]any{"client": "easy-stock", "cwd": sessionWorkDir}); err != nil {
+				if err := writeRPC("1", "session.create", map[string]any{"cwd": sessionWorkDir}); err != nil {
 					return PromptResult{}, err
 				}
 				continue
@@ -734,6 +743,26 @@ func (r *Runtime) prompt(ctx context.Context, prompt, browserStatePath string, o
 				continue
 			}
 			switch eventType(frame) {
+			case "approval":
+				if !options.AutoApprove || frame.ID == "" {
+					continue
+				}
+				if err := writeRPCResult(frame.ID, map[string]any{"choice": "session"}); err != nil {
+					return PromptResult{}, fmt.Errorf("Hermes 自动授权失败: %w", err)
+				}
+			case "clarify":
+				// One-shot backend tasks have no interactive renderer. An empty answer
+				// preserves the pre-0.21 behavior while acknowledging the new request
+				// frame so the gateway can continue or skip the clarification.
+				if frame.ID != "" {
+					clarifyResult := map[string]any{"answer": ""}
+					if _, batched := frame.Params["questions"]; batched {
+						clarifyResult = map[string]any{"answers": map[string]string{}}
+					}
+					if err := writeRPCResult(frame.ID, clarifyResult); err != nil {
+						return PromptResult{}, fmt.Errorf("Hermes 澄清请求响应失败: %w", err)
+					}
+				}
 			case "approval.request":
 				if !options.AutoApprove {
 					continue
@@ -928,7 +957,7 @@ func normalizeLLM(cfg appsettings.LLM) appsettings.LLM {
 	return appsettings.LLM{Provider: provider, BaseURL: baseURL, Model: model, APIMode: apiMode, ResponseTimeoutSeconds: appsettings.NormalizeLLMResponseTimeoutSeconds(cfg.ResponseTimeoutSeconds)}
 }
 
-func renderConfig(cfg appsettings.LLM, workDir string) string {
+func renderConfig(cfg appsettings.LLM, workDir, runtimeVersion string) string {
 	providerName := cfg.Provider
 	if providerName == "custom" {
 		providerName = "自定义模型"
@@ -936,8 +965,12 @@ func renderConfig(cfg appsettings.LLM, workDir string) string {
 	var text strings.Builder
 	fmt.Fprintf(&text, "model:\n  default: %s\n  provider: %s\n  base_url: %s\n  api_mode: %s\n\n", yamlString(cfg.Model), providerSlug, yamlString(cfg.BaseURL), yamlString(cfg.APIMode))
 	fmt.Fprintf(&text, "providers:\n  %s:\n    name: %s\n    api: %s\n    key_env: %s\n    default_model: %s\n    transport: %s\n    stale_timeout_seconds: %d\n\n", providerSlug, yamlString(providerName), yamlString(cfg.BaseURL), modelAPIKeyEnvName, yamlString(cfg.Model), yamlString(transportForAPIMode(cfg.APIMode)), appsettings.NormalizeLLMResponseTimeoutSeconds(cfg.ResponseTimeoutSeconds))
+	prompt := systemPrompt
+	if version := strings.TrimSpace(runtimeVersion); version != "" {
+		prompt += fmt.Sprintf("\n\n运行时事实：当前 easy-stock 使用内置 Hermes Agent %s。不要用 PATH 中的全局 `hermes --version`、`~/.hermes` 或其他安装目录推断本应用版本；回答版本问题时以本条事实和应用设置中的 Hermes 版本为准。", version)
+	}
 	text.WriteString("agent:\n  reasoning_effort: medium\n  system_prompt: |-\n")
-	for _, line := range strings.Split(systemPrompt, "\n") {
+	for _, line := range strings.Split(prompt, "\n") {
 		fmt.Fprintf(&text, "    %s\n", line)
 	}
 	if strings.TrimSpace(workDir) != "" {
@@ -958,7 +991,7 @@ func (r *Runtime) renderMergedConfig(cfg appsettings.LLM) (string, error) {
 		previousReasoningEffort = strings.ToLower(strings.TrimSpace(stringValue(previousAgent["reasoning_effort"])))
 	}
 	managed := map[string]any{}
-	if err := yaml.Unmarshal([]byte(renderConfig(cfg, r.workDir)), &managed); err != nil {
+	if err := yaml.Unmarshal([]byte(renderConfig(cfg, r.workDir, r.runtimeVersion())), &managed); err != nil {
 		return "", fmt.Errorf("生成 Hermes 配置: %w", err)
 	}
 	for _, key := range []string{"model", "providers", "agent", "terminal", "memory", "curator", "security"} {

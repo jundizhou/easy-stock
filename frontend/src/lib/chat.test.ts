@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { chatModelKey, clearHermesSessionIDs, deriveChatTitle, parseStoredConversations, resumableHermesSessionID, storeableConversations, type ChatConversation } from './chat';
 
 describe('AI chat history helpers', () => {
+	it('restores saved reasoning while continuing to accept older messages', () => {
+		const current = conversation('current', '2026-09-16T00:00:00.000Z');
+		current.messages = [
+			{ id: 'old', role: 'assistant', content: '旧回复', created_at: current.created_at },
+			{ id: 'new', role: 'assistant', content: '新回复', reasoning: '已核对数据。', created_at: current.created_at },
+		];
+		const restored = parseStoredConversations(JSON.stringify(storeableConversations([current])));
+		expect(restored[0].messages).toEqual(current.messages);
+		expect(parseStoredConversations(JSON.stringify([{ ...current, messages: [{ ...current.messages[1], reasoning: {} }] }]))).toEqual([]);
+	});
+
 	it('derives a compact title from the first message', () => {
 		expect(deriveChatTitle('  分析\n这套交易体系的核心拐点  ')).toBe('分析 这套交易体系的核心拐点');
 		expect(Array.from(deriveChatTitle('这是一个超过二十四个字符并且应该被截断的会话标题测试内容')).length).toBeLessThanOrEqual(25);

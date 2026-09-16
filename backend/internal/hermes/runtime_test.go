@@ -14,6 +14,9 @@ import (
 
 func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "runtime-manifest.json"), []byte(`{"version":"0.21.3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	python := filepath.Join(root, "python")
 	if err := os.WriteFile(python, []byte("test"), 0o700); err != nil {
 		t.Fatal(err)
@@ -61,6 +64,9 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	}
 	if strings.Contains(configText, key) {
 		t.Fatal("Hermes config.yaml leaked model API key")
+	}
+	if !strings.Contains(configText, "内置 Hermes Agent 0.21.3") || !strings.Contains(configText, "不要用 PATH 中的全局") {
+		t.Fatalf("Hermes config missing embedded runtime version guidance:\n%s", configText)
 	}
 	if storedKey, err := runtime.ModelAPIKey(); err != nil || storedKey != key {
 		t.Fatalf("ModelAPIKey() = %q, %v; want saved key", storedKey, err)

@@ -69,7 +69,13 @@ Electron 开发模式同样读取这两个变量。若 `desktop/resources/hermes
 运行时准备脚本支持两种来源：
 
 1. `HERMES_RUNTIME_SOURCE=/path/to/hermes-runtime`：复制一套已验证的 Runtime，并从已安装包读取真实 Hermes 版本；
-2. 未指定来源：使用 `uv` 创建 Python 3.11 构建环境并安装最新稳定版 `hermes-agent[all]==0.19.0`。
+2. 未指定来源：使用 `uv` 创建 Python 3.11 构建环境，并从 GitHub 标签 `v2026.9.14` 的源码归档安装 `hermes-agent[all]`。该版本目前尚未发布到 PyPI，因此不能使用 `hermes-agent==0.21.3` 的 PyPI 依赖写法。
+
+当前固定版本对应 GitHub 标签 `v2026.9.14`。可用 `HERMES_AGENT_TAG` 选择其他 GitHub 标签，或用 `HERMES_AGENT_SOURCE` 覆盖源码归档地址，用 `HERMES_AGENT_PACKAGE` 覆盖完整的 uv 安装规格。easy-stock 同时兼容 Hermes 旧版的事件通知和 0.21.x 的 server→client JSON-RPC 请求，以便会话、审批和澄清在运行时升级期间平滑迁移。
+
+桌面开发启动默认使用 0.21.3；低于 0.21.3 的 `HERMES_AGENT_VERSION` 或精确安装规格会被忽略，避免旧命令清空当前运行目录后把 Hermes 降级到不兼容版本。
+
+AI 对话将 `reasoning.delta` 和 `message.complete.payload.reasoning` 单独保存到消息的 `reasoning` 字段，在正文上方的「思考过程」中展示。生成时默认展开，完成后默认折叠，本地历史刷新后仍可查看；模型未返回 reasoning 时不生成思考内容。0.21.3 的 `thinking.delta` 用于等待状态，`reasoning.available` 在当前上游实现中还会携带助手正文预览，因此这两类事件显示为进度提示，不混入思考正文。历史消息若此前没有保存 reasoning，不会自动回填。
 
 macOS 准备脚本会复制 uv 托管的基础 Python，并把 Runtime 内的符号链接实体化；Windows 准备脚本会复制完整的 uv 托管 Python 到 `hermes-runtime/python`，再把构建用 venv 的 `site-packages` 合并进去并删除带有构建机绝对路径的 venv。两个平台都会拒绝指向 Runtime 目录之外的链接，安装后的应用不依赖 GitHub Actions runner 或开发机上的 Python。
 
