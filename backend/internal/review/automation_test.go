@@ -149,7 +149,7 @@ func TestAutomationAnalyzesPostWithConfiguredLLM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompter := fakePrompter{content: `{"summary":"情绪回暖","key_points":["观察核心承接"],"outlook":"明日关注分歧转强"}`}
+	prompter := &recordingPrompter{content: `{"summary":"情绪回暖","key_points":["观察核心承接"],"outlook":"明日关注分歧转强"}`}
 	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), settings, http.DefaultClient, "", prompter)
 	analyzed, err := automation.AnalyzePost(context.Background(), post.ID)
 	if err != nil {
@@ -157,6 +157,9 @@ func TestAutomationAnalyzesPostWithConfiguredLLM(t *testing.T) {
 	}
 	if analyzed.AISummary != "情绪回暖" || len(analyzed.AIKeyPoints) != 1 || analyzed.AIAnalyzedAt.IsZero() {
 		t.Fatalf("analysis=%+v", analyzed)
+	}
+	if len(prompter.modules) != 1 || prompter.modules[0] != "review-analysis" {
+		t.Fatalf("usage modules = %v", prompter.modules)
 	}
 }
 
@@ -723,6 +726,9 @@ func TestAutomationUsesHermesWithPersistedXueqiuBrowserState(t *testing.T) {
 	if prompter.statePath != statePath || strings.Contains(strings.ToLower(prompter.prompt), "cookie=") {
 		t.Fatalf("browser state handoff path=%q prompt=%q", prompter.statePath, prompter.prompt)
 	}
+	if prompter.module != "review-collection" {
+		t.Fatalf("usage module = %q", prompter.module)
+	}
 	posts, total, err := store.ListPosts(context.Background(), Query{Source: "xueqiu", Limit: 10})
 	if err != nil || total != 1 || posts[0].Title != "盘后复盘" || posts[0].AuthorName != "测试大V" {
 		t.Fatalf("posts=%+v total=%d err=%v", posts, total, err)
@@ -746,7 +752,7 @@ func TestAutomationUsesElectronBrowserBridgeBeforeHermesNormalization(t *testing
 			t.Fatalf("browser bridge request = %+v", request)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"data":{"author_name":"测试大V","external_id":"2799158966","articles":[{"title":"原始标题","original_url":"https://xueqiu.com/2799158966/123456789","content_text":"内置 Electron 浏览器读取到的真实文章正文，市场先分歧后回流。","published_at":"2026-08-07 15:30"}],"error":""}}`))
+		_, _ = w.Write([]byte(`{"ok":true,"data":{"author_name":"测试大V","external_id":"2799158966","articles":[{"title":"原始标题","original_url":"https://xueqiu.com/2799158966/123456789","content_text":"内置 Electron 浏览器读取到的真实文章正文，市场先分歧后回流。","published_at":"今天 15:30"}],"error":""}}`))
 	}))
 	defer bridge.Close()
 	t.Setenv("A_STOCK_BROWSER_BRIDGE_URL", bridge.URL)
@@ -789,6 +795,13 @@ func TestAutomationUsesElectronBrowserBridgeBeforeHermesNormalization(t *testing
 	posts, total, err := store.ListPosts(context.Background(), Query{Source: "xueqiu", Limit: 10})
 	if err != nil || total != 1 || posts[0].Title != "盘后复盘" || !strings.Contains(posts[0].ContentText, "真实文章正文") || strings.Contains(posts[0].ContentText, "模型不得替换") {
 		t.Fatalf("posts=%+v total=%d err=%v", posts, total, err)
+	}
+	if strings.Contains(prompter.prompt, "真实文章正文") || len(prompter.modules) != 1 || prompter.modules[0] != "review-normalization" {
+		t.Fatalf("normalization sent article body or lost attribution: modules=%v prompt=%s", prompter.modules, prompter.prompt)
+	}
+	result = automation.SyncOne(context.Background(), sub.ID)
+	if result.Error != "" || result.Found != 1 || result.Imported != 0 || len(prompter.modules) != 1 {
+		t.Fatalf("repeated sync should not call AI: result=%+v modules=%v", result, prompter.modules)
 	}
 }
 
@@ -856,6 +869,10 @@ func TestAutomationUsesElectronBrowserBridgeForTaoguba(t *testing.T) {
 	if err != nil || total != 1 || posts[0].Title != "807复盘" || !strings.Contains(posts[0].ContentText, "真实文章正文") || strings.Contains(posts[0].ContentText, "模型不得替换") {
 		t.Fatalf("posts=%+v total=%d err=%v", posts, total, err)
 	}
+	result = automation.SyncOne(context.Background(), sub.ID)
+	if result.Error != "" || result.Found != 1 || result.Imported != 0 || len(prompter.modules) != 1 {
+		t.Fatalf("repeated sync should not call AI: result=%+v modules=%v", result, prompter.modules)
+	}
 }
 
 func TestAutomationRequiresXueqiuBrowserLoginState(t *testing.T) {
@@ -910,6 +927,7 @@ func (p fakePrompter) Prompt(context.Context, string) (hermes.PromptResult, erro
 type recordingPrompter struct {
 	content string
 	prompt  string
+	modules []string
 }
 
 type stagedSummaryPrompter struct {
@@ -1020,6 +1038,9 @@ type blockingSummaryPrompter struct {
 }
 
 func (p *blockingSummaryPrompter) Prompt(ctx context.Context, prompt string) (hermes.PromptResult, error) {
+	if hermes.UsageModule(ctx) != "review-summary" {
+		return hermes.PromptResult{}, fmt.Errorf("background summary lost usage module: %q", hermes.UsageModule(ctx))
+	}
 	if strings.Contains(prompt, "任务阶段：单作者观点归纳") {
 		select {
 		case p.started <- struct{}{}:
@@ -1061,8 +1082,9 @@ func (p *stagedSummaryPrompter) Prompts() []string {
 	return append([]string(nil), p.prompts...)
 }
 
-func (p *recordingPrompter) Prompt(_ context.Context, prompt string) (hermes.PromptResult, error) {
+func (p *recordingPrompter) Prompt(ctx context.Context, prompt string) (hermes.PromptResult, error) {
 	p.prompt = prompt
+	p.modules = append(p.modules, hermes.UsageModule(ctx))
 	return hermes.PromptResult{Content: p.content}, nil
 }
 
@@ -1070,14 +1092,16 @@ type fakeBrowserPrompter struct {
 	content   string
 	prompt    string
 	statePath string
+	module    string
 }
 
 func (p *fakeBrowserPrompter) Prompt(context.Context, string) (hermes.PromptResult, error) {
 	return hermes.PromptResult{Content: p.content}, nil
 }
 
-func (p *fakeBrowserPrompter) PromptWithBrowserState(_ context.Context, prompt, statePath string) (hermes.PromptResult, error) {
+func (p *fakeBrowserPrompter) PromptWithBrowserState(ctx context.Context, prompt, statePath string) (hermes.PromptResult, error) {
 	p.prompt = prompt
 	p.statePath = statePath
+	p.module = hermes.UsageModule(ctx)
 	return hermes.PromptResult{Content: p.content}, nil
 }

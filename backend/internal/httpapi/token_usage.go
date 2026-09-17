@@ -19,6 +19,7 @@ import (
 type tokenUsageEntry struct {
 	Date                string `json:"date"`
 	Module              string `json:"module"`
+	OriginalModule      string `json:"original_module,omitempty"`
 	Model               string `json:"model,omitempty"`
 	Prompt              int    `json:"prompt_tokens"`
 	Completion          int    `json:"completion_tokens"`
@@ -30,6 +31,7 @@ type tokenUsageEntry struct {
 type tokenUsageStore struct {
 	mu      sync.Mutex
 	path    string
+	Version int               `json:"version"`
 	Entries []tokenUsageEntry `json:"entries"`
 }
 type tokenUsageRequest struct {
@@ -46,10 +48,26 @@ func newTokenUsageStore(settingsPath string) *tokenUsageStore {
 	if strings.TrimSpace(settingsPath) != "" {
 		path = filepath.Join(filepath.Dir(settingsPath), "token-usage.json")
 	}
-	s := &tokenUsageStore{path: path}
+	s := &tokenUsageStore{path: path, Version: 1}
 	if path != "" {
 		if data, err := os.ReadFile(path); err == nil {
-			_ = json.Unmarshal(data, s)
+			var stored tokenUsageStore
+			if json.Unmarshal(data, &stored) == nil {
+				s.Entries = stored.Entries
+				s.Version = max(1, stored.Version)
+				if stored.Version == 0 {
+					// In the unversioned application, review automation was the
+					// only built-in caller missing module tags. This is a broad
+					// historical inference, not per-request attribution. Retain
+					// the original module and never apply it to new unknown calls.
+					for i := range s.Entries {
+						if s.Entries[i].Module == "other" {
+							s.Entries[i].OriginalModule = "other"
+							s.Entries[i].Module = "review-legacy"
+						}
+					}
+				}
+			}
 		}
 	}
 	return s
@@ -111,7 +129,7 @@ func newTokenUsageGateway(gateway hermes.Gateway, store *tokenUsageStore) hermes
 
 func (g *tokenUsageGateway) Prompt(ctx context.Context, prompt string) (hermes.PromptResult, error) {
 	result, err := g.Gateway.Prompt(ctx, prompt)
-	g.record(ctx, prompt, result)
+	g.record(ctx, prompt, result, err)
 	return result, err
 }
 
@@ -123,7 +141,7 @@ func (g *tokenUsageGateway) PromptWithOptions(ctx context.Context, prompt string
 		return g.Prompt(ctx, prompt)
 	}
 	result, err := prompter.PromptWithOptions(ctx, prompt, options)
-	g.record(ctx, prompt, result)
+	g.record(ctx, prompt, result, err)
 	return result, err
 }
 
@@ -133,7 +151,7 @@ func (g *tokenUsageGateway) PromptWithBrowserState(ctx context.Context, prompt, 
 		return hermes.PromptResult{}, fmt.Errorf("Hermes 不支持浏览器登录态提示词")
 	}
 	result, err := prompter.PromptWithBrowserState(ctx, prompt, statePath)
-	g.record(ctx, prompt, result)
+	g.record(ctx, prompt, result, err)
 	return result, err
 }
 
@@ -177,14 +195,23 @@ func (g *tokenUsageGateway) ModelAPIKeyForProfile(profileID string) (string, err
 	return gateway.ModelAPIKeyForProfile(profileID)
 }
 
-func (g *tokenUsageGateway) record(ctx context.Context, prompt string, result hermes.PromptResult) {
+func (g *tokenUsageGateway) record(ctx context.Context, prompt string, result hermes.PromptResult, callErr error) {
 	if g.store == nil {
 		return
 	}
 	usage := result.Usage
-	estimated := usage.TotalTokens <= 0
 	if usage.TotalTokens <= 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	estimated := usage.TotalTokens <= 0
+	if estimated {
+		// A failed request may never have reached the model. Only provider
+		// usage is evidence of consumption in that case; do not invent an estimate.
+		if callErr != nil {
+			return
+		}
 		usage = estimateTokenUsage(prompt, result.Content)
+		usage.Model = result.Usage.Model
 	}
 	if usage.TotalTokens <= 0 {
 		return
@@ -230,6 +257,7 @@ func (s *Server) tokenUsageSummary(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		Date                string `json:"date"`
 		Module              string `json:"module"`
+		OriginalModule      string `json:"original_module,omitempty"`
 		Model               string `json:"model"`
 		Prompt              int    `json:"prompt_tokens"`
 		Completion          int    `json:"completion_tokens"`
@@ -262,7 +290,7 @@ func (s *Server) tokenUsageSummary(w http.ResponseWriter, r *http.Request) {
 		} else {
 			index[key] = len(rows)
 			rows = append(rows, row{
-				Date: date, Module: e.Module, Model: e.Model,
+				Date: date, Module: e.Module, Model: e.Model, OriginalModule: e.OriginalModule,
 				Prompt: e.Prompt, Completion: e.Completion, Total: e.Total,
 				EstimatedPrompt: e.EstimatedPrompt, EstimatedCompletion: e.EstimatedCompletion, EstimatedTotal: e.EstimatedTotal,
 			})

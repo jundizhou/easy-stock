@@ -10,6 +10,7 @@ export type TokenUsageSummary = {
 	rows: Array<{
 		date: string;
 		module: string;
+		original_module?: string;
 		model: string;
 		prompt_tokens: number;
 		completion_tokens: number;

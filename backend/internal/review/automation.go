@@ -400,7 +400,10 @@ func (a *Automation) collectBrowserSourceWithHermes(ctx context.Context, sub Sub
 		if err != nil {
 			return nil, "", "", err
 		}
-		collection = a.normalizeBrowserBridgeCollection(ctx, sub, collection)
+		collection, err = a.normalizeBrowserBridgeCollection(ctx, sub, collection)
+		if err != nil {
+			return nil, "", "", err
+		}
 		return postsFromBrowserCollection(sub, collection)
 	}
 	return a.collectWithBrowserState(ctx, sub, statePath)
@@ -456,23 +459,54 @@ func (a *Automation) collectFromBrowserBridge(ctx context.Context, sub Subscript
 	return payload.Data, nil
 }
 
-func (a *Automation) normalizeBrowserBridgeCollection(ctx context.Context, sub Subscription, raw hermesXueqiuCollection) hermesXueqiuCollection {
-	data, err := json.Marshal(raw)
-	if err != nil || a.prompter == nil {
-		return raw
+func (a *Automation) normalizeBrowserBridgeCollection(ctx context.Context, sub Subscription, raw hermesXueqiuCollection) (hermesXueqiuCollection, error) {
+	// Keep already imported articles in the collection for accurate discovery
+	// counts, but only ask the model to normalize metadata for new articles.
+	raw.Articles = append([]hermesXueqiuArticle(nil), raw.Articles...)
+	pending := raw
+	pending.Articles = nil
+	byURL := map[string]hermesXueqiuArticle{}
+	for index, article := range raw.Articles {
+		parsed, source, err := classifyURL(strings.TrimSpace(article.OriginalURL))
+		if err != nil || source != sub.Source || parsed.Scheme != "https" {
+			continue
+		}
+		article.OriginalURL = parsed.String()
+		if _, exists := byURL[article.OriginalURL]; exists {
+			continue
+		}
+		if stored, err := a.store.GetPostByURL(ctx, article.OriginalURL); err == nil {
+			// The browser may return relative dates again. Reuse the verified
+			// stored fields so skipping normalization still yields valid posts.
+			raw.Articles[index] = hermesXueqiuArticle{
+				Title: stored.Title, OriginalURL: stored.OriginalURL,
+				ContentText: stored.ContentText, PublishedAt: stored.PublishedAt.Format(time.RFC3339),
+			}
+			continue
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return raw, fmt.Errorf("检查已导入文章失败: %w", err)
+		}
+		byURL[article.OriginalURL] = article
+		// Normalization only needs title and publication time. Preserve the
+		// browser's original body locally instead of sending it through the model.
+		article.ContentText = ""
+		pending.Articles = append(pending.Articles, article)
 	}
-	prompt := "你是" + browserSourceLabel(sub.Source) + "文章整理代理。以下 JSON 来自用户已登录的内置 Electron 浏览器，字段均为实际页面读取结果。请挑选最近最多5篇文章，清理标题，把发布时间尽量转换为RFC3339；不得新增链接、不得编造正文、不得输出Cookie。只返回严格JSON，结构保持不变：" + string(data) + "\n目标主页：" + sub.HomepageURL
-	response, err := hermes.PromptFullyAuthorized(ctx, a.prompter, prompt)
+	if len(pending.Articles) == 0 || a.prompter == nil {
+		return raw, nil
+	}
+	data, err := json.Marshal(pending)
 	if err != nil {
-		return raw
+		return raw, nil
+	}
+	prompt := "你是" + browserSourceLabel(sub.Source) + "文章整理代理。以下 JSON 来自用户已登录的内置 Electron 浏览器，字段均为实际页面读取结果。请整理最多5篇新文章的标题，把发布时间尽量转换为RFC3339；正文已保存在本地，content_text保持为空；不得新增链接、不得编造内容、不得输出Cookie。只返回严格JSON，结构保持不变：" + string(data) + "\n目标主页：" + sub.HomepageURL
+	response, err := hermes.PromptFullyAuthorized(hermes.WithUsageModule(ctx, "review-normalization"), a.prompter, prompt)
+	if err != nil {
+		return raw, nil
 	}
 	normalized, err := parseHermesXueqiuCollection(response.Content)
 	if err != nil || strings.TrimSpace(normalized.Error) != "" {
-		return raw
-	}
-	byURL := map[string]hermesXueqiuArticle{}
-	for _, article := range raw.Articles {
-		byURL[strings.TrimSpace(article.OriginalURL)] = article
+		return raw, nil
 	}
 	articles := make([]hermesXueqiuArticle, 0, min(len(raw.Articles), 5))
 	seen := map[string]bool{}
@@ -498,13 +532,13 @@ func (a *Automation) normalizeBrowserBridgeCollection(ctx context.Context, sub S
 		seen[url] = true
 	}
 	if len(articles) == 0 {
-		return raw
+		return raw, nil
 	}
 	return hermesXueqiuCollection{
 		AuthorName: firstNonEmpty(cleanInline(normalized.AuthorName), raw.AuthorName),
 		ExternalID: firstNonEmpty(strings.TrimSpace(normalized.ExternalID), raw.ExternalID),
 		Articles:   articles,
-	}
+	}, nil
 }
 
 func (a *Automation) collectWithBrowserState(ctx context.Context, sub Subscription, statePath string) ([]Post, string, string, error) {
@@ -520,7 +554,7 @@ func (a *Automation) collectWithBrowserState(ctx context.Context, sub Subscripti
 	if !ok {
 		return nil, "", "", errors.New("当前 Hermes 运行时不支持复用浏览器登录态")
 	}
-	response, err := hermes.PromptFullyAuthorizedWithBrowserState(ctx, browserPrompter, prompt, statePath)
+	response, err := hermes.PromptFullyAuthorizedWithBrowserState(hermes.WithUsageModule(ctx, "review-collection"), browserPrompter, prompt, statePath)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -937,7 +971,7 @@ type llmAnalysis struct {
 
 func analyzeWithHermes(ctx context.Context, prompter hermes.Prompter, post Post) (llmAnalysis, error) {
 	prompt := "你是谨慎的A股复盘研究助手，只提炼原作者观点，不编造投资建议。请分析下面的A股复盘文章。只返回严格JSON：{\"summary\":\"200字内摘要\",\"key_points\":[\"要点\"],\"outlook\":\"作者对下一交易日或后市的预期；没有则写未明确\"}。不要添加markdown。\n标题：" + post.Title + "\n作者：" + post.AuthorName + "\n正文：" + truncateRunes(post.ContentText, 12000)
-	response, err := hermes.PromptFullyAuthorized(ctx, prompter, prompt)
+	response, err := hermes.PromptFullyAuthorized(hermes.WithUsageModule(ctx, "review-analysis"), prompter, prompt)
 	if err != nil {
 		return llmAnalysis{}, fmt.Errorf("Hermes AI 提炼失败: %w", err)
 	}

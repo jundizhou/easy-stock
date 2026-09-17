@@ -9,6 +9,15 @@ const moduleLabels: Record<string, string> = {
 	'stock-analysis': '个股分析',
 	'portfolio-inspection': '持仓 AI 巡检',
 	'review-diary': '大V复盘日记',
+	'review-collection': '复盘文章采集',
+	'review-normalization': '复盘文章整理',
+	'review-analysis': '复盘文章分析',
+	'review-summary': '复盘每日总结',
+	'review-validation': '复盘次日验证',
+	'review-legacy': '复盘后台（历史推定）',
+	'portfolio-expectation': '持仓明日预期',
+	'settings-model-test': '模型连接测试',
+	'other': '未归类',
 	'market-overview': '行情总览',
 	'mastery': '游资心法',
 };
@@ -71,6 +80,7 @@ export function TokenUsageWorkspace({ config, refreshKey }: { config: BackendCon
 					<span className="workspace-kicker">USAGE ANALYTICS</span>
 					<h2>Token 统计</h2>
 					<p>真实用量来自模型返回的 usage；本地估算单独展示，不并入真实总量。</p>
+					{rows.some(row => row.module === 'review-legacy') && <p>历史复盘用量按旧版调用路径推定归类，保留原始金额，无法进一步拆分采集、整理和分析。</p>}
 				</div>
 				<button type="button" className="token-usage-refresh" onClick={() => void loadUsage()} disabled={state === 'loading'}>
 					{state === 'loading' ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新数据

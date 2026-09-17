@@ -1264,6 +1264,7 @@ func parseDailySummaryModel(content string) (dailySummaryModel, error) {
 
 func promptDailySummaryJSON[T any](ctx context.Context, prompter hermes.Prompter, prompt, label string, parse func(string) (T, error)) (T, error) {
 	var empty T
+	ctx = hermes.WithUsageModule(ctx, "review-summary")
 	response, err := hermes.PromptUsingOptions(ctx, prompter, prompt, dailySummaryPromptOptions)
 	if err != nil {
 		return empty, fmt.Errorf("Hermes %s失败: %w", label, err)
