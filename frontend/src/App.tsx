@@ -40,8 +40,6 @@ import {
 	SourceHealth,
 	StreamMessage,
 	ThemeOverview,
-	LimitUpLadderData,
-	MarketEmotionHistory,
 	StockAIAnalysis,
 	ThemeScreenLane,
 	ThemeScreenPagination,
@@ -71,6 +69,7 @@ import { PortfolioInspectionWorkspace } from './components/PortfolioInspectionWo
 import { TokenUsageWorkspace } from './components/TokenUsageWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
 import { useTheme } from './lib/theme';
+import { useLimitUpWorkspace } from './lib/use-limit-up-workspace';
 import { useThemeOverview } from './lib/use-theme-overview';
 import { useThemeConstituents, sameTheme } from './lib/use-theme-constituents';
 import { useThemeKLines } from './lib/use-theme-klines';
@@ -120,12 +119,10 @@ export function App() {
 	const [stockPage, setStockPage] = useState(1);
 	const [stockSort, setStockSort] = useState<ThemeScreenSort>('rank_score');
 	const [stockLane, setStockLane] = useState<ThemeScreenLane>('all');
-	const [limitUpData, setLimitUpData] = useState<LimitUpLadderData | null>(null);
-	const [limitUpState, setLimitUpState] = useState<LoadState>('idle');
-	const [limitUpError, setLimitUpError] = useState('');
-	const [marketEmotionData, setMarketEmotionData] = useState<MarketEmotionHistory | null>(null);
-	const [marketEmotionState, setMarketEmotionState] = useState<LoadState>('idle');
-	const [marketEmotionError, setMarketEmotionError] = useState('');
+	const limitUp = useLimitUpWorkspace(config, workspaceMode === 'limit-up');
+	const { data: limitUpData, state: limitUpState, error: limitUpError } = limitUp.ladder;
+	const { data: marketEmotionData, state: marketEmotionState, error: marketEmotionError } = limitUp.history;
+	const refreshLimitUpWorkspace = limitUp.refresh;
 	const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
 	const [masteryRefreshKey, setMasteryRefreshKey] = useState(0);
 	const [stockAIRefreshKey, setStockAIRefreshKey] = useState(0);
@@ -283,47 +280,6 @@ export function App() {
 		};
 	}, [config, streamKey, workspaceMode]);
 
-	const loadLimitUpLadder = useCallback(async () => {
-		if (!config) {
-			return;
-		}
-		setLimitUpState('loading');
-		setLimitUpError('');
-		try {
-			const payload = await requestJSON<{ data: LimitUpLadderData }>(config, '/api/v1/short-term/limit-up-ladder');
-			setLimitUpData(payload.data);
-			setLimitUpState('ready');
-		} catch (error) {
-			setLimitUpState('error');
-			setLimitUpError(error instanceof Error ? error.message : '短线连板数据加载失败');
-		}
-	}, [config]);
-
-	const loadMarketEmotion = useCallback(async () => {
-		if (!config) return;
-		setMarketEmotionState('loading');
-		setMarketEmotionError('');
-		try {
-			const payload = await requestJSON<{ data: MarketEmotionHistory }>(config, '/api/v1/short-term/emotion-history');
-			setMarketEmotionData(payload.data);
-			setMarketEmotionState('ready');
-		} catch (error) {
-			setMarketEmotionState('error');
-			setMarketEmotionError(error instanceof Error ? error.message : '市场情绪历史加载失败');
-		}
-	}, [config]);
-
-	const refreshLimitUpWorkspace = useCallback(() => {
-		void loadLimitUpLadder();
-		void loadMarketEmotion();
-	}, [loadLimitUpLadder, loadMarketEmotion]);
-
-	useEffect(() => {
-		if (workspaceMode === 'limit-up') {
-			refreshLimitUpWorkspace();
-		}
-	}, [refreshLimitUpWorkspace, workspaceMode]);
-
 	const refreshAll = () => {
 		if (workspaceMode === 'limit-up') {
 			refreshLimitUpWorkspace();
@@ -417,7 +373,7 @@ export function App() {
 	const statusText = configError || (overview.fetching || constituents.fetching || historyState === 'loading' ? '部分数据更新中' : overview.error || constituents.error || historyErrorSymbols.size ? '部分数据暂不可用' : '题材数据已更新');
 	const currentLoadState = workspaceMode === 'limit-up' ? limitUpState : workspaceMode === 'mastery' || workspaceMode === 'reviews' || workspaceMode === 'stock-ai' || workspaceMode === 'portfolio-inspection' || workspaceMode === 'ai' || workspaceMode === 'market' || workspaceMode === 'token-usage' ? 'ready' : foundationState;
 	const currentStatusText = workspaceMode === 'limit-up'
-		? limitUpState === 'loading' ? '同步连板梯队' : limitUpState === 'error' ? '连板数据异常' : '连板结构已更新'
+		? limitUpState === 'loading' || marketEmotionState === 'loading' ? '部分数据更新中' : limitUpState === 'error' || marketEmotionState === 'error' ? '部分数据暂不可用' : '连板结构已更新'
 		: workspaceMode === 'mastery' ? '游资心法库已连接' : workspaceMode === 'reviews' ? '复盘资料库已连接' : workspaceMode === 'stock-ai' ? '个股分析引擎已连接' : workspaceMode === 'portfolio-inspection' ? '持仓巡检引擎已连接' : workspaceMode === 'ai' ? 'AI 助手已连接' : workspaceMode === 'market' ? '行情数据层已连接' : workspaceMode === 'token-usage' ? 'Token 统计已连接' : statusText;
 	const themeSourceStatus = overviewMeta?.source === 'theme-radar:fusion'
 		? overviewMeta.carry_forward ? '行业趋势 · 开盘啦衰减融合' : '行业趋势 · 开盘啦融合'
@@ -425,7 +381,7 @@ export function App() {
 			? overviewMeta.carry_forward ? '沿用 ' + (overviewMeta.trade_date || '上一交易日') + ' 开盘啦' : (overviewMeta.trade_date || '当日') + ' 开盘啦'
 			: '行业趋势强度';
 	const currentSubStatus = workspaceMode === 'limit-up'
-		? limitUpData ? `${limitUpData.current.trade_date} · ${limitUpData.session_status} · ${limitUpData.meta.source.includes('duanxianxia') ? '开盘啦涨停池' : '东方财富兜底'} · ${limitUpData.concept_status === 'ready' ? '题材已归因' : '题材降级'}` : '开盘啦涨停池优先'
+		? limitUpData ? `${limitUpData.current.trade_date} · ${limitUpData.session_status} · ${limitUpData.meta.source.includes('duanxianxia') ? '开盘啦涨停池' : '东方财富兜底'} · ${limitUpData.concept_status === 'ready' ? '题材已归因' : limitUpState === 'loading' ? '题材补充中' : '题材暂不完整'}` : '开盘啦涨停池优先'
 		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Hermes 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '逐股分析 · 组合风险 · 后台任务' : workspaceMode === 'ai' ? '本机 Hermes AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : workspaceMode === 'token-usage' ? '模型输入、输出与功能模块消耗' : themeSourceStatus + ' · ' + streamStatus;
 	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '个股 AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : workspaceMode === 'token-usage' ? 'Token 统计' : 'AI 对话';
 	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Hermes 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '多周期评分、隔日情景推演与账户级风控执行工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : workspaceMode === 'token-usage' ? '按日、按月和功能模块查看模型 Token 消耗' : '像 Codex 一样持续协作、拆解问题并形成可执行结果';
@@ -727,7 +683,7 @@ export function App() {
 					</section>
 				</aside>
 			</div>
-			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} />}
+			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} progress={limitUp.ladder.progress} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} />}
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>

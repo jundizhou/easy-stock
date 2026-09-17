@@ -166,8 +166,10 @@ func (c *Client) StockCatalog(ctx context.Context) ([]foundation.StockCatalogEnt
 	for i := range entries {
 		entries[i].Meta = meta
 	}
+	c.catalogCacheMu.Lock()
 	c.catalog = cloneStockCatalog(entries)
 	c.catalogUntil = time.Now().Add(stockCatalogTTL)
+	c.catalogCacheMu.Unlock()
 	return entries, nil
 }
 
@@ -201,4 +203,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// CachedStockCatalog never waits for the remote pagination lock.
+func (c *Client) CachedStockCatalog() []foundation.StockCatalogEntry {
+	c.catalogCacheMu.RLock()
+	defer c.catalogCacheMu.RUnlock()
+	return cloneStockCatalog(c.catalog)
 }

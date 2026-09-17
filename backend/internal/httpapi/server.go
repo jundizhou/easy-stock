@@ -54,6 +54,8 @@ type Server struct {
 	inflection            InflectionEvaluator
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
+	limitUpProgress       *shortTermCache[limitUpLadderData]
+	emotionProgress       *shortTermCache[marketemotion.History]
 	stockDirectories      *stockDirectoryCache
 	hotStockRanks         *hotStockRankCache
 	marketSnapshots       *marketOverviewCache
@@ -295,6 +297,8 @@ func NewServer(config any) *Server {
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
 		themeProgress:         newThemeProgressCache(),
 		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
+		limitUpProgress:       &shortTermCache[limitUpLadderData]{},
+		emotionProgress:       &shortTermCache[marketemotion.History]{},
 		stockDirectories:      newStockDirectoryCache(6 * time.Hour),
 		hotStockRanks:         newHotStockRankCache(2 * time.Minute),
 		marketSnapshots:       newMarketOverviewCache(45 * time.Second),
@@ -326,6 +330,19 @@ func NewServer(config any) *Server {
 			}
 		}
 	}
+	if s.themeRadarStore != nil {
+		if payload, err := s.themeRadarStore.LoadLadder(context.Background()); err == nil && len(payload) > 0 {
+			var cached shortTermProgress[limitUpLadderData]
+			if json.Unmarshal(payload, &cached) == nil && cached.Data != nil {
+				cached.Refreshing, cached.Stale = false, true
+				cached.Data.Meta.Stale = true
+				if cached.Data.Intraday != nil {
+					cached.Data.Intraday.Stale = true
+				}
+				s.limitUpProgress.value = cached
+			}
+		}
+	}
 	s.marketEmotion = newMarketEmotionEngine(
 		cfg.MarketEmotionStore,
 		s.limitUpProvider,
@@ -354,6 +371,12 @@ func (s *Server) Close() error {
 	}
 	if s == nil {
 		return nil
+	}
+	if s.limitUpProgress != nil {
+		s.limitUpProgress.close()
+	}
+	if s.emotionProgress != nil {
+		s.emotionProgress.close()
 	}
 	var closeErrors []error
 	if s.stockResearch != nil {

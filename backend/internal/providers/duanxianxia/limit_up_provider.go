@@ -356,3 +356,99 @@ func limitUpEventKey(event foundation.LimitUpEvent) string {
 }
 
 var _ RecentLimitUpProvider = (*LimitUpProvider)(nil)
+
+// CachedLimitUps restores retained pools without starting a remote refresh.
+func (p *LimitUpProvider) CachedLimitUps(ctx context.Context, days int) ([]foundation.LimitUpEvent, error) {
+	if p.primary == nil {
+		return nil, nil
+	}
+	pools, err := p.primary.CachedLimitUpPools(ctx, max(days, 2))
+	var events []foundation.LimitUpEvent
+	for _, pool := range pools {
+		events = append(events, cloneLimitUpEvents(pool.Events)...)
+	}
+	return events, err
+}
+
+// ProgressiveLimitUps publishes immutable, cumulative pools as each source completes.
+func (p *LimitUpProvider) ProgressiveLimitUps(ctx context.Context, days int, publish func([]foundation.LimitUpEvent, string, error)) {
+	type result struct {
+		stage  string
+		events []foundation.LimitUpEvent
+		themes []Snapshot
+		err    error
+	}
+	updates := make(chan result, 3)
+	send := func(item result) {
+		select {
+		case updates <- item:
+		case <-ctx.Done():
+		}
+	}
+	go func() {
+		var events []foundation.LimitUpEvent
+		var err error
+		if p.primary != nil {
+			var pools []LimitUpPoolSnapshot
+			pools, err = p.primary.EarlyLimitUpPools(ctx, max(days, 2))
+			for _, pool := range pools {
+				items := cloneLimitUpEvents(pool.Events)
+				for i := range items {
+					items[i].Meta.Stale = p.primary.now().Sub(pool.FetchedAt) >= p.primary.refreshInterval
+				}
+				events = append(events, items...)
+			}
+		} else {
+			err = fmt.Errorf("开盘啦涨停池不可用")
+		}
+		send(result{stage: "primary", events: events, err: err})
+	}()
+	go func() {
+		var events []foundation.LimitUpEvent
+		var err error
+		if progressive, ok := p.fallback.(interface {
+			ProgressiveRecentLimitUps(context.Context, int, func([]foundation.LimitUpEvent)) ([]foundation.LimitUpEvent, error)
+		}); ok {
+			events, err = progressive.ProgressiveRecentLimitUps(ctx, days, func(items []foundation.LimitUpEvent) { send(result{stage: "history_partial", events: items}) })
+		} else if p.fallback != nil {
+			events, err = p.fallback.RecentLimitUps(ctx, days)
+		} else {
+			err = fmt.Errorf("历史涨停池不可用")
+		}
+		send(result{stage: "history", events: events, err: err})
+	}()
+	go func() {
+		var themes []Snapshot
+		var err error
+		if p.primary != nil {
+			themes, _, err = p.primary.Snapshots(ctx, max(days, 2))
+		}
+		send(result{stage: "themes", themes: themes, err: err})
+	}()
+	var primary, fallback []foundation.LimitUpEvent
+	var themes []Snapshot
+	var primaryErr error
+	for remaining := 3; remaining > 0; {
+		select {
+		case <-ctx.Done():
+			return
+		case item := <-updates:
+			if item.stage != "history_partial" {
+				remaining--
+			}
+			switch item.stage {
+			case "primary":
+				primary, primaryErr = item.events, item.err
+			case "history", "history_partial":
+				fallback = item.events
+			case "themes":
+				themes = item.themes
+			}
+			events := mergeLimitUpEvents(primary, fallback, primaryErr)
+			if len(primary) == 0 && len(fallback) > 0 {
+				events = markLimitUpFallback(events, "开盘啦涨停池暂无可用快照，使用东方财富补位")
+			}
+			publish(applyKaipanlaThemeLeaders(events, themes), item.stage, item.err)
+		}
+	}
+}

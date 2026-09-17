@@ -1401,6 +1401,8 @@ export type LimitUpConceptHeat = {
 };
 
 export type LimitUpLadderData = {
+	comparison_ready?: boolean;
+	intraday?: MarketEmotionIntraday;
 	session_status: string;
 	current: LimitUpLadderDay;
 	previous: LimitUpLadderDay;

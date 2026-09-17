@@ -24,6 +24,7 @@ var shanghaiLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
 type marketEmotionEngine struct {
 	mu            sync.Mutex
+	inflight      *emotionHistoryFlight
 	store         *marketemotion.Store
 	limitUps      LimitUpProvider
 	pools         MarketPoolProvider
@@ -146,6 +147,10 @@ func (s *Server) marketEmotionHistoryHandler(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusServiceUnavailable, "market emotion service is unavailable")
 		return
 	}
+	if r.URL.Query().Get("delivery") == "progressive" {
+		s.progressiveEmotionHistory(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 150*time.Second)
 	defer cancel()
 	history, err := s.marketEmotion.load(ctx)
@@ -170,9 +175,47 @@ func (s *Server) marketEmotionHistoryHandler(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"data": history})
 }
 
+type emotionHistoryFlight struct {
+	done    chan struct{}
+	history marketemotion.History
+	err     error
+}
+
+func (e *marketEmotionEngine) readLocal(ctx context.Context) (marketemotion.History, error) {
+	points, err := e.store.List(ctx, 120)
+	if err != nil {
+		return marketemotion.History{}, err
+	}
+	state, err := e.store.SyncState(ctx)
+	if err != nil {
+		return marketemotion.History{}, err
+	}
+	return buildMarketEmotionHistory(points, state), nil
+}
+
 func (e *marketEmotionEngine) load(ctx context.Context) (marketemotion.History, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	if flight := e.inflight; flight != nil {
+		e.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.history, flight.err
+		case <-ctx.Done():
+			return marketemotion.History{}, ctx.Err()
+		}
+	}
+	flight := &emotionHistoryFlight{done: make(chan struct{})}
+	e.inflight = flight
+	e.mu.Unlock()
+	flight.history, flight.err = e.loadOnce(ctx)
+	e.mu.Lock()
+	e.inflight = nil
+	close(flight.done)
+	e.mu.Unlock()
+	return flight.history, flight.err
+}
+
+func (e *marketEmotionEngine) loadOnce(ctx context.Context) (marketemotion.History, error) {
 
 	points, err := e.store.List(ctx, 120)
 	if err != nil {
@@ -205,6 +248,9 @@ func (e *marketEmotionEngine) shouldSync(points []marketemotion.Snapshot, state 
 	}
 	localNow := now.In(shanghaiLocation)
 	today := localNow.Format("2006-01-02")
+	if state.LastError != "" {
+		return now.Sub(state.UpdatedAt) >= 30*time.Second
+	}
 	if state.LastAttemptDate == today {
 		return false
 	}

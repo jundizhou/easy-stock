@@ -26,6 +26,9 @@ type Client struct {
 	reportBaseURL       string
 	thsBaseURL          string
 	httpClient          *http.Client
+	poolMu              sync.Mutex
+	limitUpDays         map[string]*limitUpDayFlight
+	catalogCacheMu      sync.RWMutex
 	catalogMu           sync.Mutex
 	catalog             []foundation.StockCatalogEntry
 	catalogUntil        time.Time

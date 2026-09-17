@@ -49,6 +49,7 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS limit_up_ladder_cache (id INTEGER PRIMARY KEY CHECK (id=1), payload_json TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS theme_overview_cache (id INTEGER PRIMARY KEY CHECK (id=1), payload_json TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS duanxianxia_snapshots (
 			id TEXT PRIMARY KEY,
@@ -372,5 +373,19 @@ func (s *Store) LoadOverview(ctx context.Context) ([]byte, error) {
 
 func (s *Store) SaveOverview(ctx context.Context, payload []byte) error {
 	_, err := s.db.ExecContext(ctx, "INSERT INTO theme_overview_cache(id,payload_json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json", string(payload))
+	return err
+}
+
+func (s *Store) LoadLadder(ctx context.Context) ([]byte, error) {
+	var payload string
+	err := s.db.QueryRowContext(ctx, "SELECT payload_json FROM limit_up_ladder_cache WHERE id=1").Scan(&payload)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return []byte(payload), err
+}
+
+func (s *Store) SaveLadder(ctx context.Context, payload []byte) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO limit_up_ladder_cache(id,payload_json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json", string(payload))
 	return err
 }

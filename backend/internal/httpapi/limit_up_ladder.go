@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/foundation"
+	"easy-stock/backend/internal/marketemotion"
 )
 
 type limitUpLadderStock struct {
@@ -90,16 +91,18 @@ type limitUpConceptHeat struct {
 }
 
 type limitUpLadderData struct {
-	SessionStatus string                `json:"session_status"`
-	Current       limitUpLadderDay      `json:"current"`
-	Previous      limitUpLadderDay      `json:"previous"`
-	Advance       []limitUpAdvanceStep  `json:"advance"`
-	IndustryHeat  []limitUpIndustryHeat `json:"industry_heat"`
-	ConceptHeat   []limitUpConceptHeat  `json:"concept_heat"`
-	ConceptStatus string                `json:"concept_status"`
-	ConceptError  string                `json:"concept_error,omitempty"`
-	ConceptMeta   foundation.SourceMeta `json:"concept_meta"`
-	Meta          foundation.SourceMeta `json:"meta"`
+	ComparisonReady bool                            `json:"comparison_ready"`
+	Intraday        *marketemotion.IntradaySnapshot `json:"intraday,omitempty"`
+	SessionStatus   string                          `json:"session_status"`
+	Current         limitUpLadderDay                `json:"current"`
+	Previous        limitUpLadderDay                `json:"previous"`
+	Advance         []limitUpAdvanceStep            `json:"advance"`
+	IndustryHeat    []limitUpIndustryHeat           `json:"industry_heat"`
+	ConceptHeat     []limitUpConceptHeat            `json:"concept_heat"`
+	ConceptStatus   string                          `json:"concept_status"`
+	ConceptError    string                          `json:"concept_error,omitempty"`
+	ConceptMeta     foundation.SourceMeta           `json:"concept_meta"`
+	Meta            foundation.SourceMeta           `json:"meta"`
 }
 
 type limitUpLadderSnapshot struct {
@@ -201,6 +204,10 @@ func (s *Server) limitUpLadderHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "limit-up provider is unavailable")
 		return
 	}
+	if r.URL.Query().Get("delivery") == "progressive" {
+		s.progressiveLimitUpLadder(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	data, err := s.limitUpSnapshots.load(ctx, s.limitUpProvider, s.stockConcepts, s.realtimeProvider)
@@ -290,7 +297,10 @@ func buildLimitUpLadder(events []foundation.LimitUpEvent, catalog []foundation.S
 	if meta.Source == "" {
 		meta.Source = "eastmoney:limit-up-pool"
 	}
-	meta.FetchedAt = now
+	if meta.FetchedAt.IsZero() {
+		meta.FetchedAt = now
+	}
+	meta.TradeDate = current.TradeDate
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	localNow := now.In(location)
 	status := "最近交易日"
@@ -301,14 +311,15 @@ func buildLimitUpLadder(events []foundation.LimitUpEvent, catalog []foundation.S
 		}
 	}
 	return limitUpLadderData{
-		SessionStatus: status,
-		Current:       current,
-		Previous:      previous,
-		Advance:       buildAdvanceSteps(previous, current),
-		IndustryHeat:  buildIndustryHeat(current),
-		ConceptHeat:   conceptHeat,
-		ConceptMeta:   conceptMeta,
-		Meta:          meta,
+		ComparisonReady: previous.TradeDate != "",
+		SessionStatus:   status,
+		Current:         current,
+		Previous:        previous,
+		Advance:         buildAdvanceSteps(previous, current),
+		IndustryHeat:    buildIndustryHeat(current),
+		ConceptHeat:     conceptHeat,
+		ConceptMeta:     conceptMeta,
+		Meta:            meta,
 	}, nil
 }
 
@@ -537,4 +548,47 @@ func buildIndustryHeat(day limitUpLadderDay) []limitUpIndustryHeat {
 
 func isSTStockName(name string) bool {
 	return strings.Contains(strings.ToUpper(strings.TrimSpace(name)), "ST")
+}
+
+// Quotes must describe the same trading day as the current pool. In particular,
+// do not attach today's quotes to a retained pool from a previous session.
+func enrichPreviousChangesForDate(ctx context.Context, previous *limitUpLadderDay, tradeDate string, provider RealtimeProvider) error {
+	if provider == nil {
+		return fmt.Errorf("实时行情不可用")
+	}
+	var symbols []string
+	for _, level := range previous.Levels {
+		for _, stock := range level.Stocks {
+			symbols = append(symbols, stock.Symbol)
+		}
+	}
+	if len(symbols) == 0 {
+		return fmt.Errorf("上一交易日梯队为空")
+	}
+	quotes, err := provider.Realtime(ctx, symbols)
+	if err != nil {
+		return err
+	}
+	changes := map[string]float64{}
+	for _, quote := range quotes {
+		date := quote.Meta.TradeDate
+		if !quote.TradeTime.IsZero() {
+			date = quote.TradeTime.In(shanghaiLocation).Format("2006-01-02")
+		}
+		if date == tradeDate {
+			changes[quote.Symbol] = quote.ChangePercent
+		}
+	}
+	for i := range previous.Levels {
+		for j := range previous.Levels[i].Stocks {
+			stock := &previous.Levels[i].Stocks[j]
+			if change, ok := changes[stock.Symbol]; ok {
+				stock.CurrentChangePercent = &change
+			}
+		}
+	}
+	if len(changes) == 0 {
+		return fmt.Errorf("缺少 %s 的行情，未混用其他交易日涨跌幅", tradeDate)
+	}
+	return nil
 }

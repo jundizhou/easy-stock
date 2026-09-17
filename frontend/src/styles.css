@@ -2138,6 +2138,11 @@ a:focus-visible {
 	height: 24px;
 }
 
+.short-term-status { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.short-term-status.error { color: var(--theme-amber, #b9770e); }
+.short-term-status button { margin-left: 10px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.emotion-history-panel > .short-term-status { padding: 0 14px; }
+
 .limit-up-workspace {
 	display: grid;
 	gap: 10px;
@@ -2460,6 +2465,8 @@ a:focus-visible {
 	margin: 0 auto;
 	color: var(--muted);
 }
+
+.current-ladder-panel .limit-up-loading { min-height: 240px; align-content: center; border: 0; box-shadow: none; padding: 24px; text-align: center; }
 
 .limit-up-loading strong { color: var(--text); font-size: 14px; }
 .limit-up-loading span { font-size: 11px; }

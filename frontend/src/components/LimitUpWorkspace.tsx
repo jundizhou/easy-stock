@@ -34,6 +34,7 @@ import {
 import { KLineChart } from './KLineChart';
 import { classifyBillboardSeat } from '../lib/billboard';
 import { latestTradingDayKLines } from '../lib/kline';
+import { ShortTermProgress } from '../lib/short-term-progress';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type BillboardState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
@@ -64,10 +65,11 @@ type Props = {
 	emotionData: MarketEmotionHistory | null;
 	emotionState: LoadState;
 	emotionError?: string;
+	progress?: ShortTermProgress<LimitUpLadderData> | null;
 	onRefresh: () => void;
 };
 
-export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, onRefresh }: Props) {
+export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, progress, onRefresh }: Props) {
 	const [showST, setShowST] = useState(false);
 	const [previousExpanded, setPreviousExpanded] = useState(false);
 	const [selectedStock, setSelectedStock] = useState<LimitUpLadderStock | null>(null);
@@ -171,16 +173,12 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 		return () => { cancelled = true; };
 	}, [config, selectedBillboard]);
 
-	if (!data && state === 'loading') {
-		return <div className="limit-up-loading"><RefreshCw className="spin" size={24} /><strong>载入短线连板结构</strong><span>正在读取开盘啦涨停池并补充东方财富历史梯队。</span></div>;
-	}
-	if (!data && state === 'error') {
-		return <div className="limit-up-loading error"><ShieldAlert size={26} /><strong>连板数据暂不可用</strong><span>{error || '请刷新后重试东方财富涨停池。'}</span><button type="button" onClick={onRefresh}>重新加载</button></div>;
-	}
-	if (!data) {
-		return null;
-	}
-	const conceptHeat = data.concept_heat || [];
+	const conceptHeat = data?.concept_heat || [];
+	const comparisonReady = !!data && data.comparison_ready !== false;
+	const updating = state === 'loading';
+	const intraday = data?.intraday || emotionData?.intraday;
+	const intradayState = state === 'error' ? 'error' : progress?.steps.quotes === 'loading' ? 'loading' : progress?.steps.quotes === 'error' ? 'error' : state;
+	const intradayError = progress?.errors.quotes || (!intraday && state === 'error' ? error : undefined);
 
 	return (
 		<section className="limit-up-workspace">
@@ -188,23 +186,25 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 				<div>
 					<div className="eyebrow"><Flame size={15} aria-hidden="true" />SHORT-TERM LIMIT-UP STRUCTURE</div>
 					<h2>短线连板</h2>
-					<p>{data.current.trade_date || '--'} · {data.session_status} · {current.sourceSummary} · 结构统计默认剔除 ST</p>
+					<p>{data?.current.trade_date || '等待涨停池'} · {data?.session_status || '加载中'} · {current.sourceSummary} · 结构统计默认剔除 ST</p>
 				</div>
 				<div className="limit-up-actions">
 					<label className="st-toggle"><input type="checkbox" checked={showST} onChange={(event) => setShowST(event.target.checked)} /><span>显示 ST</span></label>
 					<button type="button" className="refresh-data-button" onClick={onRefresh} disabled={state === 'loading'}><RefreshCw className={state === 'loading' ? 'spin' : ''} size={15} />刷新梯队</button>
 				</div>
 			</header>
+			{data && <p className="short-term-status" role="status">{progress?.stale || data.meta.stale ? '显示上次快照' : updating ? '基础梯队已显示，补充数据更新中' : '梯队已更新'} · 数据时间 {formatDateTimeClock(data.meta.fetched_at)}{updating && ' · 返回的数据会陆续显示'}</p>}
+			{error && data && <p className="short-term-status error" role="status">部分数据更新失败：{error}<button type="button" onClick={onRefresh}>重试</button></p>}
 
 			<div className="limit-up-summary">
-				<SummaryCard icon={<Flame size={17} />} label="涨停家数" value={current.limitUpCount} detail={stSummaryLabel(showST, current.stCount)} tone="hot" />
-				<SummaryCard icon={<Layers3 size={17} />} label="连板家数" value={current.boardCount} detail={`首板 ${current.firstBoardCount} 只`} tone="blue" />
-				<SummaryCard icon={<TrendingUp size={17} />} label="最高连板" value={`${current.maxStreak || 0}板`} detail={heightStructureLabel(current.maxStreak, current.boardCount)} tone="purple" />
-				<SummaryCard icon={<TimerReset size={17} />} label="开板后回封" value={current.reopenedCount} detail="仅统计当前仍封板，非完整炸板率" tone="amber" />
-				<SummaryCard icon={<BadgeCent size={17} />} label="封板成交额" value={formatMoney(current.totalAmount)} detail="当前可见涨停池合计" tone="green" />
+				<SummaryCard icon={<Flame size={17} />} label="涨停家数" value={data ? current.limitUpCount : '—'} detail={data ? stSummaryLabel(showST, current.stCount) : '等待涨停池'} tone="hot" />
+				<SummaryCard icon={<Layers3 size={17} />} label="连板家数" value={data ? current.boardCount : '—'} detail={data ? `首板 ${current.firstBoardCount} 只` : '等待涨停池'} tone="blue" />
+				<SummaryCard icon={<TrendingUp size={17} />} label="最高连板" value={data ? `${current.maxStreak || 0}板` : '—'} detail={data ? heightStructureLabel(current.maxStreak, current.boardCount) : '等待涨停池'} tone="purple" />
+				<SummaryCard icon={<TimerReset size={17} />} label="开板后回封" value={data ? current.reopenedCount : '—'} detail="仅统计当前仍封板，非完整炸板率" tone="amber" />
+				<SummaryCard icon={<BadgeCent size={17} />} label="封板成交额" value={data ? formatMoney(current.totalAmount) : '—'} detail="当前可见涨停池合计" tone="green" />
 			</div>
 
-			<EmotionHistoryPanel data={emotionData} state={emotionState} error={emotionError} />
+			<EmotionHistoryPanel data={emotionData} state={emotionState} error={emotionError} intraday={intraday} intradayState={intradayState} intradayError={intradayError} stale={progress?.stale} onRefresh={onRefresh} />
 
 			<div className="limit-up-main-grid">
 				<section className="limit-panel current-ladder-panel">
@@ -212,21 +212,21 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						<div><span>今日结构</span><h3>连板梯队</h3></div>
 						<small>按高度降序；同层优先无开板、早封板</small>
 					</div>
-					<LadderRows levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />
+					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />}
 				</section>
 
 				<aside className="limit-up-side-stack">
 					<section className="limit-panel advance-panel">
 						<div className="limit-panel-heading"><div><span>昨日 → 今日</span><h3>封板晋级</h3></div><GitBranch size={18} /></div>
 						<div className="advance-list">
-							{data.advance.filter((item) => item.base > 0).map((item) => (
+							{comparisonReady && data?.advance.filter((item) => item.base > 0).map((item) => (
 								<div className="advance-row" key={`${item.from_level}-${item.to_level}`}>
 									<div><strong>{item.from_level}进{item.to_level}</strong><span>{item.success}/{item.base}</span></div>
 									<i><b style={{ width: `${Math.round(item.rate * 100)}%` }} /></i>
 									<em>{formatPercent(item.rate)}</em>
 								</div>
 							))}
-							{!data.advance.some((item) => item.base > 0) && <p className="panel-empty">缺少可对照的昨日梯队。</p>}
+							{(!comparisonReady || !data?.advance.some((item) => item.base > 0)) && <p className="panel-empty">{updating ? '正在补充昨日梯队，晋级率稍后显示。' : '缺少可对照的昨日梯队。'}</p>}
 						</div>
 						<p className="metric-disclaimer">口径：昨日非ST封板股，今日继续封板且连板高度增加。盘中数据会随封板变化。</p>
 					</section>
@@ -241,7 +241,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 									<strong>{Math.round(item.heat)}</strong>
 								</div>
 							))}
-							{!conceptHeat.length && <p className="panel-empty">概念目录暂不可用，个股仍按封板梯队展示。</p>}
+							{!conceptHeat.length && <p className="panel-empty">{updating ? '炒作题材正在补充，梯队可先查看。' : '概念目录暂不可用，个股仍按封板梯队展示。'}</p>}
 						</div>
 						<p className="metric-disclaimer">热度由涨停广度、连板数量、高度、昨日延续和概念宽泛度共同计算；宽泛标签会降权。</p>
 					</section>
@@ -252,7 +252,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 				<div className="limit-panel-heading previous-ladder-heading">
 					<div><span>历史对照</span><h3>昨日连板梯队</h3></div>
 					<div className="previous-ladder-controls">
-						<div className="previous-summary"><History size={15} /><span>{previous.tradeDate || '暂无交易日'}</span><strong>{previous.limitUpCount}只涨停 · {previous.maxStreak || 0}板高度</strong><em>{previous.sourceSummary}</em></div>
+						<div className="previous-summary"><History size={15} /><span>{previous.tradeDate || '暂无交易日'}</span><strong>{previous.tradeDate ? `${previous.limitUpCount}只涨停 · ${previous.maxStreak || 0}板高度` : updating ? '历史梯队更新中' : '暂无历史梯队'}</strong><em>{previous.sourceSummary}</em></div>
 						<button
 							type="button"
 							className="previous-ladder-toggle"
@@ -278,62 +278,49 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 	);
 }
 
-function EmotionHistoryPanel({ data, state, error }: { data: MarketEmotionHistory | null; state: LoadState; error?: string }) {
-	if (!data && state === 'loading') {
-		return (
-			<section className="limit-panel emotion-history-panel emotion-loading">
-				<RefreshCw className="spin" size={19} />
-				<div><strong>初始化市场情绪缓存</strong><span>首次读取最近7个交易日；完成后刷新页面只读取本地 SQLite。</span></div>
-			</section>
-		);
-	}
-	if (!data || !data.points.length) {
-		return (
-			<section className="limit-panel emotion-history-panel emotion-loading error">
-				<ShieldAlert size={19} />
-				<div><strong>情绪时间轴暂不可用</strong><span>{error || '等待首个本地日快照。'}</span></div>
-			</section>
-		);
-	}
-	const points = data.points.slice(-30);
-	const latest = data.latest || points[points.length - 1];
+function EmotionHistoryPanel({ data, state, error, intraday, intradayState, intradayError, stale, onRefresh }: {
+	data: MarketEmotionHistory | null; state: LoadState; error?: string;
+	intraday?: MarketEmotionIntraday; intradayState: LoadState; intradayError?: string; stale?: boolean; onRefresh: () => void;
+}) {
+	const points = data?.points.slice(-30) || [];
+	const latest = data?.latest || points[points.length - 1];
 	return (
 		<section className="limit-panel emotion-history-panel">
 			<div className="emotion-history-heading">
 				<div>
 					<span><LineChart size={15} />市场级日快照</span>
 					<h3>每日情绪时间轴</h3>
-					<p>交易时段展示盘中最新情绪，非交易时段展示最近交易日收盘后的情绪；历史分每日更新。</p>
+					<p>历史时间轴先展示已有日快照，最新情绪随行情独立更新。</p>
 				</div>
-				<div className="emotion-cache-status" title={data.cache.last_error || '同一交易日不会重复请求外部行情'}>
-					<Database size={15} />
-					<span>本地缓存<strong>{data.cache.cached_days}日</strong></span>
-					<small>历史同步 {formatTradeDate(data.cache.last_external_sync)}{data.intraday ? ` · 最新 ${formatDateTimeClock(data.intraday.updated_at)}` : ''}</small>
+				<div className="emotion-cache-status">
+					<Database size={15} /><span>已缓存<strong>{data?.cache.cached_days ?? '—'}日</strong></span>
+					<small>历史同步 {formatTradeDate(data?.cache.last_external_sync || '')}{state === 'loading' ? ' · 更新中' : ''}</small>
 				</div>
 			</div>
+			{error && <p className="short-term-status error" role="status">历史更新失败：{error}<button type="button" onClick={onRefresh}>重试</button></p>}
 			<div className="emotion-history-body">
-				<LatestEmotionCard data={data.intraday} error={data.intraday_error} />
-				<EmotionLineChart points={points} />
-				<div className="emotion-raw-grid">
+				<LatestEmotionCard data={intraday} error={intradayError} loading={intradayState === 'loading'} stale={stale} />
+				{points.length ? <EmotionLineChart points={points} /> : <div className="emotion-loading" role="status"><div><strong>{state === 'loading' || state === 'idle' ? '初始化市场情绪历史' : '情绪时间轴暂不可用'}</strong><span>{state === 'loading' || state === 'idle' ? '正在补充历史日快照，梯队和最新情绪可先查看。' : '等待首个日快照，可重试更新。'}</span></div></div>}
+				{latest && <div className="emotion-raw-grid">
 					<EmotionRawMetric label="最终炸板率" value={formatRatio(latest.raw.final_break_rate)} />
 					<EmotionRawMetric label="昨日涨停反馈" value={formatSignedPercent(latest.raw.previous_limit_up_return)} />
 					<EmotionRawMetric label="昨日连板反馈" value={formatSignedPercent(latest.raw.previous_board_return)} />
 					<EmotionRawMetric label="连板晋级率" value={formatRatio(latest.raw.advance_rate)} />
 					<EmotionRawMetric label="主线集中度" value={formatRatio(latest.raw.theme_focus)} />
 					<EmotionRawMetric label="收盘高位风险" value={`${latest.raw.high_risk_score.toFixed(0)} / 100`} />
-				</div>
+				</div>}
 			</div>
 			<p className="metric-disclaimer emotion-disclaimer">盘中结论重点观察昨日最高三个实际梯队的平均收益、下跌覆盖、重伤率、晋级失败和高度坍缩；严重负反馈会否决“高潮”。</p>
 		</section>
 	);
 }
 
-function LatestEmotionCard({ data, error }: { data?: MarketEmotionIntraday; error?: string }) {
+function LatestEmotionCard({ data, error, loading, stale }: { data?: MarketEmotionIntraday; error?: string; loading?: boolean; stale?: boolean }) {
 	if (!data) {
 		return (
 			<div className="emotion-intraday-card unavailable">
 				<span>最新情绪</span>
-				<strong>暂不可用</strong>
+				<strong>{loading ? '更新中' : '暂不可用'}</strong>
 				<small>{error || '等待最近交易日行情与高位梯队。'}</small>
 			</div>
 		);
@@ -341,7 +328,7 @@ function LatestEmotionCard({ data, error }: { data?: MarketEmotionIntraday; erro
 	const metrics = data.metrics;
 	const tradingSnapshot = data.session_status === '盘中快照';
 	const snapshotLabel = tradingSnapshot ? '交易时段实时快照' : '最近交易日收盘后快照';
-	const confidenceLabel = data.stale ? '使用上次成功快照' : tradingSnapshot ? data.confidence : '收盘后确认';
+	const confidenceLabel = data.stale || stale ? '使用上次成功快照' : data.confidence.includes('不足') || data.confidence.includes('缺少') || tradingSnapshot ? data.confidence : '收盘后确认';
 	const levels = metrics.high_levels.length ? metrics.high_levels.map((level) => `${level}板`).join('、') : '暂无';
 	return (
 		<div className={`emotion-intraday-card risk-${intradayRiskTone(data.status)}`}>
@@ -355,7 +342,7 @@ function LatestEmotionCard({ data, error }: { data?: MarketEmotionIntraday; erro
 				<EmotionMiniMetric label="高度坍缩" value={metrics.height_collapse} suffix="板" />
 				<EmotionMiniMetric label="高位晋级" value={metrics.high_advance_rate * 100} suffix="%" />
 			</div>
-			<footer>{confidenceLabel} · 更新 {formatDateTimeClock(data.updated_at)} · 10分钟缓存</footer>
+			<footer>{confidenceLabel} · 更新 {formatDateTimeClock(data.updated_at)}{loading ? ' · 更新中' : ''}{error && ` · ${error}`}</footer>
 		</div>
 	);
 }
