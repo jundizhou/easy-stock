@@ -75,6 +75,7 @@ type Server struct {
 	masteryLibrary        *methodology.Library
 	marketEmotionStore    *marketemotion.Store
 	themeRadarStore       *duanxianxia.Store
+	themeProgress         *themeProgressCache
 	startupError          error
 	logger                *log.Logger
 	tokenUsage            *tokenUsageStore
@@ -292,6 +293,7 @@ func NewServer(config any) *Server {
 		marketOverview:        cfg.MarketOverview,
 		inflection:            cfg.Inflection,
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
+		themeProgress:         newThemeProgressCache(),
 		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
 		stockDirectories:      newStockDirectoryCache(6 * time.Hour),
 		hotStockRanks:         newHotStockRankCache(2 * time.Minute),
@@ -315,6 +317,14 @@ func NewServer(config any) *Server {
 	}
 	if kaipanlaService != nil {
 		s.themeRadarStore = kaipanlaService.Store()
+		if payload, err := s.themeRadarStore.LoadOverview(context.Background()); err == nil && len(payload) > 0 {
+			var cached foundation.ThemeProgress
+			if json.Unmarshal(payload, &cached) == nil {
+				cached.Refreshing = false
+				cached.Meta.Stale = true
+				s.themeProgress.value = cached
+			}
+		}
 	}
 	s.marketEmotion = newMarketEmotionEngine(
 		cfg.MarketEmotionStore,
@@ -339,6 +349,9 @@ func (s *Server) StartupError() error {
 }
 
 func (s *Server) Close() error {
+	if s != nil && s.themeProgress != nil {
+		s.themeProgress.close()
+	}
 	if s == nil {
 		return nil
 	}
@@ -767,6 +780,10 @@ func (s *Server) sectorMapHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) themeOverviewHandler(w http.ResponseWriter, r *http.Request) {
 	if s.themeOverview == nil {
 		writeError(w, http.StatusServiceUnavailable, "theme overview provider is unavailable")
+		return
+	}
+	if r.URL.Query().Get("delivery") == "progressive" {
+		s.progressiveThemeOverview(w, r)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)

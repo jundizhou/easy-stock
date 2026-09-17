@@ -7384,3 +7384,9 @@ a:focus-visible {
 	.portfolio-expectation-section > header { align-items: flex-start; flex-direction: column; }
 	.portfolio-expectation-section > header small { margin-left: 0; }
 }
+
+/* Progressive theme data keeps notices local and already loaded content visible. */
+.load-notice { margin: 10px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.load-notice button, .history-status button { margin-left: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--blue); cursor: pointer; padding: 3px 8px; }
+.stock-board > .load-notice { margin: 10px 16px; }
+.history-status.partial { color: var(--amber); }

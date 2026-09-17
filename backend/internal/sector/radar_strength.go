@@ -3,9 +3,11 @@ package sector
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/providers/duanxianxia"
@@ -47,13 +49,17 @@ func (p *RadarProvider) realtimeStrengthScores(ctx context.Context, themes []dua
 }
 
 func (p *RadarProvider) calculateRealtimeStrengthScores(ctx context.Context, themes []duanxianxia.Theme) (map[string]themeStrengthScore, error) {
+	start := time.Now()
 	pools, poolErr := p.loadRealtimeStrengthPools(ctx, themes)
+	log.Printf("event=theme_stage stage=strength_pools duration_ms=%d themes=%d", time.Since(start).Milliseconds(), len(themes))
 	if poolErr != nil && !themePoolsHaveStocks(pools) {
 		return nil, poolErr
 	}
 
 	symbols := uniqueSortedThemeSymbols(pools)
+	start = time.Now()
 	changes := p.strengthChangeLookup(ctx, symbols, pools)
+	log.Printf("event=theme_stage stage=strength_quotes duration_ms=%d symbols=%d", time.Since(start).Milliseconds(), len(symbols))
 
 	scores := make(map[string]themeStrengthScore, len(themes))
 	for _, theme := range themes {

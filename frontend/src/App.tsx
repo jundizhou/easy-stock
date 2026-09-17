@@ -38,13 +38,11 @@ import {
 	Quote,
 	SectorMap,
 	SourceHealth,
-	SourceMeta,
 	StreamMessage,
 	ThemeOverview,
 	LimitUpLadderData,
 	MarketEmotionHistory,
 	StockAIAnalysis,
-	ThemeScreenData,
 	ThemeScreenLane,
 	ThemeScreenPagination,
 	ThemeScreenSort,
@@ -54,7 +52,6 @@ import {
 } from './lib/backend';
 import {
 	QuoteLookup,
-	KLineLookup,
 	StockRole,
 	ThemeStrengthWindow,
 	ThemeStock,
@@ -74,6 +71,9 @@ import { PortfolioInspectionWorkspace } from './components/PortfolioInspectionWo
 import { TokenUsageWorkspace } from './components/TokenUsageWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
 import { useTheme } from './lib/theme';
+import { useThemeOverview } from './lib/use-theme-overview';
+import { useThemeConstituents, sameTheme } from './lib/use-theme-constituents';
+import { useThemeKLines } from './lib/use-theme-klines';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage';
@@ -101,31 +101,23 @@ export function App() {
 	});
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [config, setConfig] = useState<BackendConfig | null>(null);
-	const [themeOverviews, setThemeOverviews] = useState<ThemeOverview[]>([]);
 	const [themeStrengthWindow, setThemeStrengthWindow] = useState<ThemeStrengthWindow>('daily');
-	const [overviewMeta, setOverviewMeta] = useState<SourceMeta | null>(null);
 	const [activeTheme, setActiveTheme] = useState('');
-	const [sectorMap, setSectorMap] = useState<SectorMap | null>(null);
 	const [selectedNode, setSelectedNode] = useState('all');
 	const [selectedSymbol, setSelectedSymbol] = useState('');
-	const [hasManualStockSelection, setHasManualStockSelection] = useState(false);
 	const [liveQuotes, setLiveQuotes] = useState<QuoteLookup>({});
-	const [leadershipHistories, setLeadershipHistories] = useState<KLineLookup>({});
-	const [historyLoadingSymbols, setHistoryLoadingSymbols] = useState<Set<string>>(() => new Set());
-	const [historyErrorSymbols, setHistoryErrorSymbols] = useState<Set<string>>(() => new Set());
-	const [kLines, setKLines] = useState<KLine[]>([]);
 	const [sources, setSources] = useState<SourceHealth[]>([]);
 	const [news, setNews] = useState<NewsItem[]>([]);
-	const [foundationState, setFoundationState] = useState<LoadState>('idle');
-	const [themeState, setThemeState] = useState<LoadState>('idle');
-	const [historyState, setHistoryState] = useState<LoadState>('idle');
-	const [klineState, setKlineState] = useState<LoadState>('idle');
 	const [streamStatus, setStreamStatus] = useState('实时流待命');
-	const [statusText, setStatusText] = useState('连接数据层');
+	const [configError, setConfigError] = useState('');
+	const [themeRefreshKey, setThemeRefreshKey] = useState(0);
+	const [newsError, setNewsError] = useState('');
+	const [newsRetryKey, setNewsRetryKey] = useState(0);
+	const [sourcesRetryKey, setSourcesRetryKey] = useState(0);
+	const [sourcesError, setSourcesError] = useState('');
 	const [stockQuery, setStockQuery] = useState('');
 	const [debouncedStockQuery, setDebouncedStockQuery] = useState('');
 	const [stockPage, setStockPage] = useState(1);
-	const [stockPagination, setStockPagination] = useState<ThemeScreenPagination>(emptyStockPagination);
 	const [stockSort, setStockSort] = useState<ThemeScreenSort>('rank_score');
 	const [stockLane, setStockLane] = useState<ThemeScreenLane>('all');
 	const [limitUpData, setLimitUpData] = useState<LimitUpLadderData | null>(null);
@@ -146,71 +138,71 @@ export function App() {
 	const [aiAnalysisID, setAIAnalysisID] = useState<string | undefined>();
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [tokenUsageRefreshKey, setTokenUsageRefreshKey] = useState(0);
-	const themeRequestID = useRef(0);
-	const leadershipHistoriesRef = useRef<KLineLookup>({});
-	const historyFlightsRef = useRef<Map<string, Promise<void>>>(new Map());
-	const priorityPrefetchPromiseRef = useRef<Promise<void> | null>(null);
 
-	const rankedThemes = useMemo(() => rankThemeOverviews(themeOverviews, themeStrengthWindow).slice(0, 16), [themeOverviews, themeStrengthWindow]);
-	const activeOverview = useMemo(
-		() => themeOverviews.find((item) => item.theme === activeTheme) || null,
-		[activeTheme, themeOverviews],
-	);
-	const activeStrengthScore = activeOverview ? themeStrengthScore(activeOverview, themeStrengthWindow) : null;
-	const activeEmotion = activeOverview ? calculateThemeEmotion(activeOverview, activeStrengthScore ?? undefined) : null;
+	const overview = useThemeOverview(config, workspaceMode === 'themes');
+	const themeOverviews = overview.data;
+	const overviewMeta = overview.meta;
+	const foundationState = overview.state;
+	const activeOverviewRef = useRef<{ selection: string; data: ThemeOverview } | null>(null);
+	const previousOverview = activeOverviewRef.current?.selection === activeTheme ? activeOverviewRef.current.data : null;
+	const activeOverview = themeOverviews.find(item => sameTheme(item, activeTheme))
+		|| themeOverviews.find(item => previousOverview && (sameTheme(previousOverview, item.theme) || item.aliases?.includes(previousOverview.theme)))
+		|| previousOverview;
+	if (activeOverview) activeOverviewRef.current = { selection: activeTheme, data: activeOverview };
+	const rankedThemes = useMemo(() => {
+		const items = rankThemeOverviews(themeOverviews, themeStrengthWindow).slice(0, 16);
+		if (activeOverview && !items.some(item => item.theme === activeOverview.theme)) return [...items.slice(0, 15), activeOverview];
+		return items;
+	}, [themeOverviews, themeStrengthWindow, activeOverview]);
+	const activeStrengthScore = activeOverview && !activeOverview.provisional ? themeStrengthScore(activeOverview, themeStrengthWindow) : null;
+	const activeEmotion = activeOverview && activeStrengthScore !== null ? calculateThemeEmotion(activeOverview, activeStrengthScore) : null;
 	const isTrendOverview = typeof activeOverview?.trend_score === 'number';
 	const isKaipanlaOverview = activeOverview?.theme.startsWith('kpl:') || activeOverview?.theme.startsWith('fusion:') || false;
-	const activeSnapshotID = activeOverview?.snapshot_id || '';
-	const baseThemeStocks = useMemo(() => buildThemeStocks(sectorMap), [sectorMap]);
-	const themeStocks = useMemo(
-		() => buildThemeStocks(sectorMap, liveQuotes, leadershipHistories),
-		[leadershipHistories, liveQuotes, sectorMap],
-	);
-	const visibleStocks = useMemo(() => [...themeStocks].sort((a, b) => {
-		switch (stockSort) {
-			case 'change_percent':
-				return b.change_percent - a.change_percent || b.leader_score - a.leader_score;
-			case 'amount':
-				return b.amount - a.amount || b.leader_score - a.leader_score;
-			case 'limit_up_streak':
-				return (b.limit_up_streak || 0) - (a.limit_up_streak || 0) || b.leader_score - a.leader_score;
-			case 'rank_score':
-			default:
-				{
-					const aLeaderRank = kaipanlaLeaderRank(a.rank_role);
-					const bLeaderRank = kaipanlaLeaderRank(b.rank_role);
-					if (aLeaderRank || bLeaderRank) {
-						if (!aLeaderRank) return 1;
-						if (!bLeaderRank) return -1;
-						if (aLeaderRank !== bLeaderRank) return aLeaderRank - bLeaderRank;
-					}
-				}
-				return b.leader_score - a.leader_score || b.tradability_score - a.tradability_score;
-		}
-	}), [stockSort, themeStocks]);
-	const selectedStock = useMemo(
-		() => themeStocks.find((stock) => stock.symbol === selectedSymbol) || visibleStocks[0] || null,
-		[selectedSymbol, themeStocks, visibleStocks],
-	);
+	const constituents = useThemeConstituents(config, workspaceMode === 'themes', activeOverview, { page: stockPage, node: selectedNode, lane: stockLane, sort: stockSort, query: debouncedStockQuery }, themeRefreshKey, overview.refresh);
+	const sectorMap = constituents.data?.map || null;
+	const stockPagination = constituents.data?.pagination || emptyStockPagination();
+	const themeState = constituents.status;
+	const constituentsComplete = constituents.data?.complete === true;
+	const baseThemeStocks = useMemo(() => {
+		const order = new Map((constituents.data?.order || []).map((symbol, index) => [symbol, index]));
+		return buildThemeStocks(sectorMap).sort((a,b) => (order.get(a.symbol) ?? 999) - (order.get(b.symbol) ?? 999));
+	}, [sectorMap, constituents.data?.order]);
+	const selectedBaseRef = useRef<{ theme: string; stock: ThemeStock } | null>(null);
+	const selectedBase = baseThemeStocks.find(stock => stock.symbol === selectedSymbol)
+		|| (selectedBaseRef.current?.theme === activeTheme && selectedBaseRef.current.stock.symbol === selectedSymbol ? selectedBaseRef.current.stock : null)
+		|| baseThemeStocks[0] || null;
+	if (selectedBase) selectedBaseRef.current = { theme: activeTheme, stock: selectedBase };
+	const historySymbols = useMemo(() => baseThemeStocks.map(stock => stock.symbol), [baseThemeStocks]);
+	const prefetchSymbols = useMemo(() => rankedThemes.filter(item => item.theme !== activeOverview?.theme).slice(0, 2).flatMap(item => item.leader_stocks?.slice(0, 5).map(stock => stock.symbol) || []), [rankedThemes, activeOverview?.theme]);
+	const history = useThemeKLines(config, workspaceMode === 'themes', historySymbols, selectedBase?.symbol || '', prefetchSymbols, themeRefreshKey);
+	const leadershipHistories = history.histories;
+	const historyErrorSymbols = history.failed;
+	const historyState = history.historyState;
+	const historyReadyCount = history.ready;
+	const kLines = history.lines;
+	const klineState = history.klineState;
+	const themeStocks = useMemo(() => {
+		if (!sectorMap || !selectedBase || baseThemeStocks.some(stock => stock.symbol === selectedBase.symbol)) return buildThemeStocks(sectorMap, liveQuotes, leadershipHistories);
+		const withSelection = { ...sectorMap, groups: [...sectorMap.groups, { id: 'selected', name: '当前选择', nodes: [{ id: 'selected', name: selectedBase.nodes[0] || '当前选择', change_percent: 0, main_net_inflow: 0, match_status: 'matched', stocks: [selectedBase] }] }] };
+		return buildThemeStocks(withSelection, liveQuotes, leadershipHistories);
+	}, [leadershipHistories, liveQuotes, sectorMap, selectedBase, baseThemeStocks]);
+	// The server orders the complete pool. Keep rows stable as individual metrics arrive.
+	const visibleStocks = useMemo(() => {
+		const order = new Map(baseThemeStocks.map((stock, index) => [stock.symbol, index]));
+		return themeStocks.filter(stock => order.has(stock.symbol)).sort((a, b) => (order.get(a.symbol) ?? 0) - (order.get(b.symbol) ?? 0));
+	}, [baseThemeStocks, themeStocks]);
+	const selectedStock = themeStocks.find(stock => stock.symbol === selectedBase?.symbol) || selectedBase;
 	const selectedHistoryReady = Boolean(selectedStock && leadershipHistories[selectedStock.symbol]?.length);
 	const selectedHistoryFailed = Boolean(selectedStock && historyErrorSymbols.has(selectedStock.symbol));
-	const themeNodes = useMemo(
-		() => sectorMap?.groups.flatMap((group) => group.nodes) || [],
-		[sectorMap],
-	);
-	const streamSymbols = useMemo(() => baseThemeStocks.map((stock) => stock.symbol), [baseThemeStocks]);
+	const themeNodes = useMemo(() => sectorMap?.groups.flatMap(group => group.nodes) || [], [sectorMap]);
+	const streamSymbols = useMemo(() => [...new Set([...historySymbols, selectedStock?.symbol || ''].filter(Boolean))], [historySymbols, selectedStock?.symbol]);
 	const streamKey = streamSymbols.join(',');
-	const historySymbols = useMemo(() => baseThemeStocks.map((stock) => stock.symbol), [baseThemeStocks]);
-	const historyKey = historySymbols.join(',');
-	const historyReadyCount = useMemo(
-		() => historySymbols.filter((symbol) => Boolean(leadershipHistories[symbol]?.length)).length,
-		[historySymbols, leadershipHistories],
-	);
 	const marketPulse = useMemo(() => {
 		if (!rankedThemes.length) {
 			return { average: 0, active: 0 };
 		}
-		const scores = rankedThemes.map((theme) => themeStrengthScore(theme, themeStrengthWindow));
+		const scores = rankedThemes.filter(theme => !theme.provisional).map(theme => themeStrengthScore(theme, themeStrengthWindow));
+		if (!scores.length) return { average: 0, active: 0 };
 		return {
 			average: Math.round(scores.reduce((total, score) => total + score, 0) / scores.length),
 			active: scores.filter((score) => score >= 60).length,
@@ -221,290 +213,42 @@ export function App() {
 		resolveBackendConfig()
 			.then(setConfig)
 			.catch((error) => {
-				setFoundationState('error');
-				setStatusText(error instanceof Error ? error.message : '后端配置失败');
+				setConfigError(error instanceof Error ? error.message : '后端配置失败');
 			});
 	}, []);
 
-	const loadFoundation = useCallback(async () => {
-		if (!config) {
-			return;
-		}
-		setFoundationState('loading');
-		setStatusText('同步趋势主线');
-		const [overviewResult, sourceResult, newsResult] = await Promise.allSettled([
-			requestJSON<{ data: ThemeOverview[]; meta: SourceMeta }>(config, '/api/v1/themes/overview'),
-			requestJSON<{ sources: SourceHealth[] }>(config, '/api/v1/sources'),
-			requestJSON<{ data: NewsItem[] }>(config, '/api/v1/market/news?source=cls&limit=12'),
-		]);
-
-		if (overviewResult.status === 'fulfilled') {
-			setThemeOverviews(overviewResult.value.data);
-			setOverviewMeta(overviewResult.value.meta);
-			setFoundationState('ready');
-			setStatusText('基础数据已更新');
-		} else {
-			setFoundationState('error');
-			setStatusText(overviewResult.reason instanceof Error ? overviewResult.reason.message : '题材快照失败');
-		}
-		if (sourceResult.status === 'fulfilled') {
-			setSources(sourceResult.value.sources);
-		}
-		if (newsResult.status === 'fulfilled') {
-			setNews(newsResult.value.data);
-		}
-	}, [config]);
-
-	const loadHistorySymbols = useCallback(async (symbols: string[]) => {
-		if (!config) {
-			return;
-		}
-		const uniqueSymbols = [...new Set(symbols.filter(Boolean))];
-		const waits: Promise<void>[] = [];
-		const pending: string[] = [];
-		for (const symbol of uniqueSymbols) {
-			if (leadershipHistoriesRef.current[symbol]?.length) {
-				continue;
-			}
-			const existing = historyFlightsRef.current.get(symbol);
-			if (existing) {
-				waits.push(existing);
-			} else {
-				pending.push(symbol);
-			}
-		}
-		if (pending.length) {
-			setHistoryLoadingSymbols((current) => new Set([...current, ...pending]));
-			setHistoryErrorSymbols((current) => {
-				const next = new Set(current);
-				pending.forEach((symbol) => next.delete(symbol));
-				return next;
-			});
-			let batchPromise!: Promise<void>;
-			batchPromise = requestJSON<{ data: KLineLookup; errors?: Record<string, string> }>(
-				config,
-				`/api/v1/quotes/kline/batch?symbols=${encodeURIComponent(pending.join(','))}&period=day&limit=40`,
-			)
-				.then((payload) => {
-					const successful = pending.filter((symbol) => Boolean(payload.data[symbol]?.length));
-					const failed = pending.filter((symbol) => !payload.data[symbol]?.length);
-					setLeadershipHistories((current) => {
-						const next = { ...current, ...payload.data };
-						leadershipHistoriesRef.current = next;
-						return next;
-					});
-					setHistoryErrorSymbols((current) => {
-						const next = new Set(current);
-						successful.forEach((symbol) => next.delete(symbol));
-						failed.forEach((symbol) => next.add(symbol));
-						Object.keys(payload.errors || {}).forEach((symbol) => next.add(symbol));
-						return next;
-					});
-				})
-				.catch(() => {
-					setHistoryErrorSymbols((current) => new Set([...current, ...pending]));
-				})
-				.finally(() => {
-					setHistoryLoadingSymbols((current) => {
-						const next = new Set(current);
-						pending.forEach((symbol) => next.delete(symbol));
-						return next;
-					});
-					pending.forEach((symbol) => {
-						if (historyFlightsRef.current.get(symbol) === batchPromise) {
-							historyFlightsRef.current.delete(symbol);
-						}
-					});
-				});
-			pending.forEach((symbol) => historyFlightsRef.current.set(symbol, batchPromise));
-			waits.push(batchPromise);
-		}
-		await Promise.allSettled(waits);
-	}, [config]);
+	useEffect(() => {
+		if (!config || workspaceMode !== 'themes') return;
+		const abort = new AbortController();
+		setSourcesError('');
+		void requestJSON<{ sources: SourceHealth[] }>(config, '/api/v1/sources', { signal: abort.signal })
+			.then(payload => { if (!abort.signal.aborted) setSources(payload.sources); })
+			.catch(() => { if (!abort.signal.aborted) setSourcesError('数据源状态暂不可用'); });
+		return () => abort.abort();
+	}, [config, workspaceMode, themeRefreshKey, sourcesRetryKey]);
 
 	useEffect(() => {
-		if (workspaceMode === 'themes') {
-			void loadFoundation();
-		}
-	}, [loadFoundation, workspaceMode]);
+		if (!config || workspaceMode !== 'themes') return;
+		const abort = new AbortController();
+		setNewsError('');
+		void requestJSON<{ data: NewsItem[] }>(config, '/api/v1/market/news?source=cls&limit=12', { signal: abort.signal })
+			.then(payload => { if (!abort.signal.aborted) setNews(payload.data); })
+			.catch(() => { if (!abort.signal.aborted) setNewsError('快讯暂不可用'); });
+		return () => abort.abort();
+	}, [config, workspaceMode, themeRefreshKey, newsRetryKey]);
 
 	useEffect(() => {
-		if (rankedThemes.length && !rankedThemes.some((theme) => theme.theme === activeTheme)) {
-			setActiveTheme(rankedThemes[0].theme);
-		}
-	}, [activeTheme, rankedThemes]);
+		if (!activeOverview && rankedThemes.length) setActiveTheme(rankedThemes[0].theme);
+	}, [activeOverview, rankedThemes]);
 
 	useEffect(() => {
-		const timer = window.setTimeout(() => {
-			setDebouncedStockQuery(stockQuery.trim());
-			setStockPage(1);
-		}, 300);
+		const timer = window.setTimeout(() => { setDebouncedStockQuery(stockQuery.trim()); setStockPage(1); }, 300);
 		return () => window.clearTimeout(timer);
 	}, [stockQuery]);
 
-	const loadActiveTheme = useCallback(async () => {
-		if (!config || !activeTheme || workspaceMode !== 'themes') {
-			return;
-		}
-		const requestID = ++themeRequestID.current;
-		setThemeState('loading');
-		setSelectedSymbol('');
-		setHasManualStockSelection(false);
-		setLiveQuotes({});
-		try {
-			const params = new URLSearchParams({
-				theme: activeTheme,
-				page: String(stockPage),
-				page_size: '20',
-				node: selectedNode,
-				lane: stockLane,
-				sort: stockSort,
-			});
-			if (activeSnapshotID) {
-				params.set('snapshot_id', activeSnapshotID);
-			}
-			if (debouncedStockQuery) {
-				params.set('q', debouncedStockQuery);
-			}
-			const payload = await requestJSON<{ data: ThemeScreenData }>(
-				config,
-				`/api/v1/themes/screen?${params.toString()}`,
-			);
-			if (requestID !== themeRequestID.current) {
-				return;
-			}
-			setSectorMap(payload.data.map);
-			setStockPagination(payload.data.pagination);
-			setThemeState('ready');
-		} catch (error) {
-			if (requestID !== themeRequestID.current) {
-				return;
-			}
-			setThemeState('error');
-			setSectorMap(null);
-			setStockPagination(emptyStockPagination());
-			setStatusText(error instanceof Error ? error.message : '题材成分加载失败');
-		}
-	}, [activeSnapshotID, activeTheme, config, debouncedStockQuery, selectedNode, stockLane, stockPage, stockSort, workspaceMode]);
-
 	useEffect(() => {
-		void loadActiveTheme();
-	}, [loadActiveTheme]);
-
-	useEffect(() => {
-		if (!config || workspaceMode !== 'themes' || !rankedThemes.length) {
-			priorityPrefetchPromiseRef.current = null;
-			return;
-		}
-		let cancelled = false;
-		const priorityThemes = rankedThemes.slice(0, 3);
-		const prefetchPromise = (async () => {
-			const screens = await Promise.allSettled(priorityThemes.map((theme) => {
-				const params = new URLSearchParams({
-					theme: theme.theme,
-					page: '1',
-					page_size: '5',
-					node: 'all',
-					lane: 'all',
-					sort: 'rank_score',
-				});
-				if (theme.snapshot_id) {
-					params.set('snapshot_id', theme.snapshot_id);
-				}
-				return requestJSON<{ data: ThemeScreenData }>(config, `/api/v1/themes/screen?${params.toString()}`);
-			}));
-			if (cancelled) {
-				return;
-			}
-			const symbols = screens.flatMap((result) => result.status === 'fulfilled'
-				? buildThemeStocks(result.value.data.map).slice(0, 5).map((stock) => stock.symbol)
-				: []);
-			await loadHistorySymbols(symbols);
-		})();
-		priorityPrefetchPromiseRef.current = prefetchPromise;
-		return () => {
-			cancelled = true;
-		};
-	}, [config, loadHistorySymbols, rankedThemes, workspaceMode]);
-
-	useEffect(() => {
-		if (!historyKey || workspaceMode !== 'themes') {
-			return;
-		}
-		let cancelled = false;
-		const prioritySymbols = historySymbols.slice(0, 5);
-		const remainingSymbols = historySymbols.slice(5);
-		void (async () => {
-			await loadHistorySymbols(prioritySymbols);
-			if (cancelled) return;
-			await priorityPrefetchPromiseRef.current;
-			if (cancelled) return;
-			await loadHistorySymbols(remainingSymbols);
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [historyKey, historySymbols, loadHistorySymbols, workspaceMode]);
-
-	useEffect(() => {
-		if (!historySymbols.length || workspaceMode !== 'themes') {
-			setHistoryState('idle');
-			return;
-		}
-		const failedCount = historySymbols.filter((symbol) => historyErrorSymbols.has(symbol)).length;
-		const loadingCount = historySymbols.filter((symbol) => historyLoadingSymbols.has(symbol)).length;
-		if (historyReadyCount >= historySymbols.length) {
-			setHistoryState('ready');
-		} else if (loadingCount > 0 || historyReadyCount > 0 || failedCount < historySymbols.length) {
-			setHistoryState('loading');
-		} else {
-			setHistoryState('error');
-		}
-	}, [historyErrorSymbols, historyLoadingSymbols, historyReadyCount, historySymbols, workspaceMode]);
-
-	useEffect(() => {
-		if (!visibleStocks.length) {
-			setSelectedSymbol('');
-			return;
-		}
-		if (!visibleStocks.some((stock) => stock.symbol === selectedSymbol)) {
-			setSelectedSymbol(visibleStocks[0].symbol);
-		}
-	}, [selectedSymbol, visibleStocks]);
-
-	useEffect(() => {
-		if (historyState === 'ready' && !hasManualStockSelection && visibleStocks.length) {
-			setSelectedSymbol(visibleStocks[0].symbol);
-		}
-	}, [hasManualStockSelection, historyState, visibleStocks]);
-
-	useEffect(() => {
-		if (!config || !selectedStock || workspaceMode !== 'themes') {
-			setKLines([]);
-			return;
-		}
-		let cancelled = false;
-		setKlineState('loading');
-		requestJSON<{ data: KLine[] }>(
-			config,
-			`/api/v1/quotes/kline?symbol=${encodeURIComponent(selectedStock.symbol)}&period=day&limit=60`,
-		)
-			.then((payload) => {
-				if (!cancelled) {
-					setKLines(payload.data);
-					setKlineState('ready');
-				}
-			})
-			.catch(() => {
-				if (!cancelled) {
-					setKLines([]);
-					setKlineState('error');
-				}
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [config, selectedStock?.symbol, workspaceMode]);
+		if (selectedBase && selectedSymbol !== selectedBase.symbol) setSelectedSymbol(selectedBase.symbol);
+	}, [selectedBase?.symbol, selectedSymbol]);
 
 	useEffect(() => {
 		if (!config || !streamKey || workspaceMode !== 'themes') {
@@ -613,8 +357,9 @@ export function App() {
 			setTokenUsageRefreshKey((current) => current + 1);
 			return;
 		}
-		void loadFoundation();
-		void loadActiveTheme();
+		void overview.refresh();
+		setThemeRefreshKey(key => key + 1);
+		history.retry();
 	};
 
 	const switchWorkspace = (mode: WorkspaceMode) => {
@@ -664,10 +409,12 @@ export function App() {
 		setDebouncedStockQuery('');
 		setStockSort('rank_score');
 		setStockLane('all');
-		setStockPagination(emptyStockPagination());
+		setSelectedSymbol('');
+		setLiveQuotes({});
 		setActiveTheme(theme);
 	};
 
+	const statusText = configError || (overview.fetching || constituents.fetching || historyState === 'loading' ? '部分数据更新中' : overview.error || constituents.error || historyErrorSymbols.size ? '部分数据暂不可用' : '题材数据已更新');
 	const currentLoadState = workspaceMode === 'limit-up' ? limitUpState : workspaceMode === 'mastery' || workspaceMode === 'reviews' || workspaceMode === 'stock-ai' || workspaceMode === 'portfolio-inspection' || workspaceMode === 'ai' || workspaceMode === 'market' || workspaceMode === 'token-usage' ? 'ready' : foundationState;
 	const currentStatusText = workspaceMode === 'limit-up'
 		? limitUpState === 'loading' ? '同步连板梯队' : limitUpState === 'error' ? '连板数据异常' : '连板结构已更新'
@@ -741,7 +488,7 @@ export function App() {
 			{workspaceMode === 'token-usage' ? <TokenUsageWorkspace config={config} refreshKey={tokenUsageRefreshKey} /> : workspaceMode === 'themes' ? <>
 			<section className="market-strip" aria-label="市场概览">
 				<div><Activity size={16} aria-hidden="true" /><span>主线平均热度</span><strong>{marketPulse.average || '--'}</strong></div>
-				<div><Flame size={16} aria-hidden="true" /><span>活跃主线</span><strong>{marketPulse.active}</strong></div>
+				<div><Flame size={16} aria-hidden="true" /><span>活跃主线</span><strong>{rankedThemes.some(item => !item.provisional) ? marketPulse.active : '--'}</strong></div>
 				<div
 					className="source-health-summary"
 					tabIndex={0}
@@ -763,7 +510,8 @@ export function App() {
 									<em>{source.ok ? '正常' : sourceHealthMessage(source.message)}</em>
 								</div>
 							))}
-							{!sources.length && <p>数据源状态加载中…</p>}
+							{!sources.length && !sourcesError && <p>数据源状态加载中…</p>}
+							{sourcesError && <p className="load-notice">{sourcesError} <button type="button" onClick={() => setSourcesRetryKey(key => key + 1)}>重试</button></p>}
 						</div>
 					</div>
 				</div>
@@ -775,7 +523,7 @@ export function App() {
 					<div className="rail-heading">
 						<div className="rail-heading-copy">
 							<span>近期主线</span>
-							<strong>按{themeStrengthWindow === 'daily' ? '当日' : '5日'}强度排序</strong>
+							<strong>{rankedThemes.some(item => !item.provisional) ? `按${themeStrengthWindow === 'daily' ? '当日' : '5日'}强度排序` : '基础题材 · 来源顺序'}</strong>
 							<div className="strength-window-toggle" role="group" aria-label="趋势强度周期">
 								<button type="button" title="按题材成分股实时涨跌计算，最多每10分钟更新一次" className={themeStrengthWindow === 'daily' ? 'active' : ''} aria-pressed={themeStrengthWindow === 'daily'} onClick={() => setThemeStrengthWindow('daily')}>当日强度</button>
 								<button type="button" title="按题材成分股近5个交易日累计涨跌计算，最多每10分钟更新一次" className={themeStrengthWindow === 'five_day' ? 'active' : ''} aria-pressed={themeStrengthWindow === 'five_day'} onClick={() => setThemeStrengthWindow('five_day')}>5日强度</button>
@@ -789,7 +537,7 @@ export function App() {
 							return (
 								<button
 									type="button"
-									className={`theme-item ${theme.theme === activeTheme ? 'active' : ''}`}
+									className={`theme-item ${theme.theme === activeOverview?.theme ? 'active' : ''}`}
 									key={theme.theme}
 									onClick={() => activateTheme(theme.theme)}
 								>
@@ -798,14 +546,15 @@ export function App() {
 										<span className="theme-name-line">
 											<strong>{theme.name}</strong>
 										</span>
-										<small>{emotion.stage} · {theme.leaders?.[0] || theme.top_node || '等待主线证据'}</small>
-										<span className="theme-meter"><i style={{ width: `${emotion.score}%` }} /></span>
+										<small>{theme.provisional ? (overview.fetching ? '基础题材 · 强度更新中' : '基础题材 · 强度未齐') : emotion.stage} · {theme.leaders?.[0] || theme.top_node || '等待主线证据'}</small>
+										<span className="theme-meter"><i style={{ width: `${theme.provisional ? 0 : emotion.score}%` }} /></span>
 									</span>
-									<span className={`emotion-score ${emotion.tone}`}>{emotion.score}</span>
+									<span className={`emotion-score ${emotion.tone}`}>{theme.provisional ? '--' : emotion.score}</span>
 								</button>
 							);
 						})}
-						{foundationState === 'loading' && <RailSkeleton />}
+						{foundationState === 'loading' && !rankedThemes.length && <RailSkeleton />}
+						{overview.error && <p className="load-notice">题材部分数据暂不可用 <button type="button" onClick={() => void overview.refresh()}>重试</button></p>}
 					</div>
 				</aside>
 
@@ -837,7 +586,7 @@ export function App() {
 
 					<section className="node-filter" aria-label="题材细分">
 						<button type="button" className={selectedNode === 'all' ? 'active' : ''} onClick={() => { setSelectedNode('all'); setStockPage(1); }}>
-							全部关联 <span>{stockPagination.total}</span>
+							{constituentsComplete ? '全部关联' : '已加载'} <span>{constituents.data ? stockPagination.total : '--'}</span>
 						</button>
 						{themeNodes.map((node) => (
 							<button type="button" className={selectedNode === node.id ? 'active' : ''} key={node.id} onClick={() => { setSelectedNode(node.id); setStockPage(1); }}>
@@ -855,11 +604,12 @@ export function App() {
 							<div className={`history-status ${historyState}`}>
 								<History size={14} aria-hidden="true" />
 								<span>{historyStatusLabel(historyState, historyReadyCount, historySymbols.length)}</span>
+								{historyErrorSymbols.size > 0 && <button type="button" onClick={history.retry}>重试失败项</button>}
 							</div>
 						</div>
 						<div className="stock-controls">
 							<label><span>涨跌幅制度</span><select value={stockLane} onChange={(event) => { setStockLane(event.target.value as ThemeScreenLane); setStockPage(1); }}><option value="all">全部</option><option value="10cm">10cm</option><option value="20cm">20cm</option><option value="30cm">30cm</option></select></label>
-							<label><span>排序</span><select value={stockSort} onChange={(event) => { setStockSort(event.target.value as ThemeScreenSort); setStockPage(1); }}><option value="rank_score">全池领导力</option><option value="change_percent">当日涨幅</option><option value="amount">成交额</option><option value="limit_up_streak">连板高度</option></select></label>
+							<label><span>排序</span><select value={stockSort} onChange={(event) => { setStockSort(event.target.value as ThemeScreenSort); setStockPage(1); }}><option value="rank_score">{constituentsComplete ? '全池领导力' : '来源优先顺序'}</option><option value="change_percent">当日涨幅</option><option value="amount">成交额</option><option value="limit_up_streak">连板高度</option></select></label>
 							<label className="stock-search">
 								<Search size={16} aria-hidden="true" />
 								<input value={stockQuery} onChange={(event) => setStockQuery(event.target.value)} placeholder="搜索完整候选池中的代码、名称或细分" />
@@ -880,32 +630,32 @@ export function App() {
 											key={stock.symbol}
 											className={stock.symbol === selectedStock?.symbol ? 'selected' : ''}
 											onClick={() => {
-												setHasManualStockSelection(true);
 												setSelectedSymbol(stock.symbol);
 											}}
 										>
-											<td><RoleBadge role={stock.role} regime={stock.limit_regime} /></td>
+											<td>{metricsReady ? <RoleBadge role={stock.role} regime={stock.limit_regime} /> : <span className="role-badge watch">{stock.rank_role || '待计算'}</span>}</td>
 											<td><strong>{stock.name}</strong><small>{stock.symbol}{stock.live ? ' · 实时' : ''}</small></td>
 											<td>{metricsReady ? <StateBadge state={stock.state} /> : <MetricPending failed={metricsFailed} />}</td>
 											<td>{metricsReady ? <ScoreCell value={stock.leader_score} /> : <MetricPending failed={metricsFailed} />}</td>
 											<td>{metricsReady ? <ScoreCell value={stock.tradability_score} /> : <MetricPending failed={metricsFailed} />}</td>
 											<td className={metricsReady ? toneForValue(stock.metrics.return_5d) : undefined}>{metricsReady ? formatPercent(stock.metrics.return_5d) : <MetricPending failed={metricsFailed} />}</td>
-											<td className={toneForValue(stock.change_percent)}>{formatPercent(stock.change_percent)}</td>
+											<td className={toneForValue(stock.change_percent)}>{stock.live || stock.price > 0 ? formatPercent(stock.change_percent) : '--'}</td>
 											<td><span className="node-tags">{stock.nodes.slice(0, 2).join(' / ')}</span></td>
 										</tr>
 									})}
-									{themeState === 'loading' && <TableSkeleton />}
+									{themeState === 'loading' && !visibleStocks.length && <TableSkeleton />}
 								</tbody>
 							</table>
 							{themeState === 'error' && <EmptyState icon={<Server size={22} />} title="主线成分加载失败" detail="保留趋势总览，刷新后重试关联个股数据。" />}
-							{themeState === 'ready' && !visibleStocks.length && <EmptyState icon={<Search size={22} />} title="没有匹配个股" detail="更换细分节点或清空搜索条件。" />}
+							{themeState === 'ready' && constituentsComplete && !visibleStocks.length && <EmptyState icon={<Search size={22} />} title="没有匹配个股" detail="更换细分节点或清空搜索条件。" />}
 						</div>
+						{constituents.error && <p className="load-notice">{constituents.error} <button type="button" onClick={() => setThemeRefreshKey(key => key + 1)}>重试成分</button></p>}
 						<div className="stock-pagination" aria-label="题材个股分页">
-							<span>共 {stockPagination.total} 只 · 每页 {stockPagination.page_size} 只</span>
+							<span>{constituentsComplete ? `共 ${stockPagination.total} 只 · 每页 ${stockPagination.page_size} 只` : `已加载 ${visibleStocks.length} 只 · 完整成分${constituents.fetching ? '更新中' : '暂不可用'}`}</span>
 							<div>
-								<button type="button" disabled={stockPage <= 1 || themeState === 'loading'} onClick={() => setStockPage((current) => Math.max(1, current - 1))}>上一页</button>
-								<strong>{stockPagination.page}/{stockPagination.total_pages || 1}</strong>
-								<button type="button" disabled={!stockPagination.has_more || themeState === 'loading'} onClick={() => setStockPage((current) => current + 1)}>下一页</button>
+								<button type="button" disabled={!constituentsComplete || stockPage <= 1 || constituents.fetching} onClick={() => setStockPage((current) => Math.max(1, current - 1))}>上一页</button>
+								<strong>{constituentsComplete ? `${stockPagination.page}/${stockPagination.total_pages || 1}` : '--'}</strong>
+								<button type="button" disabled={!constituentsComplete || !stockPagination.has_more || constituents.fetching} onClick={() => setStockPage((current) => current + 1)}>下一页</button>
 							</div>
 						</div>
 					</section>
@@ -921,12 +671,14 @@ export function App() {
 							</div>
 							{selectedStock && (
 								<div className={`quote-block ${toneForValue(selectedStock.change_percent)}`}>
-									<strong>{formatNumber(selectedStock.price)}</strong>
-									<span>{formatPercent(selectedStock.change_percent)}</span>
+									<strong>{selectedStock.price > 0 ? formatNumber(selectedStock.price) : '--'}</strong>
+									<span>{selectedStock.live || selectedStock.price > 0 ? formatPercent(selectedStock.change_percent) : '--'}</span>
 								</div>
 							)}
 						</div>
+						{selectedStock && !visibleStocks.some(stock => stock.symbol === selectedStock.symbol) && <p className="load-notice">当前选择不在本页筛选结果中。</p>}
 						<CandlestickChart lines={kLines} state={klineState} />
+						{selectedHistoryFailed && <p className="load-notice">日 K 更新失败 <button type="button" onClick={history.retry}>重试</button></p>}
 						{selectedStock && (selectedHistoryReady
 							? <StockSnapshot stock={selectedStock} />
 							: <MetricLoadingPanel failed={selectedHistoryFailed} />)}
@@ -934,6 +686,8 @@ export function App() {
 
 					<section className="detail-panel identity-panel">
 						<div className="panel-label"><Target size={16} aria-hidden="true" />龙头身份模型</div>
+						{selectedHistoryReady && (!constituentsComplete || historyState !== 'ready') && <p className="load-notice">当前为部分样本结果，其他个股数据到齐后继续更新。</p>}
+						{selectedStock && selectedHistoryReady && selectedStock.metrics.history_days < 15 && <p className="load-notice">历史不足 15 个交易日，指标仅供参考。</p>}
 						{selectedStock && selectedHistoryReady ? (
 							<>
 								<div className="identity-row">
@@ -962,6 +716,8 @@ export function App() {
 					<section className="detail-panel news-panel">
 						<div className="panel-label"><Newspaper size={16} aria-hidden="true" />市场快讯</div>
 						<div className="news-list">
+							{newsError && <p className="load-notice">{newsError} <button type="button" onClick={() => setNewsRetryKey(key => key + 1)}>重试快讯</button></p>}
+							{!news.length && !newsError && <p className="load-notice">快讯加载中…</p>}
 							{news.slice(0, 7).map((item) => (
 								<a href={item.url} target="_blank" rel="noreferrer" key={`${item.id}-${item.published_at}`}>
 									<time>{formatTime(item.published_at)}</time><span>{item.title}</span><ChevronRight size={14} aria-hidden="true" />
@@ -1231,14 +987,6 @@ function sourceHealthMessage(message?: string) {
 	return message;
 }
 
-function kaipanlaLeaderRank(role?: string) {
-	if (!role?.startsWith('龙')) return 0;
-	const value = role.slice(1).trim();
-	const chineseRanks: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5 };
-	const rank = chineseRanks[value] || Number(value);
-	return Number.isInteger(rank) && rank >= 1 && rank <= 5 ? rank : 0;
-}
-
 function formatSourceStrength(value?: number) {
 	if (typeof value !== 'number' || !Number.isFinite(value)) {
 		return '--';
@@ -1253,11 +1001,12 @@ function formatDate(value: string) {
 	return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 }
 
-function historyStatusLabel(state: LoadState, ready: number, total: number) {
+function historyStatusLabel(state: LoadState | 'partial', ready: number, total: number) {
 	switch (state) {
 		case 'loading': return total > 0 ? `多日指标 ${ready}/${total}` : '准备多日指标';
 		case 'ready': return '多日身份已计算';
-		case 'error': return '多日数据降级';
+		case 'error': return '多日数据暂不可用';
+		case 'partial': return `多日指标已完成 ${ready}/${total}，部分暂不可用`;
 		case 'idle':
 		default: return '等待多日数据';
 	}

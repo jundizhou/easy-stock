@@ -1254,6 +1254,8 @@ export type SectorMapTab = {
 };
 
 export type ThemeOverview = {
+	aliases?: string[];
+	leader_stocks?: BoardStock[];
 	theme: string;
 	name: string;
 	change_percent: number;
@@ -1311,6 +1313,11 @@ export type ThemeScreenPagination = {
 };
 
 export type ThemeScreenData = {
+	order?: string[];
+	complete?: boolean;
+	coverage?: string;
+	source_snapshot_id?: string;
+	map_revision?: string;
 	map: SectorMap;
 	pagination: ThemeScreenPagination;
 	snapshot_id: string;
@@ -1925,6 +1932,13 @@ export function buildStreamUrl(config: BackendConfig, symbols: string[], interva
   return url.toString();
 }
 
+export class BackendRequestError extends Error {
+	constructor(message: string, public status: number, public code?: string) {
+		super(message);
+		this.name = 'BackendRequestError';
+	}
+}
+
 export async function requestJSON<T>(config: BackendConfig, path: string, init: RequestInit = {}): Promise<T> {
 	const headers = new Headers(init.headers);
 	if (config.token) headers.set('Authorization', `Bearer ${config.token}`);
@@ -1935,7 +1949,7 @@ export async function requestJSON<T>(config: BackendConfig, path: string, init: 
 	try {
 		response = await fetch(requestURL, { ...init, headers });
 	} catch (error) {
-		logRuntimeEvent('error', runtimeFeatureForPath(requestURL.pathname), {
+		if (!init.signal?.aborted) logRuntimeEvent('error', runtimeFeatureForPath(requestURL.pathname), {
 			event: 'network_failure', request_id: requestID, method: init.method || 'GET', path: requestURL.pathname, error: runtimeErrorDetails(error),
 		});
 		throw error;
@@ -1947,12 +1961,15 @@ export async function requestJSON<T>(config: BackendConfig, path: string, init: 
 		});
     const text = await response.text();
 		let message = text;
+		let code: string | undefined;
 		try {
-			message = (JSON.parse(text) as { error?: string }).error || text;
+			const details = JSON.parse(text) as { error?: string; code?: string };
+			message = details.error || text;
+			code = details.code;
 		} catch {
 			// Keep plain-text upstream errors readable.
 		}
-		throw new Error(message || `HTTP ${response.status}`);
+		throw new BackendRequestError(message || `HTTP ${response.status}`, response.status, code);
   }
 	if (response.status === 204) return undefined as T;
 	return response.json() as Promise<T>;

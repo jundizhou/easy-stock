@@ -49,6 +49,7 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS theme_overview_cache (id INTEGER PRIMARY KEY CHECK (id=1), payload_json TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS duanxianxia_snapshots (
 			id TEXT PRIMARY KEY,
 			trade_date TEXT NOT NULL,
@@ -133,21 +134,32 @@ func (s *Store) SaveSuccess(ctx context.Context, snapshot Snapshot) error {
 	`, snapshot.FetchedAt.UnixMilli()); err != nil {
 		return fmt.Errorf("save theme radar success state: %w", err)
 	}
-	// Keep one authoritative snapshot per trading day so yesterday's Kaipanla
-	// theme memberships survive later five-minute refreshes.
+	// Keep recent versions for in-flight screens, and one latest version per
+	// historical trading day. Recent() still returns one snapshot per day.
 	if _, err := transaction.ExecContext(ctx, `
 		DELETE FROM duanxianxia_snapshots
-		WHERE trade_date=? AND id<>?
-	`, snapshot.TradeDate, snapshot.ID); err != nil {
-		return fmt.Errorf("deduplicate theme radar snapshots: %w", err)
+		WHERE fetched_at_ms < ? AND id NOT IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY trade_date ORDER BY fetched_at_ms DESC, id DESC) AS rank
+				FROM duanxianxia_snapshots
+			) WHERE rank=1
+		)
+	`, snapshot.FetchedAt.Add(-30*time.Minute).UnixMilli()); err != nil {
+		return fmt.Errorf("expire old theme versions: %w", err)
 	}
 	if _, err := transaction.ExecContext(ctx, `
-		DELETE FROM duanxianxia_snapshots
-		WHERE id NOT IN (
-			SELECT id FROM duanxianxia_snapshots ORDER BY fetched_at_ms DESC LIMIT 16
-		)
+		DELETE FROM duanxianxia_snapshots WHERE trade_date NOT IN (
+			SELECT DISTINCT trade_date FROM duanxianxia_snapshots ORDER BY trade_date DESC LIMIT 16
+		) OR (id NOT IN (
+			SELECT id FROM duanxianxia_snapshots ORDER BY fetched_at_ms DESC, id DESC LIMIT 128
+		) AND id NOT IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY trade_date ORDER BY fetched_at_ms DESC, id DESC) AS rank
+				FROM duanxianxia_snapshots
+			) WHERE rank=1
+		))
 	`); err != nil {
-		return fmt.Errorf("trim theme radar snapshots: %w", err)
+		return fmt.Errorf("trim theme versions: %w", err)
 	}
 	return transaction.Commit()
 }
@@ -347,4 +359,18 @@ func millisTime(value int64) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(value)
+}
+
+func (s *Store) LoadOverview(ctx context.Context) ([]byte, error) {
+	var payload string
+	err := s.db.QueryRowContext(ctx, "SELECT payload_json FROM theme_overview_cache WHERE id=1").Scan(&payload)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return []byte(payload), err
+}
+
+func (s *Store) SaveOverview(ctx context.Context, payload []byte) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO theme_overview_cache(id,payload_json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json", string(payload))
+	return err
 }

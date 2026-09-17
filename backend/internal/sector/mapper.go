@@ -3,6 +3,7 @@ package sector
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -74,6 +75,9 @@ func (m *Mapper) Build(ctx context.Context, themeID string) (foundation.SectorMa
 	}
 
 	start := time.Now()
+	defer func() {
+		log.Printf("event=theme_stage stage=constituents duration_ms=%d", time.Since(start).Milliseconds())
+	}()
 	boards, boardErr, catalog, catalogErr := m.loadBoardsAndCatalog(ctx)
 	if boardErr != nil && len(catalog) == 0 {
 		return foundation.SectorMap{}, fmt.Errorf("board list unavailable: %v; stock catalog unavailable: %w", boardErr, catalogErr)
@@ -173,14 +177,18 @@ func (m *Mapper) loadBoardsAndCatalog(ctx context.Context) (
 		defer wg.Done()
 		boardCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		defer cancel()
+		start := time.Now()
 		boards, boardErr = m.provider.Boards(boardCtx, "", 600)
+		log.Printf("event=theme_stage stage=board_catalog duration_ms=%d failed=%t", time.Since(start).Milliseconds(), boardErr != nil)
 	}()
 
 	if m.stockCatalog != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			start := time.Now()
 			catalog, catalogErr = m.stockCatalog.StockCatalog(ctx)
+			log.Printf("event=theme_stage stage=stock_catalog duration_ms=%d failed=%t", time.Since(start).Milliseconds(), catalogErr != nil)
 		}()
 	}
 	wg.Wait()

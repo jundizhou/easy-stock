@@ -220,3 +220,8 @@ func fetchMeta(state SyncState, refreshed bool, fromCache bool, refreshError str
 		FromCache:     fromCache,
 	}
 }
+
+// CachedSnapshot reads local membership without waiting for the remote refresh lock.
+func (s *Service) CachedSnapshot(ctx context.Context) (Snapshot, bool, error) {
+	return s.store.Latest(ctx)
+}

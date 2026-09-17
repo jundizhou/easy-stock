@@ -129,3 +129,34 @@ func TestLimitUpProviderPrefersRetainedKaipanlaPreviousDay(t *testing.T) {
 		t.Fatalf("missing previous stock was not filled by EastMoney: %+v", byKey["2026-08-06|600003.SH"])
 	}
 }
+
+func TestStoreKeepsRecentThemeVersionsButRecentListsOnePerDay(t *testing.T) {
+	store, err := OpenStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	for _, snapshot := range []Snapshot{
+		{ID: "old", TradeDate: "2026-09-17", FetchedAt: now},
+		{ID: "new", TradeDate: "2026-09-17", FetchedAt: now.Add(5 * time.Minute)},
+	} {
+		if err := store.SaveSuccess(ctx, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok, err := store.Get(ctx, "old"); err != nil || !ok {
+		t.Fatalf("in-flight snapshot disappeared: %v", err)
+	}
+	recent, err := store.Recent(ctx, 16)
+	if err != nil || len(recent) != 1 || recent[0].ID != "new" {
+		t.Fatalf("recent duplicated day: %+v %v", recent, err)
+	}
+	if err := store.SaveSuccess(ctx, Snapshot{ID: "later", TradeDate: "2026-09-17", FetchedAt: now.Add(36 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.Get(ctx, "old"); err != nil || ok {
+		t.Fatalf("old version not expired: %v", err)
+	}
+}

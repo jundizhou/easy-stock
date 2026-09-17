@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"easy-stock/backend/internal/sector"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -56,10 +58,32 @@ func (c *themeSnapshotCache) load(
 		c.mu.Unlock()
 		select {
 		case <-flight.done:
+			// A previous viewer may have canceled the request that owned this
+			// shared flight. A live viewer can start its own bounded attempt.
+			if ctx.Err() == nil && (errors.Is(flight.err, context.Canceled) || errors.Is(flight.err, context.DeadlineExceeded)) {
+				return c.load(ctx, key, loader)
+			}
 			return flight.snapshot, flight.err
 		case <-ctx.Done():
 			return themeSnapshot{}, ctx.Err()
 		}
+	}
+	// Discard expired derived maps; source snapshot retention is handled by the store.
+	for cachedKey, cached := range c.items {
+		if !now.Before(cached.expiresAt) {
+			delete(c.items, cachedKey)
+		}
+	}
+	if len(c.items) >= 128 {
+		var oldestKey string
+		var oldest time.Time
+		for cachedKey, cached := range c.items {
+			if oldestKey == "" || cached.expiresAt.Before(oldest) {
+				oldestKey = cachedKey
+				oldest = cached.expiresAt
+			}
+		}
+		delete(c.items, oldestKey)
 	}
 	flight := &themeSnapshotFlight{done: make(chan struct{})}
 	c.inflight[key] = flight
@@ -98,10 +122,15 @@ type themeScreenPagination struct {
 }
 
 type themeScreenData struct {
-	Map        foundation.SectorMap  `json:"map"`
-	Pagination themeScreenPagination `json:"pagination"`
-	SnapshotID string                `json:"snapshot_id"`
-	Sort       string                `json:"sort"`
+	Order            []string              `json:"order"`
+	Complete         bool                  `json:"complete"`
+	Coverage         string                `json:"coverage"`
+	SourceSnapshotID string                `json:"source_snapshot_id,omitempty"`
+	MapRevision      string                `json:"map_revision"`
+	Map              foundation.SectorMap  `json:"map"`
+	Pagination       themeScreenPagination `json:"pagination"`
+	SnapshotID       string                `json:"snapshot_id"`
+	Sort             string                `json:"sort"`
 }
 
 type themeCandidate struct {
@@ -145,20 +174,37 @@ func (s *Server) themeScreenHandler(w http.ResponseWriter, r *http.Request) {
 	nodeFilter := strings.TrimSpace(r.URL.Query().Get("node"))
 	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	snapshotID := strings.TrimSpace(r.URL.Query().Get("snapshot_id"))
+	phase := r.URL.Query().Get("phase")
+	if phase != "" && phase != "leaders" {
+		writeError(w, http.StatusBadRequest, "invalid phase")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	cacheKey := theme
+	cacheKey := theme + ":" + phase
 	if snapshotID != "" {
 		cacheKey += "@" + snapshotID
 	}
 	snapshot, err := s.themeSnapshots.load(ctx, cacheKey, func(loadCtx context.Context) (foundation.SectorMap, error) {
+		if phase == "leaders" {
+			if provider, ok := s.sectorMap.(interface {
+				BuildLeaders(context.Context, string, string) (foundation.SectorMap, error)
+			}); ok {
+				return provider.BuildLeaders(loadCtx, theme, snapshotID)
+			}
+			return foundation.SectorMap{Theme: theme, Groups: []foundation.SectorMapGroup{}}, nil
+		}
 		if provider, ok := s.sectorMap.(SnapshotSectorMapProvider); ok {
 			return provider.BuildSnapshot(loadCtx, theme, snapshotID)
 		}
 		return s.sectorMap.Build(loadCtx, theme)
 	})
 	if err != nil {
+		if errors.Is(err, sector.ErrSnapshotExpired) {
+			writeJSON(w, http.StatusGone, map[string]string{"code": "SNAPSHOT_EXPIRED", "error": "题材快照已更新，请重新获取"})
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -178,7 +224,17 @@ func (s *Server) themeScreenHandler(w http.ResponseWriter, r *http.Request) {
 	end := min(start+pageSize, total)
 	pageCandidates := filtered[start:end]
 
+	coverage := "full"
+	if phase == "leaders" {
+		coverage = "leaders"
+	}
+	order := make([]string, 0, len(pageCandidates))
+	for _, candidate := range pageCandidates {
+		order = append(order, candidate.Stock.Symbol)
+	}
 	data := themeScreenData{
+		Order:    order,
+		Complete: phase != "leaders", Coverage: coverage, SourceSnapshotID: snapshot.sectorMap.Meta.SnapshotID, MapRevision: snapshot.id,
 		Map:        trimSectorMap(snapshot.sectorMap, allCandidates, pageCandidates),
 		Pagination: themeScreenPagination{Page: page, PageSize: pageSize, Total: total, TotalPages: totalPages, HasMore: end < total},
 		SnapshotID: snapshot.id,

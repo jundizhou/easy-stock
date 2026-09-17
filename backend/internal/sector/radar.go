@@ -2,6 +2,7 @@ package sector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,8 @@ import (
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/providers/duanxianxia"
 )
+
+var ErrSnapshotExpired = errors.New("theme snapshot is no longer available")
 
 type RadarFallback interface {
 	Build(ctx context.Context, themeID string) (foundation.SectorMap, error)
@@ -333,6 +336,16 @@ func (p *RadarProvider) buildFusionSnapshot(
 }
 
 func (p *RadarProvider) buildKaipanlaSnapshot(ctx context.Context, themeID string, snapshotID string) (foundation.SectorMap, error) {
+	return p.buildKaipanla(ctx, themeID, snapshotID, false)
+}
+
+func (p *RadarProvider) buildKaipanla(ctx context.Context, themeID string, snapshotID string, leadersOnly bool) (foundation.SectorMap, error) {
+	if p.source == nil {
+		return foundation.SectorMap{}, fmt.Errorf("kaipanla source unavailable")
+	}
+	if leadersOnly && snapshotID == "" {
+		return foundation.SectorMap{}, fmt.Errorf("snapshot_id is required for leader membership")
+	}
 	var snapshot duanxianxia.Snapshot
 	if snapshotID != "" {
 		stored, exists, err := p.source.SnapshotByID(ctx, snapshotID)
@@ -340,7 +353,7 @@ func (p *RadarProvider) buildKaipanlaSnapshot(ctx context.Context, themeID strin
 			return foundation.SectorMap{}, err
 		}
 		if !exists {
-			return foundation.SectorMap{}, fmt.Errorf("theme snapshot %s is no longer available", snapshotID)
+			return foundation.SectorMap{}, fmt.Errorf("%w: %s", ErrSnapshotExpired, snapshotID)
 		}
 		snapshot = stored
 	} else {
@@ -361,7 +374,7 @@ func (p *RadarProvider) buildKaipanlaSnapshot(ctx context.Context, themeID strin
 		symbols = append(symbols, leader.Symbol)
 	}
 	quotes := map[string]foundation.Quote{}
-	if p.quotes != nil && len(symbols) > 0 {
+	if !leadersOnly && p.quotes != nil && len(symbols) > 0 {
 		if values, err := p.quotes.Realtime(ctx, symbols); err == nil {
 			for _, quote := range values {
 				quotes[quote.Symbol] = quote
@@ -439,7 +452,9 @@ func (p *RadarProvider) buildKaipanlaSnapshot(ctx context.Context, themeID strin
 		}},
 		Meta: meta,
 	}
-	p.mergeFallbackStocks(ctx, theme, &result)
+	if !leadersOnly {
+		p.mergeFallbackStocks(ctx, theme, &result)
+	}
 	return result, nil
 }
 
@@ -455,8 +470,10 @@ func (p *RadarProvider) themeOverview(
 	rising := 0
 	falling := 0
 	leaders := make([]string, 0, len(theme.Leaders))
+	leaderStocks := make([]foundation.BoardStock, 0, len(theme.Leaders))
 	for _, leader := range theme.Leaders {
 		leaders = append(leaders, leader.Name)
+		leaderStocks = append(leaderStocks, foundation.BoardStock{Symbol: leader.Symbol, Name: leader.Name, RankRole: leader.Role, RankScore: max(60, 104-leader.Rank*8)})
 		if quote, exists := quotes[leader.Symbol]; exists {
 			total += quote.ChangePercent
 			matched++
@@ -493,6 +510,7 @@ func (p *RadarProvider) themeOverview(
 		LimitUpCount:         len(theme.Leaders),
 		ActiveDays:           activeDays,
 		Leaders:              leaders,
+		LeaderStocks:         leaderStocks,
 		Source:               duanxianxia.SourceID,
 		ProviderRank:         theme.Rank,
 		SourceStrength:       theme.Strength,

@@ -116,6 +116,7 @@ func buildIndustryRadarOverviews(items []foundation.MarketIndustryMomentum, meta
 		matched := item.RisingCount + item.FallingCount
 		result = append(result, foundation.ThemeOverview{
 			Theme:                radarIndustryThemeID(item.Code, item.Name),
+			LeaderStocks:         industryLeaderStocks(item),
 			Name:                 item.Name,
 			ChangePercent:        item.ChangePercent,
 			MainNetInflow:        item.MainNetInflow,
@@ -347,6 +348,7 @@ func mergeRadarOverviews(industryItems []foundation.ThemeOverview, kaipanlaItems
 
 func mergeRadarPair(industry foundation.ThemeOverview, kaipanla foundation.ThemeOverview) foundation.ThemeOverview {
 	result := kaipanla
+	result.Aliases = []string{kaipanla.Theme, industry.Theme}
 	if industryRef, ok := parseRadarIndustryThemeID(industry.Theme); ok {
 		result.Theme = radarFusionThemeID(strings.TrimPrefix(kaipanla.Theme, "kpl:"), industryRef)
 	}
