@@ -136,3 +136,43 @@ func TestSupportedLLMProvidersBuildTheirOfficialModelsURLs(t *testing.T) {
 		})
 	}
 }
+
+func TestModelSyncFeedsReasoningControlsAndRejectsUnsupportedValues(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[{"id":"claude-discovered","capabilities":{"effort":{"supported":true,"low":{"supported":true},"high":{"supported":true},"max":{"supported":false}},"thinking":{"supported":true,"types":{"adaptive":{"supported":true}}}}}]}`)
+	}))
+	defer upstream.Close()
+	store, _ := appsettings.Open("")
+	runtime := hermes.NewRuntime(hermes.Config{Home: t.TempDir()})
+	server := NewServer(Config{SettingsStore: store, HermesGateway: runtime})
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "custom", BaseURL: upstream.URL, Model: "claude-discovered", APIMode: "anthropic_messages"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/settings/llm/models", strings.NewReader(`{"provider":"custom","base_url":"`+upstream.URL+`","api_mode":"anthropic_messages"}`))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"source":"model_api"`) {
+		t.Fatalf("sync: %d %s", response.Code, response.Body.String())
+	}
+	settings, err := runtime.AgentSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ReasoningEffort != "high" || settings.Reasoning.Allows("max") {
+		t.Fatalf("capabilities not used: %+v", settings)
+	}
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{
+		{`{"reasoning_effort":"max"}`, http.StatusBadRequest},
+		{`{"reasoning_effort":"low","reasoning_context":"old-model"}`, http.StatusConflict},
+		{`{"reasoning_effort":"low","reasoning_context":"` + settings.ReasoningContext + `"}`, http.StatusOK},
+	} {
+		response = httptest.NewRecorder()
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/settings/agent", strings.NewReader(tc.body)))
+		if response.Code != tc.status {
+			t.Fatalf("body=%s got %d: %s", tc.body, response.Code, response.Body.String())
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/hermes"
 )
 
@@ -22,12 +23,16 @@ type llmModelsRequest struct {
 	BaseURL   string  `json:"base_url"`
 	APIKey    *string `json:"api_key"`
 	ProfileID string  `json:"profile_id"`
+	APIMode   string  `json:"api_mode"`
 }
 
 type llmModelOption struct {
-	ID          string `json:"id"`
-	OwnedBy     string `json:"owned_by,omitempty"`
-	DisplayName string `json:"display_name,omitempty"`
+	Metadata     json.RawMessage            `json:"-"`
+	Reasoning    hermes.ReasoningCapability `json:"reasoning"`
+	Capabilities json.RawMessage            `json:"-"`
+	ID           string                     `json:"id"`
+	OwnedBy      string                     `json:"owned_by,omitempty"`
+	DisplayName  string                     `json:"display_name,omitempty"`
 }
 
 type llmModelsResult struct {
@@ -53,6 +58,17 @@ func (s *Server) settingsLLMModels(w http.ResponseWriter, r *http.Request) {
 	provider := strings.ToLower(firstNonEmpty(strings.TrimSpace(input.Provider), strings.TrimSpace(saved.Provider), "openai"))
 	if !supportedLLMProvider(provider) {
 		writeError(w, http.StatusBadRequest, "unsupported llm provider: "+provider)
+		return
+	}
+	mode := input.APIMode
+	if mode == "" {
+		mode = "chat_completions"
+		if provider == "anthropic" {
+			mode = "anthropic_messages"
+		}
+	}
+	if mode != "chat_completions" && mode != "codex_responses" && mode != "anthropic_messages" {
+		writeError(w, http.StatusBadRequest, "unsupported api_mode")
 		return
 	}
 	baseURL := firstNonEmpty(strings.TrimSpace(input.BaseURL), strings.TrimSpace(saved.BaseURL))
@@ -134,6 +150,35 @@ func (s *Server) settingsLLMModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	discovered := map[string]hermes.ReasoningCapability{}
+	for i := range models {
+		models[i].Reasoning = hermes.OfficialReasoningCapability(appsettings.LLM{Provider: provider, BaseURL: baseURL, Model: models[i].ID, APIMode: mode})
+		if capability, ok := hermes.DiscoveredReasoningCapability(mode, models[i].Capabilities); ok {
+			models[i].Reasoning = capability
+			discovered[models[i].ID] = capability
+		}
+	}
+	if gateway, ok := s.hermesGateway.(hermes.CapabilityGateway); ok {
+		raw := map[string]json.RawMessage{}
+		for _, model := range models {
+			raw[model.ID] = model.Metadata
+		}
+		resolved, err := gateway.ResolveModelCapabilities(baseURL, mode, raw)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "读取 Hermes 模型能力失败")
+			return
+		}
+		for i := range models {
+			if c, ok := resolved[models[i].ID]; ok {
+				models[i].Reasoning = c
+				discovered[models[i].ID] = c
+			}
+		}
+		if err := gateway.SyncModelCapabilities(baseURL, mode, discovered); err != nil {
+			writeError(w, http.StatusInternalServerError, "模型列表已获取，但保存模型能力失败")
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": llmModelsResult{Models: models, SourceURL: modelsURL}})
 }
 
@@ -182,9 +227,12 @@ func buildModelsURL(provider, rawBaseURL string) (string, error) {
 func decodeModelList(body []byte) ([]llmModelOption, error) {
 	var payload struct {
 		Data []struct {
-			ID          string `json:"id"`
-			OwnedBy     string `json:"owned_by"`
-			DisplayName string `json:"display_name"`
+			ID                  string          `json:"id"`
+			OwnedBy             string          `json:"owned_by"`
+			DisplayName         string          `json:"display_name"`
+			Capabilities        json.RawMessage `json:"capabilities"`
+			Reasoning           json.RawMessage `json:"reasoning"`
+			SupportedParameters []string        `json:"supported_parameters"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -201,7 +249,8 @@ func decodeModelList(body []byte) ([]llmModelOption, error) {
 			continue
 		}
 		seen[id] = struct{}{}
-		models = append(models, llmModelOption{ID: id, OwnedBy: strings.TrimSpace(item.OwnedBy), DisplayName: strings.TrimSpace(item.DisplayName)})
+		metadata, _ := json.Marshal(item)
+		models = append(models, llmModelOption{Metadata: metadata, ID: id, Capabilities: item.Capabilities, OwnedBy: strings.TrimSpace(item.OwnedBy), DisplayName: strings.TrimSpace(item.DisplayName)})
 	}
 	if len(models) == 0 {
 		return nil, errors.New("模型服务没有返回可用模型")

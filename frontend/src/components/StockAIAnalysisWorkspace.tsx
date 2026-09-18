@@ -1,3 +1,4 @@
+import { ReasoningControl } from './ReasoningControl';
 import {
 	Activity,
 	ArrowDownRight,
@@ -116,13 +117,6 @@ function writeStoredValue(key: string, value: string) { try { window.localStorag
 
 type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
 type HotRankState = 'idle' | 'loading' | 'ready' | 'error';
-type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-
-const reasoningOptions: Array<{ value: ReasoningEffort; label: string }> = [
-	{ value: 'none', label: '关闭思考' }, { value: 'minimal', label: '极简' }, { value: 'low', label: '低' },
-	{ value: 'medium', label: '中' }, { value: 'high', label: '高' }, { value: 'xhigh', label: '极高' }, { value: 'max', label: '最大' },
-];
-
 export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnalysis, onInitialAnalysisConsumed, onAskAI, onOpenSettings }: Props) {
 	const research = useStockResearch(config);
 	const [purpose, setPurpose] = useState<ResearchRequest['purpose']>('observe');
@@ -148,7 +142,6 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	const [hotStockSidebarCollapsed, setHotStockSidebarCollapsed] = useState(() => readStoredValue(hotStockSidebarStorageKey) === '1');
 	const [llmProfiles, setLLMProfiles] = useState<LLMProfile[]>([]);
 	const [activeLLMProfileID, setActiveLLMProfileID] = useState('');
-	const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
 	const [aiChoiceBusy, setAIChoiceBusy] = useState(false);
 	const exportRef = useRef<HTMLDivElement>(null);
 	const analysisRequestSequence = useRef(0);
@@ -160,15 +153,10 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 	useEffect(() => {
 		if (!config) return;
 		let cancelled = false;
-		void Promise.all([
-			requestJSON<{ data: AppSettings }>(config, '/api/v1/settings'),
-			requestJSON<{ data: { reasoning_effort?: string } }>(config, '/api/v1/settings/agent'),
-		]).then(([settings, agent]) => {
+		void requestJSON<{ data: AppSettings }>(config, '/api/v1/settings').then((settings) => {
 			if (cancelled) return;
 			setLLMProfiles(settings.data.llm_profiles || []);
 			setActiveLLMProfileID(settings.data.active_llm_profile_id || settings.data.llm_profiles?.[0]?.id || '');
-			const effort = agent.data.reasoning_effort as ReasoningEffort;
-			if (reasoningOptions.some((item) => item.value === effort)) setReasoningEffort(effort);
 		}).catch(() => undefined);
 		return () => { cancelled = true; };
 	}, [config, refreshKey]);
@@ -180,16 +168,6 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 			const response = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active_llm_profile_id: profileID }) });
 			setLLMProfiles(response.data.llm_profiles || []);
 			setActiveLLMProfileID(response.data.active_llm_profile_id || profileID);
-		} finally { setAIChoiceBusy(false); }
-	};
-
-	const switchResearchReasoning = async (next: ReasoningEffort) => {
-		if (!config || next === reasoningEffort || aiChoiceBusy) return;
-		setAIChoiceBusy(true);
-		try {
-			const response = await requestJSON<{ data: { reasoning_effort?: string } }>(config, '/api/v1/settings/agent', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reasoning_effort: next }) });
-			const saved = response.data.reasoning_effort as ReasoningEffort;
-			if (reasoningOptions.some((item) => item.value === saved)) setReasoningEffort(saved);
 		} finally { setAIChoiceBusy(false); }
 	};
 
@@ -425,7 +403,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} llmProfiles={llmProfiles} activeLLMProfileID={activeLLMProfileID} reasoningEffort={reasoningEffort} choiceBusy={aiChoiceBusy} onModelChange={(id) => void switchResearchModel(id)} onReasoningChange={(value) => void switchResearchReasoning(value)} />
+			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} llmProfiles={llmProfiles} activeLLMProfileID={activeLLMProfileID} config={config} refreshKey={String(refreshKey)} choiceBusy={aiChoiceBusy} onModelChange={(id) => void switchResearchModel(id)} />
 			{levelDialogOpen && <ResearchLevelDialog value={researchLevel} onChange={setResearchLevel} onCancel={() => setLevelDialogOpen(false)} onConfirm={confirmResearchLevel} />}
 			<StockResearchOptions purpose={purpose} horizon={horizon} cost={cost} onPurpose={setPurpose} onHorizon={setHorizon} onCost={setCost} />
 			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
@@ -580,7 +558,7 @@ function AnalysisExportFooter({ analysis }: { analysis: StockAIAnalysis }) {
 	</footer>;
 }
 
-function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSubmit, loading, llmProfiles, activeLLMProfileID, reasoningEffort, choiceBusy, onModelChange, onReasoningChange }: {
+function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSubmit, loading, llmProfiles, activeLLMProfileID, config, refreshKey, choiceBusy, onModelChange }: {
 	query: string;
 	mode: StockAIWorkspaceMode;
 	directory: StockDirectoryEntry[];
@@ -590,10 +568,10 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 	loading: boolean;
 	llmProfiles: LLMProfile[];
 	activeLLMProfileID: string;
-	reasoningEffort: ReasoningEffort;
+	config: BackendConfig | null;
+	refreshKey: string;
 	choiceBusy: boolean;
 	onModelChange: (value: string) => void;
-	onReasoningChange: (value: ReasoningEffort) => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(0);
@@ -633,7 +611,7 @@ function AnalysisSearch({ query, mode, directory, directoryState, onQuery, onSub
 		<header className="stock-ai-search-hero">
 			<div className="stock-ai-research-options">
 				<label><span>模型</span><select value={activeLLMProfileID} onChange={(event) => onModelChange(event.target.value)} disabled={choiceBusy || loading || !llmProfiles.length} aria-label="完整分析模型"><option value="">当前模型</option>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name} · {profile.model}</option>)}</select></label>
-				<label><span>思考</span><select value={reasoningEffort} onChange={(event) => onReasoningChange(event.target.value as ReasoningEffort)} disabled={choiceBusy || loading} aria-label="完整分析思考等级">{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+				<ReasoningControl config={config} refreshKey={JSON.stringify([activeLLMProfileID, llmProfiles.find((profile) => profile.id === activeLLMProfileID), refreshKey])} disabled={choiceBusy || loading} label="完整分析思考等级" />
 			</div>
 			<div>
 				<span><BrainCircuit size={15} />STOCK DECISION SYSTEM</span>

@@ -24,9 +24,11 @@ var (
 )
 
 type agentSettingsView struct {
-	ReasoningEffort string             `json:"reasoning_effort"`
-	Skills          []hermes.SkillInfo `json:"skills"`
-	MCPServers      []mcpServerView    `json:"mcp_servers"`
+	ReasoningContext string                     `json:"reasoning_context"`
+	Reasoning        hermes.ReasoningCapability `json:"reasoning"`
+	ReasoningEffort  string                     `json:"reasoning_effort"`
+	Skills           []hermes.SkillInfo         `json:"skills"`
+	MCPServers       []mcpServerView            `json:"mcp_servers"`
 }
 
 type mcpServerView struct {
@@ -44,9 +46,10 @@ type mcpServerView struct {
 }
 
 type agentSettingsUpdateRequest struct {
-	ReasoningEffort *string            `json:"reasoning_effort"`
-	Skills          *[]skillUpdate     `json:"skills"`
-	MCPServers      *[]mcpServerUpdate `json:"mcp_servers"`
+	ReasoningContext *string            `json:"reasoning_context"`
+	ReasoningEffort  *string            `json:"reasoning_effort"`
+	Skills           *[]skillUpdate     `json:"skills"`
+	MCPServers       *[]mcpServerUpdate `json:"mcp_servers"`
 }
 
 type skillUpdate struct {
@@ -154,8 +157,20 @@ func (s *Server) settingsAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "读取现有 Hermes 设置: "+err.Error())
 		return
 	}
+	if request.ReasoningEffort != nil && len(current.Reasoning.Options) > 0 && !current.Reasoning.Allows(strings.ToLower(strings.TrimSpace(*request.ReasoningEffort))) {
+		writeError(w, http.StatusBadRequest, "当前模型或接口不支持该思考选项，请刷新后重试")
+		return
+	}
+	if request.ReasoningContext != nil && *request.ReasoningContext != current.ReasoningContext {
+		writeError(w, http.StatusConflict, hermes.ErrReasoningContextChanged.Error())
+		return
+	}
 	settings := mergeAgentSettings(current, request)
 	if err := gateway.SyncAgentSettings(settings); err != nil {
+		if errors.Is(err, hermes.ErrReasoningContextChanged) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "保存 Hermes Skill/MCP 设置: "+err.Error())
 		return
 	}
@@ -482,7 +497,7 @@ func filterGitHubSkillArchive(data []byte, prefix string) ([]byte, error) {
 }
 
 func buildAgentSettingsView(settings hermes.AgentSettings) agentSettingsView {
-	view := agentSettingsView{ReasoningEffort: settings.ReasoningEffort, Skills: settings.Skills, MCPServers: make([]mcpServerView, 0, len(settings.MCPServers))}
+	view := agentSettingsView{ReasoningContext: settings.ReasoningContext, ReasoningEffort: settings.ReasoningEffort, Reasoning: settings.Reasoning, Skills: settings.Skills, MCPServers: make([]mcpServerView, 0, len(settings.MCPServers))}
 	for _, server := range settings.MCPServers {
 		item := mcpServerView{
 			Name: server.Name, Enabled: server.Enabled, Transport: server.Transport,

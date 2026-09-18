@@ -192,7 +192,7 @@ func minimalSandboxConfig(base map[string]any, workDir string) map[string]any {
 	if providerName != "" {
 		if baseProvider, ok := stringMap(baseProviders[providerName]); ok {
 			provider := copyMapKeys(baseProvider,
-				"name", "api", "key_env", "default_model", "transport", "stale_timeout_seconds",
+				"name", "api", "key_env", "default_model", "transport", "stale_timeout_seconds", "extra_body",
 			)
 			if len(provider) > 0 {
 				config["providers"] = map[string]any{providerName: provider}
@@ -203,7 +203,7 @@ func minimalSandboxConfig(base map[string]any, workDir string) map[string]any {
 		config["service_tier"] = serviceTier
 	}
 	baseAgent, _ := stringMap(base["agent"])
-	agent := copyMapKeys(baseAgent, "system_prompt", "reasoning_effort")
+	agent := copyMapKeys(baseAgent, "system_prompt", "reasoning_effort", "easy_stock_reasoning_effort")
 	config["agent"] = agent
 	config["curator"] = map[string]any{"enabled": false}
 	config["memory"] = map[string]any{"memory_enabled": false, "user_profile_enabled": false, "nudge_interval": 0}

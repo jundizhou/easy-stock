@@ -121,7 +121,7 @@ func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
 	}
 	runtime := NewRuntime(Config{Home: home, WorkDir: root, PythonPath: filepath.Join(root, "python")})
 	key := "model-secret"
-	if err := runtime.SyncLLM(appsettings.LLM{Provider: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-test"}, &key); err != nil {
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-5.5"}, &key); err != nil {
 		t.Fatal(err)
 	}
 	config, err := runtime.readConfigMap()
@@ -156,7 +156,7 @@ func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "mcp_servers:") || !strings.Contains(text, "disabled:") || !strings.Contains(text, "gpt-test") {
+	if !strings.Contains(text, "mcp_servers:") || !strings.Contains(text, "disabled:") || !strings.Contains(text, "gpt-5.5") {
 		t.Fatalf("merged config missing managed sections:\n%s", text)
 	}
 	merged, _ := runtime.readConfigMap()
@@ -166,7 +166,7 @@ func TestRuntimeAgentSettingsPreservesSecretsAndModelConfig(t *testing.T) {
 	if !slices.Contains(stringSlice(mergedSkills["disabled"]), "missing-local-skill") || intValue(github["keepalive_interval"]) != 15 {
 		t.Fatalf("unmanaged Hermes settings were overwritten:\n%s", text)
 	}
-	if err := runtime.SyncLLM(appsettings.LLM{Provider: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-test-2"}, nil); err != nil {
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "openai", BaseURL: "https://api.openai.com/v1", Model: "gpt-5.2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := runtime.AgentSettings()

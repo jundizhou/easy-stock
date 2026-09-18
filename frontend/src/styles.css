@@ -5216,7 +5216,7 @@ a:focus-visible {
 .ai-chat-model-picker.error { border-color: var(--theme-amber-line, #e6c3a0); background: var(--theme-surface-soft, #fffaf3); }
 .ai-chat-reasoning-picker {
 	display: grid;
-	grid-template-columns: auto minmax(64px, 82px) auto;
+	grid-template-columns: auto minmax(90px, 110px) auto;
 	align-items: center;
 	gap: 5px;
 	min-height: 34px;
@@ -5225,7 +5225,7 @@ a:focus-visible {
 	border-radius: 8px;
 	background: var(--theme-surface, #fbfdff);
 }
-.ai-chat-reasoning-picker > span {
+.ai-chat-reasoning-picker .reasoning-control > span {
 	color: var(--theme-blue, #2773c5);
 	font-size: 10px;
 	font-weight: 750;
@@ -5532,9 +5532,9 @@ a:focus-visible {
 	.ai-conversation-tools { flex-wrap: wrap; gap: 5px; }
 	.ai-chat-model-picker,
 	.ai-chat-model-picker:has(.ai-chat-profile-select) { grid-template-columns: minmax(88px, .8fr) minmax(96px, 1fr) auto; flex-basis: 300px; padding-left: 7px; }
-	.ai-chat-reasoning-picker { grid-template-columns: auto minmax(55px, 72px) auto; padding-left: 7px; }
+	.ai-chat-reasoning-picker { grid-template-columns: auto minmax(80px, 100px) auto; padding-left: 7px; }
 	.ai-chat-model-picker > span { display: none; }
-	.ai-chat-reasoning-picker > span { display: none; }
+	.ai-chat-reasoning-picker .reasoning-control > span { display: none; }
 	.ai-chat-settings-button { width: 34px; padding: 0 !important; font-size: 0 !important; }
 	.ai-message-list { padding-inline: 15px; }
 	.ai-message { grid-template-columns: 28px minmax(0, 1fr); gap: 9px; }
@@ -7397,3 +7397,7 @@ a:focus-visible {
 .load-notice button, .history-status button { margin-left: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--blue); cursor: pointer; padding: 3px 8px; }
 .stock-board > .load-notice { margin: 10px 16px; }
 .history-status.partial { color: var(--amber); }
+
+/* Shared model-aware control retains the compact chat picker layout. */
+.ai-chat-reasoning-picker > .reasoning-control { display: contents; }
+.reasoning-control > small[role="alert"] { grid-column: 1 / -1; color: var(--theme-red, #c43e3e); font-size: 12px; }

@@ -167,7 +167,16 @@ export type HermesMCPServerSetting = {
 	supports_parallel_tool_calls?: boolean;
 };
 
+export type ReasoningCapability = {
+ options: { value: string; label: string }[];
+ default: string;
+ source: string;
+ note: string;
+};
+
 export type HermesAgentSettings = {
+ reasoning?: ReasoningCapability;
+ reasoning_context?: string;
   reasoning_effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | string;
   skills: HermesSkillSetting[];
   mcp_servers: HermesMCPServerSetting[];
@@ -206,6 +215,7 @@ export type LLMConnectionTestResult = {
 };
 
 export type LLMModelOption = {
+ reasoning?: ReasoningCapability;
 	id: string;
 	owned_by?: string;
 	display_name?: string;

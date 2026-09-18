@@ -173,6 +173,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		return [...settings.llm_profiles.map((profile) => profile.api_key), ...sharedCredentials].filter((item) => item.configured).length + browserSessions + (wechatServiceStatus.authenticated ? 1 : 0);
 	}, [browserAuthStatuses, settings, wechatServiceStatus.authenticated]);
 
+	const selectedModelCapability = modelOptions.find((option) => option.id === model)?.reasoning;
 	const selectedLLMProfile = useMemo(() => llmProfiles.find((profile) => profile.id === activeLLMProfileID), [activeLLMProfileID, llmProfiles]);
 
 	const patchSelectedLLMProfile = (patch: Partial<LLMProfile>) => setLLMProfiles((current) => current.map((profile) => profile.id === activeLLMProfileID ? { ...profile, ...patch } : profile));
@@ -301,7 +302,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 		setModelListState('loading');
 		setModelListMessage('正在读取模型服务的模型列表…');
 		try {
-			const request: { provider: string; base_url: string; api_key?: string } = { provider: requestProvider, base_url: requestBaseURL };
+			const request: { provider: string; base_url: string; api_mode: string; api_key?: string } = { provider: requestProvider, base_url: requestBaseURL, api_mode: apiMode };
 			if (requestAPIKey || clearProfileKeys.has(activeLLMProfileID)) request.api_key = requestAPIKey;
 			(request as { profile_id?: string }).profile_id = activeLLMProfileID;
 			const payload = await requestJSON<{ data: LLMModelsResult }>(config, '/api/v1/settings/llm/models', {
@@ -496,7 +497,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 							<label><span>配置名称</span><input value={profileName} onChange={(event) => { setProfileName(event.target.value); patchSelectedLLMProfile({ name: event.target.value }); }} placeholder="例如 DeepSeek 日常 / GPT-5.6 Sol 深度分析" /></label>
 							<div className="settings-grid two-columns">
 								<label><span>服务商</span><select value={provider} onChange={(event) => updateProvider(event.target.value)}>{llmProviders.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-								<label><span>接口协议</span><select value={apiMode} onChange={(event) => { setAPIMode(event.target.value); patchSelectedLLMProfile({ api_mode: event.target.value }); setTestState('idle'); setTestResult(null); }}><option value="chat_completions">Chat Completions</option><option value="codex_responses">Responses API</option><option value="anthropic_messages">Anthropic Messages</option></select></label>
+								<label><span>接口协议</span><select value={apiMode} onChange={(event) => { setAPIMode(event.target.value); resetModelList(); patchSelectedLLMProfile({ api_mode: event.target.value }); setTestState('idle'); setTestResult(null); }}><option value="chat_completions">Chat Completions</option><option value="codex_responses">Responses API</option><option value="anthropic_messages">Anthropic Messages</option></select></label>
 							</div>
 								<label><span>API Base URL</span><input value={baseURL} onChange={(event) => updateBaseURL(event.target.value)} placeholder="https://api.example.com/v1" /></label>
 								<SecretField key={`llm-api-key-${activeLLMProfileID}`} label="模型 API Key" secretKey="llm_api_key" status={selectedLLMProfile?.api_key} value={profileKeyValues[activeLLMProfileID] || ''} clearing={clearProfileKeys.has(activeLLMProfileID)} onChange={updateSecret} onClear={toggleClear} hint="每套配置独立安全保存；切换配置不会覆盖其他密钥" revealable />
@@ -507,6 +508,7 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 										<button type="button" className="model-refresh-button" onClick={() => void fetchModels()} disabled={!config || state === 'saving' || modelListState === 'loading'}>{modelListState === 'loading' ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{modelListState === 'success' ? '刷新' : '获取模型'}</button>
 									</span>
 									<small className={`model-list-message ${modelListState}`}>{modelListMessage || '请先填写 Base URL 和 API Key，再获取模型列表；也可继续手动输入。'}</small>
+									{selectedModelCapability && <small className="model-list-message">思考选项：{selectedModelCapability.options.map((option) => option.label).join('、')} · {selectedModelCapability.source === 'model_api' ? '来源：模型接口' : selectedModelCapability.source === 'hermes' ? '来源：Hermes' : selectedModelCapability.source === 'unknown' ? '能力未确认' : '来源：官方文档'}</small>}
 								</div>
 							<label className="settings-timeout-field"><span>模型响应等待时间（秒）</span><input type="number" min={30} max={3600} step={30} value={responseTimeoutSeconds} onChange={(event) => setResponseTimeoutSeconds(Number(event.target.value) || defaultResponseTimeoutSeconds)} /><small>默认 300 秒，范围 30–3600 秒；模型长时间无响应时将等待更久再重试。</small></label>
 							<div className={`llm-connection-test ${testState}`}>

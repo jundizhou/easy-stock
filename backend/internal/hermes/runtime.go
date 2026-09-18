@@ -3,6 +3,7 @@ package hermes
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,9 @@ import (
 	"easy-stock/backend/internal/appsettings"
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed reasoning_launcher.py
+var reasoningLauncher string
 
 const (
 	providerSlug          = "easy-stock"
@@ -89,14 +93,15 @@ type ProfileGateway interface {
 }
 
 type AgentSettings struct {
-	ReasoningEffort string          `json:"reasoning_effort" yaml:"-"`
-	Skills          []SkillInfo     `json:"skills" yaml:"-"`
-	MCPServers      []MCPServerInfo `json:"mcp_servers" yaml:"-"`
+	ReasoningContext string              `json:"reasoning_context" yaml:"-"`
+	ReasoningEffort  string              `json:"reasoning_effort" yaml:"-"`
+	Reasoning        ReasoningCapability `json:"reasoning" yaml:"-"`
+	Skills           []SkillInfo         `json:"skills" yaml:"-"`
+	MCPServers       []MCPServerInfo     `json:"mcp_servers" yaml:"-"`
 }
 
-// ValidReasoningEfforts mirrors the levels supported by Hermes. "none" turns
-// reasoning off; the remaining levels trade latency and token usage for depth.
-var ValidReasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+// ValidReasoningEfforts is only a syntax allowlist; model capabilities further restrict it.
+var ValidReasoningEfforts = []string{"default", "enabled", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 func IsValidReasoningEffort(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
@@ -138,11 +143,13 @@ type Runtime struct {
 	workDir     string
 	pythonPath  string
 
-	mu         sync.RWMutex
-	configMu   sync.Mutex
-	llm        appsettings.LLM
-	configured bool
-	hasAPIKey  bool
+	mu                sync.RWMutex
+	configMu          sync.Mutex
+	reasoningMu       sync.Mutex
+	reasoningResolved map[string]ReasoningCapability
+	llm               appsettings.LLM
+	configured        bool
+	hasAPIKey         bool
 }
 
 func NewRuntime(cfg Config) *Runtime {
@@ -354,13 +361,8 @@ func (r *Runtime) AgentSettings() (AgentSettings, error) {
 			disabled[name] = true
 		}
 	}
-	reasoningEffort := "medium"
-	if agent, ok := stringMap(config["agent"]); ok {
-		if value := strings.ToLower(strings.TrimSpace(stringValue(agent["reasoning_effort"]))); IsValidReasoningEffort(value) {
-			reasoningEffort = value
-		}
-	}
-	settings := AgentSettings{ReasoningEffort: reasoningEffort, Skills: discoverSkills(filepath.Join(r.home, "skills"))}
+	capability := r.reasoningCapability(reasoningLLM(config))
+	settings := AgentSettings{ReasoningContext: reasoningContext(config), ReasoningEffort: capability.Normalize(storedReasoningEffort(config)), Reasoning: capability, Skills: discoverSkills(filepath.Join(r.home, "skills"))}
 	for index := range settings.Skills {
 		settings.Skills[index].Enabled = !disabled[settings.Skills[index].Name]
 	}
@@ -408,19 +410,21 @@ func (r *Runtime) SyncAgentSettings(settings AgentSettings) error {
 	if err != nil {
 		return err
 	}
+	if settings.ReasoningContext != "" && settings.ReasoningContext != reasoningContext(config) {
+		return ErrReasoningContextChanged
+	}
 	reasoningEffort := strings.ToLower(strings.TrimSpace(settings.ReasoningEffort))
 	if reasoningEffort == "" {
-		reasoningEffort = "medium"
+		reasoningEffort = r.reasoningCapability(reasoningLLM(config)).Default
 	}
 	if !IsValidReasoningEffort(reasoningEffort) {
 		return fmt.Errorf("无效的 Hermes 思考等级: %s", settings.ReasoningEffort)
 	}
-	agent, _ := stringMap(config["agent"])
-	if agent == nil {
-		agent = map[string]any{}
+	if err := r.validateReasoning(config, reasoningEffort); err != nil {
+		return err
 	}
-	agent["reasoning_effort"] = reasoningEffort
-	config["agent"] = agent
+	r.applyReasoning(config, reasoningLLM(config), reasoningEffort)
+
 	skills, _ := stringMap(config["skills"])
 	if skills == nil {
 		skills = map[string]any{}
@@ -522,7 +526,31 @@ func (r *Runtime) start(ctx context.Context, browserStatePath string, options pr
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, r.pythonPath, "-m", "tui_gateway.entry")
+	// Snapshot the effective policy at process creation so model/effort changes
+	// cannot alter an already running request.
+	r.configMu.Lock()
+	config, configErr := r.readConfigMap()
+	if configPath := options.env["HERMES_CONFIG"]; configPath != "" {
+		var data []byte
+		data, configErr = os.ReadFile(configPath)
+		if configErr == nil {
+			config = map[string]any{}
+			configErr = yaml.Unmarshal(data, &config)
+		}
+	}
+	if configErr == nil {
+		r.applyReasoning(config, reasoningLLM(config), storedReasoningEffort(config))
+	}
+	r.configMu.Unlock()
+	if configErr != nil {
+		return nil, configErr
+	}
+	policy, err := json.Marshal(config["easy_stock_reasoning"])
+	if err != nil {
+		return nil, err
+	}
+	processEnv = setEnv(processEnv, "EASY_STOCK_REASONING_POLICY", string(policy))
+	cmd := exec.CommandContext(ctx, r.pythonPath, "-c", reasoningLauncher)
 	cmd.Dir = firstExistingDirectory(options.workDir, r.workDir, r.home)
 	cmd.Env = processEnv
 	stdin, err := cmd.StdinPipe()
@@ -969,7 +997,7 @@ func renderConfig(cfg appsettings.LLM, workDir, runtimeVersion string) string {
 	if version := strings.TrimSpace(runtimeVersion); version != "" {
 		prompt += fmt.Sprintf("\n\n运行时事实：当前 easy-stock 使用内置 Hermes Agent %s。不要用 PATH 中的全局 `hermes --version`、`~/.hermes` 或其他安装目录推断本应用版本；回答版本问题时以本条事实和应用设置中的 Hermes 版本为准。", version)
 	}
-	text.WriteString("agent:\n  reasoning_effort: medium\n  system_prompt: |-\n")
+	text.WriteString("agent:\n  reasoning_effort: none\n  system_prompt: |-\n")
 	for _, line := range strings.Split(prompt, "\n") {
 		fmt.Fprintf(&text, "    %s\n", line)
 	}
@@ -985,11 +1013,7 @@ func (r *Runtime) renderMergedConfig(cfg appsettings.LLM) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	previousAgent, _ := stringMap(config["agent"])
-	previousReasoningEffort := ""
-	if previousAgent != nil {
-		previousReasoningEffort = strings.ToLower(strings.TrimSpace(stringValue(previousAgent["reasoning_effort"])))
-	}
+	previousReasoningEffort := storedReasoningEffort(config)
 	managed := map[string]any{}
 	if err := yaml.Unmarshal([]byte(renderConfig(cfg, r.workDir, r.runtimeVersion())), &managed); err != nil {
 		return "", fmt.Errorf("生成 Hermes 配置: %w", err)
@@ -1001,16 +1025,8 @@ func (r *Runtime) renderMergedConfig(cfg appsettings.LLM) (string, error) {
 			delete(config, key)
 		}
 	}
-	// Model/profile synchronization regenerates the managed agent section. Keep
-	// the user's selected reasoning level instead of resetting it to medium.
-	if IsValidReasoningEffort(previousReasoningEffort) {
-		generatedAgent, _ := stringMap(config["agent"])
-		if generatedAgent == nil {
-			generatedAgent = map[string]any{}
-		}
-		generatedAgent["reasoning_effort"] = previousReasoningEffort
-		config["agent"] = generatedAgent
-	}
+	r.applyReasoning(config, cfg, previousReasoningEffort)
+
 	existingSkills, _ := stringMap(config["skills"])
 	if existingSkills == nil {
 		existingSkills = map[string]any{}
