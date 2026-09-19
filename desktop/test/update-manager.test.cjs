@@ -62,6 +62,33 @@ test('backup failure prevents quitAndInstall', async () => {
   assert.match(manager.getStatus().message, /\[本机路径\]/);
 });
 
+test('install status reports how many locked files the backup skipped', async () => {
+  const updater = new FakeUpdater();
+  const manager = new UpdateManager({
+    updater,
+    enabled: true,
+    currentVersion: '0.9.1',
+    platform: 'win32',
+    stopRuntime: async () => {},
+    createBackup: async () => ({
+      path: 'C:/backups/test',
+      manifest: {
+        createdAt: '2026-09-19T00:00:00.000Z',
+        skipped: [
+          { path: 'hermes-home/session.db', type: 'skipped', reason: 'EBUSY' },
+          { path: 'logs/backend.log', type: 'skipped', reason: 'EBUSY' },
+        ],
+      },
+    }),
+  });
+  updater.emit('update-available', { version: '1.2.0' });
+  updater.emit('update-downloaded', { version: '1.2.0' });
+  await manager.installUpdate();
+
+  assert.equal(manager.getStatus().backupSkippedCount, 2);
+  assert.match(manager.getStatus().message, /2 个被占用文件未能备份/);
+});
+
 test('development updater is disabled', async () => {
   const manager = new UpdateManager({ enabled: false, currentVersion: '0.3.0' });
   assert.equal(manager.getStatus().state, 'disabled');

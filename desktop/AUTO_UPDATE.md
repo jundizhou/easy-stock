@@ -6,8 +6,9 @@ The packaged macOS and Windows apps use `electron-updater` with the public OSS u
 - macOS publishes a signed/notarized ZIP, its blockmap and `latest-mac.yml` to OSS for automatic updates; DMGs are published to GitHub Releases for manual installation.
 - Windows publishes a signed NSIS installer, its blockmap and `latest.yml` to OSS for automatic updates; the installer is also published to GitHub Releases for manual installation.
 - The app checks 30 seconds after startup and every 12 hours. Downloads and restarts always require a user action.
-- Before installation, the app stops its local services, flushes Electron sessions, and backs up user data outside the Electron `userData` directory. The latest three backups are retained.
+- Before installation, the app stops its local services (killing the whole child process tree on Windows so the Hermes runtime cannot linger), flushes Electron sessions, and backs up user data outside the Electron `userData` directory. Files that remain locked (antivirus scans, slow-exiting processes) are retried with backoff and, if they never unlock, skipped and recorded under `skipped` in the backup `manifest.json` instead of aborting the update. The latest three backups are retained.
 - A persistence migration/open failure prevents the desktop backend from starting instead of silently opening an empty database.
+- Override the feed with `A_STOCK_UPDATE_FEED_URL`; it must use HTTPS except for loopback hosts (`127.0.0.1`, `localhost`, `[::1]`), where plain HTTP is allowed so end-to-end update tests can run against a local feed server.
 
 Release signing and OSS secrets expected by `.github/workflows/release.yml`:
 

@@ -130,7 +130,15 @@ class UpdateManager extends EventEmitter {
     try {
       await this.stopRuntime();
       const backup = await this.createBackup({ fromVersion: this.currentVersion, toVersion: this.latestInfo.version });
-      this.setStatus({ state: 'installing', backupPath: backup.path, backupCreatedAt: backup.manifest?.createdAt, message: '数据备份完成，正在启动安装程序' });
+      const skippedCount = Array.isArray(backup.manifest?.skipped) ? backup.manifest.skipped.length : 0;
+      const backupNote = skippedCount > 0 ? `（${skippedCount} 个被占用文件未能备份，详见备份 manifest）` : '';
+      this.setStatus({
+        state: 'installing',
+        backupPath: backup.path,
+        backupCreatedAt: backup.manifest?.createdAt,
+        backupSkippedCount: skippedCount,
+        message: `数据备份完成${backupNote}，正在启动安装程序`,
+      });
       this.updater.quitAndInstall(false, true);
       return this.getStatus();
     } catch (error) {

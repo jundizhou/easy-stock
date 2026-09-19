@@ -172,7 +172,7 @@ async function createWindow() {
     bootWechatService().catch((error) => {
       wechatServiceError = error.message || String(error);
 			desktopLogger.event('error', 'wechat-service', 'startup failed', error);
-      if (wechatServiceProcess && !wechatServiceProcess.killed) wechatServiceProcess.kill();
+      if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
       wechatServiceProcess = undefined;
       wechatServiceConfig = undefined;
     }),
@@ -231,6 +231,21 @@ async function createWindow() {
   await window.loadFile(frontendPath);
 }
 
+function killChildTree(child) {
+  if (child.killed || child.exitCode !== null) return;
+  if (process.platform === 'win32' && child.pid) {
+    // TerminateProcess (child.kill) leaves grandchildren such as the Hermes
+    // Python runtime alive; they keep userData files locked and the pre-update
+    // backup then fails with EBUSY. taskkill /T walks the tree first, the
+    // plain kill right after remains the fallback for a vanished taskkill.
+    try {
+      const { spawn } = require('node:child_process');
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    } catch {}
+  }
+  child.kill();
+}
+
 function terminateChild(child, timeoutMs = 10000) {
   if (!child || child.killed || child.exitCode !== null) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -245,7 +260,7 @@ function terminateChild(child, timeoutMs = 10000) {
       resolve();
     };
     child.once('exit', finish);
-    child.kill();
+    killChildTree(child);
     timer = setTimeout(() => {
       if (child.exitCode !== null) return finish();
       try { child.kill('SIGKILL'); } catch {}
@@ -660,8 +675,8 @@ app.on('before-quit', () => {
   clearInterval(updateCheckTimer);
   if (xueqiuBrowserBridge) void xueqiuBrowserBridge.close();
   if (taogubaBrowserBridge) void taogubaBrowserBridge.close();
-  if (backendProcess && !backendProcess.killed) backendProcess.kill();
-  if (wechatServiceProcess && !wechatServiceProcess.killed) wechatServiceProcess.kill();
+  if (backendProcess && !backendProcess.killed) killChildTree(backendProcess);
+  if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
 });
 
 app.on('window-all-closed', () => {
