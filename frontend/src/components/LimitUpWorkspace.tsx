@@ -493,7 +493,10 @@ function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrent
 }
 
 function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onSelect, onSelectBillboard }: { tradeDate: string; ai?: LadderThemeEntry; stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void }) {
+	const [conceptsExpanded, setConceptsExpanded] = useState(false);
 	const concepts = [...new Set((stock.raw_concepts || []).flatMap(value => value.split(/[、,，;；]/)).map(value => value.trim()).filter(Boolean))];
+	const visibleConcepts = conceptsExpanded ? concepts : concepts.slice(0, 3);
+	const hiddenConceptCount = Math.max(0, concepts.length - 3);
 	const tooltip = [
 		`${stock.name} · 概念板块：${concepts.join('、') || '暂无概念数据'}`,
 		`数据源：${stock.source?.includes('duanxianxia') ? '开盘啦' : stock.source ? '东方财富补充' : '待确认'}`,
@@ -513,16 +516,31 @@ function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onS
 				<span>{stock.limit_regime}</span>
 			</div>
 			<div className="limit-stock-concepts">
-                <div className="limit-stock-concepts-heading">概念板块<small>（开启AI分析更准确）</small></div>
-                <div className="limit-stock-concept-tags">{concepts.length ? concepts.map(concept => <span key={concept}>{concept}</span>) : <small>暂无概念数据</small>}</div>
-            </div>
-			{ai && <div className="limit-stock-ai-theme" title={ai.result ? `${ai.result.reason}\n依据：搜索报道线索（AI归因）\n归因交易日：${ai.trade_date || '未知'}\n识别时间：${ai.identified_at ? new Date(ai.identified_at).toLocaleString() : '未知'}${ai.error ? `\n${ai.error}` : ''}` : ai.error || '正在识别'}>
+				<div className="limit-stock-concepts-heading">概念板块<small>（开启AI分析更准确）</small></div>
+				<div className="limit-stock-concept-tags">
+					{visibleConcepts.length ? visibleConcepts.map(concept => <span key={concept}>{concept}</span>) : <small>暂无概念数据</small>}
+					{hiddenConceptCount > 0 && <button
+						type="button"
+						className="limit-stock-concept-toggle"
+						aria-expanded={conceptsExpanded}
+						aria-label={conceptsExpanded ? `收起${stock.name}的概念板块` : `展开${stock.name}其余${hiddenConceptCount}个概念`}
+						title={conceptsExpanded ? '收起概念' : `展开其余${hiddenConceptCount}个概念`}
+						onClick={event => { event.stopPropagation(); setConceptsExpanded(expanded => !expanded); }}
+						onKeyDown={event => event.stopPropagation()}
+					>{conceptsExpanded ? '收起' : `+${hiddenConceptCount} 展开`}</button>}
+				</div>
+			</div>
+			{ai && <div className="limit-stock-ai-theme" title={ai.result ? `依据：搜索报道线索（AI归因）\n归因交易日：${ai.trade_date || '未知'}\n识别时间：${ai.identified_at ? new Date(ai.identified_at).toLocaleString() : '未知'}${ai.error ? `\n${ai.error}` : ''}` : ai.error || '正在识别'}>
 				<span>{ai.result && ai.trade_date !== tradeDate ? `历史上涨题材 · ${ai.trade_date || '日期未知'}` : 'AI上涨题材'}</span><strong>{ai.result?.themes[0] || (ai.status === 'running' ? '识别中…' : '上涨题材待确认')}</strong>
-				{ai.result && <p className="limit-stock-ai-reason">{ai.result.reason}</p>}
 				{!ai.result && ai.error && <p className="limit-stock-ai-reason">{ai.error}</p>}
-				{ai.result?.caveat && <p className="limit-stock-ai-reason">{ai.result.caveat}</p>}
-				{ai.result && <div className="limit-stock-ai-sources">{ai.result.sources.map((source, index) => <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noopener noreferrer" title={`${source.title}${source.date ? ` · ${source.date}` : ''}${source.snippet ? `\n${source.snippet}` : ''}`} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>来源{index + 1}</a>)}</div>}
-				{ai.result && <small>{ai.status === 'running' ? '刷新中' : ai.status === 'failed' ? '沿用旧结果' : '已缓存'}</small>}
+				{ai.result && <details className="limit-stock-ai-details" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+					<summary><span className="when-collapsed">展开详情</span><span className="when-expanded">收起详情</span><ChevronDown size={12} aria-hidden="true" /></summary>
+					<div className="limit-stock-ai-details-body">
+						<p className="limit-stock-ai-reason">{ai.result.reason}</p>
+						{ai.result.caveat && <p className="limit-stock-ai-reason">{ai.result.caveat}</p>}
+						<div className="limit-stock-ai-sources">{ai.result.sources.map((source, index) => <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noopener noreferrer" title={`${source.title}${source.date ? ` · ${source.date}` : ''}${source.snippet ? `\n${source.snippet}` : ''}`}>来源{index + 1}</a>)}<small>{ai.status === 'running' ? '刷新中' : ai.status === 'failed' ? '沿用旧结果' : '已缓存'}</small></div>
+					</div>
+				</details>}
 			</div>}
 			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{stock.industry || '暂无行业数据'}</em></div>
 			{!compact ? <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><button type="button" className="limit-billboard-button" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button></div> : <button type="button" className="limit-billboard-button compact" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>}
