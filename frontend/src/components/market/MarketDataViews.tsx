@@ -38,6 +38,8 @@ type DataState = 'idle' | 'loading' | 'ready' | 'error';
 type SortDirection = 'asc' | 'desc';
 type SortState = { key: string; direction: SortDirection };
 
+const FUTURES_VARIETY_NAMES: Record<string, string> = { IF: '沪深300', IH: '上证50', IC: '中证500', IM: '中证1000' };
+
 export type BillboardDetailEntry = {
 	state: DataState;
 	detail?: MarketBillboardDetail;
@@ -209,7 +211,22 @@ export function FuturesPositionView({ series, members, consensus, variety, onVar
 					<SummaryMetric icon={<Building2 size={17} />} label="统计范围" value={consensusVariety ? `${consensusVariety.contract_count} 个合约` : '--'} detail={`${consensus?.trade_date || latest.trade_date} · ${series?.index_code || '--'}`} tone="flat" />
 			</section>
 			{!consensus && <div className="market-module-empty market-futures-consensus-empty"><AlertTriangle size={20} /><strong>共识统计未获取</strong><span>全部合约前20会员多空单数据暂不可用，不以主力合约或持仓变化代替。</span></div>}
-			{consensus?.varieties?.length ? <section className="market-futures-consensus" aria-label="股指期货共识口径统计"><header><div><span>CFFEX CONSENSUS</span><h3>{consensus.trade_date} 四大期指多空单共识</h3></div><small>+ 多单 · − 空单 · 全部合约 · 前20会员 · 中信期货(代客)</small></header><div className="market-data-table"><header><span>品种</span><span>前20多空单净值</span><span>当日多空单变化</span><span>中信多空单变化</span><span>合约数</span></header>{consensus.varieties.map((item) => <article key={item.variety}><strong>{item.variety}</strong><span>{formatFuturesOpeningHands(item.net_long_position, true)}</span><span className={toneClass(item.net_long_change)}>{formatFuturesOpeningHands(item.net_long_change, true)}</span><span className={toneClass(item.citic_net_long_change)}>{formatFuturesOpeningHands(item.citic_net_long_change, true)}</span><span>{item.contract_count}</span></article>)}</div></section> : null}
+			{consensus?.varieties?.length ? <section className="market-futures-consensus" aria-label="股指期货共识口径统计">
+				<header><div><span>CFFEX CONSENSUS</span><h3>{consensus.trade_date} 四大期指多空单共识</h3></div><small>全部合约 · 前20会员</small></header>
+				<div className="market-futures-consensus-scroll" role="region" aria-label="四大期指多空数据，可横向滚动" tabIndex={0}>
+					<table className="market-futures-consensus-table" aria-label="四大期指多空单共识">
+						<thead><tr><th scope="col">品种</th><th scope="col">前20多空单净值</th><th scope="col">当日多空单变化</th><th scope="col">中信多空单变化</th><th scope="col">合约数</th></tr></thead>
+						<tbody>{consensus.varieties.map((item) => <tr key={item.variety}>
+							<th scope="row"><strong>{item.variety}</strong><small>{FUTURES_VARIETY_NAMES[item.variety]}</small></th>
+							<td className={toneClass(item.net_long_position)}>{formatFuturesOpeningHands(item.net_long_position, true)}</td>
+							<td className={toneClass(item.net_long_change)}>{formatFuturesOpeningHands(item.net_long_change, true)}</td>
+							<td className={toneClass(item.citic_net_long_change)}>{formatFuturesOpeningHands(item.citic_net_long_change, true)}</td>
+							<td>{item.contract_count}</td>
+						</tr>)}</tbody>
+					</table>
+				</div>
+				<footer><span>+ 多单 · − 空单</span><span>中信统计：中信期货(代客)</span></footer>
+			</section> : null}
 			<section className="market-futures-panel"><header><div><span>MAIN CONTRACT REFERENCE</span><h3>{series?.variety_name || variety} · 主力合约持仓趋势参考</h3></div><div className="market-margin-legend"><span className="total">多单</span><span className="lending">空单</span><span className="financing">净持仓</span></div></header>
 				<div className="market-futures-bars">{rows.slice(-30).map((row) => <article key={row.trade_date}><time>{formatMonthDay(row.trade_date)}</time><div><i className="long" style={{ width: `${Math.max(1, Math.abs(row.long_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.long_position)}</span></div><div><i className="short" style={{ width: `${Math.max(1, Math.abs(row.short_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.short_position)}</span></div><strong className={toneClass(row.net_position)}>{formatFuturesHands(row.net_position)}</strong></article>)}</div>
 				<footer>共识统计采用 {consensus?.trade_date || latest.trade_date} 全部合约前20会员多空单口径（+ 多单，− 空单）；此处图表为主力合约持仓趋势参考。结算价 {latest.settle_price == null ? '--' : latest.settle_price.toFixed(2)} · 现货指数 {latest.index_close == null ? '--' : latest.index_close.toFixed(2)} · 基差 {latest.basis == null ? '--' : latest.basis.toFixed(2)}。</footer>

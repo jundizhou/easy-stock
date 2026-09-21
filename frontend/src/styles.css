@@ -7047,12 +7047,26 @@ a:focus-visible {
 .market-futures-panel > footer { padding: 8px 14px 11px; border-top: 1px solid var(--line-soft); color: var(--theme-subtle, #8b97a5); font-size: 8px; line-height: 1.6; }
 .market-futures-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .market-futures-consensus { overflow: hidden; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--theme-surface, #fff); }
-.market-futures-consensus > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); background: var(--theme-surface, #fbfcfe); }
+.market-futures-consensus > header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); background: var(--theme-surface, #fbfcfe); }
 .market-futures-consensus > header > div { display: grid; gap: 2px; }
 .market-futures-consensus > header span { color: var(--theme-blue, #2476d2); font-size: 8px; font-weight: 750; letter-spacing: .08em; }
 .market-futures-consensus > header h3 { margin: 0; color: var(--theme-text, #293b51); font-size: 13px; }
 .market-futures-consensus > header small { color: var(--theme-subtle, #8794a4); font-size: 9px; }
-.market-futures-consensus .market-data-table { border: 0; border-radius: 0; }
+.market-futures-consensus-scroll { overflow-x: auto; }
+.market-futures-consensus-scroll:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.market-futures-consensus-table { width: 100%; min-width: 640px; border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.market-futures-consensus-table th,
+.market-futures-consensus-table td { padding: 10px 16px; text-align: right; white-space: nowrap; }
+.market-futures-consensus-table thead th { background: var(--theme-surface-soft, #f7f9fc); color: var(--muted); font-size: 10px; font-weight: 500; }
+.market-futures-consensus-table tbody th,
+.market-futures-consensus-table tbody td { border-top: 1px solid var(--line-soft); background: var(--theme-surface, #fff); }
+.market-futures-consensus-table tr > :first-child { position: sticky; left: 0; z-index: 1; text-align: left; }
+.market-futures-consensus-table tr > :last-child { width: 72px; color: var(--muted); text-align: center; }
+.market-futures-consensus-table tbody th strong { color: var(--text); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+.market-futures-consensus-table tbody th small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.market-futures-consensus-table tbody td { font-family: "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+.market-futures-consensus-table tbody tr:hover > * { background: var(--theme-surface-soft, #f7f9fc); }
+.market-futures-consensus > footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; padding: 9px 16px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 9px; }
 .market-futures-opening { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--theme-surface, #f8fbff); }
 .market-futures-opening > header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 .market-futures-opening > header > div { display: grid; gap: 4px; }
