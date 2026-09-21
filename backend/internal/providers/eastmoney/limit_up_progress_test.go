@@ -15,6 +15,16 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 	gate := make(chan struct{})
 	var calls, active, peak atomic.Int32
 	now := time.Now().In(time.FixedZone("Asia/Shanghai", 8*60*60))
+	latest := now
+	for !foundation.IsAStockTradingDay(latest) {
+		latest = latest.AddDate(0, 0, -1)
+	}
+	expectedDays := 0
+	for offset := 0; offset < 8; offset++ {
+		if foundation.IsAStockTradingDay(now.AddDate(0, 0, -offset)) {
+			expectedDays++
+		}
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		n := active.Add(1)
@@ -25,7 +35,7 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 				break
 			}
 		}
-		if r.URL.Query().Get("date") != now.Format("20060102") {
+		if r.URL.Query().Get("date") != latest.Format("20060102") {
 			select {
 			case <-gate:
 			case <-r.Context().Done():
@@ -46,7 +56,7 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 	}()
 	select {
 	case first := <-partial:
-		if len(first) != 1 || first[0].Date.Format("20060102") != now.Format("20060102") {
+		if len(first) != 1 || first[0].Date.Format("20060102") != latest.Format("20060102") {
 			t.Fatalf("wrong first batch: %+v", first)
 		}
 	case <-ctx.Done():
@@ -61,7 +71,7 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 	}
 	before := calls.Load()
 	items, err := c.RecentLimitUps(ctx, 8)
-	if err != nil || len(items) != 8 || calls.Load() != before {
+	if err != nil || len(items) != expectedDays || calls.Load() != before {
 		t.Fatalf("history cache not reused: items=%d calls=%d err=%v", len(items), calls.Load(), err)
 	}
 	items[0].Name = "mutated"

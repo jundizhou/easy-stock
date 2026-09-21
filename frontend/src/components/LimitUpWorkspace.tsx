@@ -32,6 +32,7 @@ import {
 	requestJSON,
 } from '../lib/backend';
 import { KLineChart } from './KLineChart';
+import { LadderThemeEntries, LadderThemeEntry, useLadderThemeAI } from '../lib/ladder-theme-ai';
 import { classifyBillboardSeat } from '../lib/billboard';
 import { latestTradingDayKLines } from '../lib/kline';
 import { ShortTermProgress } from '../lib/short-term-progress';
@@ -86,6 +87,13 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 	const billboardCache = useRef(new Map<string, { item: MarketBillboardItem | null; detail: MarketBillboardDetail | null }>());
 	const current = useMemo(() => summarizeVisibleDay(data?.current, showST), [data?.current, showST]);
 	const previous = useMemo(() => summarizeVisibleDay(data?.previous, showST), [data?.previous, showST]);
+	const [includeFirstBoardAI, setIncludeFirstBoardAI] = useState(false);
+	const aiStocks = [
+		...current.levels.filter(level => includeFirstBoardAI || level.level > 1).flatMap(level => level.stocks.map(stock => ({ ...stock, trade_date: current.tradeDate }))),
+		...(previousExpanded ? previous.levels.filter(level => includeFirstBoardAI || level.level > 1).flatMap(level => level.stocks.map(stock => ({ ...stock, trade_date: previous.tradeDate }))) : []),
+	];
+	const themeAI = useLadderThemeAI(config, aiStocks);
+	const aiEntries = Object.values(themeAI.entries);
 
 	useEffect(() => {
 		setSelectedKLinePeriod('day');
@@ -189,10 +197,17 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 					<p>{data?.current.trade_date || '等待涨停池'} · {data?.session_status || '加载中'} · {current.sourceSummary} · 结构统计默认剔除 ST</p>
 				</div>
 				<div className="limit-up-actions">
+					<label className="st-toggle" title="联网查阅近期报道识别上涨题材；不足则待确认。成功结果持续复用，失败后七天内不自动重试，手动刷新不受限制。"><input type="checkbox" checked={themeAI.enabled} onChange={event => themeAI.setEnabled(event.target.checked)} /><span>AI增强上涨题材识别</span></label>
+					<button type="button" className="refresh-data-button" onClick={themeAI.refresh} disabled={!themeAI.enabled || themeAI.busy || !aiStocks.length} title="重新识别当前范围内全部股票，优先高连板，绕过七天限制。"><RefreshCw size={15} />重新识别</button>
+					{themeAI.enabled && <>
+						<label className="st-toggle"><input type="checkbox" checked={includeFirstBoardAI} onChange={event => setIncludeFirstBoardAI(event.target.checked)} /><span>AI包含首板</span></label>
+						<button type="button" className="refresh-data-button" onClick={themeAI.busy ? themeAI.pauseBatch : themeAI.resume} disabled={!aiStocks.length}>{themeAI.busy ? '暂停后续识别' : '继续识别'}</button>
+					</>}
 					<label className="st-toggle"><input type="checkbox" checked={showST} onChange={(event) => setShowST(event.target.checked)} /><span>显示 ST</span></label>
 					<button type="button" className="refresh-data-button" onClick={onRefresh} disabled={state === 'loading'}><RefreshCw className={state === 'loading' ? 'spin' : ''} size={15} />刷新梯队</button>
 				</div>
 			</header>
+			{themeAI.enabled && <p className="short-term-status" role="status">{themeAI.busy ? `本轮识别 ${themeAI.progress.completed}/${themeAI.progress.total}` : '本轮已结束'} · 当前范围 {new Set(aiStocks.map(stock => stock.symbol)).size} 只 · 已缓存 {aiEntries.filter(e => e.result).length} 只 · 排队等待 {themeAI.progress.remaining} 只。{themeAI.busy && themeAI.progress.active.length > 0 && `正在检索：${themeAI.progress.active.join('、')}。`}按当前范围持续识别，同时处理2只，可随时暂停。{themeAI.error && <span role="alert"> {themeAI.error}</span>}</p>}
 			{data && <p className="short-term-status" role="status">{progress?.stale || data.meta.stale ? '显示上次快照' : updating ? '基础梯队已显示，补充数据更新中' : '梯队已更新'} · 数据时间 {formatDateTimeClock(data.meta.fetched_at)}{updating && ' · 返回的数据会陆续显示'}</p>}
 			{error && data && <p className="short-term-status error" role="status">部分数据更新失败：{error}<button type="button" onClick={onRefresh}>重试</button></p>}
 
@@ -212,7 +227,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						<div><span>今日结构</span><h3>连板梯队</h3></div>
 						<small>按高度降序；同层优先无开板、早封板</small>
 					</div>
-					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />}
+					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows aiEntries={themeAI.entries} levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />}
 				</section>
 
 				<aside className="limit-up-side-stack">
@@ -265,7 +280,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						</button>
 					</div>
 				</div>
-				{previousExpanded && <div id="previous-ladder-content"><LadderRows levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} emptyText="暂无昨日梯队数据" /></div>}
+				{previousExpanded && <div id="previous-ladder-content"><LadderRows aiEntries={themeAI.entries} levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} emptyText="暂无昨日梯队数据" /></div>}
 			</section>
 
 			<footer className="limit-up-note">
@@ -436,7 +451,7 @@ function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNo
 	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function LadderRows({ levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
+function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { aiEntries: LadderThemeEntries; levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
 	const [collapsedLevels, setCollapsedLevels] = useState<Set<number>>(() => new Set([1]));
 
 	if (!levels.length) {
@@ -469,7 +484,7 @@ function LadderRows({ levels, tradeDate, compact = false, showCurrentChange = fa
 						<ChevronDown size={17} aria-hidden="true" />
 					</summary>
 									<div className="limit-stock-grid">
-										{level.stocks.map((stock) => <LadderStockChip stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
+										{level.stocks.map((stock) => <LadderStockChip tradeDate={tradeDate} ai={aiEntries[stock.symbol]} stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
 					</div>
 				</details>
 			))}
@@ -477,11 +492,10 @@ function LadderRows({ levels, tradeDate, compact = false, showCurrentChange = fa
 	);
 }
 
-function LadderStockChip({ stock, compact, showCurrentChange, onSelect, onSelectBillboard }: { stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void }) {
-	const primaryTheme = stock.primary_theme || stock.industry || '待归因';
-	const secondary = stock.secondary_themes?.length ? stock.secondary_themes.join(' / ') : stock.industry || '暂无辅助题材';
+function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onSelect, onSelectBillboard }: { tradeDate: string; ai?: LadderThemeEntry; stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void }) {
+	const concepts = [...new Set((stock.raw_concepts || []).flatMap(value => value.split(/[、,，;；]/)).map(value => value.trim()).filter(Boolean))];
 	const tooltip = [
-		`${stock.name} · 主炒：${primaryTheme}`,
+		`${stock.name} · 概念板块：${concepts.join('、') || '暂无概念数据'}`,
 		`数据源：${stock.source?.includes('duanxianxia') ? '开盘啦' : stock.source ? '东方财富补充' : '待确认'}`,
 		stock.theme_source ? `题材口径：${stock.theme_source.includes('cross-day') ? '跨日开盘啦统一' : stock.theme_source.includes('duanxianxia') ? '开盘啦逐股题材' : '东方财富概念归因'}` : '',
 		stock.raw_concepts?.length ? `原始概念：${stock.raw_concepts.join('、')}` : '',
@@ -498,8 +512,19 @@ function LadderStockChip({ stock, compact, showCurrentChange, onSelect, onSelect
 				)}
 				<span>{stock.limit_regime}</span>
 			</div>
-			<div className="limit-stock-theme"><span>主炒</span><strong>{primaryTheme}</strong>{stock.theme_confidence > 0 && <em>{Math.round(stock.theme_confidence * 100)}%</em>}</div>
-			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{secondary}</em></div>
+			<div className="limit-stock-concepts">
+                <div className="limit-stock-concepts-heading">概念板块<small>（开启AI分析更准确）</small></div>
+                <div className="limit-stock-concept-tags">{concepts.length ? concepts.map(concept => <span key={concept}>{concept}</span>) : <small>暂无概念数据</small>}</div>
+            </div>
+			{ai && <div className="limit-stock-ai-theme" title={ai.result ? `${ai.result.reason}\n依据：搜索报道线索（AI归因）\n归因交易日：${ai.trade_date || '未知'}\n识别时间：${ai.identified_at ? new Date(ai.identified_at).toLocaleString() : '未知'}${ai.error ? `\n${ai.error}` : ''}` : ai.error || '正在识别'}>
+				<span>{ai.result && ai.trade_date !== tradeDate ? `历史上涨题材 · ${ai.trade_date || '日期未知'}` : 'AI上涨题材'}</span><strong>{ai.result?.themes[0] || (ai.status === 'running' ? '识别中…' : '上涨题材待确认')}</strong>
+				{ai.result && <p className="limit-stock-ai-reason">{ai.result.reason}</p>}
+				{!ai.result && ai.error && <p className="limit-stock-ai-reason">{ai.error}</p>}
+				{ai.result?.caveat && <p className="limit-stock-ai-reason">{ai.result.caveat}</p>}
+				{ai.result && <div className="limit-stock-ai-sources">{ai.result.sources.map((source, index) => <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noopener noreferrer" title={`${source.title}${source.date ? ` · ${source.date}` : ''}${source.snippet ? `\n${source.snippet}` : ''}`} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>来源{index + 1}</a>)}</div>}
+				{ai.result && <small>{ai.status === 'running' ? '刷新中' : ai.status === 'failed' ? '沿用旧结果' : '已缓存'}</small>}
+			</div>}
+			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{stock.industry || '暂无行业数据'}</em></div>
 			{!compact ? <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><button type="button" className="limit-billboard-button" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button></div> : <button type="button" className="limit-billboard-button compact" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>}
 		</article>
 	);

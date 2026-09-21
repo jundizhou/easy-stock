@@ -215,3 +215,23 @@ func TestLadderRejectsQuotesFromDifferentTradingDay(t *testing.T) {
 		t.Fatal("mixed different trading days")
 	}
 }
+
+func TestLadderWeekendUsesFridayPoolAndQuotes(t *testing.T) {
+	friday := time.Date(2026, 9, 18, 0, 0, 0, 0, shanghaiLocation)
+	sunday := friday.AddDate(0, 0, 2)
+	events := []foundation.LimitUpEvent{
+		{Symbol: "600001.SH", Date: friday.AddDate(0, 0, -1), Streak: 2},
+		{Symbol: "600001.SH", Date: friday, Streak: 3},
+		// A provider may repeat Friday's pool under the requested Sunday date.
+		{Symbol: "600001.SH", Date: sunday, Streak: 3},
+	}
+	ladder, err := buildLimitUpLadder(events, nil, sunday)
+	if err != nil || ladder.Current.TradeDate != "2026-09-18" || ladder.Previous.TradeDate != "2026-09-17" || ladder.SessionStatus != "最近交易日" {
+		t.Fatalf("wrong weekend dates: %+v %v", ladder, err)
+	}
+	gate := make(chan struct{})
+	close(gate)
+	if err := enrichPreviousChangesForDate(context.Background(), &ladder.Previous, ladder.Current.TradeDate, datedLadderQuotes{gate, friday}); err != nil {
+		t.Fatalf("Friday quotes should match the weekend snapshot: %v", err)
+	}
+}

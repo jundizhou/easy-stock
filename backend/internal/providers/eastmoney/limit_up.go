@@ -59,6 +59,9 @@ func (c *Client) RecentLimitUps(ctx context.Context, lookbackDays int) ([]founda
 	var lastErr error
 	for offset := lookbackDays - 1; offset >= 0; offset-- {
 		date := now.AddDate(0, 0, -offset)
+		if !foundation.IsAStockTradingDay(date) {
+			continue
+		}
 		dayEvents, err := c.LimitUpPool(ctx, date)
 		if err != nil {
 			lastErr = err
@@ -67,7 +70,7 @@ func (c *Client) RecentLimitUps(ctx context.Context, lookbackDays int) ([]founda
 		successfulDays++
 		events = append(events, dayEvents...)
 	}
-	if successfulDays == 0 {
+	if successfulDays == 0 && lastErr != nil {
 		return nil, fmt.Errorf("eastmoney recent limit-up pool unavailable: %w", lastErr)
 	}
 	return events, nil
@@ -102,7 +105,12 @@ func (c *Client) recentLimitUps(ctx context.Context, lookbackDays int, publish f
 				if ctx.Err() != nil {
 					return
 				}
-				events, err := c.LimitUpPool(ctx, now.AddDate(0, 0, -offset))
+				date := now.AddDate(0, 0, -offset)
+				if !foundation.IsAStockTradingDay(date) {
+					results <- dayResult{offset: offset}
+					continue
+				}
+				events, err := c.LimitUpPool(ctx, date)
 				results <- dayResult{offset, events, err}
 			}
 		}()

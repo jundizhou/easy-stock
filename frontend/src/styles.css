@@ -7415,3 +7415,18 @@ a:focus-visible {
 /* Shared model-aware control retains the compact chat picker layout. */
 .ai-chat-reasoning-picker > .reasoning-control { display: contents; }
 .reasoning-control > small[role="alert"] { grid-column: 1 / -1; color: var(--theme-red, #c43e3e); font-size: 12px; }
+
+.limit-stock-ai-theme { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 6px 0; font-size: 11px; }
+.limit-stock-ai-theme > span, .limit-stock-ai-theme > small { color: var(--muted); font-size: 10px; }
+.limit-stock-ai-theme > strong { color: var(--purple); overflow-wrap: anywhere; }
+
+.limit-stock-ai-reason { flex-basis: 100%; margin: 0; color: var(--muted); line-height: 1.5; }
+
+.limit-stock-ai-sources { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.limit-stock-concepts { margin: 6px 0; min-width: 0; }
+.limit-stock-concepts-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.limit-stock-concepts-heading small { font-size: 10px; font-weight: normal; }
+.limit-stock-concept-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.limit-stock-concept-tags > span { max-width: 100%; padding: 3px 6px; border-radius: 4px; background: var(--theme-blue-soft, rgba(23, 94, 169, .07)); color: var(--theme-blue, #175ea9); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.limit-stock-concept-tags > small { color: var(--muted); font-size: 11px; }

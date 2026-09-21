@@ -35,6 +35,7 @@ import (
 )
 
 type Server struct {
+	ladderThemeAI         *ladderThemeAI
 	mux                   *http.ServeMux
 	token                 string
 	realtimeProvider      RealtimeProvider
@@ -309,6 +310,7 @@ func NewServer(config any) *Server {
 		reviewImporter:        cfg.ReviewImporter,
 		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
 		settingsStore:         cfg.SettingsStore,
+		ladderThemeAI:         newLadderThemeAI(cfg.SettingsPath),
 		reviewAutomation:      cfg.ReviewAutomation,
 		remoteDailySync:       cfg.RemoteDailySync,
 		hermesGateway:         cfg.HermesGateway,
@@ -509,6 +511,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/themes/screen", s.themeScreenHandler)
 	s.mux.HandleFunc("GET /api/v1/sector-map", s.sectorMapHandler)
 	s.mux.HandleFunc("GET /api/v1/short-term/limit-up-ladder", s.limitUpLadderHandler)
+	s.mux.HandleFunc("POST /api/v1/short-term/ladder-theme-ai", s.ladderThemeAIIdentify)
+	s.mux.HandleFunc("GET /api/v1/short-term/ladder-theme-ai", s.ladderThemeAIResults)
 	s.mux.HandleFunc("GET /api/v1/short-term/emotion-history", s.marketEmotionHistoryHandler)
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery", s.masteryIndex)
 	s.mux.HandleFunc("GET /api/v1/short-term/mastery/trader", s.masteryTrader)
