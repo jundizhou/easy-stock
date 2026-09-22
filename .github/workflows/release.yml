@@ -1,251 +1,81 @@
-name: Desktop Release
+name: Desktop Release Recovery
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to publish or update
+        description: Existing release tag whose validated build artifacts should be uploaded
         required: true
-        default: v0.1.0
+        default: v1.2.2
+        type: string
+      artifact_run_id:
+        description: Original Desktop Release run with successful source and package checks
+        required: true
+        default: "35587092767"
         type: string
 
-env:
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-
 permissions:
+  actions: read
   contents: write
 
 concurrency:
-  group: desktop-release-${{ inputs.tag || github.ref_name }}
+  group: desktop-release-${{ inputs.tag }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+  GH_REPO: ${{ github.repository }}
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
-  quality:
-    name: Test release source
+  recover:
+    name: Upload verified artifacts to release draft
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Check out source
+      - name: Check out the original release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.tag }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Verify release tag
-        run: node desktop/scripts/check-release-tag.mjs "$RELEASE_TAG"
-
-      - name: Test backend and frontend
-        run: npm test
-
-      - name: Test desktop shell
-        run: npm --workspace desktop test
-
-  macos:
-    name: macOS ${{ matrix.arch }}
-    needs: quality
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15-intel
-            arch: x64
-          - runner: macos-15
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build macOS release assets
-        env:
-          A_STOCK_DESKTOP_ARCH: ${{ matrix.arch }}
-          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run release:mac
-
-      - name: Verify Hermes inside the macOS updater ZIP
+      - name: Verify original build provenance and draft status
+        shell: bash
         run: |
-          verify_root="$RUNNER_TEMP/easy-stock-zip-check"
-          mkdir -p "$verify_root"
-          ditto -x -k "desktop/dist/release/easy-stock-${RELEASE_TAG}-macos-${{ matrix.arch }}.zip" "$verify_root"
-          node desktop/scripts/verify-release-package.mjs "$verify_root/easy-stock.app" macos
+          set -euo pipefail
+          node desktop/scripts/check-release-tag.mjs "$RELEASE_TAG"
+          run_sha=$(gh api "repos/$GH_REPO/actions/runs/$ARTIFACT_RUN_ID" --jq .head_sha)
+          test "$run_sha" = "$(git rev-parse HEAD)"
+          gh api "repos/$GH_REPO/actions/runs/$ARTIFACT_RUN_ID/jobs?filter=latest&per_page=100" > original-jobs.json
+          jq -e '[.jobs[] | select(.name == "Test release source" or .name == "macOS x64" or .name == "macOS arm64" or .name == "Windows x64")] | (length == 4 and all(.[]; .conclusion == "success"))' original-jobs.json
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          echo "Verified original build commit: $run_sha"
 
-      - name: Verify macOS updater metadata
-        run: node desktop/scripts/verify-updater-artifacts.mjs desktop/dist/release latest-mac.yml
-
-      - name: Preserve architecture-specific updater metadata
-        run: mv desktop/dist/release/latest-mac.yml desktop/dist/release/latest-mac-${{ matrix.arch }}.yml
-
-      - name: Upload macOS release assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: easy-stock-macos-${{ matrix.arch }}
-          path: desktop/dist/release/*
-          if-no-files-found: error
-          compression-level: 0
-
-  windows:
-    name: Windows x64
-    needs: quality
-    runs-on: windows-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Windows release asset
-        env:
-          A_STOCK_DESKTOP_ARCH: x64
-          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npm run release:windows
-
-      - name: Verify Hermes inside the Windows installer
-        shell: pwsh
-        run: |
-          $verifyRoot = Join-Path $env:RUNNER_TEMP 'easy-stock-installer-check'
-          $installer = "desktop/dist/release/easy-stock-$env:RELEASE_TAG-windows-x64-setup.exe"
-          7z x $installer "-o$verifyRoot/installer" -y
-          if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Windows installer' }
-          $payload = @(Get-ChildItem "$verifyRoot/installer" -Recurse -Filter 'app-64.7z')
-          if ($payload.Count -ne 1) { throw 'Expected exactly one x64 application payload in the installer' }
-          7z x $payload[0].FullName "-o$verifyRoot/app" -y
-          if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Windows application payload' }
-          node desktop/scripts/verify-release-package.mjs "$verifyRoot/app" windows
-          if ($LASTEXITCODE -ne 0) { throw 'Windows installer verification failed' }
-
-      - name: Verify Windows updater metadata
-        run: node desktop/scripts/verify-updater-artifacts.mjs desktop/dist/release latest.yml
-
-      - name: Upload Windows release asset
-        uses: actions/upload-artifact@v4
-        with:
-          name: easy-stock-windows-x64
-          path: desktop/dist/release/*
-          if-no-files-found: error
-          compression-level: 0
-
-  publish:
-    name: Publish GitHub Release
-    needs:
-      - quality
-      - macos
-      - windows
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Download release assets
+      - name: Download original release artifacts
         uses: actions/download-artifact@v4
         with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id }}
           pattern: easy-stock-*
           path: release-assets
           merge-multiple: true
 
-      - name: Merge and verify macOS updater metadata
+      - name: Verify update packages and prepare user downloads
         run: |
           node desktop/scripts/merge-mac-updater-metadata.mjs release-assets
           node desktop/scripts/verify-updater-artifacts.mjs release-assets latest-mac.yml latest.yml
+          node desktop/scripts/prepare-publish-assets.mjs release-assets publish-assets "$RELEASE_TAG"
 
-      - name: Prepare GitHub and OSS asset sets
-        run: node desktop/scripts/prepare-publish-assets.mjs release-assets publish-assets "$RELEASE_TAG"
-
-      - name: Install ossutil
-        run: |
-          curl --fail --silent --show-error --location https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip --output "$RUNNER_TEMP/ossutil.zip"
-          unzip -q "$RUNNER_TEMP/ossutil.zip" -d "$RUNNER_TEMP/ossutil"
-          chmod +x "$RUNNER_TEMP/ossutil/ossutil-2.3.0-linux-amd64/ossutil"
-          echo "OSSUTIL_BIN=$RUNNER_TEMP/ossutil/ossutil-2.3.0-linux-amd64/ossutil" >> "$GITHUB_ENV"
-
-      - name: Publish and verify updater assets to OSS
-        env:
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-          OSS_REGION: cn-beijing
-          OSS_ENDPOINT: https://oss-cn-beijing.aliyuncs.com
-          OSS_BUCKET: easy-stock-fs
-          OSS_UPDATE_PREFIX: updates/desktop
-          OSS_UPDATE_PUBLIC_URL: https://easy-stock-fs.oss-cn-beijing.aliyuncs.com/updates/desktop
-        run: |
-          test -n "$OSS_ACCESS_KEY_ID" || { echo "Missing GitHub secret: OSS_ACCESS_KEY_ID" >&2; exit 1; }
-          test -n "$OSS_ACCESS_KEY_SECRET" || { echo "Missing GitHub secret: OSS_ACCESS_KEY_SECRET" >&2; exit 1; }
-          bash desktop/scripts/publish-updater-oss.sh publish-assets/updater
-
-      - name: Generate SHA-256 checksums for user downloads
+      - name: Generate SHA-256 checksums
         working-directory: publish-assets/github
         run: find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
 
-      - name: Publish or update release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Upload and verify the existing release draft
         run: |
           bash desktop/scripts/publish-github-release.sh "$RELEASE_TAG" publish-assets/github ".github/release-notes/$RELEASE_TAG.md"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
