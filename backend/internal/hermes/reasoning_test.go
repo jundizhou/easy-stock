@@ -157,11 +157,11 @@ func TestBundledReasoningBridge(t *testing.T) {
 		t.Skip("set HERMES_TEST_PYTHON to the bundled runtime Python")
 	}
 	r := NewRuntime(Config{Home: t.TempDir(), PythonPath: python})
-	caps, err := r.ResolveModelCapabilities("https://api.deepseek.com/v1", "chat_completions", map[string]json.RawMessage{"deepseek-chat": nil})
+	caps, err := r.ResolveModelCapabilities("https://api.deepseek.com/v1", "chat_completions", map[string]json.RawMessage{"deepseek-v4-pro": nil})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := caps["deepseek-chat"]
+	c := caps["deepseek-v4-pro"]
 	if c.Source != "hermes" || c.Profile != "deepseek" || !c.Allows("max") || c.Allows("xhigh") {
 		t.Fatalf("native bridge: %+v", c)
 	}

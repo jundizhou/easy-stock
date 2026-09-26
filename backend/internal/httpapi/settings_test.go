@@ -24,7 +24,7 @@ func TestSettingsAPIStoresSecretsWithoutReturningThem(t *testing.T) {
 	gateway := &fakeHermesGateway{status: hermes.Status{Available: true}}
 	server := NewServer(Config{SettingsStore: store, HermesGateway: gateway})
 	body := `{
-		"llm":{"provider":"deepseek","base_url":"https://api.deepseek.com","model":"deepseek-chat","api_mode":"chat_completions","api_key":"sk-private-12345678"},
+		"llm":{"provider":"deepseek","base_url":"https://api.deepseek.com","model":"deepseek-v4-pro","api_mode":"chat_completions","api_key":"sk-private-12345678"},
 		"credentials":{"tushare_token":"tushare-private-87654321"}
 	}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
@@ -227,7 +227,7 @@ func TestSettingsAPISupportsMultipleLLMProfilesAndSelection(t *testing.T) {
 	runtime := hermes.NewRuntime(hermes.Config{Home: filepath.Join(root, "hermes"), PythonPath: python})
 	server := NewServer(Config{SettingsStore: store, HermesGateway: runtime})
 	body := `{"llm_profiles":[
-		{"id":"deepseek","name":"DeepSeek","provider":"deepseek","base_url":"https://api.deepseek.com","model":"deepseek-chat","api_mode":"chat_completions","api_key":"ds-private"},
+		{"id":"deepseek","name":"DeepSeek","provider":"deepseek","base_url":"https://api.deepseek.com","model":"deepseek-v4-pro","api_mode":"chat_completions","api_key":"ds-private"},
 		{"id":"sol","name":"GPT-5.6 Sol","provider":"custom","base_url":"https://model.example/v1","model":"gpt-5.6-sol","api_mode":"codex_responses","api_key":"sol-private"}
 	],"active_llm_profile_id":"sol"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
@@ -247,7 +247,7 @@ func TestSettingsAPISupportsMultipleLLMProfilesAndSelection(t *testing.T) {
 	switchReq := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"active_llm_profile_id":"deepseek"}`))
 	switchRec := httptest.NewRecorder()
 	server.ServeHTTP(switchRec, switchReq)
-	if switchRec.Code != http.StatusOK || store.Snapshot().LLM.Model != "deepseek-chat" {
+	if switchRec.Code != http.StatusOK || store.Snapshot().LLM.Model != "deepseek-v4-pro" {
 		t.Fatalf("profile switch failed: status=%d body=%s", switchRec.Code, switchRec.Body.String())
 	}
 	if key, err := runtime.ModelAPIKey(); err != nil || key != "ds-private" {

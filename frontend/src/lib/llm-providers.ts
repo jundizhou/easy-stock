@@ -10,7 +10,7 @@ export type LLMProviderDefinition = {
 
 export const llmProviders: LLMProviderDefinition[] = [
 	{ id: 'openai', label: 'OpenAI', baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiMode: 'chat_completions' },
-	{ id: 'deepseek', label: 'DeepSeek', baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-chat', apiMode: 'chat_completions' },
+	{ id: 'deepseek', label: 'DeepSeek', baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-pro', apiMode: 'chat_completions' },
 	{ id: 'moonshot', label: 'Kimi（月之暗面）', baseURL: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', apiMode: 'chat_completions' },
 	{ id: 'minimax', label: 'MiniMax', baseURL: 'https://api.minimaxi.com/v1', defaultModel: 'MiniMax-Text-01', apiMode: 'chat_completions' },
 	{ id: 'zhipu', label: '智谱 GLM', baseURL: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4-plus', apiMode: 'chat_completions' },

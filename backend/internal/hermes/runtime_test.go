@@ -24,7 +24,7 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	home := filepath.Join(root, "hermes-home")
 	runtime := NewRuntime(Config{RuntimeRoot: root, Home: home, WorkDir: root, PythonPath: python})
 	key := "sk-hermes-private"
-	if err := runtime.SyncLLM(appsettings.LLM{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIMode: "chat_completions"}, &key); err != nil {
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIMode: "chat_completions"}, &key); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,13 +40,13 @@ func TestRuntimeSyncLLMWritesHermesConfigAndKeepsSecretInEnv(t *testing.T) {
 	model, _ := stringMap(config["model"])
 	providers, _ := stringMap(config["providers"])
 	provider, _ := stringMap(providers[providerSlug])
-	if stringValue(model["provider"]) != providerSlug || stringValue(model["default"]) != "deepseek-chat" || stringValue(provider["transport"]) != "chat_completions" || intValue(provider["stale_timeout_seconds"]) != appsettings.DefaultLLMResponseTimeoutSeconds {
+	if stringValue(model["provider"]) != providerSlug || stringValue(model["default"]) != "deepseek-v4-pro" || stringValue(provider["transport"]) != "chat_completions" || intValue(provider["stale_timeout_seconds"]) != appsettings.DefaultLLMResponseTimeoutSeconds {
 		t.Fatalf("unexpected Hermes config:\n%s", configText)
 	}
 	if timeout, err := readEnvValue(filepath.Join(home, ".env"), staleTimeoutEnvName); err != nil || timeout != strconv.Itoa(appsettings.DefaultLLMResponseTimeoutSeconds) {
 		t.Fatalf("initial stale timeout env = %q, %v; want %d", timeout, err, appsettings.DefaultLLMResponseTimeoutSeconds)
 	}
-	if err := runtime.SyncLLM(appsettings.LLM{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIMode: "chat_completions", ResponseTimeoutSeconds: 600}, nil); err != nil {
+	if err := runtime.SyncLLM(appsettings.LLM{Provider: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIMode: "chat_completions", ResponseTimeoutSeconds: 600}, nil); err != nil {
 		t.Fatal(err)
 	}
 	configData, err = os.ReadFile(filepath.Join(home, "config.yaml"))

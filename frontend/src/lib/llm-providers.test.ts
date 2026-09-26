@@ -11,7 +11,7 @@ describe('LLM provider definitions', () => {
 	it('provides model-discovery defaults for provider switching', () => {
 		expect(llmProviderDefinition('minimax')).toMatchObject({ baseURL: 'https://api.minimaxi.com/v1', apiMode: 'chat_completions' });
 		expect(llmProviderDefinition('zhipu')).toMatchObject({ baseURL: 'https://open.bigmodel.cn/api/paas/v4', apiMode: 'chat_completions' });
-		expect(llmProviderDefaultModel('deepseek')).toBe('deepseek-chat');
+		expect(llmProviderDefaultModel('deepseek')).toBe('deepseek-v4-pro');
 	});
 
 	it('falls back to custom settings for unknown providers', () => {

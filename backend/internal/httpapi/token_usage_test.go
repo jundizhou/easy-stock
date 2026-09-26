@@ -65,7 +65,7 @@ func TestTokenUsageStoreSeparatesEstimatedFromReal(t *testing.T) {
 func TestTokenUsageStoreSeparatesModels(t *testing.T) {
 	store := newTokenUsageStore(filepath.Join(t.TempDir(), "settings.json"))
 	store.add(tokenUsageRequest{Module: "stock-analysis", Model: "kimi-k3", Prompt: 1, Completion: 2, Total: 3})
-	store.add(tokenUsageRequest{Module: "stock-analysis", Model: "deepseek-chat", Prompt: 4, Completion: 5, Total: 9})
+	store.add(tokenUsageRequest{Module: "stock-analysis", Model: "deepseek-v4-pro", Prompt: 4, Completion: 5, Total: 9})
 
 	if len(store.Entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(store.Entries))

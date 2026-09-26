@@ -1252,7 +1252,7 @@ func defaultBaseURL(provider string) string {
 func defaultModel(provider string) string {
 	switch provider {
 	case "deepseek":
-		return "deepseek-chat"
+		return "deepseek-v4-pro"
 	case "qwen":
 		return "qwen-plus"
 	case "moonshot":
