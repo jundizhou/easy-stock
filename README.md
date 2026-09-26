@@ -6,6 +6,8 @@
 
 <p align="center"><strong>面向个人投资者的 A股行情分析、股票分析与 AI投研桌面应用</strong></p>
 
+<p align="center"><sub><a href="./README_EN.md">English</a> | 简体中文</sub></p>
+
 <p align="center">
   让 AI 看懂市场，让每一次判断都有证据。<br />
   把盘中观察、盘后复盘和长期认知，沉淀为一套持续进化的研究系统。
