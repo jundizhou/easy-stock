@@ -60,6 +60,8 @@ const config = {
     'user-data.cjs',
     'wechat-service.cjs',
     'xueqiu-browser-bridge.cjs',
+    'stockdb-service.cjs',
+    'quant-terminal-service.cjs',
     'package.json',
     '!dist{,/**/*}',
     '!resources{,/**/*}',

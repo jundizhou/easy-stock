@@ -197,8 +197,16 @@ async function bootStockDb() {
     stockdbConfig = { baseURL: `http://127.0.0.1:${port}`, managed: false };
     return stockdbConfig;
   }
-  const exePath = STOCKDB_DEFAULT_BIN;
-  const child = startStockDb({ exePath, port });
+  // [p5-sidecar] 打包态优先使用 resources 内嵌引擎；数据目录用 userData 可写区
+  const exePath = process.env.A_STOCK_STOCKDB_BIN
+    || (app.isPackaged ? path.join(resourcesRoot(), 'stockdb', STOCKDB_DEFAULT_BIN.split('/').pop() || 'stockdb.exe') : STOCKDB_DEFAULT_BIN);
+  const stockdbDataDir = process.env.A_STOCK_STOCKDB_CWD
+    || (app.isPackaged ? path.join(app.getPath('userData'), 'stockdb-data') : undefined);
+  if (stockdbDataDir) fs.mkdirSync(stockdbDataDir, { recursive: true });
+  if (stockdbDataDir && !fs.existsSync(path.join(stockdbDataDir, 'data'))) {
+    desktopLogger.event('warn', 'stockdb', `数据目录无 LevelDB 快照（${stockdbDataDir}），引擎将以空库启动；可设置 A_STOCK_STOCKDB_CWD 指向含 data/data1/mydb 的目录，或用 A_STOCK_STOCKDB_BIN 指向外部引擎`);
+  }
+  const child = startStockDb({ exePath, cwd: stockdbDataDir, port });
   child.stdout?.on('data', (chunk) => logChildOutput('stockdb', 'info', chunk));
   child.stderr?.on('data', (chunk) => logChildOutput('stockdb', 'warn', chunk));
   child.once('error', (error) => desktopLogger.event('error', 'stockdb', 'process error', error));
@@ -221,8 +229,14 @@ async function bootQuantTerminal() {
     quantTerminalConfig = { baseURL: `http://127.0.0.1:${port}`, managed: false };
     return quantTerminalConfig;
   }
-  const python = resolveQuantPython({ runtimeRoot: resourcesRoot(), configured: process.env.A_STOCK_QUANT_PYTHON });
-  const child = startQuantTerminal({ python, scriptPath: QUANT_TERMINAL_DEFAULT_SCRIPT, port });
+  // [p5-sidecar] 打包态脚本取 resources/quant，解释器优先 hermes-runtime 内置 Python
+  const python = resolveQuantPython({
+    runtimeRoot: process.env.A_STOCK_QUANT_PYTHON_RUNTIME || path.join(resourcesRoot(), 'hermes-runtime'),
+    configured: process.env.A_STOCK_QUANT_PYTHON,
+  });
+  const quantScript = process.env.A_STOCK_QUANT_SCRIPT
+    || (app.isPackaged ? path.join(resourcesRoot(), 'quant', 'quant_terminal.py') : QUANT_TERMINAL_DEFAULT_SCRIPT);
+  const child = startQuantTerminal({ python, scriptPath: quantScript, port });
   child.stdout?.on('data', (chunk) => logChildOutput('quant-terminal', 'info', chunk));
   child.stderr?.on('data', (chunk) => logChildOutput('quant-terminal', 'warn', chunk));
   child.once('error', (error) => desktopLogger.event('error', 'quant-terminal', 'process error', error));

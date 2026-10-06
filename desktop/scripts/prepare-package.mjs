@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { prepareCodexRuntime, codexExecutable } from './codex-runtime.mjs';
 import { prepareHermesRuntime, hermesRuntimePython } from './hermes-runtime.mjs';
 import { prepareWechatRuntime } from './wechat-runtime.mjs';
+import { resolveSidecarSources, stageSidecarAssets } from './sidecar-assets.mjs';
+import { signSidecars } from './sign-sidecars.mjs';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(desktopRoot, '..');
@@ -23,6 +25,19 @@ fs.mkdirSync(path.join(resourcesRoot, 'backend'), { recursive: true });
 runNpm(['--workspace', 'frontend', 'run', 'build'], repoRoot);
 run('go', ['build', '-trimpath', '-o', path.join(resourcesRoot, 'backend', backendName), './cmd/server'], path.join(repoRoot, 'backend'), { CGO_ENABLED: process.env.CGO_ENABLED || '0' });
 fs.cpSync(path.join(repoRoot, 'frontend', 'dist'), path.join(resourcesRoot, 'frontend', 'dist'), { recursive: true });
+// [p5-sidecar] 装载 Free-StockDB 引擎与 Quant Terminal（缺失仅告警，不阻塞上游打包）
+const sidecarSources = resolveSidecarSources({
+  env: process.env,
+  platform: process.platform,
+  defaults: {
+    stockdbBin: process.env.A_STOCK_STOCKDB_SRC || 'C:/quant/tools/free-stockdb/stockdb/stockdb.exe',
+    stockdbData: process.env.A_STOCK_STOCKDB_DATA_SRC || '',
+    quantScript: process.env.A_STOCK_QUANT_SRC || 'C:/quant/quant_terminal.py',
+  },
+});
+const sidecarManifest = stageSidecarAssets({ sources: sidecarSources, resourcesRoot });
+signSidecars({ resourcesRoot, env: process.env });
+
 prepareAgentBrowser();
 
 const codexManifest = await prepareCodexRuntime({ runtimeRoot: path.join(resourcesRoot, 'codex-runtime') });
