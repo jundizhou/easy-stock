@@ -33,6 +33,23 @@ const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs
 const { UpdateManager } = require('./update-manager.cjs');
 const { resolveUpdateFeedURL } = require('./update-feed.cjs');
 const { createRotatingLogger } = require('./runtime-logger.cjs');
+// >>> INTEGRATE-ORCHESTRATOR
+const {
+  STOCKDB_DEFAULT_PORT,
+  STOCKDB_DEFAULT_BIN,
+  tcpPortReady,
+  waitForStockDb,
+  startStockDb,
+  createStockDbGuard,
+} = require('./stockdb-service.cjs');
+const {
+  QUANT_TERMINAL_DEFAULT_PORT,
+  QUANT_TERMINAL_DEFAULT_SCRIPT,
+  resolveQuantPython,
+  startQuantTerminal,
+  waitForQuantTerminal,
+  createQuantTerminalGuard,
+} = require('./quant-terminal-service.cjs');
 
 app.setName('easy-stock');
 const defaultUserDataPath = app.getPath('userData');
@@ -76,6 +93,12 @@ let wechatServiceConfig;
 let wechatServiceError = '';
 let updateManager;
 let updateCheckTimer;
+let stockdbProcess;
+let stockdbConfig;
+let quantTerminalProcess;
+let quantTerminalConfig;
+let stockdbGuard;
+let quantTerminalGuard;
 const reviewLoginWindows = new Map();
 
 function featureLogger(feature) {
@@ -165,6 +188,71 @@ async function bootBackend() {
   return backendConfig;
 }
 
+async function bootStockDb() {
+  const port = STOCKDB_DEFAULT_PORT;
+  desktopLogger.event('info', 'stockdb', 'starting');
+  if (await tcpPortReady(port)) {
+    desktopLogger.event('info', 'stockdb', 'already listening, attach mode');
+    stockdbProcess = undefined;
+    stockdbConfig = { baseURL: `http://127.0.0.1:${port}`, managed: false };
+    return stockdbConfig;
+  }
+  const exePath = STOCKDB_DEFAULT_BIN;
+  const child = startStockDb({ exePath, port });
+  child.stdout?.on('data', (chunk) => logChildOutput('stockdb', 'info', chunk));
+  child.stderr?.on('data', (chunk) => logChildOutput('stockdb', 'warn', chunk));
+  child.once('error', (error) => desktopLogger.event('error', 'stockdb', 'process error', error));
+  child.once('exit', (code, signal) => {
+    desktopLogger.event(app.isQuitting ? 'info' : 'error', 'stockdb', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`);
+  });
+  await waitForStockDb({ port });
+  stockdbProcess = child;
+  stockdbConfig = { baseURL: `http://127.0.0.1:${port}`, managed: true };
+  desktopLogger.event('info', 'stockdb', 'ready');
+  return stockdbConfig;
+}
+
+async function bootQuantTerminal() {
+  const port = QUANT_TERMINAL_DEFAULT_PORT;
+  desktopLogger.event('info', 'quant-terminal', 'starting');
+  if (await tcpPortReady(port)) {
+    desktopLogger.event('info', 'quant-terminal', 'already listening, attach mode');
+    quantTerminalProcess = undefined;
+    quantTerminalConfig = { baseURL: `http://127.0.0.1:${port}`, managed: false };
+    return quantTerminalConfig;
+  }
+  const python = resolveQuantPython({ runtimeRoot: resourcesRoot(), configured: process.env.A_STOCK_QUANT_PYTHON });
+  const child = startQuantTerminal({ python, scriptPath: QUANT_TERMINAL_DEFAULT_SCRIPT, port });
+  child.stdout?.on('data', (chunk) => logChildOutput('quant-terminal', 'info', chunk));
+  child.stderr?.on('data', (chunk) => logChildOutput('quant-terminal', 'warn', chunk));
+  child.once('error', (error) => desktopLogger.event('error', 'quant-terminal', 'process error', error));
+  child.once('exit', (code, signal) => {
+    desktopLogger.event(app.isQuitting ? 'info' : 'error', 'quant-terminal', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`);
+  });
+  await waitForQuantTerminal({ port });
+  quantTerminalProcess = child;
+  quantTerminalConfig = { baseURL: `http://127.0.0.1:${port}`, managed: true };
+  desktopLogger.event('info', 'quant-terminal', 'ready');
+  return quantTerminalConfig;
+}
+
+function startGuards() {
+  stockdbGuard = createStockDbGuard({
+    getProcess: () => stockdbProcess,
+    restart: async () => { stockdbConfig = await bootStockDb(); },
+    port: STOCKDB_DEFAULT_PORT,
+    logger: featureLogger('stockdb-guard'),
+  });
+  stockdbGuard.start();
+  quantTerminalGuard = createQuantTerminalGuard({
+    getProcess: () => quantTerminalProcess,
+    restart: async () => { quantTerminalConfig = await bootQuantTerminal(); },
+    port: QUANT_TERMINAL_DEFAULT_PORT,
+    logger: featureLogger('quant-guard'),
+  });
+  quantTerminalGuard.start();
+}
+
 async function createWindow() {
   await Promise.all([
     bootXueqiuBrowserBridge(),
@@ -176,7 +264,18 @@ async function createWindow() {
       wechatServiceProcess = undefined;
       wechatServiceConfig = undefined;
     }),
+    bootStockDb().catch((error) => {
+      desktopLogger.event('error', 'stockdb', 'startup failed', error);
+      stockdbProcess = undefined;
+      stockdbConfig = undefined;
+    }),
+    bootQuantTerminal().catch((error) => {
+      desktopLogger.event('error', 'quant-terminal', 'startup failed', error);
+      quantTerminalProcess = undefined;
+      quantTerminalConfig = undefined;
+    }),
   ]);
+  startGuards();
   await bootBackend();
 	const windowIcon = path.join(__dirname, 'assets', 'easy-stock.png');
 
@@ -286,11 +385,15 @@ async function stopRuntime() {
     if (!entry.window.isDestroyed()) entry.window.destroy();
   }
   reviewLoginWindows.clear();
+  stockdbGuard?.stop();
+  quantTerminalGuard?.stop();
   await Promise.all([
     xueqiuBrowserBridge?.close(),
     taogubaBrowserBridge?.close(),
     terminateChild(backendProcess),
     terminateChild(wechatServiceProcess),
+    terminateChild(stockdbProcess),
+    terminateChild(quantTerminalProcess),
   ].filter(Boolean));
   xueqiuBrowserBridge = undefined;
   xueqiuBrowserBridgeConfig = undefined;
@@ -365,6 +468,8 @@ function buildRuntimeEnv(resourcesRoot) {
     A_STOCK_MARKET_EMOTION_DB: path.join(userData, 'market-emotion.db'),
     A_STOCK_THEME_RADAR_DB: path.join(userData, 'theme-radar.db'),
     A_STOCK_MASTERY_CACHE: path.join(userData, 'trading-mastery'),
+    ...(stockdbConfig?.baseURL ? { A_STOCK_STOCKDB_URL: stockdbConfig.baseURL } : {}),
+    ...(quantTerminalConfig?.baseURL ? { A_STOCK_QUANT_URL: quantTerminalConfig.baseURL } : {}),
     A_STOCK_CODEX_RUNTIME_ROOT: app.isPackaged ? path.join(resourcesRoot, 'codex-runtime') : process.env.A_STOCK_CODEX_RUNTIME_ROOT || path.join(__dirname, 'resources', 'codex-runtime'),
     A_STOCK_CODEX_HOME: path.join(userData, 'codex-home'),
     A_STOCK_HERMES_HOME: hermesHome,
@@ -380,6 +485,7 @@ function buildRuntimeEnv(resourcesRoot) {
       A_STOCK_TAOGUBA_BROWSER_BRIDGE_TOKEN: taogubaBrowserBridgeConfig.token,
     } : {}),
     ...(wechatServiceConfig ? { A_STOCK_WECHAT_API_URL: wechatServiceConfig.baseURL } : {}),
+    ...(stockdbConfig ? { A_STOCK_STOCKDB_URL: stockdbConfig.baseURL } : {}),
     A_STOCK_AGENT_BROWSER_WRAPPER_DIR: browserWrapperDir,
     A_STOCK_AGENT_BROWSER_REAL: browserReal,
     ...(process.env.A_STOCK_HERMES_PYTHON ? { A_STOCK_HERMES_PYTHON: process.env.A_STOCK_HERMES_PYTHON } : {}),
@@ -414,6 +520,8 @@ function agentBrowserBinaryName() {
 }
 
 ipcMain.handle('backend-config', () => backendConfig);
+ipcMain.handle('stockdb-config', () => stockdbConfig);
+ipcMain.handle('quant-terminal-config', () => quantTerminalConfig);
 ipcMain.handle('runtime-log-status', () => ({
 	available: true,
 	directory: runtimeLogDirectory,
@@ -679,6 +787,10 @@ app.on('before-quit', () => {
   if (taogubaBrowserBridge) void taogubaBrowserBridge.close();
   if (backendProcess && !backendProcess.killed) killChildTree(backendProcess);
   if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
+  if (stockdbGuard) stockdbGuard.stop();
+  if (quantTerminalGuard) quantTerminalGuard.stop();
+  if (stockdbProcess && !stockdbProcess.killed) killChildTree(stockdbProcess);
+  if (quantTerminalProcess && !quantTerminalProcess.killed) killChildTree(quantTerminalProcess);
 });
 
 app.on('window-all-closed', () => {

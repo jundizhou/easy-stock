@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ import (
 	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
 	"easy-stock/backend/internal/providers/sina"
 	"easy-stock/backend/internal/providers/tencent"
+	"easy-stock/backend/internal/providers/stockdb"
+	"easy-stock/backend/internal/providers/quant"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/sector"
@@ -52,6 +55,8 @@ type Server struct {
 	hotStockProvider      HotStockProvider
 	futuresPosition       FuturesPositionProvider
 	marketOverview        MarketOverviewProvider
+	stockDBProvider        *stockdb.Client
+	quantProvider          *quant.Client
 	inflection            InflectionEvaluator
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
@@ -95,6 +100,8 @@ func NewServer(config any) *Server {
 	eastMoneyClient := eastmoney.NewClient()
 	tencentClient := tencent.NewClient()
 	clsClient := cls.NewClient()
+	stockDBProvider := stockdb.NewClient(stockdb.WithBaseURL(os.Getenv("A_STOCK_STOCKDB_URL")))
+	quantProvider := quant.NewClient(quant.WithBaseURL(os.Getenv("A_STOCK_QUANT_URL")))
 	if cfg.Realtime == nil {
 		cfg.Realtime = sinaClient
 	}
@@ -297,6 +304,8 @@ func NewServer(config any) *Server {
 		hotStockProvider:      cfg.HotStocks,
 		futuresPosition:       cfg.FuturesPosition,
 		marketOverview:        cfg.MarketOverview,
+		stockDBProvider:       stockDBProvider,
+		quantProvider:         quantProvider,
 		inflection:            cfg.Inflection,
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
 		themeProgress:         newThemeProgressCache(),
@@ -530,6 +539,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/stocks/research/{id}/snapshot", s.stockResearchSnapshot)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
+
+	// ---- Free-StockDB 数据/计算底座 (7899) ----
+	s.mux.HandleFunc("GET /api/v1/stockdb/query", s.stockDBQuery)
+	s.mux.HandleFunc("GET /api/v1/stockdb/kline", s.stockDBKLine)
+	s.mux.HandleFunc("GET /api/v1/stockdb/adjustment", s.stockDBAdjustment)
+	s.mux.HandleFunc("GET /api/v1/stockdb/codes", s.stockDBCodes)
+	s.mux.HandleFunc("GET /api/v1/stockdb/status", s.stockDBStatus)
+
+	// ---- Quant Terminal 策略层 (8766) ----
+	s.mux.HandleFunc("GET /api/v1/quant/proxy", s.quantProxy)
+	s.mux.HandleFunc("GET /api/v1/quant/kline", s.quantKLine)
+	s.mux.HandleFunc("GET /api/v1/quant/sys", s.quantSys)
+	s.mux.HandleFunc("GET /api/v1/quant/hub-status", s.quantHubStatus)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)
