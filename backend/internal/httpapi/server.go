@@ -547,6 +547,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/stockdb/codes", s.stockDBCodes)
 	s.mux.HandleFunc("GET /api/v1/stockdb/status", s.stockDBStatus)
 
+	// ---- 运行时 sidecar 配置（前端 iframe 直挂用） ----
+	s.mux.HandleFunc("GET /api/v1/runtime/sidecars", s.runtimeSidecars)
+
 	// ---- Quant Terminal 策略层 (8766) ----
 	s.mux.HandleFunc("GET /api/v1/quant/proxy", s.quantProxy)
 	s.mux.HandleFunc("GET /api/v1/quant/kline", s.quantKLine)
