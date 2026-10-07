@@ -85,6 +85,22 @@ export function boardsForSymbol(boards: StockDBBoard[], symbol: string): StockDB
 	return boards.filter(board => board.symbols.includes(normalized));
 }
 
+/** 个股→板块反查结果摘要（不含成分全量，见 /api/v1/stockdb/symbol-boards）。 */
+export type SymbolBoardRef = {
+	code: string;
+	name: string;
+	category: string;
+};
+
+/** 批量反查个股所属板块（后端进程级索引，O(1) 响应；codes 最多 200 个）。 */
+export function fetchSymbolsBoards(config: BackendConfig, codes: string[], limit = 12, init: RequestInit = {}): Promise<Record<string, SymbolBoardRef[]>> {
+	const normalized = codes.map(normalizeSymbol).filter(Boolean);
+	if (!normalized.length) return Promise.resolve({});
+	const params = new URLSearchParams({ codes: [...new Set(normalized)].slice(0, 200).join(','), limit: String(limit) });
+	return requestJSON<{ boards: Record<string, SymbolBoardRef[]> }>(config, `/api/v1/stockdb/symbol-boards?${params}`, init)
+		.then(payload => payload.boards || {});
+}
+
 /** 归一化输入：去掉交易所后缀与空白，保留 6 位代码。 */
 export function normalizeSymbol(input: string): string {
 	const trimmed = input.trim().toUpperCase();

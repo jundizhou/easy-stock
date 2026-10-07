@@ -167,6 +167,7 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 	var (
 		quote           foundation.Quote
 		lines           []foundation.KLine
+		minuteBars      []stockanalysis.MinuteBar
 		benchmarkLines  []foundation.KLine
 		limitUps        []foundation.LimitUpEvent
 		cachedThemes    []foundation.StockThemeAttribution
@@ -179,6 +180,7 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		announcements   []foundation.MarketResearchItem
 		quoteErr        error
 		lineErr         error
+		minuteErr       error
 		benchmarkErr    error
 		limitUpErr      error
 		cachedThemeErr  error
@@ -272,6 +274,33 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 			news, newsErr = s.newsProvider.LatestNews(dataCtx, 120)
 		}()
 	}
+	if s.stockDBProvider != nil {
+		// 分钟K微观结构（P6-1）：独立15秒子超时，失败仅降级不阻塞主分析。
+		collectionWG.Add(1)
+		go func() {
+			defer collectionWG.Done()
+			minuteCtx, cancelMinute := context.WithTimeout(ctx, 15*time.Second)
+			defer cancelMinute()
+			all, loadErr := s.stockDBProvider.MinuteKLines(minuteCtx, normalized.RawCode)
+			if loadErr != nil {
+				minuteErr = loadErr
+				return
+			}
+			converted := make([]stockanalysis.MinuteBar, 0, len(all))
+			for _, item := range all {
+				converted = append(converted, stockanalysis.MinuteBar{
+					Stamp:  item.Stamp,
+					Open:   item.Open,
+					Close:  item.Close,
+					High:   item.High,
+					Low:    item.Low,
+					Volume: item.Volume,
+					Amount: item.Amount,
+				})
+			}
+			minuteBars = stockanalysis.LatestMinuteDay(converted)
+		}()
+	}
 	collectionWG.Wait()
 	if lineErr != nil {
 		s.logStockAnalysisStage(normalized.Canonical, "data_collection", "failed", dataStartedAt, len(lines), lineErr)
@@ -339,11 +368,19 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		dataStatus = "degraded"
 	}
 	s.logStockAnalysisStage(normalized.Canonical, "data_collection", dataStatus, dataStartedAt, len(lines), nil)
+	if minuteErr != nil {
+		s.logStockAnalysisStage(normalized.Canonical, "minute_kline", "degraded", time.Time{}, 0, minuteErr)
+	} else if len(minuteBars) > 0 {
+		s.logStockAnalysisStage(normalized.Canonical, "minute_kline", "completed", time.Time{}, len(minuteBars), nil)
+	} else {
+		s.logStockAnalysisStage(normalized.Canonical, "minute_kline", "missing", time.Time{}, 0, nil)
+	}
 
 	analysisInput := stockanalysis.Input{
 		Symbol:          normalized.Canonical,
 		Quote:           quote,
 		KLines:          lines,
+		MinuteBars:      minuteBars,
 		BenchmarkSymbol: benchmarkSymbol,
 		BenchmarkName:   benchmarkName,
 		BenchmarkKLines: benchmarkLines,

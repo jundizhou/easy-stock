@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Layers3, LoaderCircle, RefreshCw, Search } from 'lucide-react';
-import type { BackendConfig } from '../lib/backend';
+import { requestJSON, type BackendConfig } from '../lib/backend';
 import {
 	boardsForSymbol,
 	fetchBoards,
@@ -10,13 +10,63 @@ import {
 } from '../lib/sidecars';
 import { logRuntimeEvent } from '../lib/runtime-log';
 
-export function BoardExplorerWorkspace({ config, refreshKey }: { config: BackendConfig | null; refreshKey: number }) {
+export type BoardFocus = { name: string; hint?: string };
+
+/** 成分股实时行情快照（来自 /api/v1/quotes/realtime，失败静默降级为纯代码按钮）。 */
+export type BoardSymbolQuote = { symbol: string; name: string; price: number; changePercent: number };
+
+/** 板块热度（成分股行情聚合；无行情数据返回 null）。 */
+export function aggregateBoardHeat(quotes: BoardSymbolQuote[]): { avgChangePercent: number; upCount: number; downCount: number } | null {
+	if (!quotes.length) return null;
+	let up = 0;
+	let down = 0;
+	let total = 0;
+	for (const quote of quotes) {
+		if (!Number.isFinite(quote.changePercent)) continue;
+		total += quote.changePercent;
+		if (quote.changePercent > 0) up += 1;
+		else if (quote.changePercent < 0) down += 1;
+	}
+	if (!quotes.length) return null;
+	return { avgChangePercent: total / quotes.length, upCount: up, downCount: down };
+}
+
+/**
+ * 跨工作台定位解析：优先全库精确同名（stockdb 概念兜底 chips 与本页同源必命中），
+ * 其次包含关系模糊命中；均未命中回退为类目内搜索框填词。
+ */
+export function resolveBoardFocus(boards: StockDBBoard[], focus: BoardFocus): { category: string; code: string; query: string } | null {
+	const keyword = focus.name.trim();
+	if (!keyword || !boards.length) return null;
+	const target = boards.find(board => board.name === keyword)
+		|| boards.find(board => board.name.includes(keyword) || keyword.includes(board.name));
+	if (target) return { category: target.category, code: target.code, query: '' };
+	return { category: focus.hint || '概念', code: '', query: keyword };
+}
+
+function formatChangePercent(value: number): string {
+	if (!Number.isFinite(value)) return '--';
+	return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+type Props = {
+	config: BackendConfig | null;
+	refreshKey: number;
+	/** 跨工作台联动：按板块名定位（如连板雷达概念 chip 下钻）；消费后回调清空。 */
+	focusBoard?: BoardFocus | null;
+	onFocusConsumed?: () => void;
+	/** 点击成分股跳个股 AI 分析（symbol 为 6 位代码）。 */
+	onOpenStock?: (symbol: string) => void;
+};
+
+export function BoardExplorerWorkspace({ config, refreshKey, focusBoard, onFocusConsumed, onOpenStock }: Props) {
 	const [boards, setBoards] = useState<StockDBBoard[]>([]);
 	const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 	const [error, setError] = useState('');
 	const [category, setCategory] = useState('');
 	const [query, setQuery] = useState('');
 	const [selectedCode, setSelectedCode] = useState('');
+	const [quotes, setQuotes] = useState<BoardSymbolQuote[] | null>(null);
 	const [symbolQuery, setSymbolQuery] = useState('');
 	const [symbolMatches, setSymbolMatches] = useState<StockDBBoard[] | null>(null);
 
@@ -42,6 +92,18 @@ export function BoardExplorerWorkspace({ config, refreshKey }: { config: Backend
 
 	useEffect(() => { const cleanup = load(); return cleanup; }, [load, refreshKey]);
 
+	// 跨工作台定位：解析逻辑见 resolveBoardFocus（纯函数，含单测）。
+	useEffect(() => {
+		if (!focusBoard?.name || !boards.length) return;
+		const resolved = resolveBoardFocus(boards, focusBoard);
+		if (resolved) {
+			setCategory(resolved.category);
+			setSelectedCode(resolved.code);
+			setQuery(resolved.query);
+		}
+		onFocusConsumed?.();
+	}, [focusBoard, boards, onFocusConsumed]);
+
 	const groups = useMemo(() => groupBoardsByCategory(boards), [boards]);
 	const activeCategory = category || groups[0]?.[0] || '';
 	const activeBoards = useMemo(() => {
@@ -51,6 +113,52 @@ export function BoardExplorerWorkspace({ config, refreshKey }: { config: Backend
 		return bucket.filter(board => board.name.toLowerCase().includes(keyword) || board.code.toLowerCase().includes(keyword));
 	}, [groups, activeCategory, query]);
 	const selectedBoard = activeBoards.find(board => board.code === selectedCode) || activeBoards[0] || null;
+
+	// 成分股实时行情：选中板块变化时拉一次（≤60 只截断，失败静默——行情列是增强不是依赖）。
+	useEffect(() => {
+		if (!config || !selectedBoard || !selectedBoard.symbols.length) { setQuotes(null); return; }
+		const symbols = selectedBoard.symbols.slice(0, 60);
+		const abort = new AbortController();
+		const timer = setTimeout(() => {
+			requestJSON<{ data?: Array<{ symbol?: string; name?: string; price?: number; change_percent?: number }> }>(
+				config,
+				`/api/v1/quotes/realtime?symbols=${encodeURIComponent(symbols.join(','))}`,
+				{ signal: abort.signal },
+			).then(payload => {
+				if (abort.signal.aborted) return;
+				const rows = (payload.data || [])
+					.filter(item => typeof item.symbol === 'string' && item.symbol.length >= 6)
+					.map(item => {
+						// 后端格式 000552.SZ / 600519.SH：代码在前，取前 6 位。
+						const digits = item.symbol!.match(/\d{6}/);
+						return {
+							symbol: digits ? digits[0] : item.symbol!.slice(0, 6),
+							name: typeof item.name === 'string' ? item.name : '',
+							price: Number(item.price) || 0,
+							changePercent: Number(item.change_percent) || 0,
+						};
+					});
+				setQuotes(rows);
+			}).catch(() => {
+				if (!abort.signal.aborted) setQuotes(null);
+			});
+		}, 120);
+		return () => { abort.abort(); clearTimeout(timer); };
+	}, [config, selectedBoard]);
+
+	const quoteBySymbol = useMemo(() => new Map((quotes || []).map(quote => [quote.symbol, quote])), [quotes]);
+	// 板块热度：只用 activeBoards 内、已被行情覆盖的成分股聚合（最多取前 60 只与行情请求一致）。
+	const heatByBoard = useMemo(() => {
+		const map = new Map<string, { avgChangePercent: number; upCount: number; downCount: number }>();
+		if (!quotes || !quotes.length) return map;
+		const covered = new Set(quotes.map(quote => quote.symbol));
+		for (const board of activeBoards) {
+			const sample = board.symbols.filter(symbol => covered.has(symbol));
+			const heat = aggregateBoardHeat(sample.map(symbol => quoteBySymbol.get(symbol)!).filter(Boolean));
+			if (heat) map.set(board.code, heat);
+		}
+		return map;
+	}, [activeBoards, quotes, quoteBySymbol]);
 
 	const lookupSymbol = useCallback(() => {
 		const normalized = normalizeSymbol(symbolQuery);
@@ -119,17 +227,21 @@ export function BoardExplorerWorkspace({ config, refreshKey }: { config: Backend
 							<input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedCode(''); }} placeholder={`在${activeCategory}中搜索名称或代码`} />
 						</label>
 						<div className="board-list-scroll">
-							{activeBoards.map(board => (
-								<button
-									type="button"
-									key={board.code}
-									className={selectedBoard?.code === board.code ? 'active' : ''}
-									onClick={() => setSelectedCode(board.code)}
-								>
-									<strong>{board.name}</strong>
-									<small>{board.code} · {board.symbols.length}只</small>
-								</button>
-							))}
+							{activeBoards.map(board => {
+								const heat = heatByBoard.get(board.code);
+								return (
+									<button
+										type="button"
+										key={board.code}
+										className={selectedBoard?.code === board.code ? 'active' : ''}
+										onClick={() => setSelectedCode(board.code)}
+									>
+										<strong>{board.name}</strong>
+										<small>{board.code} · {board.symbols.length}只{heat ? ` · 均值 ${formatChangePercent(heat.avgChangePercent)}` : ''}</small>
+										{heat && <span className={`board-heat ${heat.avgChangePercent >= 0 ? 'up' : 'down'}`}>{heat.upCount}/{heat.downCount}</span>}
+									</button>
+								);
+							})}
 							{!activeBoards.length && <p className="load-notice">没有匹配板块</p>}
 						</div>
 					</aside>
@@ -144,7 +256,22 @@ export function BoardExplorerWorkspace({ config, refreshKey }: { config: Backend
 									<span className="board-count">{selectedBoard.symbols.length} 只成分</span>
 								</header>
 								<div className="board-symbols">
-									{selectedBoard.symbols.map(symbol => <span className="board-symbol" key={symbol}>{symbol}</span>)}
+									{selectedBoard.symbols.map(symbol => {
+										const quote = quoteBySymbol.get(symbol);
+										return (
+											<button
+												type="button"
+												className="board-symbol"
+												key={symbol}
+												title={quote ? `${quote.name} ${quote.price} ${formatChangePercent(quote.changePercent)}` : symbol}
+												onClick={(event) => { event.stopPropagation(); onOpenStock?.(symbol); }}
+											>
+												<span className="board-symbol-code">{symbol}</span>
+												{quote && <span className="board-symbol-name">{quote.name || '--'}</span>}
+												{quote && <span className={`board-symbol-change ${quote.changePercent >= 0 ? 'up' : 'down'}`}>{formatChangePercent(quote.changePercent)}</span>}
+											</button>
+										);
+									})}
 								</div>
 							</>
 						) : <p className="load-notice">从左侧选择板块查看成分股。</p>}

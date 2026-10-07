@@ -122,35 +122,39 @@ func EnrichWithAI(ctx context.Context, prompter agent.Prompter, analysis *Analys
 	if prompter == nil || analysis == nil {
 		return errors.New("AI分析底座不可用")
 	}
+	priceContext := map[string]any{
+		"current_quote":       analysis.Quote,
+		"current_price":       analysis.Quote.Price,
+		"current_trade_time":  analysis.Quote.TradeTime,
+		"latest_daily_bar":    latestDailyBar(analysis.dailyBars),
+		"daily_kline_summary": summarizeDailyKLines(analysis.dailyBars),
+	}
+	if analysis.MinuteMicro != nil && analysis.MinuteMicro.Available {
+		priceContext["minute_structure"] = analysis.MinuteMicro
+	}
 	payload := map[string]any{
-		"symbol":       analysis.Symbol,
-		"name":         analysis.Name,
-		"quote":        analysis.Quote,
-		"profile":      analysis.Profile,
-		"trend":        analysis.Trend,
-		"short_term":   analysis.ShortTerm,
-		"theme":        analysis.Theme,
-		"fundamental":  analysis.Fundamental,
-		"research":     analysis.Research,
-		"stock_news":   analysis.StockNews,
-		"theme_news":   analysis.ThemeNews,
-		"market":       analysis.Market,
-		"scorecard":    analysis.Scorecard,
-		"timeframes":   analysis.Timeframes,
-		"relative":     analysis.Relative,
-		"signals":      analysis.Signals,
-		"next_day":     analysis.NextDay,
-		"risk_control": analysis.RiskControl,
-		"action_plan":  analysis.ActionPlan,
-		"risks":        analysis.Risks,
-		"data_quality": analysis.DataQuality,
-		"price_context": map[string]any{
-			"current_quote":       analysis.Quote,
-			"current_price":       analysis.Quote.Price,
-			"current_trade_time":  analysis.Quote.TradeTime,
-			"latest_daily_bar":    latestDailyBar(analysis.dailyBars),
-			"daily_kline_summary": summarizeDailyKLines(analysis.dailyBars),
-		},
+		"symbol":        analysis.Symbol,
+		"name":          analysis.Name,
+		"quote":         analysis.Quote,
+		"profile":       analysis.Profile,
+		"trend":         analysis.Trend,
+		"short_term":    analysis.ShortTerm,
+		"theme":         analysis.Theme,
+		"fundamental":   analysis.Fundamental,
+		"research":      analysis.Research,
+		"stock_news":    analysis.StockNews,
+		"theme_news":    analysis.ThemeNews,
+		"market":        analysis.Market,
+		"scorecard":     analysis.Scorecard,
+		"timeframes":    analysis.Timeframes,
+		"relative":      analysis.Relative,
+		"signals":       analysis.Signals,
+		"next_day":      analysis.NextDay,
+		"risk_control":  analysis.RiskControl,
+		"action_plan":   analysis.ActionPlan,
+		"risks":         analysis.Risks,
+		"data_quality":  analysis.DataQuality,
+		"price_context": priceContext,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -165,6 +169,7 @@ func EnrichWithAI(ctx context.Context, prompter agent.Prompter, analysis *Analys
 3. 不模拟任何投资名人的口吻，不使用“大佬投票”或人格化结论。
 4. action 必须是条件化建议，不能承诺收益；隔日预期只能描述情景，不得表述为确定性预测。
 5. price_context.current_price是当前行情价，优先级高于任何由日K推导出的旧收盘价；latest_daily_bar是最近一根日K，必须结合日期判断是否为当日收盘。daily_kline_summary是本地代码对最近最多120个交易日K线计算出的确定性统计摘要，包含区间收益、波动、回撤、量能、连涨跌和20日分段结构；不要反推或编造摘要之外的逐日K线。
+5.1 price_context.minute_structure是本地代码基于最近可用交易日1分钟K计算的确定性微观结构摘要（VWAP、收盘偏离、开盘/尾盘动量、高低点时点、分时形态标签）。其trade_date早于latest_daily_bar日期时，表示分钟数据尚未同步到最新交易日，引用时必须注明实际日期并说明数据时点，不得冒充当日或最近交易日的分时表现。
 6. scorecard、relative、theme、fundamental等事实和分数不得篡改；action_plan与risk_control里的价格只是本地候选，你可以依据全局分析重新定价。
 6.1 当profile.primary_type=new_listing时，这是不足20个交易日的上市初期受限样本分析。不得推断MA20/60/120、ATR14、20/60/120日收益或成熟趋势结构，不得把价格发现评分表述为成熟趋势评分；维持观察优先、小仓验证和上市区间失效约束。
 7. decision_mode=non_short时必须计算完整价格计划。价格不能只由均线或ATR决定，原因需要同时结合至少两个不同维度，例如基本面/研报预期、题材持续性、资金与趋势结构、新闻风险。必须满足：止损价 < 允许介入区间 < 第一止盈价 <= 第二止盈价，且第一止盈价必须高于当前现价；持有区间必须高于止损价。若现价已经超过原先按介入成本计算的目标，重新以现价上方的趋势延伸或压力位重算止盈区，并明确已有仓位如何移动保护位、新仓不追高。弱势非短线票可以把允许介入价设为右侧修复确认区，但仍要给出价格。

@@ -65,7 +65,16 @@ func Analyze(input Input) (Analysis, error) {
 	scorecard := buildScorecard(profile, signals)
 	conclusion := buildConclusion(name, profile, trend, shortTerm, action, risks)
 	evidence := buildEvidence(input, profile, trend, shortTerm, theme, market, relative, riskControl, lines, fundamental, research, stockNews, themeNews)
+	minuteMicro := analyzeMinuteMicro(input.MinuteBars)
+	if minuteMicro != nil && minuteMicro.Available {
+		evidence = append(evidence, minuteMicroEvidence(minuteMicro)...)
+	}
 	quality := buildDataQuality(input, profile, lines, shortTerm, theme, market, relative, fundamental, research, stockNews, themeNews)
+	if minuteMicro != nil && minuteMicro.Available {
+		quality = append(quality, DataQuality{Key: "minute_kline", Status: "ready", Message: fmt.Sprintf("已纳入%s分钟K微观结构（%d根）", minuteMicro.TradeDate, minuteMicro.BarCount)})
+	} else {
+		quality = append(quality, DataQuality{Key: "minute_kline", Status: "missing", Message: "分钟K数据不可用，分时微观结构未纳入本次分析"})
+	}
 
 	return Analysis{
 		Symbol:                input.Symbol,
@@ -76,6 +85,7 @@ func Analyze(input Input) (Analysis, error) {
 		Conclusion:            conclusion,
 		Trend:                 trend,
 		ShortTerm:             shortTerm,
+		MinuteMicro:           minuteMicro,
 		Theme:                 theme,
 		Fundamental:           fundamental,
 		Research:              research,

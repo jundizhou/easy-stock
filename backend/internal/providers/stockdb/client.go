@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -131,6 +132,77 @@ func (c *Client) KLineMonthly(ctx context.Context, code, date string) (map[strin
 // KLineMinute 分钟 K：表 分钟k:code:YYYYMMDDHHMMSS。
 func (c *Client) KLineMinute(ctx context.Context, code, datetime string) (map[string]any, error) {
 	return c.Query(ctx, joinKey("分钟k", code, datetime))
+}
+
+// MinuteKLine 单根分钟K。free-stockdb 分钟k 表 volume 单位为股，
+// Stamp 为该分钟起始时刻的 14 位时间戳 YYYYMMDDHHMMSS（左端点标签）。
+type MinuteKLine struct {
+	Stamp  string  `json:"stamp"`
+	Open   float64 `json:"open"`
+	Close  float64 `json:"close"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Volume float64 `json:"volume"`
+	Amount float64 `json:"amount"`
+}
+
+type minuteKLineValue struct {
+	Date   int64   `json:"date"`
+	Open   float64 `json:"open"`
+	Close  float64 `json:"close"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Volume float64 `json:"volume"`
+	Amount float64 `json:"amount"`
+}
+
+// MinuteKLines 拉取一只股票的分钟K全表。
+//
+// free-stockdb 的子键不支持范围语义（t=分钟k:000001:20250901000000 返回空），
+// 因此只能整表返回后由调用方按日期过滤；单只股票全量约十万行，属本地回环请求。
+// 缺失字段或时间戳不完整的行会被跳过。
+func (c *Client) MinuteKLines(ctx context.Context, code string) ([]MinuteKLine, error) {
+	raw, err := c.RawQuery(ctx, joinKey("分钟k", code, ""))
+	if err != nil {
+		return nil, err
+	}
+	var rows []json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("stockdb: decode 分钟k %q: %w", code, err)
+	}
+	out := make([]MinuteKLine, 0, len(rows))
+	for _, row := range rows {
+		var pair [2]json.RawMessage
+		if err := json.Unmarshal(row, &pair); err != nil {
+			continue
+		}
+		var value minuteKLineValue
+		if err := json.Unmarshal(pair[1], &value); err != nil {
+			continue
+		}
+		item := MinuteKLine{
+			Open:   value.Open,
+			Close:  value.Close,
+			High:   value.High,
+			Low:    value.Low,
+			Volume: value.Volume,
+			Amount: value.Amount,
+		}
+		if value.Date > 0 {
+			item.Stamp = strconv.FormatInt(value.Date, 10)
+		} else {
+			var keyText string
+			_ = json.Unmarshal(pair[0], &keyText)
+			if idx := strings.LastIndex(keyText, ":"); idx >= 0 {
+				item.Stamp = keyText[idx+1:]
+			}
+		}
+		if len(item.Stamp) != 14 || item.Open <= 0 || item.Close <= 0 {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // Adjustment 复权因子：表 复权:code。

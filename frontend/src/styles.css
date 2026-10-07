@@ -7557,6 +7557,10 @@ a:focus-visible {
 .limit-stock-concepts-heading small { font-size: 10px; font-weight: normal; }
 .limit-stock-concept-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .limit-stock-concept-tags > span { max-width: 100%; padding: 3px 6px; border-radius: 4px; background: var(--theme-blue-soft, rgba(23, 94, 169, .07)); color: var(--theme-blue, #175ea9); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+/* 概念 chip 已按钮化（P6-2：点击跳板块图谱下钻），视觉沿用 span 蓝底并加交互态。 */
+.limit-stock-concept-tags > button { max-width: 100%; padding: 3px 6px; border: 0; border-radius: 4px; background: var(--theme-blue-soft, rgba(23, 94, 169, .07)); color: var(--theme-blue, #175ea9); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; cursor: pointer; font-family: inherit; }
+.limit-stock-concept-tags > button:hover { background: var(--theme-blue, #175ea9); color: #fff; }
+.limit-stock-concept-tags > button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .limit-stock-concept-tags > small { color: var(--muted); font-size: 11px; }
 .limit-stock-concept-toggle { padding: 3px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--theme-blue, #175ea9); font-size: 11px; line-height: 1.4; cursor: pointer; }
 .limit-stock-concept-toggle:hover { background: var(--theme-blue-soft, rgba(23, 94, 169, .07)); }
@@ -7611,4 +7615,64 @@ a:focus-visible {
 .board-detail-heading p { margin: 3px 0 0; color: var(--theme-muted, var(--muted)); font-size: 11px; }
 .board-count { padding: 4px 10px; border-radius: 999px; background: var(--theme-blue-soft, var(--surface-2)); color: var(--blue); font-size: 11px; white-space: nowrap; }
 .board-symbols { display: flex; flex-wrap: wrap; gap: 6px; }
-.board-symbol { padding: 4px 9px; border-radius: 5px; background: var(--theme-surface-2, var(--surface-2)); color: var(--theme-text, var(--text)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.board-symbol { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; border: 0; border-radius: 5px; background: #f2f5f8; color: #1f2733; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; cursor: pointer; }
+.board-symbol:hover { background: var(--blue); color: #fff; }
+.board-symbol:hover .board-symbol-change { color: #fff; }
+.board-symbol:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.board-symbol-name { font-family: inherit; color: inherit; opacity: .75; font-size: 11px; }
+.board-symbol-change { font-variant-numeric: tabular-nums; font-size: 11px; font-weight: 600; }
+.board-symbol-change.up { color: var(--up, #c0392b); }
+.board-symbol-change.down { color: var(--down, #1e8e3e); }
+.board-heat { font-size: 10px; font-variant-numeric: tabular-nums; padding: 1px 5px; border-radius: 4px; }
+.board-heat.up { background: rgba(192, 57, 43, .12); color: var(--up, #c0392b); }
+.board-heat.down { background: rgba(30, 142, 62, .12); color: var(--down, #1e8e3e); }
+
+/* ---- 策略信号工作台（P6-3：MER 状态 + clip_n300 前向轨 + OOS 门禁） ---- */
+.quant-signal { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.quant-signal-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--theme-muted, #52779e); }
+.quant-signal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.quant-signal-heading h2 { margin: 0; font-size: 17px; }
+.quant-signal-heading p { margin: 3px 0 0; color: var(--theme-muted, #52779e); font-size: 11px; }
+.quant-signal-status { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--theme-line, #dce2e6); border-radius: 8px; color: var(--theme-muted, #52779e); font-size: 12px; }
+.quant-signal-status.error { color: var(--red, #c0392b); border-color: var(--red, #c0392b); }
+.quant-signal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; align-items: start; }
+.quant-card { border: 1px solid var(--theme-line, #dce2e6); border-radius: 10px; background: var(--theme-surface, #ffffff); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.quant-card-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--theme-text, #1f2733); }
+.quant-card-disclaimer { grid-column: 1 / -1; }
+.quant-state-main { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.quant-state-badge { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+.quant-state-badge.tone-bear { color: var(--green, #1e8e3e); }
+.quant-state-badge.tone-bull { color: var(--red, #c0392b); }
+.quant-state-badge.tone-neutral { color: var(--theme-text, #1f2733); }
+.quant-state-tone { color: var(--theme-muted, #52779e); font-size: 12px; }
+.quant-dims { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.quant-dim-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--theme-text, #1f2733); }
+.quant-dim-score { font-weight: 700; font-variant-numeric: tabular-nums; }
+.quant-dim-bar { height: 6px; border-radius: 3px; background: var(--theme-surface-2, #f2f5f8); overflow: hidden; margin-top: 4px; }
+.quant-dim-fill { height: 100%; border-radius: 3px; background: var(--blue); transition: width .3s ease; }
+.quant-dim-read { margin-top: 4px; font-size: 10px; color: var(--theme-muted, #52779e); line-height: 1.4; }
+.quant-index-line { font-size: 11px; color: var(--theme-muted, #52779e); font-variant-numeric: tabular-nums; }
+.quant-headline { font-size: 13px; font-weight: 600; color: var(--theme-text, #1f2733); line-height: 1.5; }
+.quant-note { margin: 0; font-size: 11px; color: var(--theme-muted, #52779e); line-height: 1.5; }
+.quant-note.warn { color: var(--amber, #b45309); }
+.quant-falsify { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 11px; line-height: 1.55; color: var(--theme-text, #1f2733); }
+.quant-falsify strong { margin-right: 6px; color: var(--blue); }
+.quant-track-meta { font-size: 11px; color: var(--theme-muted, #52779e); font-variant-numeric: tabular-nums; }
+.quant-track-progress { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--theme-text, #1f2733); }
+.quant-track-bar { flex: 1; max-width: 260px; height: 8px; border-radius: 4px; background: var(--theme-surface-2, #f2f5f8); overflow: hidden; }
+.quant-track-fill { height: 100%; border-radius: 4px; background: var(--blue); transition: width .3s ease; }
+.quant-track-table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+.quant-track-table th, .quant-track-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--theme-line, #dce2e6); }
+.quant-track-table th { color: var(--theme-muted, #52779e); font-weight: 500; }
+.quant-evidence { padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+.quant-evidence.forward { background: rgba(192, 57, 43, .1); color: var(--red, #c0392b); }
+.quant-evidence.pre-anchor { background: var(--theme-surface-2, #f2f5f8); color: var(--theme-muted, #52779e); }
+.quant-card-gate { grid-column: 1 / -1; }
+.quant-gate-badge { padding: 9px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+.quant-gate-badge.locked { background: rgba(180, 83, 9, .1); color: var(--amber, #b45309); }
+.quant-gate-badge.open { background: rgba(30, 142, 62, .1); color: var(--green, #1e8e3e); }
+.quant-oos-timeline { display: flex; border-radius: 8px; overflow: hidden; border: 1px solid var(--theme-line, #dce2e6); min-height: 52px; }
+.quant-oos-seg { display: flex; align-items: center; justify-content: center; padding: 6px 8px; text-align: center; font-size: 10px; line-height: 1.45; }
+.quant-oos-seg.ok { background: var(--theme-surface-2, #f2f5f8); color: var(--theme-muted, #52779e); }
+.quant-oos-seg.bad { background: rgba(192, 57, 43, .14); color: var(--red, #c0392b); }
+.quant-oos-seg.pending { background: rgba(30, 142, 62, .1); color: var(--green, #1e8e3e); }

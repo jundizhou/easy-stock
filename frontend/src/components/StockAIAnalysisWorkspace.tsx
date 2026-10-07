@@ -81,6 +81,9 @@ type Props = {
 	mode: StockAIWorkspaceMode;
 	initialAnalysis?: StockAIAnalysis | null;
 	onInitialAnalysisConsumed?: () => void;
+	/** 跨工作台联动：按 6 位代码直接发起分析（如板块图谱成分股点击）；消费后回调清空。 */
+	initialSymbol?: string;
+	onInitialSymbolConsumed?: () => void;
 	onAskAI: (analysis: StockAIAnalysis) => void;
 	onOpenSettings: () => void;
 };
@@ -117,7 +120,7 @@ function writeStoredValue(key: string, value: string) { try { window.localStorag
 
 type DirectoryState = 'idle' | 'loading' | 'cached' | 'ready' | 'error';
 type HotRankState = 'idle' | 'loading' | 'ready' | 'error';
-export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnalysis, onInitialAnalysisConsumed, onAskAI, onOpenSettings }: Props) {
+export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnalysis, onInitialAnalysisConsumed, initialSymbol, onInitialSymbolConsumed, onAskAI, onOpenSettings }: Props) {
 	const research = useStockResearch(config);
 	const [purpose, setPurpose] = useState<ResearchRequest['purpose']>('observe');
 	const [horizon, setHorizon] = useState<ResearchRequest['horizon']>('swing');
@@ -268,6 +271,15 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, initialAnal
 		setResearchLevel('deep');
 		setLevelDialogOpen(true);
 	}, [analysis?.research_report, config, directory]);
+
+	// 跨工作台联动（如板块图谱成分股点击）：按代码直接以当前档位发起分析，消费后清空。
+	useEffect(() => {
+		const raw = (initialSymbol || '').trim();
+		if (!raw || !config) return;
+		setQuery(raw);
+		void runAnalysis(raw);
+		onInitialSymbolConsumed?.();
+	}, [initialSymbol, config, runAnalysis, onInitialSymbolConsumed]);
 
 	useEffect(() => () => {
 		analysisAbortController.current?.abort();

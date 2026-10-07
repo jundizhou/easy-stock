@@ -11,6 +11,7 @@ type Input struct {
 	Symbol             string
 	Quote              foundation.Quote
 	KLines             []foundation.KLine
+	MinuteBars         []MinuteBar
 	BenchmarkSymbol    string
 	BenchmarkName      string
 	BenchmarkKLines    []foundation.KLine
@@ -44,6 +45,7 @@ type Analysis struct {
 	Conclusion            Conclusion           `json:"conclusion"`
 	Trend                 TrendAnalysis        `json:"trend"`
 	ShortTerm             ShortTermAnalysis    `json:"short_term"`
+	MinuteMicro           *MinuteMicrostructure `json:"minute_micro,omitempty"`
 	Theme                 ThemeAnalysis        `json:"theme"`
 	Fundamental           *FundamentalAnalysis `json:"fundamental,omitempty"`
 	Research              *ResearchAnalysis    `json:"research,omitempty"`
@@ -78,6 +80,18 @@ type AIDailyBar struct {
 	Amount        float64 `json:"amount"`
 	TurnoverRate  float64 `json:"turnover_rate,omitempty"`
 	ChangePercent float64 `json:"change_percent,omitempty"`
+}
+
+// MinuteBar 是单个交易日的1分钟K样本（free-stockdb 分钟k 表）。
+// volume 单位为股；Stamp 为该分钟起始时刻的14位时间戳 YYYYMMDDHHMMSS（左端点标签）。
+type MinuteBar struct {
+	Stamp  string  `json:"stamp"`
+	Open   float64 `json:"open"`
+	Close  float64 `json:"close"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Volume float64 `json:"volume"`
+	Amount float64 `json:"amount"`
 }
 
 type Profile struct {

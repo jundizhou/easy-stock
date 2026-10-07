@@ -546,6 +546,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/stockdb/adjustment", s.stockDBAdjustment)
 	s.mux.HandleFunc("GET /api/v1/stockdb/codes", s.stockDBCodes)
 	s.mux.HandleFunc("GET /api/v1/stockdb/status", s.stockDBStatus)
+	s.mux.HandleFunc("GET /api/v1/stockdb/symbol-boards", s.stockDBSymbolBoards)
 
 	// ---- 运行时 sidecar 配置（前端 iframe 直挂用） ----
 	s.mux.HandleFunc("GET /api/v1/runtime/sidecars", s.runtimeSidecars)
@@ -555,6 +556,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/quant/kline", s.quantKLine)
 	s.mux.HandleFunc("GET /api/v1/quant/sys", s.quantSys)
 	s.mux.HandleFunc("GET /api/v1/quant/hub-status", s.quantHubStatus)
+	s.mux.HandleFunc("GET /api/v1/quant/track", s.quantTrackHandler)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)

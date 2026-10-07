@@ -36,6 +36,7 @@ import { LadderThemeEntries, LadderThemeEntry, useLadderThemeAI } from '../lib/l
 import { classifyBillboardSeat } from '../lib/billboard';
 import { latestTradingDayKLines } from '../lib/kline';
 import { ShortTermProgress } from '../lib/short-term-progress';
+import { useSymbolBoards } from '../lib/use-symbol-boards';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type BillboardState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
@@ -68,9 +69,12 @@ type Props = {
 	emotionError?: string;
 	progress?: ShortTermProgress<LimitUpLadderData> | null;
 	onRefresh: () => void;
+	/** 点击概念板块 chip 时触发（跳转板块图谱下钻，App 层消费）。 */
+	onOpenBoard?: (board: { name: string }) => void;
 };
 
-export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, progress, onRefresh }: Props) {
+export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, progress, onRefresh, onOpenBoard }: Props) {
+	const openConceptBoard = (concept: string) => onOpenBoard?.({ name: concept });
 	const [showST, setShowST] = useState(false);
 	const [previousExpanded, setPreviousExpanded] = useState(false);
 	const [selectedStock, setSelectedStock] = useState<LimitUpLadderStock | null>(null);
@@ -227,7 +231,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						<div><span>今日结构</span><h3>连板梯队</h3></div>
 						<small>按高度降序；同层优先无开板、早封板</small>
 					</div>
-					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows aiEntries={themeAI.entries} levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />}
+					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows config={config} aiEntries={themeAI.entries} levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} onSelectConcept={openConceptBoard} emptyText="当前涨停池没有可展示股票" />}
 				</section>
 
 				<aside className="limit-up-side-stack">
@@ -280,7 +284,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						</button>
 					</div>
 				</div>
-				{previousExpanded && <div id="previous-ladder-content"><LadderRows aiEntries={themeAI.entries} levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} emptyText="暂无昨日梯队数据" /></div>}
+				{previousExpanded && <div id="previous-ladder-content"><LadderRows config={config} aiEntries={themeAI.entries} levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} onSelectConcept={openConceptBoard} emptyText="暂无昨日梯队数据" /></div>}
 			</section>
 
 			<footer className="limit-up-note">
@@ -451,7 +455,7 @@ function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNo
 	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { aiEntries: LadderThemeEntries; levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
+function LadderRows({ config, aiEntries, levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, onSelectConcept, emptyText }: { config: BackendConfig | null; aiEntries: LadderThemeEntries; levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; onSelectConcept: (concept: string) => void; emptyText: string }) {
 	const [collapsedLevels, setCollapsedLevels] = useState<Set<number>>(() => new Set([1]));
 
 	if (!levels.length) {
@@ -484,7 +488,7 @@ function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrent
 						<ChevronDown size={17} aria-hidden="true" />
 					</summary>
 									<div className="limit-stock-grid">
-										{level.stocks.map((stock) => <LadderStockChip tradeDate={tradeDate} ai={aiEntries[stock.symbol]} stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
+										{level.stocks.map((stock) => <LadderStockChip config={config} tradeDate={tradeDate} ai={aiEntries[stock.symbol]} stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} onSelectConcept={onSelectConcept} key={stock.symbol} />)}
 					</div>
 				</details>
 			))}
@@ -492,14 +496,21 @@ function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrent
 	);
 }
 
-function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onSelect, onSelectBillboard }: { tradeDate: string; ai?: LadderThemeEntry; stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void }) {
+function LadderStockChip({ config, tradeDate, ai, stock, compact, showCurrentChange, onSelect, onSelectBillboard, onSelectConcept }: { config: BackendConfig | null; tradeDate: string; ai?: LadderThemeEntry; stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void; onSelectConcept: (concept: string) => void }) {
 	const [conceptsExpanded, setConceptsExpanded] = useState(false);
 	const concepts = [...new Set((stock.raw_concepts || []).flatMap(value => value.split(/[、,，;；]/)).map(value => value.trim()).filter(Boolean))];
-	const visibleConcepts = conceptsExpanded ? concepts : concepts.slice(0, 3);
-	const hiddenConceptCount = Math.max(0, concepts.length - 3);
+	// 开盘啦概念缺失时，用 Free-StockDB 板块索引兜底反查（申万一级+概念优先，见 sidecars 排序）。
+	const stockdbBoards = useSymbolBoards(config, stock.symbol, concepts.length === 0);
+	const stockdbConcepts = stockdbBoards?.map(board => board.name) || [];
+	const chipConcepts = concepts.length ? concepts : stockdbConcepts;
+	const chipConceptSource = concepts.length ? 'kaipanla' : stockdbBoards ? 'stockdb' : 'pending';
+	const visibleConcepts = conceptsExpanded ? chipConcepts : chipConcepts.slice(0, 3);
+	const hiddenConceptCount = Math.max(0, chipConcepts.length - 3);
 	const tooltip = [
-		`${stock.name} · 概念板块：${concepts.join('、') || '暂无概念数据'}`,
-		`数据源：${stock.source?.includes('duanxianxia') ? '开盘啦' : stock.source ? '东方财富补充' : '待确认'}`,
+		`${stock.name} · 概念板块：${chipConcepts.join('、') || '暂无概念数据'}`,
+		concepts.length
+			? `数据源：${stock.source?.includes('duanxianxia') ? '开盘啦' : stock.source ? '东方财富补充' : '待确认'}`
+			: stockdbBoards?.length ? '数据源：Free-StockDB 板块反查（开盘啦概念缺失兜底）' : '数据源：待确认',
 		stock.theme_source ? `题材口径：${stock.theme_source.includes('cross-day') ? '跨日开盘啦统一' : stock.theme_source.includes('duanxianxia') ? '开盘啦逐股题材' : '东方财富概念归因'}` : '',
 		stock.raw_concepts?.length ? `原始概念：${stock.raw_concepts.join('、')}` : '',
 		...(stock.theme_evidence || []),
@@ -516,9 +527,15 @@ function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onS
 				<span>{stock.limit_regime}</span>
 			</div>
 			<div className="limit-stock-concepts">
-				<div className="limit-stock-concepts-heading">概念板块<small>（开启AI分析更准确）</small></div>
+				<div className="limit-stock-concepts-heading">概念板块<small>{chipConceptSource === 'stockdb' ? '（stockdb 反查）' : chipConceptSource === 'pending' ? '（反查中…）' : '（点击查看板块成分）'}</small></div>
 				<div className="limit-stock-concept-tags">
-					{visibleConcepts.length ? visibleConcepts.map(concept => <span key={concept}>{concept}</span>) : <small>暂无概念数据</small>}
+					{visibleConcepts.length ? visibleConcepts.map(concept => <button
+						type="button"
+						key={concept}
+						title={`查看「${concept}」板块成分`}
+						onClick={event => { event.stopPropagation(); onSelectConcept(concept); }}
+						onKeyDown={event => event.stopPropagation()}
+					>{concept}</button>) : <small>{chipConceptSource === 'pending' ? '板块反查中…' : '暂无概念数据'}</small>}
 					{hiddenConceptCount > 0 && <button
 						type="button"
 						className="limit-stock-concept-toggle"
