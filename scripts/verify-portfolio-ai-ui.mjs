@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const base = process.env.PORTFOLIO_UI_URL || 'http://127.0.0.1:20073/#portfolio-inspection';
+const output = path.resolve(process.env.PORTFOLIO_UI_OUTPUT || '.runtime/portfolio-ai-ui');
+const sample = JSON.parse(await fs.readFile(process.env.RESEARCH_CASE_FILE || '.runtime/research-evaluation/600519.json', 'utf8'));
+await fs.mkdir(output, { recursive: true });
+const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
+await context.addInitScript(() => { window.aStock = { getBackendConfig: async () => ({ backendUrl: location.origin, token: '' }) }; });
+const analysis = structuredClone(sample.job.analysis);
+const now = new Date().toISOString();
+analysis.analysis_id = 'portfolio-ui-stock'; analysis.ai = { status: 'ready', message: 'UI TEST FIXTURE' };
+analysis.research_report = { ...(analysis.research_report || {}), headline: '界面测试个股逻辑', request: { symbol: analysis.symbol, purpose: 'observe', horizon: 'short', analysis_level: 'quick' }, generated_at: now, cutoff_at: now, sources: [{ id: 'ui-source', title: 'UI TEST FIXTURE 测试来源', content: '仅用于界面验证，不是真实研判', captured_at: now, url: 'https://example.com' }], support: [], counter: [], alternatives: [], conditions: [], scenarios: [], questions: [], attempts: [], anchors: [], invalidation_ids: [], limitations: [], thesis: { text: '测试逻辑', kind: 'inference', source_ids: ['ui-source'] }, decision: { status: 'observe', horizon: 'short', new_position: '观察', existing_position: '观察', reason: '界面测试' } };
+const holding = { symbol: analysis.symbol, name: 'UI TEST FIXTURE 股票', weight_percent: 60 };
+const request = { trader_profile: 'balanced', horizon: 'swing', research_level: 'standard', holdings: [holding] };
+const profile = { id: 'balanced', label: '均衡' };
+const metrics = { total_position_percent: 60, cash_percent: 40, ai_research_coverage_percent: 100, coverage_percent: 100, stop_loss_coverage_percent: 0, stop_loss_risk_percent: 0 };
+const facts = { cash_percent: { value: 40, available: true, method: '现金占总资产 %' }, [`${holding.symbol}.pnl_percent`]: { value: null, available: false, method: '成本未填写' } };
+const results = [{ holding, status: 'succeeded', analysis, analysis_id: analysis.analysis_id, research_origin: 'reused', report_completed_at: now, research_cutoff_at: now }];
+const refs = [{ report_id: analysis.analysis_id, source_id: 'ui-source' }];
+const conclusion = { total_score: 71, score_available: true, risk_level: '高', risk_reason: '测试集中风险', style_match: '部分偏离', confidence_level: '中', confidence_reason: '原研究周期与当前持有周期不同', source: 'hermes-ai', executive_summary: 'UI TEST FIXTURE：复用成功研究后综合评估组合，固定止损缺失不阻断评分。', dimensions: ['持仓逻辑质量', '组合结构合理性', '风险承受能力', '策略匹配度'].map((label, i) => ({ key: `d${i}`, label, score: 70 + i, weight: [35, 25, 25, 15][i], reason: '测试理由：结合仓位和研究证据评估，相关限制单独标明。', adjustments: [{ risk_id: `r${i}`, reason: 'UI TEST FIXTURE 待验证事项', points: -5 }], evidence_refs: refs, limitations: [] })), holdings: [{ symbol: holding.symbol, portfolio_role: '观察', action_priority: '观察', conclusion: '测试条件下继续观察', action: '等待趋势确认', confirmation: '趋势延续', invalidation: '趋势破坏' }], primary_risks: ['测试集中风险'], concentration_findings: ['测试共同驱动'], adjustment_order: ['先核实趋势变化'], next_checklist: ['核实下一份披露'], scenarios: [{ name: '震荡分化', condition: '趋势走弱', portfolio_action: '复核持有逻辑' }], risk_groups: [{ name: '测试主线', symbols: [holding.symbol], weight_percent: 60, reason: '有引用的共同驱动', evidence_refs: refs }], data_limitations: ['本例仅验证界面，不调用真实模型'] };
+const report = { id: 'portfolio-ui', algorithm_version: 'portfolio-ai-score-v3', prompt_version: 'portfolio-inspection-v3', generated_at: now, profile, metrics, request, facts, holdings: results, conclusion };
+conclusion.explanation_details = { 'primary_risks[0]': { evidence_refs: refs, symbols: [holding.symbol] }, 'dimensions.d0.limitations[0]': { evidence_refs: [{ fact: 'cash_percent' }] } };
+conclusion.dimensions[0].limitations = ['UI TEST FIXTURE 维度限制'];
+let job = { id: report.id, status: 'succeeded', request, results, report, report_available: true, total_stocks: 1, completed_stocks: 1, updated_at: now };
+let submitted; const apiWrites = [];
+await context.route('**/api/**', async (route) => {
+ const req = route.request(); const pathname = new URL(req.url()).pathname; let data = [];
+ if (req.method() !== 'GET') apiWrites.push(pathname);
+ if (pathname === '/api/v1/stocks/directory') data = { stocks: [{ symbol: holding.symbol, code: holding.symbol.split('.')[0], name: holding.name }] };
+ else if (pathname.includes('/portfolio-inspections')) {
+  if (req.method() === 'POST' && pathname.endsWith('/cancel')) { job = { ...job, status: 'partial', resume_available: true, error: 'UI TEST FIXTURE 汇总失败', report: { ...report, conclusion: { ...conclusion, total_score: undefined, score_available: false } } }; data = {}; }
+  else if (req.method() === 'POST') { submitted = req.postDataJSON(); job = { ...job, id: 'ui-running', status: 'running', stage: 'analyzing_stocks', started_at: now, report: undefined, completed_stocks: 0, results: [{ ...results[0], status: 'running', research_origin: 'shared_running' }], message: 'UI TEST FIXTURE 共享已有研究' }; data = job; }
+  else data = pathname.endsWith('/portfolio-inspections') ? [job] : job;
+ } else if (pathname === '/api/v1/agent/status') data = { available: true, configured: true, message: 'UI TEST FIXTURE', runtime: 'hermes' };
+ else if (pathname === '/api/health') data = { status: 'ok' };
+ await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+});
+const page = await context.newPage(); const errors = []; page.on('pageerror', (e) => errors.push(e.message));
+try {
+ await page.goto(base); await page.locator('.portfolio-history button').first().click();
+ await page.getByRole('heading', { name: /组合综合评分/ }).waitFor();
+ const risks = page.locator('.portfolio-report-grid .stock-research-counter');
+ await risks.locator('.portfolio-evidence summary').click();
+ assert.ok((await risks.innerText()).includes('不是真实研判'));
+ assert.ok((await risks.innerText()).includes('涉及持仓：UI TEST FIXTURE 股票'));
+ assert.equal(await page.locator('.portfolio-score-dimensions article.stock-ai-kpi').count(), 4);
+ await page.locator('.portfolio-score-dimensions summary').first().click();
+ await page.locator('.portfolio-score-dimensions .portfolio-evidence summary').filter({ hasText: 'UI TEST FIXTURE 测试来源' }).first().click();
+ assert.ok((await page.locator('.portfolio-score-dimensions').innerText()).includes('不是真实研判'));
+ await page.locator('.portfolio-research-baseline > summary').click();
+ assert.ok((await page.locator('.portfolio-research-baseline').innerText()).includes('未设置有效静态止损方案'));
+ assert.ok(!(await page.locator('.portfolio-report').innerText()).includes('覆盖不足，暂不评分'));
+ await page.screenshot({ path: path.join(output, 'desktop.png'), fullPage: true });
+ await page.setViewportSize({ width: 390, height: 844 });
+ await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
+ const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
+ assert.equal(overflow, false, 'mobile horizontal overflow');
+ await page.setViewportSize({ width: 1440, height: 1100 });
+ await page.getByRole('button', { name: '重新研究此股并评估组合' }).click();
+ await page.getByRole('button', { name: '停止持仓分析' }).waitFor();
+ assert.deepEqual(submitted.force_symbols, [holding.symbol]);
+ assert.equal(submitted.horizon, 'swing');
+ assert.ok((await page.locator('.portfolio-progress-stocks').innerText()).includes('共享已有研究'));
+ await page.getByRole('button', { name: '停止持仓分析' }).click();
+ await page.getByRole('button', { name: '补齐失败个股' }).waitFor();
+ await page.getByRole('button', { name: '补齐失败个股' }).click();
+ await page.getByRole('button', { name: '停止持仓分析' }).waitFor();
+ assert.ok(apiWrites.some((p) => p.endsWith('/resume')));
+ assert.deepEqual(errors, []);
+ await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, fixture_only: true, workflows: ['four-dimensional scoring', 'inline sources', 'independent stop budget', 'mobile', 'single-stock explicit refresh', 'shared task progress', 'cancel', 'recovery'], errors }, null, 2));
+ console.log(`Portfolio UI checks passed: ${output}`);
+} finally { await browser.close(); }

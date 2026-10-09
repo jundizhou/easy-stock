@@ -43,7 +43,8 @@ type settingsView struct {
 	ReviewAutomation struct {
 		Profiles []reviewSourceProfileView `json:"profiles"`
 	} `json:"review_automation"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedAt     *time.Time        `json:"updated_at,omitempty"`
+	Notifications notificationsView `json:"notifications"`
 }
 
 type llmProfileView struct {
@@ -460,6 +461,7 @@ func validateSingleLLM(request settingsUpdateRequest) error {
 
 func (s *Server) buildSettingsView(values appsettings.Values) settingsView {
 	view := settingsView{}
+	view.Notifications = buildNotificationsView(values.Notifications)
 	view.AgentRuntime = agent.RuntimeID(values.AgentRuntime)
 	if s.agentGateway != nil {
 		view.Agent = s.agentGateway.Status()

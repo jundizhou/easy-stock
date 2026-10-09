@@ -918,7 +918,7 @@ func TestSummarizeDailyKLinesCompressesLatest120TradingDays(t *testing.T) {
 	if summary.SampleDays != 120 || summary.LimitedSample {
 		t.Fatalf("unexpected sample metadata: %+v", summary)
 	}
-	if summary.WindowReturns["120d"] <= 0 || summary.AverageVolume["20d"] <= 0 || summary.VolumeRatio5D20D <= 0 {
+	if summary.WindowReturns["60d"] <= 0 || summary.AverageVolume["20d"] <= 0 || summary.VolumeRatio5D20D <= 0 {
 		t.Fatalf("missing deterministic return or volume statistics: %+v", summary)
 	}
 	if len(summary.TwentyDaySegments) != 6 || summary.TwentyDaySegments[5].TradingDays != 20 {

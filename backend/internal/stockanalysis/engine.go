@@ -1356,13 +1356,12 @@ func seriesSlopePercent(values []float64, lookback int) float64 {
 }
 
 func windowReturn(values []float64, window int) float64 {
-	if len(values) < 2 {
+	if len(values) < 2 || window <= 0 {
 		return 0
 	}
-	start := max(len(values)-window, 0)
-	if start >= len(values)-1 {
-		start = len(values) - 2
-	}
+	// N daily returns require N+1 closes. Short heuristic samples use only
+	// their available span; evidence summaries omit incomplete windows.
+	start := max(len(values)-window-1, 0)
 	return percentChange(values[start], values[len(values)-1])
 }
 

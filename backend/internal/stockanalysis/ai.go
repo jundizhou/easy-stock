@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/agent"
+	"easy-stock/backend/internal/runtimelog"
 )
 
 type aiConclusion struct {
@@ -477,13 +478,20 @@ func summarizeDailyKLines(bars []AIDailyBar) aiDailyKLineSummary {
 			continue
 		}
 		key := fmt.Sprintf("%dd", window)
-		summary.WindowReturns[key] = round2(windowReturn(closes, window))
+		if len(valid) > window {
+			summary.WindowReturns[key] = round2(windowReturn(closes, window))
+		}
 		summary.AverageVolume[key] = round2(averageTail(volumes, window))
 		summary.AverageAmount[key] = round2(averageTail(amounts, window))
 		summary.AverageTurnover[key] = round2(averageTail(turnovers, window))
 		if len(returns) > 0 {
 			observations := min(window, len(returns))
 			summary.DailyVolatility[key] = round2(standardDeviation(returns[len(returns)-observations:]))
+		}
+	}
+	for _, window := range []int{1, 2, 3, 4} {
+		if len(valid) > window {
+			summary.WindowReturns[fmt.Sprintf("%dd", window)] = round2(windowReturn(closes, window))
 		}
 	}
 	if len(valid) >= 20 {
@@ -670,11 +678,15 @@ type promptJSONObjectOptions struct {
 	// 本次尝试失败，会连同错误原文一起触发纠错重试。
 	// 参数为 *T 的装箱值（即 *ResearchSynthesis 等），实现方自行断言。
 	afterValidation func(decoded any) error
+	// 上游 v1.5.0 新增：校验单个候选对象；在 decodeFreshJSONObject 里对每个候选调用，
+	// 只有通过校验的候选才被接受（用于「研究分块保存/断点恢复」逐段校验）。
+	validate func(any) error
 }
 
 type invalidJSONResponseError struct {
-	label string
-	cause error
+	label   string
+	cause   error
+	content string
 }
 
 func (e *invalidJSONResponseError) Error() string {
@@ -697,6 +709,8 @@ type promptJSONAttempt struct {
 	// 避免所有原因都被压成同一句误导性的 "does not contain expected fields"。
 	failureClass jsonFailureClass
 	truncated    bool
+	// 上游 v1.5.0 新增：prompt 进度（用于归档/诊断）。
+	progress agent.PromptProgress
 }
 
 // [ES_REPAIR_RETRY_ON_VALIDATION_PATCH] 让「JSON 能解析但语义校验不通过」也走
@@ -722,6 +736,7 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 		diagnostic := promptJSONAttempt{
 			number: attempt, durationMS: time.Since(startedAt).Milliseconds(), promptBytes: len([]byte(attemptPrompt)),
 			responseBytes: len([]byte(result.Content)),
+			progress:      result.Progress,
 		}
 		if callErr != nil {
 			diagnostic.err = callErr.Error()
@@ -737,10 +752,11 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 		}
 
 		decoded = *new(T)
-		decodeErr := decodeJSONObject(result.Content, &decoded)
+		// 上游 v1.5.0：先做候选级校验（研究分块保存/断点恢复逐段校验）；
+		// 本地 ES_REPAIR_RETRY_ON_VALIDATION_PATCH：JSON 合法但语义不通过时，
+		// 也按 decode 失败处理，从而触发带反馈的纠错重试。
+		decodeErr := decodeJSONObjectWithValidation(result.Content, &decoded, options.validate)
 		if decodeErr == nil && options.afterValidation != nil {
-			// [ES_REPAIR_RETRY_ON_VALIDATION_PATCH] JSON 合法但语义不通过时，
-			// 也按 decode 失败处理，从而触发带反馈的纠错重试。
 			decodeErr = options.afterValidation(&decoded)
 		}
 		if decodeErr == nil {
@@ -761,7 +777,7 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 		}
 		if attempt >= options.maxAttempts {
 			if options.maxAttempts == 1 {
-				return decoded, &invalidJSONResponseError{label: label, cause: decodeErr}
+				return decoded, &invalidJSONResponseError{label: label, cause: decodeErr, content: runtimelog.Redact(truncateExactText(result.Content, 8_000))}
 			}
 			return decoded, fmt.Errorf("Hermes未返回有效%sJSON: 首次%v；自动纠错后%w", label, firstDecodeErr, decodeErr)
 		}
@@ -778,6 +794,12 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 }
 
 func decodeJSONObject(content string, target any) error {
+	return decodeJSONObjectWithValidation(content, target, nil)
+}
+
+// Validate each candidate before accepting it, so an incidental matching field
+// in a nested object cannot stand in for a complete research stage.
+func decodeJSONObjectWithValidation(content string, target any, validate func(any) error) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return errors.New("empty response")
@@ -800,7 +822,7 @@ func decodeJSONObject(content string, target any) error {
 
 	// [ES_JSON_STRUCTURE_REPAIR_PATCH] 先用原文扫描；仅当原文完全解不出结果时，
 	// 再用结构修复版重扫一遍（修复版对合法 JSON 恒等于原文，因此无额外语义风险）。
-	rawErr := decodeJSONObjectRaw(content, target)
+	rawErr := decodeJSONObjectRaw(content, target, validate)
 	if rawErr == nil {
 		return nil
 	}
@@ -813,18 +835,21 @@ func decodeJSONObject(content string, target any) error {
 	if !ok || sanitized == content {
 		return rawErr
 	}
-	if err := decodeJSONObjectRaw(sanitized, target); err == nil {
+	if err := decodeJSONObjectRaw(sanitized, target, validate); err == nil {
 		return nil
 	}
 	return rawErr
 }
 
 // decodeJSONObjectRaw 单遍扫描：不做结构修复，只做数字容错与候选选择。
-func decodeJSONObjectRaw(content string, target any) error {
+func decodeJSONObjectRaw(content string, target any, validate func(any) error) error {
 	var lastErr error
 	// [ES_JSON_NUMERIC_COERCION_PATCH] 首个「已命中期望字段」的候选的具体解码错误，
 	// 优先于后续嵌套候选的 "does not contain expected fields" 暴露，避免误导排查。
 	var specificErr error
+	// 上游 v1.5.0：记录首个「命中期望字段但解码失败」的错误，
+	// 避免后续不含期望字段的嵌套对象掩盖主响应对象真正的类型错误。
+	var fieldErr error
 	// [ES_REPAIR_SEMANTICS_PATCH] §3：识别「顶层兄弟对象」而非「嵌套旁支」。
 	//
 	// 现场缺陷：模型回显输入 evidence-pack，其 `analysis` 子对象含与目标同名的
@@ -867,18 +892,27 @@ func decodeJSONObjectRaw(content string, target any) error {
 			if specificErr == nil {
 				lastErr = errors.New("JSON object does not contain expected fields")
 			}
-		} else if err := decodeFreshJSONObject(coerceJSONNumbers(candidate), target); err == nil {
+		} else if err := decodeFreshJSONObject(coerceJSONNumbers(candidate), target, validate); err == nil {
 			return nil
 		} else {
 			if specificErr == nil {
 				specificErr = err
 			}
 			lastErr = err
+			// 上游 v1.5.0：记录首个命中期望字段的错误，避免被后续无关候选掩盖。
+			if fieldErr == nil {
+				fieldErr = err
+			}
 		}
 	}
 	// [ES_JSON_NUMERIC_COERCION_PATCH] 真实原因优先
 	if specificErr != nil {
 		return specificErr
+	}
+	// A later nested object without the expected top-level fields must not
+	// hide the actual type error in the model's main response object.
+	if fieldErr != nil {
+		return fieldErr
 	}
 	if lastErr != nil {
 		return lastErr
@@ -1069,7 +1103,7 @@ func hasKnownJSONField(candidate string, target any) bool {
 	return false
 }
 
-func decodeFreshJSONObject(candidate string, target any) error {
+func decodeFreshJSONObject(candidate string, target any, validate func(any) error) error {
 	targetValue := reflect.ValueOf(target)
 	if !targetValue.IsValid() || targetValue.Kind() != reflect.Pointer || targetValue.IsNil() {
 		return errors.New("JSON decode target must be a non-nil pointer")
@@ -1078,6 +1112,11 @@ func decodeFreshJSONObject(candidate string, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(candidate))
 	if err := decoder.Decode(fresh.Interface()); err != nil {
 		return err
+	}
+	if validate != nil {
+		if err := validate(fresh.Interface()); err != nil {
+			return err
+		}
 	}
 	targetValue.Elem().Set(fresh.Elem())
 	return nil

@@ -71,6 +71,39 @@ func TestTaskBindingSurvivesRuntimeModelAndSkillChange(t *testing.T) {
 	}
 }
 
+func TestTaskBindingFreezesReasoningEffort(t *testing.T) {
+	s := testService(t)
+	config, err := s.readConfigMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfig, _ := stringMap(config["agent"])
+	agentConfig["easy_stock_reasoning_effort"] = "max"
+	if err := s.writeConfigMap(config); err != nil {
+		t.Fatal(err)
+	}
+	ctx, release, err := s.BindTask(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	agentConfig["easy_stock_reasoning_effort"] = "low"
+	if err := s.writeConfigMap(config); err != nil {
+		t.Fatal(err)
+	}
+	if effort, ok := BoundReasoningEffort(ctx); !ok || effort != "max" {
+		t.Fatal("running task inherited a later reasoning change")
+	}
+	next, cleanup, err := s.BindTask(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if effort, ok := BoundReasoningEffort(next); !ok || effort != "low" {
+		t.Fatal("new task ignored the updated reasoning setting")
+	}
+}
+
 func TestPreparedConfigurationRollback(t *testing.T) {
 	s := testService(t)
 	before := s.configurationID()

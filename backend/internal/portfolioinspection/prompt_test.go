@@ -5,24 +5,19 @@ import (
 	"testing"
 )
 
-func TestBuildPromptPinsDeterministicV2Scores(t *testing.T) {
-	rules, _ := RulesFor(ProfileBalanced)
-	metrics := Metrics{
-		TotalPositionPercent: 70, CashPercent: 30, CoveragePercent: 100,
-		HealthScore: 78, HealthScoreAvailable: true, WeightedRisk: 35,
-		RiskResilienceScore: 100, DiversificationScore: 72, StyleMatchScore: 100,
-	}
-	prompt, err := buildPrompt(Request{TraderProfile: ProfileBalanced}, nil, metrics, rules)
+func TestBuildPromptUsesAIResearchRubric(t *testing.T) {
+	req, results, metrics, _ := scoreFixture()
+	rules, _ := RulesFor(req.TraderProfile)
+	prompt, err := buildPrompt(req, results, metrics, rules)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{
-		`"prompt_version":"portfolio-inspection-v2"`,
-		`"deterministic_summary":{"health_score":78,"risk_level":"低","style_match":"匹配"}`,
-		"必须原样复制deterministic_summary",
-	} {
+	for _, expected := range []string{`"prompt_version":"portfolio-inspection-v4"`, `"scoring_version":"portfolio-ai-score-v4"`, "holding_logic", "不得调用工具", "没有静态止损价不阻断评分"} {
 		if !strings.Contains(prompt, expected) {
-			t.Fatalf("prompt missing %q: %s", expected, prompt)
+			t.Fatalf("missing %s", expected)
 		}
+	}
+	if strings.Contains(prompt, "deterministic_summary") || strings.Contains(prompt, "必须原样复制") {
+		t.Fatal("AI scoring still overridden")
 	}
 }

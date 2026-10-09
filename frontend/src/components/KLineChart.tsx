@@ -7,20 +7,22 @@ type Props = {
 	state?: 'loading' | 'ready' | 'error' | 'idle';
 	mode?: 'intraday' | 'daily';
 	periodLabel?: string;
+	compact?: boolean;
+	timeZone?: string;
 };
 
-function formatTime(value: string, mode: 'intraday' | 'daily', periodLabel: string) {
+function formatTime(value: string, mode: 'intraday' | 'daily', periodLabel: string, timeZone?: string) {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return value.slice(0, 16);
 	if (mode === 'intraday' && periodLabel === '5日') return `${date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
 	if (mode === 'intraday') return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-	return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+	return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', timeZone });
 }
 
-function formatLongDate(value: string) {
+function formatLongDate(value: string, timeZone?: string) {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return value.slice(0, 16);
-	return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+	return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone });
 }
 
 function formatVolume(value: number) {
@@ -55,20 +57,20 @@ function intradayLimitPercent(symbol = '') {
 	return 10;
 }
 
-export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', periodLabel = '日K' }: Props) {
+export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', periodLabel = '日K', compact = false, timeZone }: Props) {
 	const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 	if (state === 'loading') return <div className="kline-chart-placeholder">正在加载{periodLabel}数据…</div>;
 	if (!lines.length) return <div className="kline-chart-placeholder">{state === 'error' ? `${periodLabel}数据暂不可用，请稍后重试。` : `暂无${periodLabel}数据。`}</div>;
 
 	const sorted = [...lines].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-	const width = 960;
-	const height = 430;
-	const left = 68;
-	const right = 84;
+	const width = compact ? 540 : 960;
+	const height = compact ? 350 : 430;
+	const left = compact ? 58 : 68;
+	const right = compact ? 68 : 84;
 	const chartTop = 20;
-	const chartBottom = 316;
-	const volumeTop = 338;
-	const volumeBottom = 388;
+	const chartBottom = height - 114;
+	const volumeTop = height - 92;
+	const volumeBottom = height - 42;
 	const plotWidth = width - left - right;
 	const minPrice = Math.min(...sorted.map((line) => line.low));
 	const maxPrice = Math.max(...sorted.map((line) => line.high));
@@ -167,7 +169,7 @@ export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', per
 							const x = left + index * step + step / 2;
 							const barTop = volumeY(line.volume);
 							const change = barChangePercent(index);
-							return <g key={`${line.time}-${index}`} className={line.close >= line.open ? 'kline-up' : 'kline-down'}><title>{`${formatLongDate(line.time)} 收 ${line.close.toFixed(2)}（${change >= 0 ? '+' : ''}${change.toFixed(2)}%）成交量 ${formatVolume(line.volume)}`}</title><circle className="kline-close-point" cx={x} cy={priceY(line.close)} r={Math.max(1.5, Math.min(3, step / 3))} /><rect className="kline-volume" x={x - bodyWidth / 2} y={barTop} width={bodyWidth} height={volumeBottom - barTop} /></g>;
+							return <g key={`${line.time}-${index}`} className={line.close >= line.open ? 'kline-up' : 'kline-down'}><title>{`${formatLongDate(line.time, timeZone)} 收 ${line.close.toFixed(2)}（${change >= 0 ? '+' : ''}${change.toFixed(2)}%）成交量 ${formatVolume(line.volume)}`}</title><circle className="kline-close-point" cx={x} cy={priceY(line.close)} r={Math.max(1.5, Math.min(3, step / 3))} /><rect className="kline-volume" x={x - bodyWidth / 2} y={barTop} width={bodyWidth} height={volumeBottom - barTop} /></g>;
 						})}
 					</>
 				) : sorted.map((line, index) => {
@@ -177,12 +179,12 @@ export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', per
 					const bodyBottom = priceY(Math.min(line.open, line.close));
 					const barTop = volumeY(line.volume);
 					const change = barChangePercent(index);
-					return <g className={rising ? 'kline-up' : 'kline-down'} key={`${line.time}-${index}`}><title>{`${formatLongDate(line.time)} 开 ${line.open.toFixed(2)} 高 ${line.high.toFixed(2)} 低 ${line.low.toFixed(2)} 收 ${line.close.toFixed(2)}（${change >= 0 ? '+' : ''}${change.toFixed(2)}%）成交量 ${formatVolume(line.volume)}`}</title><line className="kline-wick" x1={x} x2={x} y1={priceY(line.high)} y2={priceY(line.low)} /><rect className="kline-body" x={x - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={Math.max(bodyBottom - bodyTop, 1.5)} /><rect className="kline-volume" x={x - bodyWidth / 2} y={barTop} width={bodyWidth} height={volumeBottom - barTop} /></g>;
+					return <g className={rising ? 'kline-up' : 'kline-down'} key={`${line.time}-${index}`}><title>{`${formatLongDate(line.time, timeZone)} 开 ${line.open.toFixed(2)} 高 ${line.high.toFixed(2)} 低 ${line.low.toFixed(2)} 收 ${line.close.toFixed(2)}（${change >= 0 ? '+' : ''}${change.toFixed(2)}%）成交量 ${formatVolume(line.volume)}`}</title><line className="kline-wick" x1={x} x2={x} y1={priceY(line.high)} y2={priceY(line.low)} /><rect className="kline-body" x={x - bodyWidth / 2} y={bodyTop} width={bodyWidth} height={Math.max(bodyBottom - bodyTop, 1.5)} /><rect className="kline-volume" x={x - bodyWidth / 2} y={barTop} width={bodyWidth} height={volumeBottom - barTop} /></g>;
 				})}
 				{labelIndexes.map((index) => {
 					const line = sorted[index];
 					const x = left + index * step + step / 2;
-					return <text className="kline-date-label" x={x} y={height - 15} textAnchor={index === 0 ? 'start' : index === sorted.length - 1 ? 'end' : 'middle'} key={line.time}>{formatTime(line.time, mode, periodLabel)}</text>;
+					return <text className="kline-date-label" x={x} y={height - 15} textAnchor={index === 0 ? 'start' : index === sorted.length - 1 ? 'end' : 'middle'} key={line.time}>{formatTime(line.time, mode, periodLabel, timeZone)}</text>;
 				})}
 				{hoveredX != null && hoveredY != null && <>
 					<line className="kline-crosshair" x1={hoveredX} x2={hoveredX} y1={chartTop} y2={volumeBottom} />
@@ -192,7 +194,7 @@ export function KLineChart({ lines, symbol, state = 'ready', mode = 'daily', per
 				<rect className="kline-hover-layer" x={left} y={chartTop} width={plotWidth} height={volumeBottom - chartTop} onMouseMove={handleChartMove} onMouseLeave={() => setHoveredIndex(null)} aria-label="悬浮查看行情明细" />
 			</svg>
 			{hoveredLine && <div className={`kline-hover-card ${mode === 'intraday' ? 'right' : 'left'}`}>
-				<strong>{mode === 'intraday' ? formatLongDate(hoveredLine.time) : formatTime(hoveredLine.time, mode, periodLabel)}</strong>
+				<strong>{mode === 'intraday' ? formatLongDate(hoveredLine.time, timeZone) : formatTime(hoveredLine.time, mode, periodLabel, timeZone)}</strong>
 				<div><span>开盘</span><b>{hoveredLine.open.toFixed(2)}</b></div>
 				<div><span>收盘</span><b className={hoveredLine.close >= hoveredLine.open ? 'up' : 'down'}>{hoveredLine.close.toFixed(2)}</b></div>
 				<div><span>最高</span><b className="up">{hoveredLine.high.toFixed(2)}</b></div>

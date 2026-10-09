@@ -229,6 +229,7 @@ type taskBinding struct {
 	codex    *CodexRuntime
 	identity string
 	status   Status
+	effort   string
 }
 type bindingKey struct{}
 
@@ -279,8 +280,13 @@ func (s *Service) BindTask(ctx context.Context) (context.Context, func(), error)
 	s.HermesRuntime.mu.RUnlock()
 	h := NewHermesRuntime(HermesConfig{RuntimeRoot: s.runtimeRoot, Home: dir, WorkDir: s.workDir, PythonPath: s.pythonPath})
 	h.llm, h.configured, h.hasAPIKey = cfg, configured, key
+	config, err := h.readConfigMap()
+	if err != nil {
+		cleanup()
+		return ctx, func() {}, err
+	}
 	c := NewCodexRuntime(s.codex.config, h)
-	b := &taskBinding{owner: s, runtime: s.active, hermes: h, codex: c, identity: ModelIdentity(s.active, cfg), status: s.activeStatus()}
+	b := &taskBinding{owner: s, runtime: s.active, hermes: h, codex: c, identity: ModelIdentity(s.active, cfg), status: s.activeStatus(), effort: storedReasoningEffort(config)}
 	return context.WithValue(ctx, bindingKey{}, b), cleanup, nil
 }
 
@@ -322,6 +328,20 @@ func BoundModel(ctx context.Context) string {
 	return ""
 }
 
+// The bound configuration is copied at task start. Its digest includes the
+// reasoning policy, so a resumed research cannot silently mix configurations.
+func BoundConfigurationIdentity(ctx context.Context) string {
+	if binding, ok := ctx.Value(bindingKey{}).(*taskBinding); ok {
+		data, err := os.ReadFile(filepath.Join(binding.hermes.home, "config.yaml"))
+		if err != nil {
+			return binding.identity
+		}
+		hash := sha256.Sum256(data)
+		return binding.identity + ":" + hex.EncodeToString(hash[:])
+	}
+	return ""
+}
+
 func BoundStatus(ctx context.Context) (Status, bool) {
 	if binding, ok := ctx.Value(bindingKey{}).(*taskBinding); ok {
 		return binding.status, true
@@ -334,4 +354,11 @@ func BoundLLM(ctx context.Context) (appsettings.LLM, bool) {
 		return binding.hermes.llm, true
 	}
 	return appsettings.LLM{}, false
+}
+
+func BoundReasoningEffort(ctx context.Context) (string, bool) {
+	if binding, ok := ctx.Value(bindingKey{}).(*taskBinding); ok {
+		return binding.effort, true
+	}
+	return "", false
 }

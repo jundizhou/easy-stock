@@ -102,6 +102,9 @@ func (r *CodexRuntime) renderConfiguration(options PromptOptions) (string, map[s
 	var b strings.Builder
 	fmt.Fprintf(&b, "model = %s\nmodel_provider = \"easy-stock\"\nweb_search = \"disabled\"\ncheck_for_update_on_startup = false\ncli_auth_credentials_store = \"ephemeral\"\n", strconv.Quote(cfg.Model))
 	effort := settings.ReasoningEffort
+	if options.Sandbox && options.ReasoningEffortCap != "" {
+		effort = cappedReasoningEffort(effort, options.ReasoningEffortCap, settings.Reasoning)
+	}
 	// Native Responses toggles (e.g. MiniMax M3) use any non-none effort
 	// to enable thinking. Keep the shared UI as a toggle, not fake levels.
 	if effort == "enabled" && settings.Reasoning.Wire == "openai_responses" {
@@ -484,10 +487,16 @@ func (r *CodexRuntime) PromptWithOptions(ctx context.Context, prompt string, opt
 		return e
 	}
 	result := PromptResult{Runtime: Codex}
+	watchdog := newPromptWatchdog(options)
+	defer watchdog.close()
 	for {
 		select {
 		case <-ctx.Done():
+			result.Progress = watchdog.snapshot()
 			return result, ctx.Err()
+		case <-watchdog.channel():
+			result.Progress = watchdog.snapshot()
+			return result, watchdog.timeout()
 		case f, ok := <-frames:
 			if !ok {
 				return result, errors.New("Codex 会话意外结束")
@@ -495,7 +504,14 @@ func (r *CodexRuntime) PromptWithOptions(ctx context.Context, prompt string, opt
 			if f.Error != nil {
 				return result, errors.New(f.Error.Message)
 			}
+			watchdog.observe(f)
+			result.Progress = watchdog.snapshot()
+			if err := watchdog.retryLimitError(); err != nil {
+				return result, err
+			}
 			switch eventType(f) {
+			case "message.delta":
+				result.Content += firstNonEmpty(eventText(f, "delta"), eventText(f, "text"))
 			case "gateway.ready":
 				err = send("create", "session.create", map[string]any{})
 			case "message.complete":

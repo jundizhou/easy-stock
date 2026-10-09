@@ -1,284 +1,269 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1180" viewBox="0 0 1680 1180" role="img" aria-labelledby="title desc">
-  <title id="title">easy-stock AI 原生架构</title>
-  <desc id="desc">展示 easy-stock 从趋势题材、短线连板、个股 AI 分析到业务编排、AI Agent、数据智能和外部生态的分层架构</desc>
-  <defs>
-    <linearGradient id="canvas" x1="0" y1="0" x2="1680" y2="1180" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F4FBFF"/>
-      <stop offset=".48" stop-color="#F8FAFF"/>
-      <stop offset="1" stop-color="#F7F5FF"/>
-    </linearGradient>
-    <linearGradient id="hero" x1="72" y1="48" x2="1608" y2="160" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#082C3D"/>
-      <stop offset=".52" stop-color="#0A1C36"/>
-      <stop offset="1" stop-color="#28164C"/>
-    </linearGradient>
-    <linearGradient id="ai" x1="354" y1="534" x2="1326" y2="746" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0C3548"/>
-      <stop offset=".5" stop-color="#122B50"/>
-      <stop offset="1" stop-color="#30205D"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop stop-color="#1EDCC8"/>
-      <stop offset=".5" stop-color="#35C6FF"/>
-      <stop offset="1" stop-color="#9B7BFF"/>
-    </linearGradient>
-    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="0">
-      <stop stop-color="#FF526F"/>
-      <stop offset="1" stop-color="#FFB648"/>
-    </linearGradient>
-    <filter id="cardShadow" x="-15%" y="-20%" width="130%" height="150%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#1D3655" flood-opacity=".12"/>
-    </filter>
-    <filter id="deepShadow" x="-15%" y="-25%" width="130%" height="160%">
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#07152D" flood-opacity=".28"/>
-    </filter>
-    <marker id="arrowBlue" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0 0 11 5.5 0 11Z" fill="#36BDE9"/>
-    </marker>
-    <marker id="arrowPurple" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0 0 11 5.5 0 11Z" fill="#8067E8"/>
-    </marker>
-    <style>
-      text { font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
-      .eyebrow { font-size: 15px; font-weight: 700; letter-spacing: 2px; }
-      .layer-title { font-size: 18px; font-weight: 800; fill: #17334D; }
-      .layer-sub { font-size: 13px; fill: #668096; }
-      .card-title { font-size: 17px; font-weight: 750; fill: #17334D; }
-      .card-sub { font-size: 12px; fill: #70879A; }
-      .feature-title { font-size: 14px; font-weight: 800; fill: #17334D; }
-      .feature-sub { font-size: 10.5px; fill: #70879A; }
-      .white-title { font-size: 17px; font-weight: 750; fill: #F4FBFF; }
-      .white-sub { font-size: 12px; fill: #B9D8E8; }
-      .pill { font-size: 12px; font-weight: 700; }
-    </style>
-  </defs>
-
-  <rect width="1680" height="1180" rx="38" fill="url(#canvas)"/>
-  <circle cx="1515" cy="96" r="220" fill="#8F73FF" opacity=".06"/>
-  <circle cx="154" cy="1020" r="250" fill="#2CDAC8" opacity=".055"/>
-
-  <!-- Header -->
-  <rect x="56" y="38" width="1568" height="132" rx="30" fill="url(#hero)" filter="url(#deepShadow)"/>
-  <rect x="82" y="64" width="80" height="80" rx="22" fill="#0E3D50" stroke="#79E9F5" stroke-opacity=".45"/>
-  <path d="M137 118c-10 18-30 27-48 18-17-8-24-30-16-47 9-19 31-27 50-18 14 7 22 21 22 36H89" fill="none" stroke="url(#accent)" stroke-width="9" stroke-linecap="round"/>
-  <path d="m105 125 13-13 11 7 18-22" fill="none" stroke="url(#warm)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="188" y="89" class="eyebrow" fill="#70E7F0">AI-NATIVE A-SHARE INTELLIGENCE PLATFORM</text>
-  <text x="188" y="127" font-size="34" font-weight="850" fill="#FFFFFF">easy-stock AI 原生架构</text>
-  <text x="1030" y="91" font-size="14" font-weight="700" fill="#9BCADA">实时证据</text>
-  <text x="1030" y="121" font-size="14" fill="#E8F6FF">数据可追踪 · Agent 可执行 · 研究可积累</text>
-  <rect x="1380" y="72" width="190" height="62" rx="18" fill="#FFFFFF" fill-opacity=".09" stroke="#FFFFFF" stroke-opacity=".16"/>
-  <text x="1475" y="98" text-anchor="middle" font-size="12" font-weight="700" fill="#92EAE8">LOCAL FIRST</text>
-  <text x="1475" y="121" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">本地优先 · 模型开放</text>
-
-  <!-- Left host rail -->
-  <rect x="56" y="198" width="240" height="900" rx="28" fill="#FFFFFF" stroke="#CFE0EA" filter="url(#cardShadow)"/>
-  <rect x="72" y="216" width="208" height="54" rx="16" fill="#E9F9FC"/>
-  <text x="92" y="240" class="eyebrow" fill="#118B98">DESKTOP HOST</text>
-  <text x="92" y="260" font-size="12" fill="#4F7C89">桌面运行与会话边界</text>
-  <g transform="translate(80 300)">
-    <rect width="192" height="118" rx="20" fill="#F7FBFD" stroke="#DCE9EF"/>
-    <circle cx="30" cy="31" r="14" fill="#29C6D6" opacity=".16"/>
-    <path d="M22 31h16M30 23v16" stroke="#1497A8" stroke-width="3" stroke-linecap="round"/>
-    <text x="54" y="36" class="card-title">Electron Shell</text>
-    <text x="20" y="66" class="card-sub">生命周期与资源装配</text>
-    <text x="20" y="88" class="card-sub">随机端口 · Preload 注入</text>
-  </g>
-  <g transform="translate(80 438)">
-    <rect width="192" height="118" rx="20" fill="#F7FBFD" stroke="#DCE9EF"/>
-    <circle cx="30" cy="31" r="14" fill="#6F67E8" opacity=".14"/>
-    <path d="M24 31h12M30 25v12" stroke="#6F67E8" stroke-width="3" stroke-linecap="round"/>
-    <text x="54" y="36" class="card-title">Session Vault</text>
-    <text x="20" y="66" class="card-sub">雪球 / 淘股吧隔离会话</text>
-    <text x="20" y="88" class="card-sub">持久 Cookie · 本机权限</text>
-  </g>
-  <g transform="translate(80 576)">
-    <rect width="192" height="118" rx="20" fill="#F7FBFD" stroke="#DCE9EF"/>
-    <circle cx="30" cy="31" r="14" fill="#FF7B68" opacity=".14"/>
-    <path d="M23 31h14M26 26l-3 5 3 5M34 26l3 5-3 5" fill="none" stroke="#EF6C59" stroke-width="2.5" stroke-linecap="round"/>
-    <text x="54" y="36" class="card-title">Loopback Guard</text>
-    <text x="20" y="66" class="card-sub">127.0.0.1 服务边界</text>
-    <text x="20" y="88" class="card-sub">一次性 Token · CORS</text>
-  </g>
-  <g transform="translate(80 714)">
-    <rect width="192" height="118" rx="20" fill="#F7FBFD" stroke="#DCE9EF"/>
-    <circle cx="30" cy="31" r="14" fill="#33B98D" opacity=".14"/>
-    <path d="M24 35c3-11 9-11 12 0M30 22v14" fill="none" stroke="#23966F" stroke-width="2.7" stroke-linecap="round"/>
-    <text x="54" y="36" class="card-title">Local Runtime</text>
-    <text x="20" y="66" class="card-sub">Go Backend · Hermes</text>
-    <text x="20" y="88" class="card-sub">SQLite · 缓存 · 日志</text>
-  </g>
-  <rect x="80" y="864" width="192" height="202" rx="20" fill="#102D43"/>
-  <text x="100" y="896" class="eyebrow" fill="#67DDE4">DESIGN PRINCIPLE</text>
-  <text x="100" y="932" font-size="17" font-weight="800" fill="#FFFFFF">数据留在本机</text>
-  <text x="100" y="962" font-size="13" fill="#B8D3E1">密钥不进入页面</text>
-  <text x="100" y="987" font-size="13" fill="#B8D3E1">会话按配置隔离</text>
-  <text x="100" y="1012" font-size="13" fill="#B8D3E1">模型按需访问</text>
-  <rect x="100" y="1032" width="118" height="5" rx="2.5" fill="url(#accent)"/>
-
-  <!-- Right governance rail -->
-  <rect x="1384" y="198" width="240" height="900" rx="28" fill="#FFFFFF" stroke="#DCD7F2" filter="url(#cardShadow)"/>
-  <rect x="1400" y="216" width="208" height="54" rx="16" fill="#F1EEFF"/>
-  <text x="1420" y="240" class="eyebrow" fill="#6B55C8">GOVERNANCE</text>
-  <text x="1420" y="260" font-size="12" fill="#786F9A">安全、质量与可观测性</text>
-  <g transform="translate(1408 300)">
-    <rect width="192" height="134" rx="20" fill="#FBFAFF" stroke="#E6E0F7"/>
-    <text x="22" y="35" class="card-title">🔐 密钥隔离</text>
-    <text x="22" y="66" class="card-sub">API Key 写入 Hermes .env</text>
-    <text x="22" y="90" class="card-sub">页面与通用设置不保存明文</text>
-    <rect x="22" y="108" width="88" height="7" rx="3.5" fill="#8D73EA" opacity=".65"/>
-  </g>
-  <g transform="translate(1408 454)">
-    <rect width="192" height="134" rx="20" fill="#FBFAFF" stroke="#E6E0F7"/>
-    <text x="22" y="35" class="card-title">◎ 证据治理</text>
-    <text x="22" y="66" class="card-sub">来源 · 时间 · 延迟 · 降级</text>
-    <text x="22" y="90" class="card-sub">AI 结论关联原始证据</text>
-    <rect x="22" y="108" width="122" height="7" rx="3.5" fill="#38BFE0" opacity=".72"/>
-  </g>
-  <g transform="translate(1408 608)">
-    <rect width="192" height="134" rx="20" fill="#FBFAFF" stroke="#E6E0F7"/>
-    <text x="22" y="35" class="card-title">◫ 弹性降级</text>
-    <text x="22" y="66" class="card-sub">Provider 健康探针</text>
-    <text x="22" y="90" class="card-sub">缓存、兜底与错误诊断</text>
-    <rect x="22" y="108" width="105" height="7" rx="3.5" fill="#35C891" opacity=".7"/>
-  </g>
-  <g transform="translate(1408 762)">
-    <rect width="192" height="134" rx="20" fill="#FBFAFF" stroke="#E6E0F7"/>
-    <text x="22" y="35" class="card-title">◌ 运行可观测</text>
-    <text x="22" y="66" class="card-sub">同步进度 · 任务状态</text>
-    <text x="22" y="90" class="card-sub">Latency · Stale · Error</text>
-    <rect x="22" y="108" width="138" height="7" rx="3.5" fill="#FF8762" opacity=".7"/>
-  </g>
-  <rect x="1408" y="924" width="192" height="142" rx="20" fill="#2C2051"/>
-  <text x="1428" y="954" class="eyebrow" fill="#B9A7FF">TRUST BOUNDARY</text>
-  <text x="1428" y="988" font-size="16" font-weight="800" fill="#FFFFFF">AI 辅助，而非替代判断</text>
-  <text x="1428" y="1017" font-size="12" fill="#D5CFF0">行情与模型输出均需核验</text>
-  <text x="1428" y="1041" font-size="12" fill="#D5CFF0">不输出黑盒收益承诺</text>
-
-  <!-- Main platform area -->
-  <rect x="322" y="198" width="1036" height="188" rx="28" fill="#FFFFFF" stroke="#D7E4EC" filter="url(#cardShadow)"/>
-  <text x="350" y="229" class="layer-title">01 · AI 投研体验层</text>
-  <text x="350" y="252" class="layer-sub">同一工作台承接盘中观察、盘后复盘与持续研究</text>
-
-  <g transform="translate(350 276)">
-    <g>
-      <rect width="148" height="82" rx="18" fill="#EAFBFA" stroke="#BEEBE7"/>
-      <circle cx="25" cy="27" r="14" fill="#24C7B8" opacity=".18"/>
-      <path d="m18 31 5-7 6 5 8-12" fill="none" stroke="#159E91" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="46" y="30" class="feature-title">趋势题材</text>
-      <text x="14" y="60" class="feature-sub">主线 · 强度 · 题材地图</text>
-    </g>
-    <g transform="translate(164)">
-      <rect width="148" height="82" rx="18" fill="#FFF2EF" stroke="#FFD4CB"/>
-      <circle cx="25" cy="27" r="14" fill="#FF6D5C" opacity=".16"/>
-      <path d="M19 34V25M25 34V19M32 34V27" stroke="#E95749" stroke-width="2.7" stroke-linecap="round"/>
-      <text x="46" y="30" class="feature-title">短线连板</text>
-      <text x="14" y="60" class="feature-sub">梯队 · 晋级 · 市场情绪</text>
-    </g>
-    <g transform="translate(328)">
-      <rect width="148" height="82" rx="18" fill="#EBF6FF" stroke="#C8E5F7"/>
-      <circle cx="25" cy="27" r="14" fill="#2A9EEA" opacity=".15"/>
-      <path d="M18 29h5l3-8 4 15 4-10h5" fill="none" stroke="#2184C6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="46" y="30" class="feature-title">个股 AI 分析</text>
-      <text x="14" y="60" class="feature-sub">趋势 · 连板 · 证据链</text>
-    </g>
-    <g transform="translate(492)">
-      <rect width="148" height="82" rx="18" fill="#F2F0FF" stroke="#DCD6FF"/>
-      <circle cx="25" cy="27" r="14" fill="#7966E5" opacity=".15"/>
-      <path d="M18 20h14v16l-7-4-7 4Z" fill="none" stroke="#6E59D0" stroke-width="2.4" stroke-linejoin="round"/>
-      <text x="46" y="30" class="feature-title">游资心法</text>
-      <text x="14" y="60" class="feature-sub">原文缓存 · 知识研读</text>
-    </g>
-    <g transform="translate(656)">
-      <rect width="148" height="82" rx="18" fill="#FFF8E9" stroke="#F5E2B2"/>
-      <circle cx="25" cy="27" r="14" fill="#F4AE36" opacity=".18"/>
-      <path d="M18 19h14v17H18zM21 23h8M21 28h8" fill="none" stroke="#C98920" stroke-width="2.2" stroke-linecap="round"/>
-      <text x="46" y="30" class="feature-title">大 V 复盘</text>
-      <text x="14" y="60" class="feature-sub">订阅 · 归档 · 观点汇总</text>
-    </g>
-    <g transform="translate(820)">
-      <rect width="148" height="82" rx="18" fill="#EEF7FF" stroke="#C8E5F7"/>
-      <circle cx="25" cy="27" r="14" fill="#2A9EEA" opacity=".15"/>
-      <path d="M19 23h12v10H19zM22 19v4M28 19v4M22 37h6" fill="none" stroke="#2184C6" stroke-width="2.2" stroke-linecap="round"/>
-      <text x="46" y="30" class="feature-title">AI Copilot</text>
-      <text x="14" y="60" class="feature-sub">对话 · 解释 · 研究协作</text>
-    </g>
-  </g>
-
-  <!-- Flow connector -->
-  <path d="M840 386v27" stroke="#36BDE9" stroke-width="4" marker-end="url(#arrowBlue)"/>
-
-  <!-- Application orchestration -->
-  <rect x="322" y="422" width="1036" height="144" rx="28" fill="#FFFFFF" stroke="#D7E4EC" filter="url(#cardShadow)"/>
-  <text x="350" y="454" class="layer-title">02 · 业务编排与领域服务</text>
-  <text x="350" y="477" class="layer-sub">Go API 将 A 股领域模型、调度任务与证据口径统一起来</text>
-  <g transform="translate(350 498)">
-    <rect width="128" height="42" rx="13" fill="#EAF8FC"/><text x="64" y="27" text-anchor="middle" class="pill" fill="#187D9B">API Gateway</text>
-    <rect x="140" width="128" height="42" rx="13" fill="#ECF9F5"/><text x="204" y="27" text-anchor="middle" class="pill" fill="#217D63">Research Workspace</text>
-    <rect x="280" width="128" height="42" rx="13" fill="#EBF6FF"/><text x="344" y="27" text-anchor="middle" class="pill" fill="#247DB3">Stock Analysis</text>
-    <rect x="420" width="128" height="42" rx="13" fill="#FFF3EE"/><text x="484" y="27" text-anchor="middle" class="pill" fill="#B65F43">Strategy Engine</text>
-    <rect x="560" width="128" height="42" rx="13" fill="#F2EFFF"/><text x="624" y="27" text-anchor="middle" class="pill" fill="#6751BC">Review Intelligence</text>
-    <rect x="700" width="128" height="42" rx="13" fill="#FFF8E9"/><text x="764" y="27" text-anchor="middle" class="pill" fill="#9A711F">Scheduler</text>
-    <rect x="840" width="128" height="42" rx="13" fill="#EEF4F8"/><text x="904" y="27" text-anchor="middle" class="pill" fill="#4D6D83">Source Health</text>
-  </g>
-
-  <path d="M840 566v27" stroke="#8067E8" stroke-width="4" marker-end="url(#arrowPurple)"/>
-
-  <!-- AI platform -->
-  <rect x="322" y="602" width="1036" height="232" rx="30" fill="url(#ai)" filter="url(#deepShadow)"/>
-  <text x="350" y="638" class="eyebrow" fill="#66E5E4">03 · HERMES AI AGENT PLATFORM</text>
-  <text x="350" y="670" font-size="23" font-weight="850" fill="#FFFFFF">让 AI 不只会回答，更能获取、分析、调用工具并延续研究上下文</text>
-  <rect x="350" y="696" width="202" height="104" rx="20" fill="#FFFFFF" fill-opacity=".09" stroke="#7CE5EB" stroke-opacity=".28"/>
-  <text x="372" y="728" class="white-title">Prompt &amp; Skills</text>
-  <text x="372" y="756" class="white-sub">A 股研究提示词</text>
-  <text x="372" y="779" class="white-sub">游资知识与方法论</text>
-  <rect x="570" y="696" width="202" height="104" rx="20" fill="#FFFFFF" fill-opacity=".09" stroke="#7CE5EB" stroke-opacity=".28"/>
-  <text x="592" y="728" class="white-title">Session &amp; Memory</text>
-  <text x="592" y="756" class="white-sub">连续对话与任务状态</text>
-  <text x="592" y="779" class="white-sub">本地研究记忆索引</text>
-  <rect x="790" y="696" width="202" height="104" rx="20" fill="#FFFFFF" fill-opacity=".09" stroke="#B5A7FF" stroke-opacity=".32"/>
-  <text x="812" y="728" class="white-title">Tool Router</text>
-  <text x="812" y="756" class="white-sub">数据 API · SQLite</text>
-  <text x="812" y="779" class="white-sub">agent-browser · Browser Bridge</text>
-  <rect x="1010" y="696" width="318" height="104" rx="20" fill="#FFFFFF" fill-opacity=".1" stroke="#C0B4FF" stroke-opacity=".34"/>
-  <text x="1032" y="728" class="white-title">Open Model Gateway</text>
-  <text x="1032" y="756" class="white-sub">OpenAI · DeepSeek · 通义千问 · Moonshot</text>
-  <text x="1032" y="779" class="white-sub">Anthropic · Responses · Messages · 自定义兼容接口</text>
-
-  <path d="M840 834v27" stroke="#36BDE9" stroke-width="4" marker-end="url(#arrowBlue)"/>
-
-  <!-- Data intelligence -->
-  <rect x="322" y="870" width="1036" height="142" rx="28" fill="#FFFFFF" stroke="#D7E4EC" filter="url(#cardShadow)"/>
-  <text x="350" y="902" class="layer-title">04 · 数据智能与证据底座</text>
-  <text x="350" y="925" class="layer-sub">先把数据变成可信证据，再交给 Agent 理解与行动</text>
-  <g transform="translate(350 946)">
-    <rect width="180" height="42" rx="13" fill="#E8F7FA"/><text x="90" y="27" text-anchor="middle" class="pill" fill="#187D91">Provider Registry</text>
-    <rect x="197" width="180" height="42" rx="13" fill="#ECF8F3"/><text x="287" y="27" text-anchor="middle" class="pill" fill="#247D63">Market Model</text>
-    <rect x="394" width="180" height="42" rx="13" fill="#EBF6FF"/><text x="484" y="27" text-anchor="middle" class="pill" fill="#247DB3">Theme Attribution</text>
-    <rect x="591" width="180" height="42" rx="13" fill="#F2EFFF"/><text x="681" y="27" text-anchor="middle" class="pill" fill="#6652B9">Evidence Metadata</text>
-    <rect x="788" width="180" height="42" rx="13" fill="#FFF4ED"/><text x="878" y="27" text-anchor="middle" class="pill" fill="#A75E3D">SQLite · Cache</text>
-  </g>
-
-  <path d="M840 1012v24" stroke="#8067E8" stroke-width="4" marker-end="url(#arrowPurple)"/>
-
-  <!-- Ecosystem -->
-  <rect x="322" y="1048" width="1036" height="50" rx="18" fill="#162C43"/>
-  <text x="348" y="1079" class="eyebrow" fill="#73DDE6">05 · EXTERNAL ECOSYSTEM</text>
-  <rect x="650" y="1058" width="250" height="30" rx="10" fill="#FFFFFF" fill-opacity=".1"/>
-  <text x="775" y="1078" text-anchor="middle" class="pill" fill="#DDF8FA">行情：开盘啦 · 东财 · 新浪 · 财联社</text>
-  <rect x="916" y="1058" width="190" height="30" rx="10" fill="#FFFFFF" fill-opacity=".1"/>
-  <text x="1011" y="1078" text-anchor="middle" class="pill" fill="#F0EAFF">内容：雪球 · 淘股吧 · 微信</text>
-  <rect x="1122" y="1058" width="210" height="30" rx="10" fill="#FFFFFF" fill-opacity=".1"/>
-  <text x="1227" y="1078" text-anchor="middle" class="pill" fill="#FFF2D8">模型：云端大模型与兼容服务</text>
-
-  <!-- Cross-cutting connection rails -->
-  <path d="M296 482h24M296 718h24M296 940h24" stroke="#45BFCB" stroke-width="3" stroke-dasharray="7 7"/>
-  <path d="M1358 482h26M1358 718h26M1358 940h26" stroke="#8067E8" stroke-width="3" stroke-dasharray="7 7"/>
-
-  <!-- Footer legend -->
-  <g transform="translate(56 1122)">
-    <circle cx="9" cy="9" r="7" fill="#35C6E8"/><text x="24" y="14" font-size="12" fill="#60798E">数据与证据流</text>
-    <circle cx="145" cy="9" r="7" fill="#8067E8"/><text x="160" y="14" font-size="12" fill="#60798E">AI 任务与工具流</text>
-    <circle cx="318" cy="9" r="7" fill="#FF7A62"/><text x="333" y="14" font-size="12" fill="#60798E">外部实时连接</text>
-    <text x="1568" y="14" text-anchor="end" font-size="12" font-weight="700" fill="#8294A5">easy-stock · AI-native by design</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1576" viewBox="0 0 1680 1576" role="img" aria-labelledby="title desc">
+<title id="title">easy-stock AI 原生架构：本地证据与 Hermes / Codex 双运行时</title>
+<desc id="desc">基于开源版当前代码。Electron 管理本地 Go 服务、Hermes 与 Codex 运行时、浏览器桥接和微信解析服务。React 工作台通过 HTTP 与 WebSocket 访问 Go API。领域服务直接使用多源行情、统一证据模型与本地 SQLite，并按需通过统一 Agent 服务调用一个所选运行时。深度个股研究先计算量化基线，再生成问题、由 Go 只读补证、生成判断和交易条件、校验引用，保存阶段检查点。持仓巡检复用个股报告。模型服务、行情源与内容平台位于本机边界之外。</desc>
+<defs>
+<linearGradient id="hero" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#ffffff"/><stop offset=".5" stop-color="#ffffff"/><stop offset="1" stop-color="#eaf1fc"/></linearGradient>
+<marker id="arrowData" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M1 1 7 4 1 7" fill="none" stroke="#2476d2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrowAI" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M1 1 7 4 1 7" fill="none" stroke="#7651c9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrowGray" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M1 1 7 4 1 7" fill="none" stroke="#7d899a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<style>text { font-family: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif; } .mono { font-family: "SFMono-Regular", Consolas, monospace; } </style>
+</defs>
+<rect x="0" y="0" width="1680" height="1576" rx="0" fill="#f5f7fa" stroke="#f5f7fa" />
+<!-- Product header: stock-analysis light palette, restrained contrast. -->
+<rect x="40" y="36" width="1600" height="146" rx="16" fill="url(#hero)" stroke="#d7dee8" />
+<rect x="64" y="61" width="88" height="88" rx="18" fill="#2476d2" stroke="#2476d2" />
+<g transform="translate(84 83)" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3v40h45M10 30l10-13 10 7 15-20"/><path d="M35 4h10v10"/></g>
+<text x="176" y="78" font-size="14" fill="#2476d2" font-weight="650">A-STOCK RESEARCH SYSTEM</text>
+<text x="176" y="122" font-size="38" fill="#172033" font-weight="750">easy-stock · AI 原生架构</text>
+<text x="176" y="153" font-size="18" fill="#56657a" font-weight="400">以市场证据为起点，把量化计算、AI 研判与本地研究积累连成闭环</text>
+<rect x="1178" y="63" width="138" height="28" rx="5" fill="#edf9f4" stroke="#edf9f4" />
+<text x="1247.0" y="82" font-size="13" fill="#14865f" font-weight="600" text-anchor="middle">LOCAL FIRST</text>
+<rect x="1332" y="63" width="260" height="28" rx="5" fill="#edf5ff" stroke="#edf5ff" />
+<text x="1462.0" y="82" font-size="13" fill="#2476d2" font-weight="600" text-anchor="middle">HERMES / CODEX</text>
+<text x="1592" y="125" font-size="19" fill="#172033" font-weight="600" text-anchor="end">发现 → 研判 → 巡检 → 复盘 → 核验</text>
+<text x="1592" y="153" font-size="15" fill="#56657a" font-weight="400" text-anchor="end">React + TypeScript  /  Go  /  Electron</text>
+<!-- Local desktop boundary. -->
+<rect x="40" y="214" width="1600" height="1126" rx="18" fill="#ffffff" stroke="#d7dee8" />
+<rect x="62" y="202" width="307" height="24" rx="0" fill="#f5f7fa" stroke="#f5f7fa" />
+<text x="72" y="220" font-size="15" fill="#56657a" font-weight="600">本机运行边界 · Electron / userData</text>
+<rect x="64" y="244" width="232" height="1064" rx="12" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(82 264)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+</g>
+<text x="116" y="285" font-size="19" fill="#172033" font-weight="700">Electron 桌面宿主</text>
+<text x="82" y="316" font-size="15" fill="#56657a" font-weight="400">启动、装配与本地能力</text>
+<rect x="80" y="340" width="200" height="142" rx="10" fill="#ffffff" stroke="#e8edf3" />
+<g transform="translate(96 358)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h1M7 17.5h1"/>
+</g>
+<text x="96" y="399" font-size="19" fill="#172033" font-weight="650">进程与资源装配</text>
+<text x="96" y="427" font-size="14" fill="#56657a" font-weight="400">Go 后端 · 前端静态资源</text>
+<text x="96" y="452" font-size="14" fill="#56657a" font-weight="400">Hermes / Codex / Python</text>
+<rect x="80" y="498" width="200" height="142" rx="10" fill="#ffffff" stroke="#e8edf3" />
+<g transform="translate(96 516)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 2 3 6v6c0 5 5 8 9 10 4-2 9-5 9-10V6zM8 12l3 3 5-6"/>
+</g>
+<text x="96" y="557" font-size="19" fill="#172033" font-weight="650">本机通信边界</text>
+<text x="96" y="585" font-size="14" fill="#56657a" font-weight="400">可用端口 · 启动 Token</text>
+<text x="96" y="610" font-size="14" fill="#56657a" font-weight="400">Preload / IPC · 本机鉴权</text>
+<rect x="80" y="656" width="200" height="170" rx="10" fill="#ffffff" stroke="#e8edf3" />
+<g transform="translate(96 674)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2c-6 6-6 14 0 20 6-6 6-14 0-20"/>
+</g>
+<text x="96" y="715" font-size="19" fill="#172033" font-weight="650">内容采集与导入</text>
+<text x="96" y="743" font-size="14" fill="#56657a" font-weight="400">雪球 / 淘股吧浏览器桥接</text>
+<text x="96" y="768" font-size="14" fill="#56657a" font-weight="400">agent-browser 回退采集</text>
+<text x="96" y="793" font-size="14" fill="#56657a" font-weight="400">微信 FastAPI 链接解析</text>
+<rect x="80" y="842" width="200" height="142" rx="10" fill="#ffffff" stroke="#e8edf3" />
+<g transform="translate(96 860)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="m5 12 4 4L19 6"/>
+</g>
+<text x="96" y="901" font-size="19" fill="#172033" font-weight="650">运行与更新保障</text>
+<text x="96" y="929" font-size="14" fill="#56657a" font-weight="400">启动健康检查 · 日志轮转</text>
+<text x="96" y="954" font-size="14" fill="#56657a" font-weight="400">更新检查 · 安装前备份</text>
+<rect x="80" y="1000" width="200" height="170" rx="10" fill="#ffffff" stroke="#e8edf3" />
+<g transform="translate(96 1018)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 5C8 2 5 2 2 3v17c3-1 6-1 10 2 4-3 7-3 10-2V3c-3-1-6-1-10 2v17"/>
+</g>
+<text x="96" y="1059" font-size="19" fill="#172033" font-weight="650">资料与会话积累</text>
+<text x="96" y="1087" font-size="14" fill="#56657a" font-weight="400">游资心法原文与索引</text>
+<text x="96" y="1112" font-size="14" fill="#56657a" font-weight="400">浏览器持久登录态</text>
+<text x="96" y="1137" font-size="14" fill="#56657a" font-weight="400">前端对话 / 原生 Agent 会话</text>
+<rect x="80" y="1190" width="200" height="96" rx="10" fill="#edf5ff" stroke="#bdd2ed" />
+<text x="96" y="1220" font-size="17" fill="#2476d2" font-weight="650">本地优先 · 证据可追溯</text>
+<text x="96" y="1246" font-size="14" fill="#56657a" font-weight="400">来源、时间与降级状态</text>
+<text x="96" y="1268" font-size="14" fill="#56657a" font-weight="400">随数据与研究结果保留</text>
+<!-- React workspaces. -->
+<rect x="328" y="244" width="1288" height="158" rx="12" fill="#ffffff" stroke="#d7dee8" />
+<rect x="348" y="259" width="30" height="30" rx="6" fill="#edf5ff" stroke="#edf5ff" />
+<text x="363" y="281" font-size="15" fill="#2476d2" font-weight="700" text-anchor="middle" class="mono">01</text>
+<text x="392" y="282" font-size="23" fill="#172033" font-weight="700">AI 投研工作台</text>
+<text x="1596" y="282" font-size="15" fill="#56657a" font-weight="400" text-anchor="end">React 19 · TypeScript · Vite</text>
+<rect x="348" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(360 318)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M3 3v18h18M7 15l4-5 4 3 6-8"/>
+</g>
+<text x="392" y="336" font-size="16" fill="#172033" font-weight="650">行情总览</text>
+<text x="360" y="365" font-size="12.5" fill="#56657a" font-weight="400">指数 · 资金 · 研报</text>
+<rect x="505" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(517 318)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="m12 3 10 5-10 5L2 8zM2 12l10 5 10-5M2 16l10 5 10-5"/>
+</g>
+<text x="549" y="336" font-size="16" fill="#172033" font-weight="650">趋势题材</text>
+<text x="517" y="365" font-size="12.5" fill="#56657a" font-weight="400">主线 · 强度 · 题材图</text>
+<rect x="662" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(674 318)" fill="none" stroke="#e33b46" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M4 20V10M12 20V4M20 20v-7M2 20h20"/>
+</g>
+<text x="706" y="336" font-size="16" fill="#172033" font-weight="650">短线连板</text>
+<text x="674" y="365" font-size="12.5" fill="#56657a" font-weight="400">梯队 · 晋级 · 情绪</text>
+<rect x="819" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(831 318)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M9 5a3 3 0 0 0-5 3 4 4 0 0 0 0 8 3 3 0 0 0 5 3M15 5a3 3 0 0 1 5 3 4 4 0 0 1 0 8 3 3 0 0 1-5 3M9 3v18M15 3v18M4 8h2M18 16h2M9 12h6"/>
+</g>
+<text x="863" y="336" font-size="16" fill="#172033" font-weight="650">个股 AI 分析</text>
+<text x="831" y="365" font-size="12.5" fill="#56657a" font-weight="400">分级研究 · 条件核验</text>
+<rect x="976" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(988 318)" fill="none" stroke="#14865f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<rect x="2" y="5" width="20" height="15" rx="3"/><path d="M2 8V4a2 2 0 0 1 2-2h14M22 10h-6v6h6M18 13h1"/>
+</g>
+<text x="1020" y="336" font-size="16" fill="#172033" font-weight="650">持仓 AI 巡检</text>
+<text x="988" y="365" font-size="12.5" fill="#56657a" font-weight="400">组合评分 · 个股联动</text>
+<rect x="1133" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(1145 318)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<rect x="4" y="3" width="18" height="18" rx="2"/><path d="M4 7H2v12a2 2 0 0 0 2 2M8 7h5v5H8zM17 7h2M17 11h2M8 16h11"/>
+</g>
+<text x="1177" y="336" font-size="16" fill="#172033" font-weight="650">大 V 复盘</text>
+<text x="1145" y="365" font-size="12.5" fill="#56657a" font-weight="400">同步 · 共识 · 核验</text>
+<rect x="1290" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(1302 318)" fill="none" stroke="#7651c9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 5C8 2 5 2 2 3v17c3-1 6-1 10 2 4-3 7-3 10-2V3c-3-1-6-1-10 2v17"/>
+</g>
+<text x="1334" y="336" font-size="16" fill="#172033" font-weight="650">游资心法</text>
+<text x="1302" y="365" font-size="12.5" fill="#56657a" font-weight="400">原文资料 · 经验研读</text>
+<rect x="1447" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(1459 318)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<rect x="3" y="6" width="18" height="15" rx="4"/><path d="M12 2v4M7 12h1M16 12h1M8 17h8M1 11v5M23 11v5"/>
+</g>
+<text x="1491" y="336" font-size="16" fill="#172033" font-weight="650">AI Copilot</text>
+<text x="1459" y="365" font-size="12.5" fill="#56657a" font-weight="400">对话 · 工具 · 会话</text>
+<path d="M972 402V436" fill="none" stroke="#2476d2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowData)"/>
+<!-- The API has two distinct transports; jobs use HTTP polling. -->
+<rect x="328" y="440" width="1288" height="72" rx="10" fill="#edf5ff" stroke="#bdd2ed" />
+<rect x="348" y="460" width="30" height="30" rx="6" fill="#edf5ff" stroke="#edf5ff" />
+<text x="363" y="482" font-size="15" fill="#2476d2" font-weight="700" text-anchor="middle" class="mono">02</text>
+<text x="392" y="483" font-size="23" fill="#172033" font-weight="700">Go 本地 API</text>
+<text x="627" y="482" font-size="17" fill="#2476d2" font-weight="550">HTTP · 查询 / 任务轮询</text>
+<text x="966" y="482" font-size="17" fill="#2476d2" font-weight="550">WebSocket · 行情 / AI 事件</text>
+<text x="1594" y="482" font-size="16" fill="#56657a" font-weight="400" text-anchor="end">鉴权 · 参数校验 · 请求日志</text>
+<path d="M972 512V550" fill="none" stroke="#2476d2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowData)"/>
+<!-- Business services: rules and evidence remain independent of AI calls. -->
+<rect x="328" y="554" width="1288" height="304" rx="12" fill="#ffffff" stroke="#d7dee8" />
+<rect x="348" y="569" width="30" height="30" rx="6" fill="#edf5ff" stroke="#edf5ff" />
+<text x="363" y="591" font-size="15" fill="#2476d2" font-weight="700" text-anchor="middle" class="mono">03</text>
+<text x="392" y="592" font-size="23" fill="#172033" font-weight="700">领域服务与任务编排</text>
+<text x="1596" y="592" font-size="15" fill="#56657a" font-weight="400" text-anchor="end">研究级别 · 后台任务 · 复用与恢复 · 定时调度</text>
+<rect x="348" y="618" width="240" height="122" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<rect x="349" y="635" width="3" height="42" rx="1" fill="#e8edf3" stroke="#e8edf3" />
+<text x="364" y="647" font-size="20" fill="#172033" font-weight="700">市场与题材</text>
+<text x="364" y="670" font-size="13" fill="#56657a" font-weight="400" class="mono">sector / narrative</text>
+<text x="364" y="695" font-size="14" fill="#56657a" font-weight="400">行业与题材融合 · 产业链映射</text>
+<text x="364" y="719" font-size="14" fill="#56657a" font-weight="400">量价强度 · 拐点评估</text>
+<rect x="600" y="618" width="240" height="122" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<rect x="601" y="635" width="3" height="42" rx="1" fill="#e8edf3" stroke="#e8edf3" />
+<text x="616" y="647" font-size="20" fill="#172033" font-weight="700">短线与情绪</text>
+<text x="616" y="670" font-size="13" fill="#56657a" font-weight="400" class="mono">httpapi / marketemotion</text>
+<text x="616" y="695" font-size="14" fill="#56657a" font-weight="400">涨停梯队 · 晋级 · 昨日反馈</text>
+<text x="616" y="719" font-size="14" fill="#56657a" font-weight="400">情绪历史 · 盘中风险</text>
+<rect x="852" y="618" width="240" height="122" rx="10" fill="#edf5ff" stroke="#bdd2ed" />
+<rect x="853" y="635" width="3" height="42" rx="1" fill="#2476d2" stroke="#2476d2" />
+<text x="868" y="647" font-size="20" fill="#2476d2" font-weight="700">个股分级研究</text>
+<text x="868" y="670" font-size="13" fill="#56657a" font-weight="400" class="mono">stockanalysis</text>
+<text x="868" y="695" font-size="14" fill="#56657a" font-weight="400">量化 / 快速 / 标准 / 深度</text>
+<text x="868" y="719" font-size="14" fill="#56657a" font-weight="400">证据快照 · 条件核验</text>
+<rect x="1104" y="618" width="240" height="122" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<rect x="1105" y="635" width="3" height="42" rx="1" fill="#e8edf3" stroke="#e8edf3" />
+<text x="1120" y="647" font-size="20" fill="#172033" font-weight="700">持仓 AI 巡检</text>
+<text x="1120" y="670" font-size="13" fill="#56657a" font-weight="400" class="mono">portfolioinspection</text>
+<text x="1120" y="695" font-size="14" fill="#56657a" font-weight="400">复用个股报告 · 缺失时补齐</text>
+<text x="1120" y="719" font-size="14" fill="#56657a" font-weight="400">组合评分 · 集中与联动风险</text>
+<rect x="1356" y="618" width="240" height="122" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<rect x="1357" y="635" width="3" height="42" rx="1" fill="#e8edf3" stroke="#e8edf3" />
+<text x="1372" y="647" font-size="20" fill="#172033" font-weight="700">复盘与知识</text>
+<text x="1372" y="670" font-size="13" fill="#56657a" font-weight="400" class="mono">review / methodology</text>
+<text x="1372" y="695" font-size="14" fill="#56657a" font-weight="400">订阅同步 · 共识 · 次日验证</text>
+<text x="1372" y="719" font-size="14" fill="#56657a" font-weight="400">持仓明日预期 · 心法索引</text>
+<text x="348" y="780" font-size="16" fill="#2476d2" font-weight="650">个股深度研究</text>
+<rect x="498" y="754" width="166" height="40" rx="6" fill="#f3f6fa" stroke="#e8edf3" />
+<text x="581" y="780" font-size="16" fill="#172033" font-weight="550" text-anchor="middle">量化基线</text>
+<path d="M666 774H678" fill="none" stroke="#7d899a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowGray)"/>
+<rect x="682" y="754" width="166" height="40" rx="6" fill="#edf5ff" stroke="#e8edf3" />
+<text x="765" y="780" font-size="16" fill="#2476d2" font-weight="550" text-anchor="middle">问题提纲</text>
+<path d="M850 774H862" fill="none" stroke="#7d899a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowGray)"/>
+<rect x="866" y="754" width="166" height="40" rx="6" fill="#f3f6fa" stroke="#e8edf3" />
+<text x="949" y="780" font-size="16" fill="#172033" font-weight="550" text-anchor="middle">Go 只读补证</text>
+<path d="M1034 774H1046" fill="none" stroke="#7d899a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowGray)"/>
+<rect x="1050" y="754" width="166" height="40" rx="6" fill="#edf5ff" stroke="#e8edf3" />
+<text x="1133" y="780" font-size="16" fill="#2476d2" font-weight="550" text-anchor="middle">核心判断</text>
+<path d="M1218 774H1230" fill="none" stroke="#7d899a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowGray)"/>
+<rect x="1234" y="754" width="166" height="40" rx="6" fill="#edf5ff" stroke="#e8edf3" />
+<text x="1317" y="780" font-size="16" fill="#2476d2" font-weight="550" text-anchor="middle">交易条件</text>
+<path d="M1402 774H1414" fill="none" stroke="#7d899a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowGray)"/>
+<rect x="1418" y="754" width="166" height="40" rx="6" fill="#f3f6fa" stroke="#e8edf3" />
+<text x="1501" y="780" font-size="16" fill="#172033" font-weight="550" text-anchor="middle">引用校验</text>
+<text x="348" y="826" font-size="16" fill="#56657a" font-weight="400">先采集与计算，再按级别调用 AI；每阶段保存检查点，模型与证据一致时可继续研究。</text>
+<rect x="1426" y="807" width="168" height="28" rx="5" fill="#edf9f4" stroke="#edf9f4" />
+<text x="1510.0" y="826" font-size="13" fill="#14865f" font-weight="600" text-anchor="middle">报告绑定对话</text>
+<!-- Parallel dependencies: direct data access versus optional model reasoning. -->
+<path d="M630 858V906" fill="none" stroke="#2476d2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowData)"/>
+<text x="648" y="889" font-size="15" fill="#2476d2" font-weight="550">数据 / 证据</text>
+<path d="M1288 858V906" fill="none" stroke="#7651c9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowAI)"/>
+<text x="1306" y="889" font-size="15" fill="#7651c9" font-weight="550">按需 AI 调用</text>
+<rect x="328" y="910" width="604" height="398" rx="12" fill="#ffffff" stroke="#d7dee8" />
+<rect x="348" y="926" width="30" height="30" rx="6" fill="#edf5ff" stroke="#edf5ff" />
+<text x="363" y="948" font-size="15" fill="#2476d2" font-weight="700" text-anchor="middle" class="mono">04</text>
+<text x="392" y="949" font-size="23" fill="#172033" font-weight="700">数据与本地证据</text>
+<rect x="348" y="971" width="564" height="92" rx="10" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(366 987)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="m12 3 10 5-10 5L2 8zM2 12l10 5 10-5M2 16l10 5 10-5"/>
+</g>
+<text x="404" y="1008" font-size="20" fill="#172033" font-weight="650">多源适配与回退</text>
+<text x="366" y="1041" font-size="16" fill="#56657a" font-weight="400">行情 · K 线 · 主营 / 财务 · 公告 / 研报 · 热榜</text>
+<rect x="348" y="1077" width="564" height="92" rx="10" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(366 1093)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 2 3 6v6c0 5 5 8 9 10 4-2 9-5 9-10V6zM8 12l3 3 5-6"/>
+</g>
+<text x="404" y="1114" font-size="20" fill="#172033" font-weight="650">统一模型与证据快照</text>
+<text x="366" y="1147" font-size="16" fill="#56657a" font-weight="400">来源 / 时间 / 过期 / 降级 · 题材归因 · 版本化快照</text>
+<rect x="348" y="1183" width="564" height="104" rx="10" fill="#f3f6fa" stroke="#e8edf3" />
+<g transform="translate(366 1198)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 4 18 4 18 0V5M3 12c0 4 18 4 18 0"/>
+</g>
+<text x="404" y="1219" font-size="20" fill="#172033" font-weight="650">SQLite 与本地缓存</text>
+<text x="366" y="1246" font-size="15" fill="#56657a" font-weight="400" class="mono">reviews · stock-research · portfolio-inspections</text>
+<text x="366" y="1270" font-size="15" fill="#56657a" font-weight="400" class="mono">market-emotion · theme-radar · 研究检查点</text>
+<rect x="960" y="910" width="656" height="398" rx="12" fill="#ffffff" stroke="#bdd2ed" />
+<rect x="980" y="926" width="30" height="30" rx="6" fill="#edf5ff" stroke="#edf5ff" />
+<text x="995" y="948" font-size="15" fill="#2476d2" font-weight="700" text-anchor="middle" class="mono">05</text>
+<text x="1024" y="949" font-size="23" fill="#172033" font-weight="700">统一 Agent 服务</text>
+<text x="1596" y="949" font-size="14" fill="#56657a" font-weight="400" text-anchor="end" class="mono">agent.Service</text>
+<rect x="980" y="971" width="616" height="76" rx="8" fill="#edf5ff" stroke="#bdd2ed" />
+<text x="1000" y="1001" font-size="19" fill="#2476d2" font-weight="650">共享模型连接 · 思考强度 · Skills · MCP</text>
+<text x="1000" y="1028" font-size="16" fill="#56657a" font-weight="400">任务绑定配置 · 运行时选择 · 模型身份 · Token 用量</text>
+<rect x="980" y="1063" width="298" height="150" rx="10" fill="#f3f6fa" stroke="#d7dee8" />
+<text x="1000" y="1096" font-size="25" fill="#172033" font-weight="700">Hermes</text>
+<text x="1000" y="1126" font-size="16" fill="#56657a" font-weight="400">Python / Hermes Gateway</text>
+<text x="1000" y="1155" font-size="14.5" fill="#2476d2" font-weight="400">Chat Completions · Responses</text>
+<text x="1000" y="1181" font-size="14.5" fill="#2476d2" font-weight="400">Anthropic Messages</text>
+<rect x="1298" y="1063" width="298" height="150" rx="10" fill="#f4f0fc" stroke="#d8cbed" />
+<text x="1318" y="1096" font-size="25" fill="#172033" font-weight="700">Codex</text>
+<text x="1318" y="1126" font-size="16" fill="#56657a" font-weight="400">原生 App Server · JSON-RPC 适配</text>
+<text x="1318" y="1155" font-size="16" fill="#7651c9" font-weight="550">仅 Responses</text>
+<text x="1318" y="1181" font-size="15" fill="#7651c9" font-weight="400">独立会话与历史</text>
+<text x="980" y="1246" font-size="16" fill="#172033" font-weight="400">交互对话：会话续接 · 工具调用 · 授权 / 澄清</text>
+<text x="980" y="1275" font-size="16" fill="#56657a" font-weight="400">个股研究：关闭模型工具，由 Go 执行只读补证</text>
+<!-- External services are outside the local boundary. Arrows show inbound data and model dependency. -->
+<rect x="40" y="1376" width="1600" height="152" rx="14" fill="#f3f6fa" stroke="#d7dee8" />
+<path d="M528 1390V1356H630V1312" fill="none" stroke="#2476d2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowData)"/>
+<path d="M1288 1312V1356H1402V1390" fill="none" stroke="#7651c9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowAI)"/>
+<text x="64" y="1414" font-size="23" fill="#172033" font-weight="700">外部生态</text>
+<text x="64" y="1444" font-size="16" fill="#56657a" font-weight="400">行情 · 内容 · 模型</text>
+<text x="64" y="1494" font-size="14" fill="#56657a" font-weight="400">按能力连接外部来源</text>
+<rect x="328" y="1394" width="400" height="116" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<text x="348" y="1424" font-size="20" fill="#172033" font-weight="650">行情与研究数据源</text>
+<text x="348" y="1454" font-size="16" fill="#56657a" font-weight="400">东财 · 新浪 · 腾讯 · 财联社</text>
+<text x="348" y="1482" font-size="16" fill="#56657a" font-weight="400">开盘啦 / 短线侠 · 期货持仓 · 热榜</text>
+<rect x="750" y="1394" width="416" height="116" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<text x="770" y="1424" font-size="20" fill="#172033" font-weight="650">复盘文章与知识资料</text>
+<text x="770" y="1454" font-size="16" fill="#56657a" font-weight="400">雪球 · 淘股吧 · 微信链接 · 公共复盘</text>
+<text x="770" y="1482" font-size="16" fill="#56657a" font-weight="400">桌面采集 / Go 导入 · 游资心法仓库</text>
+<rect x="1188" y="1394" width="428" height="116" rx="10" fill="#ffffff" stroke="#d7dee8" />
+<text x="1208" y="1424" font-size="20" fill="#172033" font-weight="650">用户选择的大模型连接</text>
+<text x="1208" y="1454" font-size="16" fill="#56657a" font-weight="400">模型服务商 / 自定义兼容端点</text>
+<text x="1208" y="1482" font-size="16" fill="#56657a" font-weight="400">由所选运行时直接调用</text>
+<path d="M64 1551H92" fill="none" stroke="#2476d2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowData)"/>
+<text x="104" y="1557" font-size="14" fill="#56657a" font-weight="400">数据与本地服务调用</text>
+<path d="M294 1551H322" fill="none" stroke="#7651c9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowAI)"/>
+<text x="334" y="1557" font-size="14" fill="#56657a" font-weight="400">AI 任务与模型连接</text>
+<text x="1616" y="1557" font-size="14" fill="#56657a" font-weight="400" text-anchor="end">基于开源版当前实现 · 分级研究 / 双运行时 / 本地证据</text>
 </svg>

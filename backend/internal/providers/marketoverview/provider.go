@@ -159,6 +159,15 @@ func (p *Provider) MarketAnnouncements(ctx context.Context, query string, symbol
 	return p.primary.MarketAnnouncements(ctx, query, symbol, category, limit)
 }
 
+func (p *Provider) MarketAnnouncementContent(ctx context.Context, id string) (string, error) {
+	if provider, ok := p.primary.(interface {
+		MarketAnnouncementContent(context.Context, string) (string, error)
+	}); ok {
+		return provider.MarketAnnouncementContent(ctx, id)
+	}
+	return "", fmt.Errorf("announcement body provider unavailable")
+}
+
 func (p *Provider) MarketReports(ctx context.Context, kind string, query string, symbol string, industry string, limit int) ([]foundation.MarketResearchItem, foundation.SourceMeta, error) {
 	return p.primary.MarketReports(ctx, kind, query, symbol, industry, limit)
 }

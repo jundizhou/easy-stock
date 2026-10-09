@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"easy-stock/backend/internal/foundation"
 )
@@ -31,6 +32,12 @@ func TestClientRealtimeParsesSinaResponse(t *testing.T) {
 	}
 	if got[0].ChangePercent <= 0 {
 		t.Fatalf("ChangePercent = %f, want positive", got[0].ChangePercent)
+	}
+	if got[0].Volume != 123456 || got[0].Amount != 123456789 {
+		t.Fatalf("session liquidity discarded: %+v", got[0])
+	}
+	if want := time.Date(2026, 6, 12, 7, 0, 0, 0, time.UTC); !got[0].TradeTime.Equal(want) {
+		t.Fatalf("market timestamp = %s, want %s", got[0].TradeTime, want)
 	}
 	if got[0].Meta.Source != "sina" || got[0].Meta.SourceURL == "" {
 		t.Fatalf("unexpected meta: %+v", got[0].Meta)
@@ -86,6 +93,9 @@ func TestClientKLineParsesSinaJSONPResponse(t *testing.T) {
 	}
 	if got[0].Symbol != "000001.SZ" || got[0].Close != 11.240 || got[0].Volume != 203235546 {
 		t.Fatalf("unexpected kline: %+v", got[0])
+	}
+	if got[0].Amount != 0 {
+		t.Fatalf("amount must stay unknown when daily source omits it: %+v", got[0])
 	}
 	if got[0].Meta.Source != "sina" || got[0].Meta.SourceURL == "" {
 		t.Fatalf("unexpected meta: %+v", got[0].Meta)

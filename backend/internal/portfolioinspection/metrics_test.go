@@ -112,3 +112,10 @@ func successfulHolding(holding Holding, name string, score, risk int, theme stri
 	}
 	return HoldingResult{Holding: holding, Status: "succeeded", CompletedAt: time.Now(), Analysis: &analysis}
 }
+
+func TestNormalizePreservesOptimizationChain(t *testing.T) {
+	req, err := normalizeRequest(Request{SourceOptimizationID: "po-root", TraderProfile: ProfileBalanced, Holdings: []Holding{{Symbol: "600519", Weight: 80}}})
+	if err != nil || req.SourceOptimizationID != "po-root" {
+		t.Fatalf("optimization provenance lost: %+v %v", req, err)
+	}
+}

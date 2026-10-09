@@ -8,9 +8,9 @@ const symbol = process.argv[2] || '000930.SZ';
 const levels = process.argv.slice(3);
 const policies = {
   quantitative: { calls: 0, timeout: 120_000 },
-  quick: { calls: 1, timeout: 180_000, bytes: 4_000 },
-  standard: { calls: 2, timeout: 360_000, bytes: 8_000 },
-  deep: { calls: 3, timeout: 1_080_000 },
+  quick: { calls: 1, timeout: 300_000, bytes: 4_000 },
+  standard: { calls: 2, timeout: 660_000, bytes: 8_000 },
+  deep: { calls: 3, timeout: 2_100_000 },
 };
 const headers = { 'Content-Type': 'application/json', ...(process.env.A_STOCK_TOKEN ? { Authorization: `Bearer ${process.env.A_STOCK_TOKEN}` } : {}) };
 async function request(route, options = {}) {
@@ -42,7 +42,7 @@ function audit(job, snapshot, policy, tokens) {
   }
   check('request level', () => assert.equal(report.analysis_level, job.request.analysis_level));
   check('call count', () => assert.ok(report.attempts.length === policy.calls || (job.request.analysis_level === 'deep' && report.attempts.length === 4) || (job.request.analysis_level === 'standard' && report.attempts.length === 3)));
-  check('compression version', () => assert.equal(report.compression.version, 'evidence-pack-v2'));
+  check('compression version', () => assert.equal(report.compression.version, 'evidence-pack-v7'));
   if (policy.bytes) check('evidence budget', () => assert.ok(report.compression.selected_content_bytes <= policy.bytes));
   check('snapshot identity', () => { assert.equal(report.snapshot_id, snapshot.id); assert.equal(report.snapshot_version, snapshot.version); });
   check('nonempty judgment and actions', () => {
@@ -84,14 +84,16 @@ for (const level of levels.length ? levels : Object.keys(policies)) {
   const policy = policies[level];
   assert.ok(policy, `Unknown level ${level}`);
   let job;
-  const started = Date.now();
   try {
     const before = await usage();
     job = await request('stocks/research', { method: 'POST', body: JSON.stringify({ symbol, purpose: 'observe', horizon: 'swing', analysis_level: level }) });
     console.log(`${level}: started ${job.id}`);
     let lastMessage;
+    let executionStarted;
     while (['queued', 'running'].includes(job.status)) {
-      if (Date.now() - started > policy.timeout + 60_000) throw new Error('Evaluation wait deadline exceeded');
+      if (job.status === 'running') executionStarted ??= Date.now();
+      const timeout = job.budget?.total_timeout_seconds ? job.budget.total_timeout_seconds * 1000 : policy.timeout;
+      if (executionStarted && Date.now() - executionStarted > timeout + 60_000) throw new Error('Evaluation execution deadline exceeded');
       if (job.message !== lastMessage) { console.log(`${level}: ${job.message}`); lastMessage = job.message; }
       await new Promise((resolve) => setTimeout(resolve, 2500));
       job = await request(`stocks/research/${job.id}`);
@@ -101,7 +103,7 @@ for (const level of levels.length ? levels : Object.keys(policies)) {
     const tokens = Object.fromEntries(['prompt_tokens', 'completion_tokens', 'total_tokens'].map((key) => [key, after[key] - before[key]]));
     const validation = audit(job, snapshot, policy, tokens);
     const durationMS = Date.parse(job.completed_at) - Date.parse(job.started_at);
-    const evaluation = { level, symbol, name: job.analysis?.name, job_id: job.id, model: job.analysis?.ai.model, status: job.status, duration_ms: durationMS, tokens, ...validation };
+    const evaluation = { level, symbol, name: job.analysis?.name, job_id: job.id, model: job.analysis?.ai.model, status: job.status, duration_ms: durationMS, budget: job.budget, tokens, ...validation };
     await fs.writeFile(path.join(output, `${symbol}-${level}.json`), JSON.stringify({ job, snapshot, validation: evaluation }, null, 2));
     evaluations.push(evaluation);
     console.log(JSON.stringify(evaluation));

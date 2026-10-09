@@ -20,7 +20,9 @@ import (
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/notification"
 	"easy-stock/backend/internal/portfolioinspection"
+	"easy-stock/backend/internal/portfoliooptimization"
 	"easy-stock/backend/internal/providers/cls"
 	"easy-stock/backend/internal/providers/duanxianxia"
 	"easy-stock/backend/internal/providers/eastmoney"
@@ -37,38 +39,46 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/strategy/shannon"
+	"easy-stock/backend/internal/themeindex"
 )
 
 type Server struct {
-	ladderThemeAI         *ladderThemeAI
-	mux                   *http.ServeMux
-	token                 string
-	realtimeProvider      RealtimeProvider
-	kLinePrimary          KLineProvider
-	kLineFallback         KLineProvider
-	newsProvider          NewsProvider
-	sectorMap             SectorMapProvider
-	themeOverview         ThemeOverviewProvider
-	limitUpProvider       LimitUpProvider
-	marketPools           MarketPoolProvider
-	stockConcepts         StockConceptProvider
-	stockBusiness         StockBusinessProfileProvider
-	stockDirectory        StockDirectoryProvider
-	hotStockProvider      HotStockProvider
-	futuresPosition       FuturesPositionProvider
-	marketOverview        MarketOverviewProvider
-	stockDBProvider       *stockdb.Client
-	quantProvider         *quant.Client
-	realtimeArchiver      *archive.RealtimeArchiver
-	newsArchiver          *archive.NewsArchiver
-	archiveCollector      ArchiveCollectorConfig
-	archiveBaseDir        string
-	archiveMu             sync.Mutex
-	archiveActiveDir      string
-	realtimeProviderRaw   RealtimeProvider
-	newsProviderRaw       NewsProvider
-	inflection            InflectionEvaluator
-	shannonFeed           *shannon.Feed
+	ladderThemeAI            *ladderThemeAI
+	mux                      *http.ServeMux
+	token                    string
+	realtimeProvider         RealtimeProvider
+	kLinePrimary             KLineProvider
+	kLineFallback            KLineProvider
+	newsProvider             NewsProvider
+	stockNewsSearch          StockNewsSearchProvider
+	sectorMap                SectorMapProvider
+	themeOverview            ThemeOverviewProvider
+	themeIndex               *themeindex.Service
+	limitUpProvider          LimitUpProvider
+	marketPools              MarketPoolProvider
+	stockConcepts            StockConceptProvider
+	stockValuation           StockValuationProvider
+	stockBusiness            StockBusinessProfileProvider
+	stockFinancialSupplement StockFinancialSupplementProvider
+	stockDirectory           StockDirectoryProvider
+	industryStocks           IndustryStocksProvider
+	hotStockProvider         HotStockProvider
+	futuresPosition          FuturesPositionProvider
+	marketOverview           MarketOverviewProvider
+	// ---- 本地：Free-StockDB / Quant 侧车与归档 ----
+	stockDBProvider     *stockdb.Client
+	quantProvider       *quant.Client
+	realtimeArchiver    *archive.RealtimeArchiver
+	newsArchiver        *archive.NewsArchiver
+	archiveCollector    ArchiveCollectorConfig
+	archiveBaseDir      string
+	archiveMu           sync.Mutex
+	archiveActiveDir    string
+	realtimeProviderRaw RealtimeProvider
+	newsProviderRaw     NewsProvider
+	inflection          InflectionEvaluator
+	shannonFeed         *shannon.Feed
+	// ---- 缓存 / 引擎 ----
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
 	limitUpProgress       *shortTermCache[limitUpLadderData]
@@ -81,12 +91,15 @@ type Server struct {
 	reviewStore           *review.Store
 	portfolioStore        *portfolioinspection.Store
 	portfolioInspection   *portfolioinspection.Service
+	portfolioOptimization *portfoliooptimization.Service
 	portfolioExpectation  *portfolioinspection.ExpectationService
 	stockResearchStore    *stockanalysis.ResearchStore
 	stockResearch         *stockanalysis.ResearchService
 	reviewImporter        ReviewImporter
 	wechatAPIURL          string
 	settingsStore         *appsettings.Store
+	notificationSender    notificationSender
+	notifications         *notification.Dispatcher
 	reviewAutomation      *review.Automation
 	remoteDailySync       *review.RemoteDailySync
 	agentGateway          agent.Gateway
@@ -125,7 +138,11 @@ func NewServer(config any) *Server {
 	)
 	quantProvider := quant.NewClient(quant.WithBaseURL(os.Getenv("A_STOCK_QUANT_URL")))
 	if cfg.Realtime == nil {
-		// 多源抗封：sina（主）+ tencent（备）。腾讯 qt.gtimg 实时报价作为
+		// 上游 v1.5.0：未显式配置估值源时，默认复用腾讯 client。
+		if cfg.StockValuation == nil {
+			cfg.StockValuation = tencentClient
+		}
+		// 本地：多源抗封：sina（主）+ tencent（备）。腾讯 qt.gtimg 实时报价作为
 		// sina 的互补第二源，sina 被封/被限流时自动切换并保持 30s 冷却。
 		cfg.Realtime = NewMultiRealtime(sinaClient, tencentClient)
 	}
@@ -136,7 +153,11 @@ func NewServer(config any) *Server {
 		cfg.KLineFallback = sinaClient
 	}
 	if cfg.News == nil {
-		// 多源抗封：cls 财联社快讯（主）+ eastmoney 公告（备）。
+		// 上游 v1.5.0：未显式配置个股新闻源时，默认复用东方财富 client。
+		if cfg.StockNews == nil {
+			cfg.StockNews = eastMoneyClient
+		}
+		// 本地：多源抗封：cls 财联社快讯（主）+ eastmoney 公告（备）。
 		// 公告与快讯互补，单源被封时由另一源顶上。
 		cfg.News = NewMultiNews(clsClient, eastMoneyClient)
 	}
@@ -168,9 +189,15 @@ func NewServer(config any) *Server {
 	}
 	if cfg.StockBusiness == nil {
 		cfg.StockBusiness = eastMoneyClient
+		if cfg.StockFinancialSupplement == nil {
+			cfg.StockFinancialSupplement = sinaClient
+		}
 	}
 	if cfg.StockDirectory == nil {
 		cfg.StockDirectory = eastMoneyClient
+	}
+	if cfg.IndustryStocks == nil {
+		cfg.IndustryStocks = tencentClient
 	}
 	if cfg.MarketOverview == nil {
 		cfg.MarketOverview = marketoverviewprovider.New(eastMoneyClient, tencentClient, tencentClient, sinaClient)
@@ -337,57 +364,62 @@ func NewServer(config any) *Server {
 		}
 	}
 	s := &Server{
-		mux:                   http.NewServeMux(),
-		token:                 cfg.Token,
-		realtimeProvider:      cfg.Realtime,
-		kLinePrimary:          cfg.KLinePrimary,
-		kLineFallback:         cfg.KLineFallback,
-		newsProvider:          cfg.News,
-		sectorMap:             cfg.SectorMap,
-		themeOverview:         cfg.ThemeOverview,
-		limitUpProvider:       cfg.LimitUp,
-		marketPools:           cfg.MarketPools,
-		stockConcepts:         cfg.StockConcept,
-		stockBusiness:         cfg.StockBusiness,
-		stockDirectory:        cfg.StockDirectory,
-		hotStockProvider:      cfg.HotStocks,
-		futuresPosition:       cfg.FuturesPosition,
-		marketOverview:        cfg.MarketOverview,
-		stockDBProvider:       stockDBProvider,
-		quantProvider:         quantProvider,
-		realtimeArchiver:      realtimeArchiver,
-		newsArchiver:          newsArchiver,
-		archiveCollector:      cfg.ArchiveCollector,
-		archiveBaseDir:        cfg.ArchiveDir,
-		realtimeProviderRaw:   realtimeProviderRaw,
-		newsProviderRaw:       newsProviderRaw,
-		inflection:            cfg.Inflection,
-		shannonFeed:           shannon.NewFeed(stockDBProvider),
-		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
-		themeProgress:         newThemeProgressCache(),
-		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
-		limitUpProgress:       &shortTermCache[limitUpLadderData]{},
-		emotionProgress:       &shortTermCache[marketemotion.History]{},
-		stockDirectories:      newStockDirectoryCache(6 * time.Hour),
-		hotStockRanks:         newHotStockRankCache(2 * time.Minute),
-		marketSnapshots:       newMarketOverviewCache(45 * time.Second),
-		marketEmotionIntraday: newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
-		reviewStore:           cfg.ReviewStore,
-		portfolioStore:        cfg.PortfolioStore,
-		stockResearchStore:    cfg.StockResearchStore,
-		reviewImporter:        cfg.ReviewImporter,
-		wechatAPIURL:          strings.TrimSpace(cfg.WeChatAPIURL),
-		settingsStore:         cfg.SettingsStore,
-		ladderThemeAI:         newLadderThemeAI(cfg.SettingsPath),
-		reviewAutomation:      cfg.ReviewAutomation,
-		remoteDailySync:       cfg.RemoteDailySync,
-		agentGateway:          cfg.AgentGateway,
-		usageGateway:          usageGateway,
-		masteryLibrary:        cfg.MasteryLibrary,
-		marketEmotionStore:    cfg.MarketEmotionStore,
-		startupError:          errors.Join(startupErrors...),
-		logger:                cfg.Logger,
-		tokenUsage:            tokenUsage,
+		mux:                      http.NewServeMux(),
+		token:                    cfg.Token,
+		realtimeProvider:         cfg.Realtime,
+		kLinePrimary:             cfg.KLinePrimary,
+		kLineFallback:            cfg.KLineFallback,
+		newsProvider:             cfg.News,
+		stockNewsSearch:          cfg.StockNews,
+		sectorMap:                cfg.SectorMap,
+		themeOverview:            cfg.ThemeOverview,
+		limitUpProvider:          cfg.LimitUp,
+		marketPools:              cfg.MarketPools,
+		stockConcepts:            cfg.StockConcept,
+		stockValuation:           cfg.StockValuation,
+		stockBusiness:            cfg.StockBusiness,
+		stockFinancialSupplement: cfg.StockFinancialSupplement,
+		stockDirectory:           cfg.StockDirectory,
+		industryStocks:           cfg.IndustryStocks,
+		hotStockProvider:         cfg.HotStocks,
+		futuresPosition:          cfg.FuturesPosition,
+		marketOverview:           cfg.MarketOverview,
+		stockDBProvider:          stockDBProvider,
+		quantProvider:            quantProvider,
+		realtimeArchiver:         realtimeArchiver,
+		newsArchiver:             newsArchiver,
+		archiveCollector:         cfg.ArchiveCollector,
+		archiveBaseDir:           cfg.ArchiveDir,
+		realtimeProviderRaw:      realtimeProviderRaw,
+		newsProviderRaw:          newsProviderRaw,
+		inflection:               cfg.Inflection,
+		shannonFeed:              shannon.NewFeed(stockDBProvider),
+		themeSnapshots:           newThemeSnapshotCache(30 * time.Second),
+		themeProgress:            newThemeProgressCache(),
+		limitUpSnapshots:         newLimitUpLadderCache(30 * time.Second),
+		limitUpProgress:          &shortTermCache[limitUpLadderData]{},
+		emotionProgress:          &shortTermCache[marketemotion.History]{},
+		stockDirectories:         newStockDirectoryCache(6 * time.Hour),
+		hotStockRanks:            newHotStockRankCache(2 * time.Minute),
+		marketSnapshots:          newMarketOverviewCache(45 * time.Second),
+		marketEmotionIntraday:    newMarketEmotionIntradayCache(marketEmotionIntradayTTL),
+		reviewStore:              cfg.ReviewStore,
+		portfolioStore:           cfg.PortfolioStore,
+		stockResearchStore:       cfg.StockResearchStore,
+		reviewImporter:           cfg.ReviewImporter,
+		wechatAPIURL:             strings.TrimSpace(cfg.WeChatAPIURL),
+		settingsStore:            cfg.SettingsStore,
+		notificationSender:       notification.NewSender(),
+		ladderThemeAI:            newLadderThemeAI(cfg.SettingsPath),
+		reviewAutomation:         cfg.ReviewAutomation,
+		remoteDailySync:          cfg.RemoteDailySync,
+		agentGateway:             cfg.AgentGateway,
+		usageGateway:             usageGateway,
+		masteryLibrary:           cfg.MasteryLibrary,
+		marketEmotionStore:       cfg.MarketEmotionStore,
+		startupError:             errors.Join(startupErrors...),
+		logger:                   cfg.Logger,
+		tokenUsage:               tokenUsage,
 	}
 	if kaipanlaService != nil {
 		s.themeRadarStore = kaipanlaService.Store()
@@ -421,9 +453,33 @@ func NewServer(config any) *Server {
 		s.kLineFallback,
 		s.stockConcepts,
 	)
-	s.stockResearch = stockanalysis.NewResearchService(cfg.StockResearchStore, s.runStockResearch)
+	s.notifications = notification.NewDispatcher(func(ctx context.Context, channel string, cfg appsettings.NotificationChannel, message notification.Message) error {
+		return s.notificationSender.Send(ctx, channel, cfg, message)
+	}, func() appsettings.Notifications { return s.settingsStore.Snapshot().Notifications }, cfg.Logger)
+	s.stockResearch = stockanalysis.NewResearchServiceWithPreparation(cfg.StockResearchStore, s.runStockResearch, s.prepareStockResearch, s.notifyStockResearch)
 	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
+	s.portfolioInspection.ConfigureCompletion(s.notifyPortfolioInspection)
+	s.portfolioInspection.ConfigureResearch(s.resolvePortfolioResearch, s.refreshPortfolioQuotes)
+	s.portfolioOptimization = portfoliooptimization.NewService(cfg.PortfolioStore, usageGateway, portfoliooptimization.Dependencies{Collect: s.collectOptimizationUniverse, Research: s.resolvePortfolioResearch, Quotes: s.refreshOptimizationQuotes})
 	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
+	s.themeIndex = cfg.ThemeIndex
+	if s.themeIndex == nil {
+		history := &themeIndexHistory{primary: eastMoneyClient, fallback: tencentClient}
+		s.themeIndex = themeindex.New(themeindex.Config{
+			Boards: eastMoneyClient,
+			Resolve: func(ctx context.Context, theme, snapshot string) (foundation.ThemeIndexTarget, error) {
+				if resolver, ok := s.sectorMap.(interface {
+					ResolveThemeIndex(context.Context, string, string) (foundation.ThemeIndexTarget, error)
+				}); ok {
+					return resolver.ResolveThemeIndex(ctx, theme, snapshot)
+				}
+				value, err := s.loadThemeIndexMembers(ctx, theme, snapshot)
+				return foundation.ThemeIndexTarget{Name: value.Name, Names: []string{value.Name}}, err
+			},
+			Members: s.loadThemeIndexMembers,
+			KLines:  history.load,
+		})
+	}
 	s.routes()
 	return s
 }
@@ -449,6 +505,15 @@ func (s *Server) Close() error {
 		s.emotionProgress.close()
 	}
 	var closeErrors []error
+	if s.notifications != nil {
+		s.notifications.Close()
+	}
+	if s.portfolioOptimization != nil {
+		s.portfolioOptimization.Close()
+	}
+	if s.portfolioInspection != nil {
+		s.portfolioInspection.Close()
+	}
 	if s.stockResearch != nil {
 		s.stockResearch.Close()
 	}
@@ -580,6 +645,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/research/institution-reports", s.marketInstitutionReportsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/industries", s.marketIndustryResearchHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/overview", s.themeOverviewHandler)
+	s.mux.HandleFunc("GET /api/v1/themes/index", s.themeIndexHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/screen", s.themeScreenHandler)
 	s.mux.HandleFunc("GET /api/v1/sector-map", s.sectorMapHandler)
 	s.mux.HandleFunc("GET /api/v1/short-term/limit-up-ladder", s.limitUpLadderHandler)
@@ -595,10 +661,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/stocks/research/{id}", s.stockResearchGet)
 	s.mux.HandleFunc("DELETE /api/v1/stocks/research/{id}", s.stockResearchDelete)
 	s.mux.HandleFunc("POST /api/v1/stocks/research/{id}/cancel", s.stockResearchCancel)
+	s.mux.HandleFunc("POST /api/v1/stocks/research/{id}/resume", s.stockResearchResume)
 	s.mux.HandleFunc("POST /api/v1/stocks/research/{id}/verify", s.stockResearchVerify)
 	s.mux.HandleFunc("GET /api/v1/stocks/research/{id}/snapshot", s.stockResearchSnapshot)
 	s.mux.HandleFunc("GET /api/v1/stocks/directory", s.stockDirectoryHandler)
 	s.mux.HandleFunc("GET /api/v1/stocks/hot-ranks", s.hotStockRanksHandler)
+
+	// ---- 上游 v1.5.0：AI 优化持仓 ----
+	s.mux.HandleFunc("POST /api/v1/portfolio-inspections/{id}/optimizations", s.portfolioOptimizationCreate)
+	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}/optimizations", s.portfolioOptimizationList)
+	s.mux.HandleFunc("GET /api/v1/portfolio-optimizations/{id}", s.portfolioOptimizationGet)
+	s.mux.HandleFunc("POST /api/v1/portfolio-optimizations/{id}/cancel", s.portfolioOptimizationCancel)
+	s.mux.HandleFunc("POST /api/v1/portfolio-optimizations/{id}/resume", s.portfolioOptimizationResume)
 
 	// ---- Free-StockDB 数据/计算底座 (7899) ----
 	s.mux.HandleFunc("GET /api/v1/stockdb/query", s.stockDBQuery)
@@ -617,9 +691,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/quant/sys", s.quantSys)
 	s.mux.HandleFunc("GET /api/v1/quant/hub-status", s.quantHubStatus)
 	s.mux.HandleFunc("GET /api/v1/quant/track", s.quantTrackHandler)
+
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)
+	s.mux.HandleFunc("POST /api/v1/portfolio-inspections/{id}/resume", s.portfolioInspectionResume)
+	s.mux.HandleFunc("POST /api/v1/portfolio-inspections/{id}/cancel", s.portfolioInspectionCancel)
 	s.mux.HandleFunc("POST /api/v1/reviews/portfolio-expectations", s.portfolioExpectationCreate)
 	s.mux.HandleFunc("GET /api/v1/reviews/portfolio-expectations/latest", s.portfolioExpectationLatest)
 	s.mux.HandleFunc("GET /api/v1/reviews/portfolio-expectations/{id}", s.portfolioExpectationGet)
@@ -660,6 +737,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/settings/llm/models", s.settingsLLMModels)
 	s.mux.HandleFunc("POST /api/v1/settings/llm/api-key/reveal", s.settingsLLMAPIKeyReveal)
 	s.mux.HandleFunc("POST /api/v1/settings/llm/test", s.settingsLLMTest)
+	s.mux.HandleFunc("GET /api/v1/settings/notifications", s.settingsNotificationsGet)
+	s.mux.HandleFunc("PUT /api/v1/settings/notifications", s.settingsNotificationsUpdate)
+	s.mux.HandleFunc("POST /api/v1/settings/notifications/test", s.settingsNotificationsTest)
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)
 	s.mux.HandleFunc("POST /api/v1/strategy/shannon/scan", s.shannonScan)

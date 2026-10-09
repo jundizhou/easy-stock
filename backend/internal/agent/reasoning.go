@@ -96,6 +96,23 @@ func (c ReasoningCapability) Normalize(value string) string {
 	return c.Default
 }
 
+func cappedReasoningEffort(current, limit string, c ReasoningCapability) string {
+	current = c.Normalize(current)
+	ranks := map[string]int{"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4, "xhigh": 5, "max": 6}
+	n, known := ranks[current]
+	bound, valid := ranks[limit]
+	if !known || !valid || n <= bound {
+		return current
+	}
+	best, rank := current, -1
+	for _, o := range c.Options {
+		if r, ok := ranks[o.Value]; ok && r <= bound && r > rank {
+			best, rank = o.Value, r
+		}
+	}
+	return best
+}
+
 // Official rules checked 2026-09-30. Exact model IDs and routes deliberately
 // avoid guessing future model capabilities or a proxy's parameter semantics.
 func OfficialReasoningCapability(cfg appsettings.LLM) ReasoningCapability {

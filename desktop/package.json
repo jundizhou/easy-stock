@@ -3,7 +3,7 @@
   "description": "easy-stock AI A-share research desktop application",
   "author": "easy-stock contributors",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.5.0",
   "main": "main.cjs",
   "scripts": {
     "predev": "npm --prefix .. run build:backend",

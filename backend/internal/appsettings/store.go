@@ -79,6 +79,7 @@ type Values struct {
 	ActiveLLMProfileID string           `json:"active_llm_profile_id,omitempty"`
 	Credentials        Credentials      `json:"credentials"`
 	ReviewAutomation   ReviewAutomation `json:"review_automation"`
+	Notifications      Notifications    `json:"notifications"`
 	Archive            Archive          `json:"archive"`
 	UpdatedAt          time.Time        `json:"updated_at,omitempty"`
 }
@@ -235,6 +236,12 @@ func (s *Store) load() error {
 		if _, exists := raw["archive"]; !exists {
 			s.values.Archive = defaultValues().Archive
 		}
+		// [ES_MERGE_V150] 老配置（v1.5.0 之前）没有 notifications 段；若不回填，
+		// Go 零值会让三类通知事件默认关闭。这里对齐 archive 的做法：仅在字段
+		// 完全缺失时补默认（用户显式关掉的 false 不会被覆盖）。
+		if _, exists := raw["notifications"]; !exists {
+			s.values.Notifications = defaultValues().Notifications
+		}
 	}
 	s.normalizeReviewProfiles()
 	s.normalizeLLMProfiles()
@@ -301,6 +308,7 @@ func llmFromProfile(profile LLMProfile, responseTimeoutSeconds int) LLM {
 
 func defaultValues() Values {
 	return Values{
+		Notifications: Notifications{Events: NotificationEvents{StockResearch: true, PortfolioInspection: true, TaskFailed: true}},
 		ReviewAutomation: ReviewAutomation{Profiles: []ReviewSourceProfile{
 			{ID: "wechat-default", Source: "wechat", Name: "微信公众号默认配置", SyncHour: 7, AutoAnalyze: true, Enabled: true},
 			{ID: "xueqiu-default", Source: "xueqiu", Name: "雪球默认配置", BaseURL: "https://xueqiu.com", SyncHour: 7, AutoAnalyze: true, Enabled: true},

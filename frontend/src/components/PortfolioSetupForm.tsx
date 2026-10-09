@@ -12,11 +12,12 @@ type Props = {
 	actionLabel: string;
 	busyLabel: string;
 	actionIcon?: ReactNode;
+ showResearchOptions?: boolean;
 	onChange: (draft: PortfolioDraft) => void;
 	onSubmit: () => void;
 };
 
-export function PortfolioSetupForm({ draft, directory, disabled = false, busy = false, actionLabel, busyLabel, actionIcon, onChange, onSubmit }: Props) {
+export function PortfolioSetupForm({ draft, directory, disabled = false, busy = false, actionLabel, busyLabel, actionIcon, showResearchOptions = false, onChange, onSubmit }: Props) {
 	const [query, setQuery] = useState('');
 	const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 	const [activeSuggestion, setActiveSuggestion] = useState(0);
@@ -66,6 +67,11 @@ export function PortfolioSetupForm({ draft, directory, disabled = false, busy = 
 			<header><span>01</span><div><strong>交易风格</strong><small>作为组合风险与集中度的判断标准</small></div></header>
 			<div className="portfolio-profile-options">{portfolioProfiles.map((item) => <button type="button" className={draft.profile === item.id ? 'active' : ''} onClick={() => onChange({ ...draft, profile: item.id })} disabled={disabled} aria-pressed={draft.profile === item.id} key={item.id}><ShieldCheck size={17} /><strong>{item.label}</strong><span>{item.description}</span><small>{item.constraint}</small></button>)}</div>
 		</section>
+  {showResearchOptions && <section className="portfolio-research-options">
+   <label>持有周期<select value={draft.horizon || 'swing'} disabled={disabled} onChange={(event) => onChange({ ...draft, horizon: event.target.value as PortfolioDraft['horizon'] })}><option value="short">超短</option><option value="swing">波段</option><option value="medium">中期</option></select></label>
+   <label>缺失报告研究深度<select value={draft.researchLevel || 'standard'} disabled={disabled} onChange={(event) => onChange({ ...draft, researchLevel: event.target.value as PortfolioDraft['researchLevel'] })}><option value="standard">标准</option><option value="deep">深度</option></select></label>
+   <p>自动复用过去 24 小时内的成功个股 AI 报告，只研究缺失股票。</p>
+  </section>}
 		<section className="portfolio-holdings-section">
 			<header><span>02</span><div><strong>当前持仓</strong><small>{draft.holdings.length}/{maxPortfolioHoldings} 只股票</small></div><div className="portfolio-allocation"><span>持仓 <b>{totalWeight}%</b></span><span>现金 <b>{remainingWeight}%</b></span></div></header>
 			<div className="portfolio-stock-search">

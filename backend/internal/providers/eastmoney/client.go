@@ -24,6 +24,7 @@ type Client struct {
 	f10BaseURL          string
 	announcementBaseURL string
 	reportBaseURL       string
+	newsSearchBaseURL   string
 	thsBaseURL          string
 	httpClient          *http.Client
 	poolMu              sync.Mutex
@@ -98,6 +99,10 @@ func WithReportBaseURL(baseURL string) Option {
 	}
 }
 
+func WithNewsSearchBaseURL(baseURL string) Option {
+	return func(c *Client) { c.newsSearchBaseURL = strings.TrimRight(baseURL, "/") }
+}
+
 // WithTHSBaseURL is primarily used by tests and local mirrors. Production
 // requests use the public 同花顺 data-center page for seat classifications.
 func WithTHSBaseURL(baseURL string) Option {
@@ -125,6 +130,7 @@ func NewClient(opts ...Option) *Client {
 		f10BaseURL:          "https://datacenter.eastmoney.com/securities",
 		announcementBaseURL: "https://np-anotice-stock.eastmoney.com",
 		reportBaseURL:       "https://reportapi.eastmoney.com",
+		newsSearchBaseURL:   "https://search-api-web.eastmoney.com",
 		thsBaseURL:          "https://data.10jqka.com.cn",
 		httpClient:          &http.Client{Timeout: 15 * time.Second},
 		thsBillboardPages:   make(map[string]thsBillboardPage),

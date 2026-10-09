@@ -326,3 +326,5 @@ tail -f .runtime/backend.log
 ### 行情或题材数据暂时为空
 
 先查看页面显示的来源、更新时间和降级信息，再检查 [数据源文档](../backend/docs/data-sources.md)。东方财富、新浪、财联社和短线侠等公共接口可能临时限流或调整字段。
+
+持仓 AI 优化实现与约束见 [portfolio-ai-optimization-design.md](portfolio-ai-optimization-design.md)，浏览器流程验证可运行 `scripts/verify-portfolio-optimization-ui.mjs`。

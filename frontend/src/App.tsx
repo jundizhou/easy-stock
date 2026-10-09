@@ -64,6 +64,7 @@ import {
 import { LimitUpWorkspace } from './components/LimitUpWorkspace';
 import { ReviewDiary } from './components/ReviewDiary';
 import { SettingsDrawer } from './components/SettingsDrawer';
+import { SidebarUpdateNotice } from './components/SidebarUpdateNotice';
 import { AIChatWorkspace } from './components/AIChatWorkspace';
 import { MarketOverviewWorkspace } from './components/MarketOverviewWorkspace';
 import { TradingMastery } from './components/TradingMastery';
@@ -80,6 +81,7 @@ import { useLimitUpWorkspace } from './lib/use-limit-up-workspace';
 import { useThemeOverview } from './lib/use-theme-overview';
 import { useThemeConstituents, sameTheme } from './lib/use-theme-constituents';
 import { useThemeKLines } from './lib/use-theme-klines';
+import { ThemeIndexPanel } from './components/ThemeIndexPanel';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage' | 'quant' | 'signals' | 'boards' | 'shannon';
@@ -152,6 +154,7 @@ export function App() {
 	const [aiPrefill, setAIPrefill] = useState('');
 	const [aiAnalysisID, setAIAnalysisID] = useState<string | undefined>();
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [settingsInitialSection, setSettingsInitialSection] = useState<'updates' | undefined>();
 	const [settingsSavedNotice, setSettingsSavedNotice] = useState(0);
 	const [tokenUsageRefreshKey, setTokenUsageRefreshKey] = useState(0);
 	const [quantRefreshKey, setQuantRefreshKey] = useState(0);
@@ -429,14 +432,14 @@ export function App() {
 			: '行业趋势强度';
 	const currentSubStatus = workspaceMode === 'limit-up'
 		? limitUpData ? `${limitUpData.current.trade_date} · ${limitUpData.session_status} · ${limitUpData.meta.source.includes('duanxianxia') ? '开盘啦涨停池' : '东方财富兜底'} · ${limitUpData.concept_status === 'ready' ? '题材已归因' : limitUpState === 'loading' ? '题材补充中' : '题材暂不完整'}` : '开盘啦涨停池优先'
-		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Agent 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '逐股分析 · 组合风险 · 后台任务' : workspaceMode === 'ai' ? '本机 Agent AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : workspaceMode === 'token-usage' ? '模型输入、输出与功能模块消耗' : workspaceMode === 'quant' ? 'iframe 直挂本地终端 · 探活 8766/7899' : workspaceMode === 'signals' ? 'MER 状态 + clip_n300 前向轨 + OOS 门禁' : workspaceMode === 'boards' ? 'Free-StockDB 板块双向映射 · 1337 板块全量索引' : themeSourceStatus + ' · ' + streamStatus;
+		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Agent 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '24 小时报告复用 · 组合 AI 评分 · 后台任务' : workspaceMode === 'ai' ? '本机 Agent AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : workspaceMode === 'token-usage' ? '模型输入、输出与功能模块消耗' : workspaceMode === 'quant' ? 'iframe 直挂本地终端 · 探活 8766/7899' : workspaceMode === 'signals' ? 'MER 状态 + clip_n300 前向轨 + OOS 门禁' : workspaceMode === 'boards' ? 'Free-StockDB 板块双向映射 · 1337 板块全量索引' : themeSourceStatus + ' · ' + streamStatus;
 	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '个股 AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : workspaceMode === 'token-usage' ? 'Token 统计' : workspaceMode === 'quant' ? '量化终端' : workspaceMode === 'signals' ? '策略信号' : workspaceMode === 'boards' ? '板块图谱' : workspaceMode === 'shannon' ? 'Brian Shannon 六层规则' : 'AI 对话';
 	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Agent 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '多周期评分、隔日情景推演与账户级风控执行工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : workspaceMode === 'token-usage' ? '按日、按月和功能模块查看模型 Token 消耗' : workspaceMode === 'quant' ? '本地量化终端与数据底座的直挂视图工作台' : workspaceMode === 'signals' ? '市场状态、前向验证轨与样本外门禁的只读工作台' : workspaceMode === 'boards' ? '按类目浏览板块并反查个股归属的工作台' : workspaceMode === 'shannon' ? 'Anchored VWAP · 5日线极性 · 多周期对齐 · 红绿灯 · 三步入场 · 仓位阶梯' : '';
 
 	return (
 		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${workspaceMode === 'ai' ? 'workspace-ai' : ''}`}>
 			<aside className="app-sidebar" aria-label="功能导航">
-				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>{sidebarExpanded && <div><strong>easy-stock</strong><span>AI STOCK LAB</span></div>}</div>
+				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>{sidebarExpanded && <div className="sidebar-brand-name"><strong>easy-stock</strong><span>AI STOCK LAB</span></div>}<SidebarUpdateNotice onOpenUpdates={() => { setSettingsInitialSection('updates'); setSettingsOpen(true); }} /></div>
 				<nav>
 					<button type="button" className={workspaceMode === 'reviews' ? 'active' : ''} onClick={() => switchWorkspace('reviews')} title="大V复盘日记"><BookOpen size={18} /><span>大V复盘日记</span></button>
 					<button type="button" className={workspaceMode === 'stock-ai' ? 'active' : ''} onClick={() => switchWorkspace('stock-ai')} title="个股分析"><BrainCircuit size={18} /><span>个股分析</span></button>
@@ -468,7 +471,7 @@ export function App() {
 					aria-label={topbarExpanded ? '收起顶部栏' : '展开顶部栏'}
 					title={topbarExpanded ? '收起顶部栏' : '展开顶部栏'}
 				><ChevronDown size={16} aria-hidden="true" /></button>}
-			<header id="workspace-topbar-content" className={workspaceMode === 'stock-ai' ? 'topbar topbar-with-modes' : 'topbar'} hidden={workspaceMode !== 'stock-ai' && !topbarExpanded}>
+			<header id="workspace-topbar-content" className="topbar" hidden={workspaceMode !== 'stock-ai' && !topbarExpanded}>
 				<div className="brand-block">
 					<div className="brand-mark"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>
 					<div>
@@ -476,11 +479,6 @@ export function App() {
 						{topbarDescription && <p>{topbarDescription}</p>}
 					</div>
 				</div>
-				{workspaceMode === 'stock-ai' && <nav className="mode-nav" aria-label="工作台模式">
-					<button type="button" className={stockAIWorkspaceMode === 'analysis' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('analysis')}><BrainCircuit size={16} aria-hidden="true" />个股分析</button>
-					<button type="button" className={stockAIWorkspaceMode === 'expectation' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('expectation')}><Target size={16} aria-hidden="true" />隔日预期</button>
-					<button type="button" className={stockAIWorkspaceMode === 'risk' ? 'active' : ''} onClick={() => setStockAIWorkspaceMode('risk')}><ShieldCheck size={16} aria-hidden="true" />风控执行</button>
-				</nav>}
 				<div className="top-actions">
 					<div className={`data-status ${currentLoadState}`}>
 						<span className="status-dot" />
@@ -695,6 +693,8 @@ export function App() {
 							: <MetricLoadingPanel failed={selectedHistoryFailed} />)}
 					</section>
 
+					<ThemeIndexPanel config={config} theme={activeOverview} refreshKey={themeRefreshKey} />
+
 					<section className="detail-panel identity-panel">
 						<div className="panel-label"><Target size={16} aria-hidden="true" />龙头身份模型</div>
 						{selectedHistoryReady && (!constituentsComplete || historyState !== 'ready') && <p className="load-notice">当前为部分样本结果，其他个股数据到齐后继续更新。</p>}
@@ -738,14 +738,14 @@ export function App() {
 					</section>
 				</aside>
 			</div>
-			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} progress={limitUp.ladder.progress} onRefresh={refreshLimitUpWorkspace} onOpenBoard={openConceptInBoardExplorer} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} initialSymbol={stockAIInitialSymbol} onInitialSymbolConsumed={() => setStockAIInitialSymbol('')} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} />}
+			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} progress={limitUp.ladder.progress} onRefresh={refreshLimitUpWorkspace} onOpenBoard={openConceptInBoardExplorer} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} onModeChange={setStockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} initialSymbol={stockAIInitialSymbol} onInitialSymbolConsumed={() => setStockAIInitialSymbol('')} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} />}
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>
-					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'mastery' ? '来源：trading-mastery/游资心法 · 每日缓存 · 同步至 Agent Skill 与本地记忆索引' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '行情与K线：东方财富/新浪 · 涨停与题材：开盘啦/东方财富 · AI只基于结构化证据总结' : workspaceMode === 'portfolio-inspection' ? '逐股分析复用个股引擎 · 组合指标由本地程序计算 · AI只基于结构化证据汇总' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : workspaceMode === 'token-usage' ? '真实用量来自模型返回的 usage · 本地估算单独记录，不并入真实总量' : workspaceMode === 'quant' ? 'iframe 直挂 Quant Terminal(8766) · 探活经 Go 网关 /api/v1/quant/*、/api/v1/stockdb/*' : workspaceMode === 'boards' ? '板块与成分：Free-StockDB 板块* 表 · 经 Go 网关 /api/v1/stockdb/query' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
+					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'mastery' ? '来源：trading-mastery/游资心法 · 每日缓存 · 同步至 Agent Skill 与本地记忆索引' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '行情与K线：东方财富/新浪 · 涨停与题材：开盘啦/东方财富 · AI只基于结构化证据总结' : workspaceMode === 'portfolio-inspection' ? '复用成功个股研究 · AI 按统一标准评估组合 · 事实与评分均可追溯' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : workspaceMode === 'token-usage' ? '真实用量来自模型返回的 usage · 本地估算单独记录，不并入真实总量' : workspaceMode === 'quant' ? 'iframe 直挂 Quant Terminal(8766) · 探活经 Go 网关 /api/v1/quant/*、/api/v1/stockdb/*' : workspaceMode === 'boards' ? '板块与成分：Free-StockDB 板块* 表 · 经 Go 网关 /api/v1/stockdb/query' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
 			</footer>
 			</div>
-			<SettingsDrawer config={config} open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsSavedNotice((current) => current + 1); setAIRefreshKey((current) => current + 1); setStockAIRefreshKey((current) => current + 1); }} />
+			<SettingsDrawer config={config} open={settingsOpen} initialSection={settingsInitialSection} onClose={() => { setSettingsOpen(false); setSettingsInitialSection(undefined); }} onSaved={() => { setSettingsSavedNotice((current) => current + 1); setAIRefreshKey((current) => current + 1); setStockAIRefreshKey((current) => current + 1); }} />
 			{settingsSavedNotice > 0 && <div className="settings-save-notice" role="status"><CheckCircle2 size={22} aria-hidden="true" /><span>保存成功</span></div>}
 		</main>
 	);

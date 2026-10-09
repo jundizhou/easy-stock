@@ -25,7 +25,7 @@
   <img alt="Go" src="https://img.shields.io/badge/Backend-Go-00ADD8?logo=go&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-3178C6?logo=react&logoColor=white" />
   <img alt="Electron" src="https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white" />
-  <img alt="Hermes" src="https://img.shields.io/badge/AI-Hermes-6D5BD0" />
+  <img alt="Hermes / Codex" src="https://img.shields.io/badge/AI-Hermes%20%2B%20Codex-2476D2" />
   <img alt="Local First" src="https://img.shields.io/badge/Data-Local%20First-159A80" />
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
@@ -198,7 +198,7 @@ easy-stock 先通过领域化数据模型整理题材、梯队、涨停原因、
 
 ### 2. 从“手工翻网页”升级为“Agent 主动执行”
 
-Hermes 可以配合 agent-browser 和 Electron 持久浏览器会话，按照订阅配置访问雪球或淘股吧主页，发现最新文章，识别作者和发布时间，完成去重、正文抓取、归档与 AI 提炼。
+桌面 Browser Bridge 优先复用 Electron 持久浏览器会话，按照订阅配置访问雪球或淘股吧主页、发现并读取文章；缺少桌面桥接时，可由所选 Agent 配合 agent-browser 采集。Go 复盘服务完成元数据整理、去重、归档与 AI 提炼。
 
 ### 3. 从“单篇摘要”升级为“观点网络”
 
@@ -206,9 +206,9 @@ Hermes 可以配合 agent-browser 和 Electron 持久浏览器会话，按照订
 
 ### 4. 从“通用问答”升级为“A 股研究 Copilot”
 
-AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话续接、工具路由、知识技能和任务上下文，业务代码不直接绑定某一家模型厂商。
+AI 会话经过本机统一 Agent 服务，可选择 Hermes 或 Codex 运行时。两者共享模型连接、思考强度、Skills 与 MCP 设置，分别管理原生会话；业务任务绑定运行时和模型配置，支持模型调用、会话续接、工具协作与任务上下文。
 
-目前可以配置 OpenAI、DeepSeek、通义千问、Moonshot、Anthropic，以及兼容 OpenAI 协议的自定义服务。
+目前可以配置 OpenAI、DeepSeek、通义千问、Moonshot、Anthropic，以及兼容接口的自定义服务；Codex 需要支持 Responses 的模型连接。
 
 ### 5. 从“用完即走”升级为“长期研究飞轮”
 
@@ -222,19 +222,25 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 
 ## AI 原生架构
 
+Go 后端负责行情采集、量化计算、证据组织与任务编排，统一 Agent 服务按配置选择 Hermes 或 Codex。数据服务与 AI 推理并行协作，量化速览无需调用模型；个股深度研究在证据快照上完成问题提纲、只读补证、核心判断、交易条件与引用校验。
+
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-ai-architecture.svg" width="1680" height="1180" alt="easy-stock AI 原生架构图" />
+  <a href="./docs/assets/easy-stock-ai-architecture.svg">
+    <img src="./docs/assets/easy-stock-ai-architecture.svg" width="1680" alt="easy-stock AI 原生架构：Electron 本地宿主、Go 领域服务、数据证据底座与 Hermes / Codex 双运行时" />
+  </a>
 </p>
 
 | 层级 | 核心职责 |
 | --- | --- |
-| **AI 投研体验层** | 行情总览、趋势题材、短线连板、个股 AI 分析、持仓 AI 巡检、游资心法、大 V 复盘与 AI Copilot |
-| **业务编排层** | Go API、个股分析引擎、持仓巡检引擎、策略评估、复盘智能、调度任务和数据源状态 |
-| **AI Agent 平台层** | Hermes Prompt、Skills、Session、Memory、Tool Router 与开放模型网关 |
-| **数据智能层** | Provider Registry、统一市场模型、题材归因、证据元数据、SQLite 与缓存快照 |
-| **外部生态层** | 行情数据源、内容平台、浏览器执行能力和用户选择的大模型服务 |
-| **桌面运行边界** | Electron 生命周期、随机端口、一次性 Token、持久浏览器会话和本地资源装配 |
-| **安全与治理** | 密钥隔离、来源追踪、弹性降级、运行状态与风险提示 |
+| **AI 投研工作台** | React + TypeScript：行情总览、趋势题材、短线连板、个股分级研究、持仓巡检、大 V 复盘、游资心法与 AI Copilot |
+| **Go 本地 API** | HTTP 查询与后台任务轮询；WebSocket 行情与 AI 事件；本机鉴权、参数校验与请求日志 |
+| **领域服务与任务编排** | 题材融合、梯队与情绪计算、拐点评估、个股研究、持仓报告复用与组合评分、观点共识、次日验证与定时同步 |
+| **数据与本地证据** | 多源适配与回退、统一行情模型、题材归因、带来源和时间的版本化快照；SQLite 保存复盘、研究任务、持仓巡检、情绪历史与题材缓存 |
+| **统一 Agent 服务** | 共享模型连接、思考强度、Skills 与 MCP；选择 Hermes 或 Codex；任务绑定配置、会话续接、授权与澄清、Token 用量统计。Codex 使用原生 App Server，仅支持 Responses 连接 |
+| **Electron 桌面宿主** | 装配 Go / Hermes / Codex / Python；分配本机端口与启动 Token；Preload / IPC；雪球与淘股吧 Browser Bridge、agent-browser 回退、微信链接解析；日志、更新与安装前备份 |
+| **外部生态** | 行情与研究数据源、内容平台、公共复盘与心法资料，以及由所选运行时直接调用的模型服务商或兼容端点 |
+
+个股研究按阶段保存检查点，支持在模型配置与证据一致时继续执行；持仓巡检优先复用 24 小时内成功的个股报告，补齐缺失研究后生成组合报告。模块与代码入口见 [当前架构说明](./backend/docs/architecture.md)。
 
 ---
 
@@ -251,6 +257,8 @@ AI 会话统一经过本机 Hermes Runtime。Hermes 负责模型调用、会话�
 ### 2. 开发者
 
 需要从源码运行、调试、测试或打包，请阅读 [开发者文档](./docs/development.md)。
+
+飞书与钉钉群机器人通知可在「系统设置 → 消息通知」中配置，支持签名、关键词和测试发送。接入步骤及通知范围见 [消息通知配置](./docs/notifications.md)。
 
 ## 社区与贡献
 
@@ -279,5 +287,17 @@ easy-stock 项目原创的后端、前端、桌面端和文档采用 [PolyForm N
 ## 风险提示
 
 > 本项目仅用于学习、研究和信息整理，不构成任何投资建议、收益承诺或交易依据。市场有风险，AI 输出和第三方数据也可能存在延迟、遗漏或错误，请始终结合原始信息独立判断并自行承担决策结果。
+
+---
+
+## Star 历史
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jundizhou/easy-stock&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jundizhou/easy-stock&type=Date" />
+    <img alt="easy-stock Star 历史曲线" src="https://api.star-history.com/svg?repos=jundizhou/easy-stock&type=Date" />
+  </picture>
+</p>
 
 <p align="center"><sub>Local first · Evidence based · Human in control</sub></p>

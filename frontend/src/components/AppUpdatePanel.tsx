@@ -1,15 +1,8 @@
 import { CheckCircle2, Download, ExternalLink, FolderOpen, HardDriveDownload, LoaderCircle, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { AppUpdateStatus } from '../lib/backend';
+import { useAppUpdateStatus } from '../lib/use-app-update-status';
 import { SettingsSection } from './SettingsSection';
-
-const developmentStatus: AppUpdateStatus = {
-	state: 'disabled',
-	supported: false,
-	currentVersion: '开发模式',
-	message: '安装版会自动检查正式更新源',
-	progress: 0,
-};
 
 export function updatePrimaryAction(status: AppUpdateStatus): 'check' | 'download' | 'install' | 'release' {
 	if (status.state === 'available') return status.installMode === 'manual' ? 'release' : 'download';
@@ -19,20 +12,8 @@ export function updatePrimaryAction(status: AppUpdateStatus): 'check' | 'downloa
 
 export function AppUpdatePanel() {
 	const bridge = window.aStock;
-	const [status, setStatus] = useState<AppUpdateStatus>(developmentStatus);
+	const { status, setStatus, error: statusError } = useAppUpdateStatus();
 	const [actionError, setActionError] = useState('');
-
-	useEffect(() => {
-		let active = true;
-		void bridge?.getUpdateStatus?.().then((next) => { if (active) setStatus(next); }).catch((error) => {
-			if (active) setActionError(error instanceof Error ? error.message : '读取版本状态失败');
-		});
-		const unsubscribe = bridge?.onUpdateStatus?.((next) => { if (active) setStatus(next); });
-		return () => {
-			active = false;
-			unsubscribe?.();
-		};
-	}, [bridge]);
 
 	const run = async (action?: () => Promise<AppUpdateStatus | void>) => {
 		if (!action) return;
@@ -62,7 +43,7 @@ export function AppUpdatePanel() {
 					<span><strong>v{status.currentVersion}</strong><small>当前版本</small></span>
 					{status.latestVersion && status.latestVersion !== status.currentVersion && <><em>→</em><span><strong>v{status.latestVersion}</strong><small>最新版本</small></span></>}
 				</div>
-				<div className="app-update-message">{status.state === 'downloaded' ? <CheckCircle2 size={15} /> : busy ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}<span>{actionError || status.message}</span></div>
+				<div className="app-update-message">{status.state === 'downloaded' ? <CheckCircle2 size={15} /> : busy ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}<span>{actionError || statusError || status.message}</span></div>
 				{status.state === 'downloading' && <div className="app-update-progress" aria-label={`下载进度 ${Math.round(status.progress)}%`}><span style={{ width: `${status.progress}%` }} /><em>{Math.round(status.progress)}%</em></div>}
 				{status.releaseNotes && <details className="app-update-notes"><summary>{status.releaseName || '查看更新说明'}</summary><p>{status.releaseNotes}</p></details>}
 				<div className="app-update-actions">

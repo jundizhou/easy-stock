@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -385,4 +386,17 @@ func envValue(values []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func TestEmbeddedModelResponseTransientClassification(t *testing.T) {
+	for _, text := range []string{"API call failed after 1 retries: [Errno 32] Broken pipe", "API call failed: connection reset by peer", "HTTP 502: upstream unavailable", "API call failed: HTTP 504", "API call failed after 1 retries: Non-streaming API call timed out after 813s with no response (threshold: 490s)"} {
+		if err := embeddedModelResponseError(text); !errors.Is(err, ErrModelTransport) {
+			t.Fatal("transport failure lost classification", err)
+		}
+	}
+	for _, text := range []string{"API call failed: HTTP 401 invalid_api_key", "API call failed: HTTP 429 rate limit exceeded", "API call failed: HTTP 503 auth_unavailable", "API call failed: HTTP 400 invalid request", "API call failed: unknown failure", `{"analysis":"broken pipe HTTP 502 was mentioned in a source"}`} {
+		if err := embeddedModelResponseError(text); errors.Is(err, ErrModelTransport) {
+			t.Fatal("non-transient failure automatically retryable", text)
+		}
+	}
 }

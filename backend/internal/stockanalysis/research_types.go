@@ -4,10 +4,12 @@ import (
 	"context"
 	"time"
 
+	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/foundation"
 )
 
-const ResearchPromptVersion = "stock-research-v2"
+const ResearchPromptVersion = "stock-research-v8"
+const ResearchValidationVersion = "stock-research-validation-v3"
 
 type ResearchRequest struct {
 	Symbol        string        `json:"symbol"`
@@ -19,16 +21,18 @@ type ResearchRequest struct {
 
 // Source text is evidence, not an instruction or a verified interpretation.
 type ResearchSource struct {
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind"`
-	Title       string    `json:"title"`
-	Content     string    `json:"content"`
-	Provider    string    `json:"provider"`
-	URL         string    `json:"url,omitempty"`
-	PublishedAt time.Time `json:"published_at,omitempty"`
-	CapturedAt  time.Time `json:"captured_at"`
-	ReportDate  string    `json:"report_date,omitempty"`
-	TimeStatus  string    `json:"time_status"`
+	ID            string    `json:"id"`
+	ExternalID    string    `json:"external_id,omitempty"`
+	ContentStatus string    `json:"content_status,omitempty"`
+	Kind          string    `json:"kind"`
+	Title         string    `json:"title"`
+	Content       string    `json:"content"`
+	Provider      string    `json:"provider"`
+	URL           string    `json:"url,omitempty"`
+	PublishedAt   time.Time `json:"published_at,omitempty"`
+	CapturedAt    time.Time `json:"captured_at"`
+	ReportDate    string    `json:"report_date,omitempty"`
+	TimeStatus    string    `json:"time_status"`
 }
 
 type PriceAnchor struct {
@@ -61,14 +65,34 @@ type ResearchClaim struct {
 	Quote     string   `json:"quote,omitempty"`
 }
 
+type ResearchLogicItem struct {
+	Name           string         `json:"name"`
+	Explanation    ResearchClaim  `json:"explanation"`
+	EvidenceLevel  string         `json:"evidence_level"`
+	MarketStatus   string         `json:"market_status"`
+	MarketEvidence *ResearchClaim `json:"market_evidence,omitempty"`
+	Gaps           []string       `json:"gaps"`
+}
+
+// Trading logic is an evidence-based interpretation, independent of the
+// deterministic theme score and whether price resonance has been confirmed.
+type ResearchTradingLogic struct {
+	Business  *ResearchClaim      `json:"business,omitempty"`
+	Mainlines []ResearchLogicItem `json:"mainlines"`
+	Secondary []ResearchLogicItem `json:"secondary"`
+	Catalysts []ResearchClaim     `json:"catalysts"`
+	Gaps      []string            `json:"gaps"`
+}
+
 type ResearchQuestion struct {
-	Question string `json:"question"`
-	Why      string `json:"why"`
-	Tool     string `json:"tool"`
-	Query    string `json:"query"`
-	SourceID string `json:"source_id,omitempty"`
-	Status   string `json:"status"`
-	Outcome  string `json:"outcome,omitempty"`
+	Question          string   `json:"question"`
+	Why               string   `json:"why"`
+	Tool              string   `json:"tool"`
+	Query             string   `json:"query"`
+	SourceID          string   `json:"source_id,omitempty"`
+	Status            string   `json:"status"`
+	Outcome           string   `json:"outcome,omitempty"`
+	EvidenceSourceIDs []string `json:"evidence_source_ids,omitempty"`
 }
 
 type ResearchOutline struct {
@@ -113,39 +137,43 @@ type ResearchDecision struct {
 	ExistingPosition string             `json:"existing_position"`
 	Reason           string             `json:"reason"`
 	PricePlan        *AnchoredPricePlan `json:"price_plan,omitempty"`
+	Blockers         []string           `json:"blockers,omitempty"`
 }
 
 type ResearchSynthesis struct {
-	Headline         string              `json:"headline"`
-	Thesis           ResearchClaim       `json:"thesis"`
-	Support          []ResearchClaim     `json:"support"`
-	Counter          []ResearchClaim     `json:"counter"`
-	Alternatives     []ResearchClaim     `json:"alternatives"`
-	MainConflict     string              `json:"main_conflict"`
-	EvidenceLevel    string              `json:"evidence_level"`
-	Limitations      []string            `json:"limitations"`
-	Conditions       []ResearchCondition `json:"conditions"`
-	InvalidationIDs  []string            `json:"invalidation_ids"`
-	Scenarios        []ResearchScenario  `json:"scenarios"`
-	Decision         ResearchDecision    `json:"decision"`
-	BaselineRelation string              `json:"baseline_relation"`
-	BaselineReason   string              `json:"baseline_reason"`
+	TradingLogic     *ResearchTradingLogic `json:"trading_logic,omitempty"`
+	Headline         string                `json:"headline"`
+	Thesis           ResearchClaim         `json:"thesis"`
+	Support          []ResearchClaim       `json:"support"`
+	Counter          []ResearchClaim       `json:"counter"`
+	Alternatives     []ResearchClaim       `json:"alternatives"`
+	MainConflict     string                `json:"main_conflict"`
+	EvidenceLevel    string                `json:"evidence_level"`
+	EvidenceReasons  []string              `json:"evidence_reasons,omitempty"`
+	Limitations      []string              `json:"limitations"`
+	Conditions       []ResearchCondition   `json:"conditions"`
+	InvalidationIDs  []string              `json:"invalidation_ids"`
+	Scenarios        []ResearchScenario    `json:"scenarios"`
+	Decision         ResearchDecision      `json:"decision"`
+	BaselineRelation string                `json:"baseline_relation"`
+	BaselineReason   string                `json:"baseline_reason"`
 }
 
 // ResearchCoreSynthesis and ResearchTradeConditions are kept separate at the
 // model boundary so the model does not have to produce one large nested JSON
 // object. ResearchSynthesis remains the persisted, backward-compatible shape.
 type ResearchCoreSynthesis struct {
-	Headline         string          `json:"headline"`
-	Thesis           ResearchClaim   `json:"thesis"`
-	Support          []ResearchClaim `json:"support"`
-	Counter          []ResearchClaim `json:"counter"`
-	Alternatives     []ResearchClaim `json:"alternatives"`
-	MainConflict     string          `json:"main_conflict"`
-	EvidenceLevel    string          `json:"evidence_level"`
-	Limitations      []string        `json:"limitations"`
-	BaselineRelation string          `json:"baseline_relation"`
-	BaselineReason   string          `json:"baseline_reason"`
+	TradingLogic     *ResearchTradingLogic `json:"trading_logic,omitempty"`
+	Headline         string                `json:"headline"`
+	Thesis           ResearchClaim         `json:"thesis"`
+	Support          []ResearchClaim       `json:"support"`
+	Counter          []ResearchClaim       `json:"counter"`
+	Alternatives     []ResearchClaim       `json:"alternatives"`
+	MainConflict     string                `json:"main_conflict"`
+	EvidenceLevel    string                `json:"evidence_level"`
+	Limitations      []string              `json:"limitations"`
+	BaselineRelation string                `json:"baseline_relation"`
+	BaselineReason   string                `json:"baseline_reason"`
 }
 
 type ResearchTradeConditions struct {
@@ -156,11 +184,12 @@ type ResearchTradeConditions struct {
 }
 
 type ResearchAttempt struct {
-	Stage         string `json:"stage"`
-	DurationMS    int64  `json:"duration_ms"`
-	PromptBytes   int    `json:"prompt_bytes"`
-	ResponseBytes int    `json:"response_bytes"`
-	Error         string `json:"error,omitempty"`
+	Stage         string               `json:"stage"`
+	DurationMS    int64                `json:"duration_ms"`
+	PromptBytes   int                  `json:"prompt_bytes"`
+	ResponseBytes int                  `json:"response_bytes"`
+	Error         string               `json:"error,omitempty"`
+	Progress      agent.PromptProgress `json:"progress,omitempty"`
 }
 
 type ResearchPromptCompression struct {
@@ -174,21 +203,22 @@ type ResearchPromptCompression struct {
 type ResearchReport struct {
 	Runtime string `json:"runtime,omitempty"`
 	ResearchSynthesis
-	SnapshotID      string                    `json:"snapshot_id"`
-	SnapshotVersion int                       `json:"snapshot_version"`
-	PromptVersion   string                    `json:"prompt_version"`
-	Request         ResearchRequest           `json:"request"`
-	AnalysisLevel   ResearchLevel             `json:"analysis_level"`
-	Model           string                    `json:"model"`
-	GeneratedAt     time.Time                 `json:"generated_at"`
-	CutoffAt        time.Time                 `json:"cutoff_at"`
-	Sources         []ResearchSource          `json:"sources"`
-	Anchors         []PriceAnchor             `json:"anchors"`
-	Questions       []ResearchQuestion        `json:"questions"`
-	Attempts        []ResearchAttempt         `json:"attempts"`
-	Compression     ResearchPromptCompression `json:"compression"`
-	Validation      string                    `json:"validation"`
-	ValidationNotes []string                  `json:"validation_notes"`
+	SnapshotID        string                    `json:"snapshot_id"`
+	SnapshotVersion   int                       `json:"snapshot_version"`
+	PromptVersion     string                    `json:"prompt_version"`
+	Request           ResearchRequest           `json:"request"`
+	AnalysisLevel     ResearchLevel             `json:"analysis_level"`
+	Model             string                    `json:"model"`
+	GeneratedAt       time.Time                 `json:"generated_at"`
+	CutoffAt          time.Time                 `json:"cutoff_at"`
+	Sources           []ResearchSource          `json:"sources"`
+	Anchors           []PriceAnchor             `json:"anchors"`
+	Questions         []ResearchQuestion        `json:"questions"`
+	Attempts          []ResearchAttempt         `json:"attempts"`
+	Compression       ResearchPromptCompression `json:"compression"`
+	Validation        string                    `json:"validation"`
+	ValidationVersion string                    `json:"validation_version,omitempty"`
+	ValidationNotes   []string                  `json:"validation_notes"`
 	// [ES_PARTIAL_CORE_SAVE_PATCH] §4 受控分段保存标记。
 	// Partial 表示本报告只含通过校验的核心研究、交易计划未生成；
 	// PartialStatus 给出细分类别（当前仅 core_only）；CoreHash 为已保存 core 的版本 hash。

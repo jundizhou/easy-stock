@@ -13,6 +13,11 @@ import (
 
 func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 	gate := make(chan struct{})
+	olderStarted := make(chan struct{}, 1)
+	// Sixteen calendar days contain multiple exchange sessions even at the
+	// end of a long closure. Explicitly overlap handlers instead of depending
+	// on which localhost request the scheduler happens to run first.
+	const lookback = 16
 	var calls, active, peak atomic.Int32
 	now := time.Now().In(time.FixedZone("Asia/Shanghai", 8*60*60))
 	latest := now
@@ -20,7 +25,7 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 		latest = latest.AddDate(0, 0, -1)
 	}
 	expectedDays := 0
-	for offset := 0; offset < 8; offset++ {
+	for offset := 0; offset < lookback; offset++ {
 		if foundation.IsAStockTradingDay(now.AddDate(0, 0, -offset)) {
 			expectedDays++
 		}
@@ -37,7 +42,17 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 		}
 		if r.URL.Query().Get("date") != latest.Format("20060102") {
 			select {
+			case olderStarted <- struct{}{}:
+			default:
+			}
+			select {
 			case <-gate:
+			case <-r.Context().Done():
+				return
+			}
+		} else {
+			select {
+			case <-olderStarted:
 			case <-r.Context().Done():
 				return
 			}
@@ -51,7 +66,7 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 	partial := make(chan []foundation.LimitUpEvent, 8)
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.ProgressiveRecentLimitUps(ctx, 8, func(events []foundation.LimitUpEvent) { partial <- events })
+		_, err := c.ProgressiveRecentLimitUps(ctx, lookback, func(events []foundation.LimitUpEvent) { partial <- events })
 		done <- err
 	}()
 	select {
@@ -70,12 +85,12 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 		t.Fatalf("unexpected parallelism %d", peak.Load())
 	}
 	before := calls.Load()
-	items, err := c.RecentLimitUps(ctx, 8)
+	items, err := c.RecentLimitUps(ctx, lookback)
 	if err != nil || len(items) != expectedDays || calls.Load() != before {
 		t.Fatalf("history cache not reused: items=%d calls=%d err=%v", len(items), calls.Load(), err)
 	}
 	items[0].Name = "mutated"
-	again, _ := c.RecentLimitUps(ctx, 8)
+	again, _ := c.RecentLimitUps(ctx, lookback)
 	if again[0].Name == "mutated" {
 		t.Fatal("consumer mutated cached pool")
 	}

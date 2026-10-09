@@ -445,7 +445,7 @@ function initializeUpdateManager() {
     }
   });
   if (enabled) {
-    setTimeout(() => void updateManager.checkForUpdates().catch(() => {}), 30000).unref?.();
+    void updateManager.checkForUpdates().catch(() => {});
     updateCheckTimer = setInterval(() => void updateManager.checkForUpdates().catch(() => {}), 12 * 60 * 60 * 1000);
     updateCheckTimer.unref?.();
   }

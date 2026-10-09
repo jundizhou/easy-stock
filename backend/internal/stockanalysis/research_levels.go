@@ -27,7 +27,6 @@ type researchLevelPolicy struct {
 	Supplement            bool
 	Repair                bool
 	StageTimeout          time.Duration
-	TotalTimeout          time.Duration
 }
 
 func normalizeResearchLevel(level ResearchLevel) (ResearchLevel, bool) {
@@ -46,13 +45,13 @@ func researchLevelPolicyFor(level ResearchLevel) researchLevelPolicy {
 	level, _ = normalizeResearchLevel(level)
 	switch level {
 	case ResearchLevelQuantitative:
-		return researchLevelPolicy{DailyBars: 300, RelativeBars: 20, MaxLimitations: 16, MaxAnchors: 8, MaxBaselineDimensions: 8, StageTimeout: 0, TotalTimeout: 2 * time.Minute}
+		return researchLevelPolicy{DailyBars: 300, RelativeBars: 20, MaxLimitations: 16, MaxAnchors: 8, MaxBaselineDimensions: 8}
 	case ResearchLevelQuick:
-		return researchLevelPolicy{DailyBars: 60, RelativeBars: 4, AnnouncementChars: 30, MaxAnnouncements: 4, MaxCards: 6, MaxEvidenceBytes: 4_000, TradeMaxCards: 6, TradeEvidenceBytes: 4_000, MaxLimitations: 4, MaxAnchors: 2, MaxBaselineDimensions: 3, StageTimeout: 3 * time.Minute, TotalTimeout: 3 * time.Minute}
+		return researchLevelPolicy{DailyBars: 60, RelativeBars: 4, AnnouncementChars: 180, MaxAnnouncements: 4, MaxCards: 6, MaxEvidenceBytes: 4_000, TradeMaxCards: 6, TradeEvidenceBytes: 4_000, MaxLimitations: 4, MaxAnchors: 2, MaxBaselineDimensions: 3, StageTimeout: 3 * time.Minute}
 	case ResearchLevelStandard:
-		return researchLevelPolicy{DailyBars: 100, RelativeBars: 6, AnnouncementChars: 50, MaxAnnouncements: 8, MaxCards: 10, MaxEvidenceBytes: 8_000, TradeMaxCards: 8, TradeEvidenceBytes: 8_000, MaxLimitations: 8, MaxAnchors: 3, MaxBaselineDimensions: 4, StageTimeout: 3 * time.Minute, TotalTimeout: 6 * time.Minute}
+		return researchLevelPolicy{DailyBars: 100, RelativeBars: 6, AnnouncementChars: 700, MaxAnnouncements: 8, MaxCards: 12, MaxEvidenceBytes: 12_000, TradeMaxCards: 8, TradeEvidenceBytes: 8_000, MaxLimitations: 8, MaxAnchors: 3, MaxBaselineDimensions: 4, StageTimeout: 3 * time.Minute}
 	default:
-		return researchLevelPolicy{DailyBars: 300, RelativeBars: 20, AnnouncementChars: 100, MaxAnnouncements: 12, MaxCards: 12, MaxEvidenceBytes: 16_000, TradeMaxCards: 12, TradeEvidenceBytes: 12_000, MaxLimitations: 16, MaxAnchors: 8, MaxBaselineDimensions: 8, Outline: true, Supplement: true, Repair: true, StageTimeout: 6 * time.Minute, TotalTimeout: 18 * time.Minute}
+		return researchLevelPolicy{DailyBars: 300, RelativeBars: 20, AnnouncementChars: 1500, MaxAnnouncements: 12, MaxCards: 16, MaxEvidenceBytes: 24_000, TradeMaxCards: 12, TradeEvidenceBytes: 12_000, MaxLimitations: 16, MaxAnchors: 8, MaxBaselineDimensions: 8, Outline: true, Supplement: true, Repair: true, StageTimeout: 8 * time.Minute}
 	}
 }
 
@@ -61,5 +60,5 @@ func ResearchStageTimeout(request ResearchRequest) time.Duration {
 }
 
 func ResearchTotalTimeout(request ResearchRequest) time.Duration {
-	return researchLevelPolicyFor(request.AnalysisLevel).TotalTimeout
+	return ResearchBudgetFor(request, 0, "").TotalTimeout()
 }

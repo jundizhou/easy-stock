@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
 	"easy-stock/backend/internal/agent"
+	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/runtimelog"
@@ -36,20 +39,64 @@ func (s *Server) awaitStockResearch(ctx context.Context, request stockanalysis.R
 	return *job.Analysis, nil
 }
 
-func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.ResearchRequest, publish stockanalysis.ResearchPublisher) (stockanalysis.Analysis, *stockanalysis.ResearchSnapshot, error) {
+func (s *Server) prepareStockResearch(ctx context.Context, request stockanalysis.ResearchRequest) (context.Context, stockanalysis.ResearchBudget, func(), error) {
 	promptGateway := s.usageGateway
 	if promptGateway == nil {
 		promptGateway = s.agentGateway
 	}
 	ctx, release, bindErr := agent.BindTask(ctx, promptGateway)
 	if bindErr != nil {
-		return stockanalysis.Analysis{}, nil, bindErr
+		return ctx, stockanalysis.ResearchBudget{}, release, bindErr
 	}
-	defer release()
+	llm, bound := agent.BoundLLM(ctx)
+	if !bound && s.settingsStore != nil {
+		llm = s.settingsStore.Snapshot().LLM
+	}
+	effort, boundEffort := agent.BoundReasoningEffort(ctx)
+	if !boundEffort && s.agentGateway != nil {
+		if settingsGateway, ok := s.agentGateway.(agent.SettingsGateway); ok {
+			if settings, err := settingsGateway.AgentSettings(); err == nil {
+				effort = settings.ReasoningEffort
+			}
+		}
+	}
+	wait := time.Duration(appsettings.NormalizeLLMResponseTimeoutSeconds(llm.ResponseTimeoutSeconds)) * time.Second
+	return ctx, stockanalysis.ResearchBudgetFor(request, wait, effort), release, nil
+}
+
+func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.ResearchRequest, publish stockanalysis.ResearchPublisher) (stockanalysis.Analysis, *stockanalysis.ResearchSnapshot, error) {
+	budget, prepared := stockanalysis.ResearchExecutionBudget(ctx)
+	if !prepared {
+		var release func()
+		var err error
+		ctx, budget, release, err = s.prepareStockResearch(ctx, request)
+		if err != nil {
+			return stockanalysis.Analysis{}, nil, err
+		}
+		defer release()
+	}
+	ctx, cancel := context.WithTimeout(stockanalysis.WithResearchBudget(ctx, budget), budget.TotalTimeout())
+	defer cancel()
+	promptGateway := s.usageGateway
+	if promptGateway == nil {
+		promptGateway = s.agentGateway
+	}
+	if s.logger != nil {
+		s.logger.Printf("level=info event=stock_research_budget feature=stock-analysis symbol=%q analysis_level=%q reasoning_effort=%q response_timeout_seconds=%d stage_timeout_seconds=%d total_timeout_seconds=%d", request.Symbol, request.AnalysisLevel, budget.ReasoningEffort, budget.ResponseTimeoutSeconds, budget.StageTimeoutSeconds, budget.TotalTimeoutSeconds)
+	}
 	if err := publish("collecting", "正在采集行情、公告和研究资料", nil, nil); err != nil {
 		return stockanalysis.Analysis{}, nil, err
 	}
-	analysis, snapshot, err := s.collectStockResearch(ctx, request.Symbol)
+	var analysis stockanalysis.Analysis
+	var snapshot *stockanalysis.ResearchSnapshot
+	var err error
+	if previous := stockanalysis.ResearchResumeData(ctx); previous != nil && previous.Analysis != nil && previous.Snapshot != nil {
+		analysis, snapshot = stockanalysis.QuantitativeOnly(*previous.Analysis), previous.Snapshot
+	} else {
+		collectCtx, stopCollection := context.WithTimeout(ctx, stockanalysis.ResearchCollectionTimeout)
+		analysis, snapshot, err = s.collectStockResearch(collectCtx, request.Symbol)
+		stopCollection()
+	}
 	if err != nil {
 		return analysis, snapshot, err
 	}
@@ -84,8 +131,11 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 	if frozen := agent.BoundModel(ctx); frozen != "" {
 		model = frozen
 	}
-	modelCtx, cancel := context.WithTimeout(ctx, stockanalysis.ResearchTotalTimeout(request))
-	defer cancel()
+	identity := agent.BoundConfigurationIdentity(ctx)
+	if identity == "" {
+		identity = modelIdentity
+	}
+	ctx = stockanalysis.WithResearchModelIdentity(ctx, identity)
 	baseline := analysis
 	var persistenceErr error
 	progress := func(stage, message string) {
@@ -96,7 +146,24 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 			cancel()
 		}
 	}
-	guarded := researchPrompter{prompter: promptGateway, request: request, onCall: func(stage string, startedAt time.Time, promptBytes, responseBytes int, err error) {
+	guarded := researchPrompter{prompter: promptGateway, request: request, onProgress: func(stage string, activity agent.PromptProgress) {
+		s.logStockResearchProgress(request.Symbol, stage, activity)
+		message := "AI正在等待模型响应"
+		if activity.ReasoningBytes > 0 {
+			message = "AI正在思考"
+		}
+		if activity.TextBytes > 0 {
+			message = "AI正在生成研究内容"
+		}
+		if activity.Event == "retry" {
+			message = "模型响应中断，正在重试当前阶段"
+		}
+		provisional := stockanalysis.QuantitativeOnly(analysis)
+		if err := publish(stage, message, &provisional, snapshot); err != nil {
+			persistenceErr = err
+			cancel()
+		}
+	}, onCall: func(stage string, startedAt time.Time, promptBytes, responseBytes int, err error) {
 		s.logStockResearchModelCall(request.Symbol, request.AnalysisLevel, stage, startedAt, promptBytes, responseBytes, err)
 	}, consistent: func() bool {
 		if agent.BoundRuntime(ctx) != "" || s.settingsStore == nil {
@@ -104,7 +171,7 @@ func (s *Server) runStockResearch(ctx context.Context, request stockanalysis.Res
 		}
 		return modelIdentity == s.stockResearchModelIdentity()
 	}}
-	err = stockanalysis.RunResearch(modelCtx, guarded, snapshot, &analysis, request, model, s.supplementStockResearch, progress)
+	err = stockanalysis.RunResearch(ctx, guarded, snapshot, &analysis, request, model, s.supplementStockResearch, progress)
 	if persistenceErr != nil {
 		return stockanalysis.QuantitativeOnly(baseline), snapshot, persistenceErr
 	}
@@ -134,10 +201,13 @@ func (s *Server) stockResearchModelIdentity() string {
 
 // Keep per-call time and model identity bounded without losing tool-free options.
 type researchPrompter struct {
-	prompter   agent.Prompter
-	request    stockanalysis.ResearchRequest
-	onCall     func(string, time.Time, int, int, error)
-	consistent func() bool
+	prompter     agent.Prompter
+	request      stockanalysis.ResearchRequest
+	onCall       func(string, time.Time, int, int, error)
+	consistent   func() bool
+	onProgress   func(string, agent.PromptProgress)
+	waitTimeout  time.Duration
+	stageTimeout time.Duration
 }
 
 func (p researchPrompter) Prompt(ctx context.Context, prompt string) (agent.PromptResult, error) {
@@ -148,18 +218,82 @@ func (p researchPrompter) PromptWithOptions(ctx context.Context, prompt string, 
 	if !p.consistent() {
 		return agent.PromptResult{}, fmt.Errorf("研究期间模型配置发生变化")
 	}
-	callCtx, cancel := context.WithTimeout(ctx, stockanalysis.ResearchStageTimeout(p.request))
+	callCtx := agent.WithUsageModule(ctx, "stock-analysis")
+	budget, prepared := stockanalysis.ResearchExecutionBudget(ctx)
+	if !prepared {
+		wait := time.Duration(0)
+		if llm, ok := agent.BoundLLM(ctx); ok {
+			wait = time.Duration(appsettings.NormalizeLLMResponseTimeoutSeconds(llm.ResponseTimeoutSeconds)) * time.Second
+		}
+		effort, _ := agent.BoundReasoningEffort(ctx)
+		budget = stockanalysis.ResearchBudgetFor(p.request, wait, effort)
+	}
+	stageLimit := p.stageTimeout
+	if stageLimit <= 0 {
+		stageLimit = budget.StageTimeout()
+	}
+	// One deadline covers the initial call and every runtime/host retry. It
+	// cannot consume the budget reserved for the rest of a deep research job.
+	callCtx, cancel := context.WithTimeout(callCtx, stageLimit)
 	defer cancel()
-	callCtx = agent.WithUsageModule(callCtx, "stock-analysis")
-	startedAt := time.Now()
-	result, err := agent.PromptUsingOptions(callCtx, p.prompter, prompt, options)
-	if p.onCall != nil {
-		p.onCall(researchPromptStage(prompt), startedAt, len([]byte(prompt)), len([]byte(result.Content)), err)
+	wait := p.waitTimeout
+	if wait <= 0 {
+		wait = budget.ResponseTimeout()
 	}
-	if !p.consistent() {
-		return agent.PromptResult{}, fmt.Errorf("研究期间模型配置发生变化")
+	options.FirstResponseTimeout, options.IdleTimeout = wait, wait
+	if options.MaxAttempts <= 0 || options.MaxAttempts > 2 {
+		options.MaxAttempts = 2
 	}
-	return result, err
+	stage := researchPromptStage(prompt)
+	originalProgress := options.OnProgress
+	retryOffset := 0
+	for attempt := 0; ; attempt++ {
+		options.OnProgress = func(activity agent.PromptProgress) {
+			activity.RetryCount += retryOffset
+			if originalProgress != nil {
+				originalProgress(activity)
+			}
+			if p.onProgress != nil {
+				p.onProgress(stage, activity)
+			}
+		}
+		startedAt := time.Now()
+		result, err := agent.PromptUsingOptions(callCtx, p.prompter, prompt, options)
+		result.Progress.RetryCount += retryOffset
+		var timeout *agent.PromptTimeoutError
+		if errors.As(err, &timeout) {
+			timeout.Progress.RetryCount += retryOffset
+		}
+		var retryLimit *agent.PromptRetryLimitError
+		if errors.As(err, &retryLimit) {
+			retryLimit.MaxAttempts += retryOffset
+			retryLimit.Progress.RetryCount += retryOffset
+		}
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			err = fmt.Errorf("模型单阶段超过%d秒时限（已接收正文%d字节、思考%d字节、重试%d次）：%w", int(stageLimit.Seconds()), result.Progress.TextBytes, result.Progress.ReasoningBytes, result.Progress.RetryCount, context.DeadlineExceeded)
+		}
+		if p.onCall != nil {
+			p.onCall(stage, startedAt, len([]byte(prompt)), len([]byte(result.Content)), err)
+		}
+		if !p.consistent() {
+			return result, fmt.Errorf("研究期间模型配置发生变化")
+		}
+		deadline, bounded := callCtx.Deadline()
+		// Runtime retries already cover transport errors. Only recover an idle
+		// watchdog once, for a tool-free call with enough total budget remaining.
+		if attempt == 0 && options.DisableTools && options.MaxAttempts > 1 && result.Progress.RetryCount == 0 && errors.As(err, &timeout) && timeout.Kind == "idle" && callCtx.Err() == nil && bounded && time.Until(deadline) > wait+30*time.Second {
+			retryOffset = result.Progress.RetryCount + 1
+			options.MaxAttempts--
+			if p.onProgress != nil {
+				activity := result.Progress
+				activity.Event = "retry"
+				activity.RetryCount = retryOffset
+				p.onProgress(stage, activity)
+			}
+			continue
+		}
+		return result, err
+	}
 }
 
 func researchPromptStage(prompt string) string {
@@ -172,7 +306,7 @@ func researchPromptStage(prompt string) string {
 		return "trade"
 	case strings.HasPrefix(prompt, "你是A股证据研究员。只基于输入证据形成"):
 		return "core"
-	case strings.HasPrefix(prompt, "你是A股证据研究员。任务是独立提出需要核实的问题"):
+	case strings.Contains(prompt, "你是A股证据研究员。任务是独立提出需要核实的问题"):
 		return "outline"
 	default:
 		return "quick"
@@ -184,11 +318,20 @@ func (s *Server) supplementStockResearch(ctx context.Context, snapshot stockanal
 	var err error
 	kind := "announcement"
 	switch question.Tool {
+	case "news":
+		if s.stockNewsSearch == nil {
+			return nil, fmt.Errorf("个股定向新闻检索不可用")
+		}
+		news, loadErr := s.collectStockResearchNews(ctx, snapshot.Symbol, snapshot.Name, question.Query, snapshot.CutoffAt)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		return stockNewsResearchSources(news, time.Now().UTC()), nil
 	case "announcements":
 		if s.marketOverview == nil {
 			return nil, fmt.Errorf("公告查询不可用")
 		}
-		items, _, err = s.marketOverview.MarketAnnouncements(ctx, question.Query, snapshot.Symbol, "all", 6)
+		items, _, err = s.marketOverview.MarketAnnouncements(ctx, researchSearchQuery(question.Query), snapshot.Symbol, "all", 6)
 	case "reports":
 		if s.marketOverview == nil {
 			return nil, fmt.Errorf("研报查询不可用")
@@ -206,8 +349,31 @@ func (s *Server) supplementStockResearch(ctx context.Context, snapshot stockanal
 		if original == nil {
 			return nil, fmt.Errorf("来源编号不存在")
 		}
-		if original.Kind != "announcement" || s.marketOverview == nil {
-			return nil, fmt.Errorf("该来源没有可进一步读取的公告正文")
+		// Old snapshots kept only the first 1,800 characters; reload those by ID.
+		legacyTruncated := original.ContentStatus == "" && len([]rune(original.Content)) == 1800
+		if original.Kind != "announcement" || (stockanalysis.ResearchSourceHasBody(*original) && !legacyTruncated) {
+			return []stockanalysis.ResearchSource{*original}, nil
+		}
+		if s.marketOverview == nil {
+			return nil, fmt.Errorf("公告正文查询不可用")
+		}
+		id := original.ExternalID
+		if id == "" {
+			if parsed, parseErr := url.Parse(original.URL); parseErr == nil && parsed.Hostname() == "data.eastmoney.com" {
+				id = strings.TrimSuffix(path.Base(parsed.Path), ".html")
+			}
+		}
+		if provider, ok := s.marketOverview.(MarketAnnouncementContentProvider); ok && id != "" {
+			body, bodyErr := provider.MarketAnnouncementContent(ctx, id)
+			if bodyErr != nil {
+				return nil, fmt.Errorf("读取公告正文失败: %w", bodyErr)
+			}
+			if strings.TrimSpace(body) == "" {
+				return nil, fmt.Errorf("公告正文为空")
+			}
+			source := stockanalysis.NewResearchSource("announcement", original.Title, body, original.Provider, original.URL, original.PublishedAt, time.Now().UTC())
+			source.ExternalID = id
+			return []stockanalysis.ResearchSource{source}, nil
 		}
 		items, _, err = s.marketOverview.MarketAnnouncements(ctx, original.Title, snapshot.Symbol, "all", 4)
 		filtered := items[:0]
@@ -232,7 +398,7 @@ func (s *Server) supplementStockResearch(ctx context.Context, snapshot stockanal
 	default:
 		return nil, fmt.Errorf("不允许的补证工具")
 	}
-	if err != nil {
+	if err != nil && question.Tool != "announcements" {
 		return nil, err
 	}
 	result := []stockanalysis.ResearchSource{}
@@ -240,29 +406,57 @@ func (s *Server) supplementStockResearch(ctx context.Context, snapshot stockanal
 		if item.Symbol != "" && !strings.HasPrefix(snapshot.Symbol, strings.Split(item.Symbol, ".")[0]) {
 			continue
 		}
-		if question.Query != "" && item.Content != "" {
-			item.Content = researchExcerpt(item.Content, question.Query)
-		}
 		result = append(result, stockanalysis.ResearchItemSource(item, kind, time.Now().UTC()))
+	}
+	if question.Tool == "announcements" {
+		terms := researchAnnouncementQueryTerms(question.Query, snapshot)
+		for _, source := range snapshot.Sources {
+			if source.Kind != "announcement" {
+				continue
+			}
+			for _, term := range terms {
+				if strings.Contains(source.Content, term) {
+					result = append(result, source)
+					break
+				}
+			}
+		}
+	}
+	if len(result) == 0 && err != nil {
+		return nil, err
 	}
 	return result, nil
 }
 
-func researchExcerpt(content, query string) string {
-	runes := []rune(content)
-	if len(runes) <= 1800 {
-		return content
-	}
-	for _, term := range strings.Fields(query) {
-		if len([]rune(term)) < 2 {
+func researchAnnouncementQueryTerms(query string, snapshot stockanalysis.ResearchSnapshot) []string {
+	terms := stockanalysis.ResearchQueryTerms(query)
+	specific, general := []string{}, []string{}
+	for _, term := range terms {
+		if term == snapshot.Name || term == snapshot.Symbol || term == strings.Split(snapshot.Symbol, ".")[0] {
 			continue
 		}
-		if index := strings.Index(content, term); index >= 0 {
-			start := max(0, len([]rune(content[:index]))-350)
-			return string(runes[start:min(len(runes), start+1800)])
+		switch term {
+		case "公告", "进展", "发行", "上市", "公司", "股份", "消息", "最新":
+			general = append(general, term)
+		default:
+			specific = append(specific, term)
 		}
 	}
-	return string(runes[:1800])
+	if len(specific) > 0 {
+		return specific
+	}
+	return general
+}
+
+func researchSearchQuery(query string) string {
+	// The upstream endpoint does not interpret a list of research keywords.
+	// Search one substantive term, and match the full query against local bodies.
+	for _, term := range strings.Fields(query) {
+		if len([]rune(term)) >= 2 && strings.Trim(term, "0123456789-年月日") != "" {
+			return term
+		}
+	}
+	return query
 }
 
 func (s *Server) stockResearchCreate(w http.ResponseWriter, r *http.Request) {
@@ -344,6 +538,46 @@ func (s *Server) stockResearchCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	s.stockResearch.Cancel(job.ID)
 	writeJSON(w, 200, map[string]any{"data": map[string]bool{"cancel_requested": true}})
+}
+
+func (s *Server) stockResearchResume(w http.ResponseWriter, r *http.Request) {
+	previous, ok := s.readResearchJob(w, r)
+	if !ok {
+		return
+	}
+	if !previous.Public().ResumeAvailable {
+		writeError(w, 409, "该研究没有可继续的阶段，请重新分析")
+		return
+	}
+	// Check the currently selected frozen configuration before creating a job.
+	gateway := s.usageGateway
+	if gateway == nil {
+		gateway = s.agentGateway
+	}
+	ctx, release, err := agent.BindTask(r.Context(), gateway)
+	if err != nil {
+		writeError(w, 409, err.Error())
+		return
+	}
+	defer release()
+	identity := agent.BoundConfigurationIdentity(ctx)
+	if identity == "" {
+		identity = s.stockResearchModelIdentity()
+	}
+	if previous.Checkpoint.ModelIdentity != identity {
+		writeError(w, 409, "模型或思考设置已变化，请重新分析，不能继续旧研究")
+		return
+	}
+	job, err := s.stockResearch.Resume(r.Context(), previous.ID)
+	if err != nil {
+		status := http.StatusConflict
+		if errors.Is(err, stockanalysis.ErrResearchBusy) {
+			status = http.StatusTooManyRequests
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"data": job.Public()})
 }
 
 func (s *Server) stockResearchDelete(w http.ResponseWriter, r *http.Request) {

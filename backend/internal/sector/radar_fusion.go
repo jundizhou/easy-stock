@@ -112,7 +112,7 @@ func buildIndustryRadarOverviews(items []foundation.MarketIndustryMomentum, meta
 		)
 		dailyScore := blendProviderAndComposite(item.Score, dailyComposite, dailyOK)
 		fiveDayScore := blendProviderAndComposite(item.Score, fiveDayComposite, fiveDayOK)
-		tradeDate := firstNonEmptyRadar(item.Meta.TradeDate, meta.TradeDate, shanghaiDate(now))
+		tradeDate := firstNonEmptyRadar(item.Meta.TradeDate, meta.TradeDate, radarMarketDate(now))
 		matched := item.RisingCount + item.FallingCount
 		result = append(result, foundation.ThemeOverview{
 			Theme:                radarIndustryThemeID(item.Code, item.Name),
@@ -369,6 +369,13 @@ func mergeRadarPair(industry foundation.ThemeOverview, kaipanla foundation.Theme
 	result.IndustryFiveDayScore = industry.IndustryFiveDayScore
 	result.DailyStrengthScore = fusedRadarScore(industry.IndustryDailyScore, kaipanla.KaipanlaDailyScore)
 	result.FiveDayStrengthScore = fusedRadarScore(industry.IndustryFiveDayScore, kaipanla.KaipanlaFiveDayScore)
+	// Membership can arrive before its strength calculation. Keep the ready
+	// industry's scores visible until the Kaipanla scores can join the fusion.
+	if kaipanla.Provisional {
+		result.Provisional = industry.Provisional
+		result.DailyStrengthScore = max(0, industry.IndustryDailyScore-radarSinglePenalty)
+		result.FiveDayStrengthScore = max(0, industry.IndustryFiveDayScore-radarSinglePenalty)
+	}
 	result.TrendScore = result.DailyStrengthScore
 	result.TrendStage = radarTrendStage(result.TrendScore)
 	return result
@@ -616,8 +623,8 @@ func fusedRadarMeta(
 	if industryMeta.FetchedAt.After(fetchedAt) {
 		fetchedAt = industryMeta.FetchedAt
 	}
-	tradeDate := firstNonEmptyRadar(industryMeta.TradeDate, snapshot.TradeDate, shanghaiDate(now))
-	carryForward := hasKaipanla && snapshot.TradeDate != shanghaiDate(now)
+	tradeDate := firstNonEmptyRadar(industryMeta.TradeDate, snapshot.TradeDate, radarMarketDate(now))
+	carryForward := hasKaipanla && tradingDayAge(snapshot.TradeDate, now) > 0
 	reasons := []string{}
 	if snapshotErr != nil {
 		reasons = append(reasons, snapshotErr.Error())
@@ -645,7 +652,7 @@ func fusedRadarMeta(
 }
 
 func tradingDayAge(tradeDate string, now time.Time) int {
-	location := now.Location()
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	date, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(tradeDate), location)
 	if err != nil {
 		return 0
@@ -656,11 +663,19 @@ func tradingDayAge(tradeDate string, now time.Time) int {
 	}
 	age := 0
 	for current := date.AddDate(0, 0, 1); !current.After(today); current = current.AddDate(0, 0, 1) {
-		if current.Weekday() != time.Saturday && current.Weekday() != time.Sunday {
+		if foundation.IsAStockTradingDay(current) {
 			age++
 		}
 	}
 	return age
+}
+
+func radarMarketDate(now time.Time) string {
+	day := now.In(time.FixedZone("Asia/Shanghai", 8*60*60))
+	for !foundation.IsAStockTradingDay(day) {
+		day = day.AddDate(0, 0, -1)
+	}
+	return shanghaiDate(day)
 }
 
 func radarTrendStage(score int) string {

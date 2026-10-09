@@ -21,6 +21,7 @@ type Client struct {
 	kLineBaseURL           string
 	moneyFlowBaseURL       string
 	sectorMoneyFlowBaseURL string
+	financialBaseURL       string
 	httpClient             *http.Client
 }
 
@@ -64,6 +65,7 @@ func NewClient(opts ...Option) *Client {
 		kLineBaseURL:           "https://quotes.sina.cn/cn/api/jsonp_v2.php/callback/CN_MarketDataService.getKLineData",
 		moneyFlowBaseURL:       "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_ssggzj",
 		sectorMoneyFlowBaseURL: "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk",
+		financialBaseURL:       "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
 		httpClient:             &http.Client{Timeout: 10 * time.Second},
 	}
 	for _, opt := range opts {
@@ -307,14 +309,18 @@ func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.Sou
 		price, _ := strconv.ParseFloat(fields[3], 64)
 		high, _ := strconv.ParseFloat(fields[4], 64)
 		low, _ := strconv.ParseFloat(fields[5], 64)
+		volume, _ := strconv.ParseFloat(fields[8], 64)
+		amount, _ := strconv.ParseFloat(fields[9], 64)
 		change := price - prevClose
 		changePercent := 0.0
 		if prevClose != 0 {
 			changePercent = change / prevClose * 100
 		}
-		tradeTime, _ := time.ParseInLocation("2006-01-02 15:04:05", fields[30]+" "+fields[31], time.Local)
+		tradeTime, _ := time.ParseInLocation("2006-01-02 15:04:05", fields[30]+" "+fields[31], time.FixedZone("Asia/Shanghai", 8*3600))
 		quotes = append(quotes, foundation.Quote{
 			Symbol:        symbol.Canonical,
+			Volume:        volume,
+			Amount:        amount,
 			Name:          fields[0],
 			Price:         price,
 			Open:          open,

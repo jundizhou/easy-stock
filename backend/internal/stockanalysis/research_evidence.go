@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const ResearchCompressionVersion = "evidence-pack-v2"
+const ResearchCompressionVersion = "evidence-pack-v7"
 
 type researchPromptPhase string
 
@@ -62,10 +62,11 @@ var researchSentencePattern = regexp.MustCompile(`[^。！？!?；;\n]+[。！�
 var researchNoiseKeys = map[string]bool{
 	"meta": true, "source": true, "provider": true, "url": true, "source_url": true,
 	"fetched_at": true, "latency_ms": true, "available_fields": true, "next_refresh_at": true,
-	"snapshot_id": true, "fallback_reason": true, "carry_forward": true,
+	"snapshot_id": true, "fallback_reason": true,
 }
 var researchRiskTerms = []string{"风险", "下滑", "下降", "亏损", "负", "减持", "诉讼", "问询", "否认", "澄清", "不确定", "现金流", "应收", "存货", "商誉", "减值", "流动性"}
 var researchFactTerms = []string{"营业总收入", "归母净利润", "扣非", "经营活动", "公告", "报告期", "合作", "订单", "客户", "项目", "投资", "回购", "中标", "产能", "产品", "业务"}
+var researchBusinessTerms = []string{"产品", "客户", "订单", "量产", "商业化", "出货", "研发", "收入构成", "供应链", "合作", "产能", "技术"}
 
 func buildResearchEvidencePack(snapshot ResearchSnapshot, request ResearchRequest, phase researchPromptPhase, outline *ResearchOutline) researchEvidencePack {
 	level, _ := normalizeResearchLevel(request.AnalysisLevel)
@@ -83,12 +84,34 @@ func buildResearchEvidencePack(snapshot ResearchSnapshot, request ResearchReques
 	if policy.MaxCards > 0 && policy.MaxEvidenceBytes > 0 && level != ResearchLevelDeep {
 		maxCards, maxChars = policy.MaxCards, policy.MaxEvidenceBytes
 	}
+	priorityIDs := researchRequestedSourceIDs(outline)
 	candidates := make([]researchEvidenceCandidate, 0, len(snapshot.Sources))
 	originalBytes := 0
 	for _, source := range snapshot.Sources {
 		originalBytes += len([]byte(source.Content))
 		source = researchSourceForLevel(source, snapshot, policy)
-		card := compressResearchSource(source, queries, phase, policy)
+		sourceQueries := queries
+		if outline != nil {
+			requestedQueries := []string{}
+			for _, question := range outline.Questions {
+				requested := question.SourceID == source.ID
+				for _, id := range question.EvidenceSourceIDs {
+					requested = requested || id == source.ID
+				}
+				if requested {
+					requestedQueries = append(requestedQueries, question.Query, question.Question)
+				}
+			}
+			if len(requestedQueries) > 0 {
+				sourceQueries = append(requestedQueries, snapshot.Name)
+			}
+		}
+		// A question about a capital event must not hide the operating facts
+		// in a multipurpose investor-relations record.
+		if isResearchBusinessDisclosure(source) {
+			sourceQueries = append(append([]string{}, researchBusinessTerms...), sourceQueries...)
+		}
+		card := compressResearchSource(source, sourceQueries, phase, policy)
 		if strings.TrimSpace(card.Text) == "" {
 			continue
 		}
@@ -98,11 +121,14 @@ func buildResearchEvidencePack(snapshot ResearchSnapshot, request ResearchReques
 		if candidates[i].score != candidates[j].score {
 			return candidates[i].score > candidates[j].score
 		}
+		if isResearchBusinessDisclosure(candidates[i].source) && isResearchBusinessDisclosure(candidates[j].source) && !candidates[i].source.PublishedAt.Equal(candidates[j].source.PublishedAt) {
+			return candidates[i].source.PublishedAt.After(candidates[j].source.PublishedAt)
+		}
 		return candidates[i].source.ID < candidates[j].source.ID
 	})
 	collapseDuplicateResearchEvidence(candidates)
 
-	selected := selectResearchEvidence(candidates, maxCards, maxChars, policy.MaxAnnouncements, phase)
+	selected := selectResearchEvidence(candidates, maxCards, maxChars, policy.MaxAnnouncements, phase, priorityIDs)
 	selectedBytes := 0
 	for _, item := range selected {
 		selectedBytes += len([]byte(item.Text))
@@ -140,18 +166,39 @@ func buildResearchTradeEvidencePack(snapshot ResearchSnapshot, request ResearchR
 	full := buildResearchEvidencePack(snapshot, request, researchPromptSynthesis, &outline)
 	level, _ := normalizeResearchLevel(request.AnalysisLevel)
 	policy := researchLevelPolicyFor(level)
-	keep := map[string]bool{"m-price": true, "m-quote": true, "f-financial": true, "f-business": true}
-	for _, claim := range append(append(append([]ResearchClaim{core.Thesis}, core.Support...), core.Counter...), core.Alternatives...) {
+	keep := map[string]bool{"m-price": true, "m-sector": true, "m-quote": true, "f-financial": true, "f-business": true}
+	claims := append(append(append([]ResearchClaim{core.Thesis}, core.Support...), core.Counter...), core.Alternatives...)
+	if core.TradingLogic != nil {
+		if core.TradingLogic.Business != nil {
+			claims = append(claims, *core.TradingLogic.Business)
+		}
+		claims = append(claims, core.TradingLogic.Catalysts...)
+		for _, item := range append(append([]ResearchLogicItem{}, core.TradingLogic.Mainlines...), core.TradingLogic.Secondary...) {
+			claims = append(claims, item.Explanation)
+			if item.MarketEvidence != nil {
+				claims = append(claims, *item.MarketEvidence)
+			}
+		}
+	}
+	for _, claim := range claims {
 		for _, id := range claim.SourceIDs {
 			keep[id] = true
 		}
+	}
+	compact := func(card researchEvidenceCard) researchEvidenceCard {
+		card = compactResearchCardForTrade(card)
+		if card.Kind == "announcement" {
+			queries := append(append([]string{}, researchRiskTerms...), researchBusinessTerms...)
+			card.Text = ResearchSourceExcerpt(card.Text, queries, min(policy.AnnouncementChars, policy.TradeEvidenceBytes/32))
+		}
+		return card
 	}
 	selected := make([]researchEvidenceCard, 0, policy.TradeMaxCards)
 	selectedIDs := map[string]bool{}
 	selectedBytes := 0
 	announcementCount := 0
 	for _, card := range full.Evidence {
-		card = compactResearchCardForTrade(card)
+		card = compact(card)
 		cardBytes := len([]byte(card.Text))
 		if !keep[card.ID] || selectedIDs[card.ID] || len(selected) >= policy.TradeMaxCards || (card.Kind == "announcement" && announcementCount >= policy.MaxAnnouncements) || selectedBytes+cardBytes > policy.TradeEvidenceBytes {
 			continue
@@ -164,7 +211,7 @@ func buildResearchTradeEvidencePack(snapshot ResearchSnapshot, request ResearchR
 		}
 	}
 	for _, card := range full.Evidence {
-		card = compactResearchCardForTrade(card)
+		card = compact(card)
 		if len(selected) >= policy.TradeMaxCards || selectedBytes+len(card.Text) > policy.TradeEvidenceBytes || selectedIDs[card.ID] || card.Kind != "announcement" || announcementCount >= policy.MaxAnnouncements || !containsAnyFold(card.Text, researchRiskTerms...) {
 			continue
 		}
@@ -184,7 +231,11 @@ func buildResearchTradeEvidencePack(snapshot ResearchSnapshot, request ResearchR
 }
 
 func compactResearchCardForTrade(card researchEvidenceCard) researchEvidenceCard {
-	if card.ID != "m-price" && card.ID != "m-relative" {
+	if card.ID == "f-business" {
+		card.Text = ResearchSourceExcerpt(card.Text, researchBusinessTerms, 180)
+		return card
+	}
+	if card.ID != "m-price" && card.ID != "m-relative" && card.ID != "f-financial" && card.ID != "m-sector" {
 		return card
 	}
 	var value any
@@ -193,6 +244,19 @@ func compactResearchCardForTrade(card researchEvidenceCard) researchEvidenceCard
 	}
 	policy := researchLevelPolicy{DailyBars: 20, RelativeBars: 6}
 	value = compactResearchJSON(value, 0, card.ID, policy)
+	if fields, ok := value.(map[string]any); ok {
+		if card.ID == "f-financial" {
+			if history, ok := fields["history"].([]any); ok && len(history) > 1 {
+				fields["history"] = history[:1]
+				fields["history_note"] = "交易条件阶段仅展示最近历史对照，其他期见核心判断与快照"
+			}
+		}
+		if card.ID == "m-sector" {
+			delete(fields, "peers")
+			fields["displayed_peer_count"] = 0
+			limitResearchMarketWindows(fields)
+		}
+	}
 	encoded, err := json.Marshal(value)
 	if err == nil {
 		card.Text = string(encoded)
@@ -211,13 +275,13 @@ func buildResearchCoreEvidencePack(snapshot ResearchSnapshot, request ResearchRe
 	selectedIDs := map[string]bool{}
 	selectedBytes := 0
 	announcementCount := 0
-	add := func(card researchEvidenceCard) {
+	add := func(card researchEvidenceCard) bool {
 		if len(selected) >= policy.MaxCards || selectedIDs[card.ID] || (card.Kind == "announcement" && announcementCount >= policy.MaxAnnouncements) {
-			return
+			return false
 		}
 		cardBytes := len([]byte(card.Text))
 		if selectedBytes+cardBytes > policy.MaxEvidenceBytes {
-			return
+			return false
 		}
 		selected = append(selected, card)
 		selectedIDs[card.ID] = true
@@ -225,11 +289,24 @@ func buildResearchCoreEvidencePack(snapshot ResearchSnapshot, request ResearchRe
 		if card.Kind == "announcement" {
 			announcementCount++
 		}
+		return true
 	}
 	for _, card := range full.Evidence {
-		if card.ID == "m-price" || card.ID == "m-quote" || card.ID == "f-financial" || card.ID == "f-business" || card.Kind == "disclosure" || card.Kind == "company_profile" {
+		if isResearchMustKeep(ResearchSource{ID: card.ID, Kind: card.Kind}) {
 			add(card)
 		}
+	}
+	for _, card := range researchBusinessCards(full.Evidence, snapshot) {
+		add(card)
+	}
+	newsCount := 0
+	for _, card := range researchRecentNewsCards(full.Evidence) {
+		if newsCount < 2 && add(card) {
+			newsCount++
+		}
+	}
+	for _, card := range researchPriorityCards(full.Evidence, outline, snapshot) {
+		add(card)
 	}
 	for _, card := range full.Evidence {
 		if card.Kind == "announcement" && containsAnyFold(card.Text, researchRiskTerms...) {
@@ -256,7 +333,13 @@ func compressResearchSource(source ResearchSource, queries []string, phase resea
 		date = source.PublishedAt.Format("2006-01-02")
 	}
 	exact := source.Kind != "calculation" && !strings.HasPrefix(source.ID, "f-")
-	compression := "原文连续片段；完整来源保存在快照"
+	compression := "原文摘录，省略处用…分隔；引文只能引用连续片段，较完整来源保存在快照"
+	if source.Kind == "announcement" && !ResearchSourceHasBody(source) {
+		compression = "仅公告标题，未取得正文；不能据此确认交易条款或业务细节"
+	}
+	if source.Kind == "news" && source.ContentStatus == "excerpt" {
+		compression = "第三方新闻检索摘要，非全文；不能声称已读取完整报道，不能升级为公司披露"
+	}
 	if !exact {
 		compression = "结构化字段；不用于逐字引文，完整来源保存在快照"
 	}
@@ -296,7 +379,7 @@ func compactResearchContent(source ResearchSource, queries []string, phase resea
 			return string(encoded)
 		}
 	}
-	text := normalizeResearchText(source.Content)
+	text := strings.TrimSpace(source.Content)
 	if text == "" {
 		return truncateExactText(source.Title, 160)
 	}
@@ -354,50 +437,7 @@ func compactResearchContent(source ResearchSource, queries []string, phase resea
 }
 
 func compactResearchAnnouncement(text string, queries []string, limit int) string {
-	if limit <= 0 {
-		limit = 100
-	}
-	sentences := researchSentencePattern.FindAllString(text, -1)
-	if len(sentences) == 0 {
-		return truncateExactText(text, limit)
-	}
-	type scoredSentence struct {
-		text  string
-		score int
-		index int
-	}
-	ranked := make([]scoredSentence, 0, len(sentences))
-	for index, sentence := range sentences {
-		sentence = strings.TrimSpace(sentence)
-		if sentence == "" {
-			continue
-		}
-		ranked = append(ranked, scoredSentence{text: sentence, score: scoreResearchSentence(sentence, queries), index: index})
-	}
-	sort.SliceStable(ranked, func(i, j int) bool {
-		if ranked[i].score != ranked[j].score {
-			return ranked[i].score > ranked[j].score
-		}
-		return ranked[i].index < ranked[j].index
-	})
-	selected := make([]scoredSentence, 0, 2)
-	length := 0
-	for _, sentence := range ranked {
-		if length+len([]rune(sentence.text)) > limit && len(selected) > 0 {
-			continue
-		}
-		selected = append(selected, sentence)
-		length += len([]rune(sentence.text))
-		if length >= limit {
-			break
-		}
-	}
-	sort.SliceStable(selected, func(i, j int) bool { return selected[i].index < selected[j].index })
-	parts := make([]string, 0, len(selected))
-	for _, sentence := range selected {
-		parts = append(parts, sentence.text)
-	}
-	return truncateExactText(strings.Join(parts, ""), limit)
+	return ResearchSourceExcerpt(text, queries, limit)
 }
 
 func compactResearchJSON(value any, depth int, sourceID string, policy researchLevelPolicy) any {
@@ -437,7 +477,7 @@ func compactResearchJSON(value any, depth int, sourceID string, policy researchL
 	}
 }
 
-func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, maxChars, maxAnnouncements int, phase researchPromptPhase) []researchEvidenceCard {
+func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, maxChars, maxAnnouncements int, phase researchPromptPhase, priorityIDs map[string]bool) []researchEvidenceCard {
 	selected := make([]researchEvidenceCard, 0, maxCards)
 	used := map[string]bool{}
 	chars := 0
@@ -449,7 +489,9 @@ func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, ma
 		if candidate.source.Kind == "announcement" && announcements >= maxAnnouncements {
 			return false
 		}
-		cost := len([]byte(candidate.card.Text)) + len([]byte(candidate.card.Title)) + 80
+		// The policy and reported statistics both bound body bytes. Titles and
+		// other metadata remain independently bounded by card count/length.
+		cost := len([]byte(candidate.card.Text))
 		if chars+cost > maxChars {
 			return false
 		}
@@ -463,6 +505,32 @@ func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, ma
 	}
 	for _, candidate := range candidates {
 		if isResearchMustKeep(candidate.source) {
+			add(candidate)
+		}
+	}
+	// Reserve coverage for operating disclosures before the planner's
+	// hypothesis-specific sources, including when there is no outline yet.
+	businessCount := 0
+	for _, candidate := range candidates {
+		if isResearchBusinessDisclosure(candidate.source) && businessCount < 1 && add(candidate) {
+			businessCount++
+		}
+	}
+	news := []researchEvidenceCandidate{}
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate.source.Provider, "eastmoney:stock-news-search:") {
+			news = append(news, candidate)
+		}
+	}
+	sort.SliceStable(news, func(i, j int) bool { return news[i].source.PublishedAt.After(news[j].source.PublishedAt) })
+	newsCount := 0
+	for _, candidate := range news {
+		if newsCount < 2 && add(candidate) {
+			newsCount++
+		}
+	}
+	for _, candidate := range candidates {
+		if priorityIDs[candidate.source.ID] {
 			add(candidate)
 		}
 	}
@@ -480,7 +548,7 @@ func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, ma
 }
 
 func isResearchMustKeep(source ResearchSource) bool {
-	if source.ID == "f-financial" || source.ID == "f-business" || source.ID == "m-price" || source.ID == "m-quote" {
+	if source.ID == "f-financial" || source.ID == "f-business" || source.ID == "m-price" || source.ID == "m-sector" || source.ID == "m-quote" {
 		return true
 	}
 	return source.Kind == "disclosure" || source.Kind == "company_profile"
@@ -501,6 +569,12 @@ func scoreResearchEvidence(source ResearchSource, text string, queries []string)
 	if !source.PublishedAt.IsZero() {
 		score += 6
 	}
+	if isResearchBusinessDisclosure(source) {
+		score += 40
+		if containsAnyFold(source.Title, "投资者关系活动记录", "调研记录", "调研纪要") {
+			score += 60
+		}
+	}
 	if containsAnyFold(text, researchRiskTerms...) {
 		score += 14
 	}
@@ -514,6 +588,89 @@ func scoreResearchEvidence(source ResearchSource, text string, queries []string)
 		}
 	}
 	return score
+}
+
+func isResearchBusinessDisclosure(source ResearchSource) bool {
+	if source.Kind != "announcement" || !ResearchSourceHasBody(source) {
+		return false
+	}
+	if containsAnyFold(source.Title, "关于参加", "召开", "会议通知", "提示性公告") {
+		return false
+	}
+	if containsAnyFold(source.Title, "投资者关系", "调研", "业绩说明", "经营情况", "业务进展", "产品进展") {
+		return true
+	}
+	matches := 0
+	for _, term := range researchBusinessTerms {
+		if strings.Contains(source.Content, term) {
+			matches++
+		}
+	}
+	return matches >= 4
+}
+
+func researchBusinessCards(cards []researchEvidenceCard, snapshot ResearchSnapshot) []researchEvidenceCard {
+	sources := make(map[string]ResearchSource, len(snapshot.Sources))
+	for _, source := range snapshot.Sources {
+		sources[source.ID] = source
+	}
+	result := []researchEvidenceCard{}
+	for _, card := range cards {
+		if isResearchBusinessDisclosure(sources[card.ID]) {
+			result = append(result, card)
+			if len(result) == 1 {
+				break
+			}
+		}
+	}
+	return result
+}
+
+func researchRecentNewsCards(cards []researchEvidenceCard) []researchEvidenceCard {
+	news := []researchEvidenceCard{}
+	for _, card := range cards {
+		if strings.HasPrefix(card.Provider, "eastmoney:stock-news-search:") {
+			news = append(news, card)
+		}
+	}
+	sort.SliceStable(news, func(i, j int) bool { return news[i].Date > news[j].Date })
+	return news
+}
+
+func researchPriorityCards(cards []researchEvidenceCard, outline ResearchOutline, snapshot ResearchSnapshot) []researchEvidenceCard {
+	ids := researchRequestedSourceIDs(&outline)
+	priority := []researchEvidenceCard{}
+	scores := map[string]int{}
+	for _, card := range cards {
+		if !ids[card.ID] {
+			continue
+		}
+		priority = append(priority, card)
+		for _, q := range outline.Questions {
+			if q.SourceID == card.ID {
+				scores[card.ID] += 1000
+			}
+			for _, term := range ResearchQueryTerms(q.Query) {
+				if term == snapshot.Name || term == snapshot.Symbol || term == strings.Split(snapshot.Symbol, ".")[0] {
+					continue
+				}
+				switch term {
+				case "公告", "进展", "发行", "上市", "公司", "股份", "消息", "最新", "上涨", "下跌":
+					continue
+				}
+				if strings.Contains(card.Text, term) {
+					scores[card.ID] += 20
+				}
+			}
+		}
+	}
+	sort.SliceStable(priority, func(i, j int) bool {
+		if scores[priority[i].ID] != scores[priority[j].ID] {
+			return scores[priority[i].ID] > scores[priority[j].ID]
+		}
+		return priority[i].Date > priority[j].Date
+	})
+	return priority
 }
 
 func scoreResearchSentence(sentence string, queries []string) int {

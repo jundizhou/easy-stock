@@ -29,7 +29,7 @@
   <img alt="Go" src="https://img.shields.io/badge/Backend-Go-00ADD8?logo=go&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-3178C6?logo=react&logoColor=white" />
   <img alt="Electron" src="https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white" />
-  <img alt="Hermes" src="https://img.shields.io/badge/AI-Hermes-6D5BD0" />
+  <img alt="Hermes / Codex" src="https://img.shields.io/badge/AI-Hermes%20%2B%20Codex-2476D2" />
   <img alt="Local First" src="https://img.shields.io/badge/Data-Local%20First-159A80" />
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
@@ -186,7 +186,7 @@ easy-stock first organizes themes, ladders, limit-up reasons, trends, relative s
 
 ### 2. From "manual browsing" to "agents that act"
 
-Hermes drives agent-browser and a persistent Electron browser session: following your subscriptions, it visits Xueqiu or TaoGuba profiles, discovers new articles, identifies author and publish time, deduplicates, extracts full text, archives, and distills — automatically.
+Desktop Browser Bridges first reuse persistent Electron sessions to visit subscribed Xueqiu or TaoGuba profiles and read articles. Without a desktop bridge, the selected agent can collect content through agent-browser. The Go review service normalizes metadata, deduplicates, archives, and distills the articles.
 
 ### 3. From "single summaries" to "an opinion network"
 
@@ -194,7 +194,7 @@ The system first synthesizes each author's core views, then aggregates across au
 
 ### 4. From "generic chat" to "an A-share research copilot"
 
-All AI sessions run through the local Hermes Runtime, which handles model calls, session continuation, tool routing, skills, and task context — business code is never locked to one vendor. OpenAI, DeepSeek, Qwen, Moonshot, Anthropic, and any OpenAI-compatible endpoint are supported.
+AI sessions use a local shared agent service with a choice of Hermes or Codex. The runtimes share model profiles, reasoning settings, Skills, and MCP configuration while keeping their native sessions separate. Business tasks bind their runtime and model configuration for model calls, session continuation, tools, and task context. OpenAI, DeepSeek, Qwen, Moonshot, Anthropic, and custom compatible endpoints can be configured; Codex requires a Responses connection.
 
 ### 5. From "one-off Q&A" to "a long-term research flywheel"
 
@@ -208,19 +208,25 @@ Every verification becomes context for the next round of research. Over time the
 
 ## AI-Native Architecture
 
+The Go backend collects market data, computes quantitative baselines, organizes evidence, and runs business workflows. A shared agent service selects Hermes or Codex from the application settings. Data services and AI reasoning are separate dependencies: quantitative previews need no model call, while deep stock research builds questions, retrieves evidence through Go, generates judgments and conditions, and validates references.
+
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-ai-architecture.svg" width="1680" height="1180" alt="easy-stock AI-native architecture diagram" />
+  <a href="./docs/assets/easy-stock-ai-architecture.svg">
+    <img src="./docs/assets/easy-stock-ai-architecture.svg" width="1680" alt="easy-stock AI-native architecture: Electron host, Go domain services, local evidence, and Hermes / Codex runtimes" />
+  </a>
 </p>
 
 | Layer | Responsibility |
 | --- | --- |
-| **AI research experience** | Market overview, trend themes, limit-up ladder, AI stock analysis, portfolio inspection, trading wisdom, review digest, AI copilot |
-| **Business orchestration** | Go API, stock analysis engine, portfolio inspection engine, strategy evaluation, review intelligence, scheduled jobs, data source status |
-| **AI agent platform** | Hermes prompts, skills, sessions, memory, tool router, and an open model gateway |
-| **Data intelligence** | Provider registry, unified market model, theme attribution, evidence metadata, SQLite, cached snapshots |
-| **External ecosystem** | Market data sources, content platforms, browser execution, and the LLM services you choose |
-| **Desktop runtime boundary** | Electron lifecycle, random ports, one-time tokens, persistent browser sessions, local asset assembly |
-| **Security & governance** | Key isolation, source tracking, graceful degradation, runtime status, risk notices |
+| **AI research workbench** | React + TypeScript: market overview, trend themes, limit-up ladder, tiered stock research, portfolio inspection, review digest, trading wisdom, and AI copilot |
+| **Local Go API** | HTTP queries and background job polling; WebSocket quotes and AI events; local authentication, request validation, and request logging |
+| **Domain services and orchestration** | Theme fusion, ladder and sentiment calculations, inflection evaluation, stock research, portfolio report reuse and scoring, viewpoint consensus, next-day verification, and scheduled sync |
+| **Data and local evidence** | Source adapters and fallbacks, unified market models, theme attribution, versioned snapshots with source and time metadata; SQLite stores reviews, research jobs, portfolio inspections, sentiment history, and theme caches |
+| **Shared agent service** | Shared model profiles, reasoning settings, Skills, and MCP; Hermes or Codex selection; task-bound configuration, session resumption, approvals, clarification, and token usage. Codex uses its native App Server and requires a Responses connection |
+| **Electron desktop host** | Bundled Go / Hermes / Codex / Python; local ports and startup tokens; Preload / IPC; Xueqiu and TaoGuba Browser Bridges, agent-browser fallback, and WeChat link parsing; logs, updates, and backups before installation |
+| **External ecosystem** | Market and research data sources, content platforms, public review feeds and trading wisdom, plus model providers or compatible endpoints called directly by the selected runtime |
+
+Stock research saves stage checkpoints and can resume when model configuration and evidence still match. Portfolio inspection first reuses successful stock reports completed within 24 hours, then fills missing research before generating a portfolio report. See the [current architecture and code entry points](./backend/docs/architecture.md) (Chinese).
 
 ---
 
@@ -235,6 +241,8 @@ For first-time setup (LLM API keys, Xueqiu/TaoGuba login for content sync), see 
 ### Developers
 
 To run, debug, test, or build from source, see the [Developer Guide](./docs/development.md) (Chinese — architecture diagrams and code are language-neutral).
+
+Configure Feishu and DingTalk custom group bots under Settings → Notifications, with signatures, keywords, and test messages. See [Notification setup](./docs/notifications.md) (Chinese) for setup and supported events.
 
 ## Community & Contributing
 

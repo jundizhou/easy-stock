@@ -17,6 +17,10 @@ type SourceMeta struct {
 }
 
 type Quote struct {
+	Valuation *StockValuation `json:"valuation,omitempty"`
+	// Session totals from the quote provider; zero means unavailable or no trades.
+	Volume        float64    `json:"volume,omitempty"`
+	Amount        float64    `json:"amount,omitempty"`
 	Symbol        string     `json:"symbol"`
 	Name          string     `json:"name"`
 	Price         float64    `json:"price"`
@@ -165,6 +169,7 @@ type StockBusinessProfile struct {
 // units: amounts are CNY and percentage fields are percentage points.
 type StockFundamentals struct {
 	Symbol                        string     `json:"symbol"`
+	PublishedAt                   time.Time  `json:"published_at,omitempty"`
 	ReportDate                    string     `json:"report_date"`
 	ReportName                    string     `json:"report_name"`
 	Revenue                       float64    `json:"revenue"`
@@ -181,6 +186,16 @@ type StockFundamentals struct {
 	DebtRatio                     float64    `json:"debt_ratio"`
 	OperatingCashFlowPerShare     float64    `json:"operating_cash_flow_per_share"`
 	Meta                          SourceMeta `json:"meta"`
+}
+
+// StockFinancialEvidence keeps only fields actually returned by a second
+// financial source. Missing values are absent, never fabricated zeroes.
+type StockFinancialEvidence struct {
+	Symbol      string             `json:"symbol"`
+	ReportDate  string             `json:"report_date"`
+	PublishedAt time.Time          `json:"published_at,omitempty"`
+	Fields      map[string]float64 `json:"fields"`
+	Meta        SourceMeta         `json:"meta"`
 }
 
 // MarketLimitEvent represents one stock in a daily limit-event pool that is

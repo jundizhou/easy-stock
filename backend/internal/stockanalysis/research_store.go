@@ -14,18 +14,22 @@ import (
 )
 
 type ResearchJob struct {
-	ID           string                `json:"id"`
-	Request      ResearchRequest       `json:"request"`
-	Status       string                `json:"status"`
-	Stage        string                `json:"stage"`
-	Message      string                `json:"message"`
-	Error        string                `json:"error,omitempty"`
-	StartedAt    time.Time             `json:"started_at"`
-	UpdatedAt    time.Time             `json:"updated_at"`
-	CompletedAt  *time.Time            `json:"completed_at,omitempty"`
-	Analysis     *Analysis             `json:"analysis,omitempty"`
-	Snapshot     *ResearchSnapshot     `json:"snapshot,omitempty"`
-	Verification *ResearchVerification `json:"verification,omitempty"`
+	ID              string                `json:"id"`
+	Request         ResearchRequest       `json:"request"`
+	Status          string                `json:"status"`
+	Stage           string                `json:"stage"`
+	Message         string                `json:"message"`
+	Error           string                `json:"error,omitempty"`
+	StartedAt       time.Time             `json:"started_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+	CompletedAt     *time.Time            `json:"completed_at,omitempty"`
+	Analysis        *Analysis             `json:"analysis,omitempty"`
+	Snapshot        *ResearchSnapshot     `json:"snapshot,omitempty"`
+	Verification    *ResearchVerification `json:"verification,omitempty"`
+	Checkpoint      *ResearchCheckpoint   `json:"checkpoint,omitempty"`
+	ResumedFrom     string                `json:"resumed_from,omitempty"`
+	ResumeAvailable bool                  `json:"resume_available,omitempty"`
+	Budget          *ResearchBudget       `json:"budget,omitempty"`
 }
 
 type ResearchJobSummary struct {
@@ -42,6 +46,8 @@ type ResearchJobSummary struct {
 }
 
 func (job ResearchJob) Public() ResearchJob {
+	job.ResumeAvailable = job.Status != "running" && job.Status != "queued" && job.Status != "succeeded" && job.Snapshot != nil && job.Checkpoint.resumable()
+	job.Checkpoint = nil
 	job.Snapshot = nil
 	if job.Analysis != nil && job.Analysis.ResearchReport == nil {
 		baseline := QuantitativeOnly(*job.Analysis)
@@ -88,7 +94,12 @@ func OpenResearchStore(path string) (*ResearchStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &ResearchStore{db: db}, nil
+	store := &ResearchStore{db: db}
+	if err := store.migrateReuseIndex(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 func (s *ResearchStore) Close() error {
@@ -110,6 +121,9 @@ func (s *ResearchStore) Save(ctx context.Context, job ResearchJob) error {
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO stock_research_jobs(id,status,updated_at,content_json) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,content_json=excluded.content_json`, job.ID, job.Status, job.UpdatedAt.Format(time.RFC3339Nano), string(encoded))
 	if err != nil {
+		return err
+	}
+	if err := saveReuseIndex(ctx, tx, job); err != nil {
 		return err
 	}
 	if job.Snapshot != nil {
@@ -230,11 +244,14 @@ func (s *ResearchStore) Delete(ctx context.Context, id string) error {
 	if _, err = tx.ExecContext(ctx, `DELETE FROM stock_research_jobs WHERE id=?`, id); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM stock_research_reuse_index WHERE id=?`, id); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM stock_research_verifications WHERE job_id=?`, id); err != nil {
 		return err
 	}
 	if job.Snapshot != nil {
-		if _, err = tx.ExecContext(ctx, `DELETE FROM stock_research_snapshots WHERE id=?`, job.Snapshot.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM stock_research_snapshots WHERE id=? AND NOT EXISTS(SELECT 1 FROM stock_research_jobs WHERE json_extract(content_json,'$.snapshot.id')=?)`, job.Snapshot.ID, job.Snapshot.ID); err != nil {
 			return err
 		}
 	}

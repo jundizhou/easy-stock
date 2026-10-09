@@ -15,6 +15,7 @@ import (
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
+	"easy-stock/backend/internal/themeindex"
 )
 
 type RealtimeProvider interface {
@@ -27,6 +28,10 @@ type KLineProvider interface {
 
 type NewsProvider interface {
 	LatestNews(ctx context.Context, limit int) ([]foundation.NewsItem, error)
+}
+
+type StockNewsSearchProvider interface {
+	SearchStockNews(ctx context.Context, symbol, query string, limit int) ([]foundation.NewsItem, error)
 }
 
 type SectorMapProvider interface {
@@ -68,6 +73,26 @@ type StockBusinessProfileProvider interface {
 	StockFundamentals(ctx context.Context, symbol string) (foundation.StockFundamentals, error)
 }
 
+type StockValuationProvider interface {
+	StockValuations(context.Context, []string) ([]foundation.StockValuation, error)
+}
+
+type StockFinancialHistoryProvider interface {
+	StockFinancialHistory(ctx context.Context, symbol string, limit int) ([]foundation.StockFundamentals, error)
+}
+
+type StockFinancialSupplementProvider interface {
+	StockFinancialEvidence(ctx context.Context, symbol string, limit int) ([]foundation.StockFinancialEvidence, error)
+}
+
+type IndustryStocksProvider interface {
+	IndustryStocks(context.Context, string, int) ([]foundation.BoardStock, foundation.SourceMeta, error)
+}
+
+type MarketAnnouncementContentProvider interface {
+	MarketAnnouncementContent(ctx context.Context, id string) (string, error)
+}
+
 type StockDirectoryProvider interface {
 	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
 }
@@ -103,45 +128,50 @@ type ReviewImporter interface {
 }
 
 type Config struct {
-	Token                string
-	Realtime             RealtimeProvider
-	KLinePrimary         KLineProvider
-	KLineFallback        KLineProvider
-	News                 NewsProvider
-	SectorMap            SectorMapProvider
-	ThemeOverview        ThemeOverviewProvider
-	ThemeRadarFallback   ThemeRadarFallback
-	LimitUp              LimitUpProvider
-	MarketPools          MarketPoolProvider
-	StockConcept         StockConceptProvider
-	StockBusiness        StockBusinessProfileProvider
-	StockDirectory       StockDirectoryProvider
-	HotStocks            HotStockProvider
-	FuturesPosition      FuturesPositionProvider
-	MarketOverview       MarketOverviewProvider
-	Inflection           InflectionEvaluator
-	ReviewDBPath         string
-	PortfolioDBPath      string
-	StockResearchDBPath  string
-	StockResearchStore   *stockanalysis.ResearchStore
-	MarketEmotionDBPath  string
-	ThemeRadarDBPath     string
-	DuanxianxiaBaseURL   string
-	WeChatAPIURL         string
-	ReviewHTTP           *http.Client
-	ReviewStore          *review.Store
-	PortfolioStore       *portfolioinspection.Store
-	MarketEmotionStore   *marketemotion.Store
-	ReviewImporter       ReviewImporter
-	SettingsPath         string
-	SettingsStore        *appsettings.Store
-	ReviewAutomation     *review.Automation
-	RemoteDailyReviewURL string
-	RemoteDailySync      *review.RemoteDailySync
-	AgentGateway         agent.Gateway
-	MasteryLibrary       *methodology.Library
-	Logger               *log.Logger
-	StrictPersistence    bool
+	Token                    string
+	Realtime                 RealtimeProvider
+	KLinePrimary             KLineProvider
+	KLineFallback            KLineProvider
+	News                     NewsProvider
+	StockNews                StockNewsSearchProvider
+	SectorMap                SectorMapProvider
+	ThemeOverview            ThemeOverviewProvider
+	ThemeIndex               *themeindex.Service
+	ThemeRadarFallback       ThemeRadarFallback
+	LimitUp                  LimitUpProvider
+	MarketPools              MarketPoolProvider
+	StockConcept             StockConceptProvider
+	StockValuation           StockValuationProvider
+	StockBusiness            StockBusinessProfileProvider
+	StockFinancialSupplement StockFinancialSupplementProvider
+	StockDirectory           StockDirectoryProvider
+	IndustryStocks           IndustryStocksProvider
+	HotStocks                HotStockProvider
+	FuturesPosition          FuturesPositionProvider
+	MarketOverview           MarketOverviewProvider
+	Inflection               InflectionEvaluator
+	ReviewDBPath             string
+	PortfolioDBPath          string
+	StockResearchDBPath      string
+	StockResearchStore       *stockanalysis.ResearchStore
+	MarketEmotionDBPath      string
+	ThemeRadarDBPath         string
+	DuanxianxiaBaseURL       string
+	WeChatAPIURL             string
+	ReviewHTTP               *http.Client
+	ReviewStore              *review.Store
+	PortfolioStore           *portfolioinspection.Store
+	MarketEmotionStore       *marketemotion.Store
+	ReviewImporter           ReviewImporter
+	SettingsPath             string
+	SettingsStore            *appsettings.Store
+	ReviewAutomation         *review.Automation
+	RemoteDailyReviewURL     string
+	RemoteDailySync          *review.RemoteDailySync
+	AgentGateway             agent.Gateway
+	MasteryLibrary           *methodology.Library
+	Logger                   *log.Logger
+	StrictPersistence        bool
 	// ArchiveDir 实时报价/资讯落盘根目录（默认 <dataDir>/data-archive）。
 	// 为空则不落盘。子目录 realtime/、news/ 由 archive 包自动创建。
 	ArchiveDir string

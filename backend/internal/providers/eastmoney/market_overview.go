@@ -715,6 +715,21 @@ func (c *Client) announcementContent(ctx context.Context, artCode string) (strin
 	return strings.TrimSpace(payload.Data.NoticeContent), nil
 }
 
+// MarketAnnouncementContent reads a known notice directly, without a title search.
+func (c *Client) MarketAnnouncementContent(ctx context.Context, id string) (string, error) {
+	if strings.TrimSpace(id) == "" || len(id) > 80 {
+		return "", fmt.Errorf("invalid announcement id")
+	}
+	content, err := c.announcementContent(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if content == "" {
+		return "", fmt.Errorf("announcement body unavailable")
+	}
+	return truncateAnnouncementContent(content, 8_000), nil
+}
+
 func truncateAnnouncementContent(value string, limit int) string {
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 	if limit <= 0 || len([]rune(value)) <= limit {

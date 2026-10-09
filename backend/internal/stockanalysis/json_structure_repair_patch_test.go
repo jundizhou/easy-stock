@@ -25,7 +25,7 @@ func TestSanitizeJSONStructureRepairsRealFinR1Defect(t *testing.T) {
 		t.Fatal("缺陷样本本应无法被标准解析器接受")
 	}
 	// 未经修复时，decodeJSONObjectRaw 报出的正是误导性的「不含期望字段」。
-	if err := decodeJSONObjectRaw(broken, new(ResearchCoreSynthesis)); err == nil {
+	if err := decodeJSONObjectRaw(broken, new(ResearchCoreSynthesis), nil); err == nil {
 		t.Fatal("缺陷样本在未开修复通道时本应失败")
 	}
 

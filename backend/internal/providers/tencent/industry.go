@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"easy-stock/backend/internal/foundation"
@@ -64,13 +66,21 @@ func (c *Client) IndustryMomentum(ctx context.Context, limit int) ([]foundation.
 		fiveDay := parseFloat(raw.FiveDay)
 		twentyDay := parseFloat(raw.TwentyDay)
 		leaderSymbol := ""
+		entryMeta := meta
+		entryMeta.AvailableFields = []string{}
+		for _, field := range []struct{ key, value string }{{"change_percent", raw.ChangePercent}, {"five_day_change_percent", raw.FiveDay}, {"twenty_day_change_percent", raw.TwentyDay}} {
+			value, err := strconv.ParseFloat(strings.TrimSpace(field.value), 64)
+			if err == nil && !math.IsNaN(value) && !math.IsInf(value, 0) {
+				entryMeta.AvailableFields = append(entryMeta.AvailableFields, field.key)
+			}
+		}
 		if normalized, err := foundation.NormalizeSymbol(raw.LeaderCode); err == nil {
 			leaderSymbol = normalized.Canonical
 		}
 		items = append(items, foundation.MarketIndustryMomentum{
 			Code: raw.Code, Name: raw.Name, ChangePercent: change, FiveDayChangePercent: fiveDay,
 			TwentyDayChange: twentyDay, LeaderSymbol: leaderSymbol, LeaderName: raw.LeaderName, LeaderChangePercent: parseFloat(raw.LeaderChange),
-			Score: tencentIndustryScore(change, fiveDay, twentyDay), Meta: meta,
+			Score: tencentIndustryScore(change, fiveDay, twentyDay), Meta: entryMeta,
 		})
 	}
 	return items, meta, nil

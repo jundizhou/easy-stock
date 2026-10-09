@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"easy-stock/backend/internal/foundation"
@@ -39,15 +40,29 @@ func (p *RadarProvider) ProgressiveOverviews(ctx context.Context, publish func(f
 		if len(snapshot.Themes) > 0 && tradingDayAge(snapshot.TradeDate, p.now()) <= 2 {
 			themes := snapshot.Themes[:min(len(snapshot.Themes), max(24, p.fallbackFill))]
 			kaipanlaItems = p.buildKaipanlaRadarOverviews(snapshot, themes, quotes, strengths, tradingDayAge(snapshot.TradeDate, p.now()))
+			for i := range kaipanlaItems {
+				_, scored := strengths[strings.TrimPrefix(kaipanlaItems[i].Theme, "kpl:")]
+				kaipanlaItems[i].Provisional = steps["strength"] != "ready" || !scored
+			}
 		}
 		items := rankAndSelectRadarOverviews(mergeRadarOverviews(industryItems, kaipanlaItems), p.fallbackFill)
-		for i := range items {
-			items[i].Provisional = steps["strength"] != "ready" || steps["industry"] != "ready" || steps["kaipanla"] != "ready"
+		stepError := func(step string) error {
+			if message := errors[step]; message != "" {
+				return fmt.Errorf("%s", message)
+			}
+			return nil
 		}
-		meta := fusedRadarMeta(p.now(), snapshot, fetchMeta, nil, industryMeta, nil, len(kaipanlaItems) > 0, len(industryItems) > 0)
+		meta := fusedRadarMeta(p.now(), snapshot, fetchMeta, stepError("kaipanla"), industryMeta, stepError("industry"), len(kaipanlaItems) > 0, len(industryItems) > 0)
+		if strengthErr := stepError("strength"); strengthErr != nil && errors["strength"] != errors["kaipanla"] {
+			meta.Stale = true
+			meta.FallbackReason = strings.Join(uniqueRadarStrings([]string{meta.FallbackReason, strengthErr.Error()}), "；")
+		}
 		stage := "base"
-		if steps["strength"] == "ready" {
-			stage = "enriched"
+		for _, item := range items {
+			if !item.Provisional {
+				stage = "enriched"
+				break
+			}
 		}
 		stepCopy := map[string]string{}
 		errorCopy := map[string]string{}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/runtimelog"
@@ -111,6 +112,13 @@ func (s *Server) logStockResearchModelCall(symbol string, level stockanalysis.Re
 	s.logger.Printf("level=info event=stock_research_model_call feature=stock-analysis symbol=%q analysis_level=%q stage=%q duration_ms=%d prompt_bytes=%d response_bytes=%d", symbol, level, stage, time.Since(startedAt).Milliseconds(), promptBytes, responseBytes)
 }
 
+func (s *Server) logStockResearchProgress(symbol, stage string, p agent.PromptProgress) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.Printf("level=info event=stock_research_progress feature=stock-analysis symbol=%q stage=%q event=%q elapsed_ms=%d first_response_ms=%d text_bytes=%d reasoning_bytes=%d retry_count=%d", symbol, stage, p.Event, p.ElapsedMS, p.FirstResponseMS, p.TextBytes, p.ReasoningBytes, p.RetryCount)
+}
+
 func (s *Server) logThemeEvidencePrompt(symbol string, stats stockanalysis.ThemeEvidencePromptStats) {
 	if s == nil || s.logger == nil {
 		return
@@ -165,33 +173,37 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 	s.logStockAnalysisStage(normalized.Canonical, "data_collection", "started", time.Time{}, 0, nil)
 
 	var (
-		quote           foundation.Quote
-		lines           []foundation.KLine
-		minuteBars      []stockanalysis.MinuteBar
-		benchmarkLines  []foundation.KLine
-		limitUps        []foundation.LimitUpEvent
-		cachedThemes    []foundation.StockThemeAttribution
-		catalog         []foundation.StockCatalogEntry
-		themes          []foundation.ThemeOverview
-		news            []foundation.NewsItem
-		business        foundation.StockBusinessProfile
-		fundamentals    foundation.StockFundamentals
-		reports         []foundation.MarketResearchItem
-		announcements   []foundation.MarketResearchItem
-		quoteErr        error
-		lineErr         error
-		minuteErr       error
-		benchmarkErr    error
-		limitUpErr      error
-		cachedThemeErr  error
-		catalogErr      error
-		themeErr        error
-		newsErr         error
-		businessErr     error
-		fundamentalErr  error
-		reportErr       error
-		announcementErr error
-		collectionWG    sync.WaitGroup
+		quote                  foundation.Quote
+		lines                  []foundation.KLine
+		minuteBars             []stockanalysis.MinuteBar
+		benchmarkLines         []foundation.KLine
+		limitUps               []foundation.LimitUpEvent
+		cachedThemes           []foundation.StockThemeAttribution
+		catalog                []foundation.StockCatalogEntry
+		themes                 []foundation.ThemeOverview
+		news                   []foundation.NewsItem
+		business               foundation.StockBusinessProfile
+		fundamentals           foundation.StockFundamentals
+		financialHistory       []foundation.StockFundamentals
+		financialHistoryErr    error
+		financialSupplement    []foundation.StockFinancialEvidence
+		financialSupplementErr error
+		reports                []foundation.MarketResearchItem
+		announcements          []foundation.MarketResearchItem
+		quoteErr               error
+		lineErr                error
+		minuteErr              error
+		benchmarkErr           error
+		limitUpErr             error
+		cachedThemeErr         error
+		catalogErr             error
+		themeErr               error
+		newsErr                error
+		businessErr            error
+		fundamentalErr         error
+		reportErr              error
+		announcementErr        error
+		collectionWG           sync.WaitGroup
 	)
 
 	collectionWG.Add(3)
@@ -246,7 +258,27 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		}()
 		go func() {
 			defer collectionWG.Done()
+			if provider, ok := s.stockBusiness.(StockFinancialHistoryProvider); ok {
+				financialHistory, financialHistoryErr = provider.StockFinancialHistory(dataCtx, normalized.Canonical, 8)
+				if financialHistoryErr == nil && len(financialHistory) > 0 {
+					fundamentals = financialHistory[0]
+					return
+				}
+				financialHistory = nil
+				if financialHistoryErr == nil {
+					financialHistoryErr = fmt.Errorf("多期财务查询未返回可用报告")
+				}
+			}
 			fundamentals, fundamentalErr = s.stockBusiness.StockFundamentals(dataCtx, normalized.Canonical)
+		}()
+	}
+	if s.stockFinancialSupplement != nil {
+		collectionWG.Add(1)
+		go func() {
+			defer collectionWG.Done()
+			financialCtx, cancel := context.WithTimeout(dataCtx, 8*time.Second)
+			defer cancel()
+			financialSupplement, financialSupplementErr = s.stockFinancialSupplement.StockFinancialEvidence(financialCtx, normalized.Canonical, 8)
 		}()
 	}
 	if s.marketOverview != nil {
@@ -302,6 +334,13 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		}()
 	}
 	collectionWG.Wait()
+	if len(financialHistory) == 0 && fundamentals.ReportDate == "" && len(financialSupplement) > 0 {
+		financialHistory = stockanalysis.FinancialFallback(financialSupplement, normalized.Canonical, time.Now())
+		if len(financialHistory) > 0 {
+			fundamentals = financialHistory[0]
+			fundamentalErr = nil
+		}
+	}
 	if lineErr != nil {
 		s.logStockAnalysisStage(normalized.Canonical, "data_collection", "failed", dataStartedAt, len(lines), lineErr)
 		return stockanalysis.Analysis{}, nil, &stockAnalysisRunError{status: http.StatusBadGateway, err: fmt.Errorf("个股K线加载失败: %w", lineErr)}
@@ -348,6 +387,13 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 	if newsErr != nil {
 		gaps = append(gaps, "近期新闻不可用: "+newsErr.Error())
 	}
+	stockNews, stockNewsErr := s.collectStockResearchNews(ctx, normalized.Canonical, quote.Name, "", time.Now().UTC())
+	if stockNewsErr != nil {
+		gaps = append(gaps, "个股定向新闻检索不可用（未检索到不代表没有事件）: "+stockNewsErr.Error())
+	} else if s.stockNewsSearch != nil && len(stockNews) == 0 {
+		gaps = append(gaps, "个股定向检索未取得近60天可用报道，不代表没有近期事件")
+	}
+	news = append(stockNews, news...)
 	if benchmarkErr != nil {
 		gaps = append(gaps, "基准指数数据不可用: "+benchmarkErr.Error())
 	}
@@ -356,6 +402,16 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 	}
 	if fundamentalErr != nil {
 		gaps = append(gaps, "基本面资料不可用: "+fundamentalErr.Error())
+	}
+	if financialHistoryErr != nil {
+		if fundamentals.Meta.Source == "sina:financial-indicators" {
+			gaps = append(gaps, "主财务来源暂不可用，已采用新浪多期财务补充，未完成跨源核验: "+financialHistoryErr.Error())
+		} else {
+			gaps = append(gaps, "多期财务资料不可用，已尝试使用最新单期披露: "+financialHistoryErr.Error())
+		}
+	}
+	if financialSupplementErr != nil {
+		gaps = append(gaps, "补充财务来源暂不可用，未完成跨源核验: "+financialSupplementErr.Error())
 	}
 	if reportErr != nil {
 		gaps = append(gaps, "机构研报不可用: "+reportErr.Error())
@@ -377,29 +433,33 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 	}
 
 	analysisInput := stockanalysis.Input{
-		Symbol:          normalized.Canonical,
-		Quote:           quote,
-		KLines:          lines,
-		MinuteBars:      minuteBars,
-		BenchmarkSymbol: benchmarkSymbol,
-		BenchmarkName:   benchmarkName,
-		BenchmarkKLines: benchmarkLines,
-		LimitUps:        limitUps,
-		Catalog:         catalog,
-		Concepts:        concepts,
-		Industry:        industry,
-		Business:        business.MainBusiness,
-		BusinessDetail:  business.Description,
-		BusinessSource:  business.Meta.Source,
-		Fundamentals:    &fundamentals,
-		Reports:         reports,
-		Announcements:   announcements,
-		CachedThemes:    cachedThemes,
-		Themes:          themes,
-		MarketEmotion:   emotion,
-		News:            news,
-		CollectionGaps:  gaps,
+		Symbol:              normalized.Canonical,
+		Quote:               quote,
+		KLines:              lines,
+		MinuteBars:          minuteBars,
+		BenchmarkSymbol:     benchmarkSymbol,
+		BenchmarkName:       benchmarkName,
+		BenchmarkKLines:     benchmarkLines,
+		LimitUps:            limitUps,
+		Catalog:             catalog,
+		Concepts:            concepts,
+		Industry:            industry,
+		Business:            business.MainBusiness,
+		BusinessDetail:      business.Description,
+		BusinessSource:      business.Meta.Source,
+		Fundamentals:        &fundamentals,
+		FinancialHistory:    financialHistory,
+		FinancialSupplement: financialSupplement,
+		Reports:             reports,
+		Announcements:       announcements,
+		CachedThemes:        cachedThemes,
+		Themes:              themes,
+		MarketEmotion:       emotion,
+		News:                news,
+		CollectionGaps:      gaps,
 	}
+	analysisInput.ResearchPeers, gaps = s.collectResearchPeers(ctx, analysisInput)
+	analysisInput.CollectionGaps = append(analysisInput.CollectionGaps, gaps...)
 	localStartedAt := time.Now()
 	s.logStockAnalysisStage(normalized.Canonical, "local_analysis", "started", time.Time{}, len(lines), nil)
 	analysis, err := stockanalysis.Analyze(analysisInput)

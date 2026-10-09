@@ -9,6 +9,8 @@ export type PortfolioDraftHolding = {
 
 export type PortfolioDraft = {
 	profile: PortfolioTraderProfile;
+ horizon?: 'short' | 'swing' | 'medium';
+ researchLevel?: 'standard' | 'deep';
 	holdings: PortfolioDraftHolding[];
 };
 
@@ -29,14 +31,16 @@ export function readPortfolioDraft(): PortfolioDraft {
 		const holdings = Array.isArray(parsed.holdings)
 			? parsed.holdings.filter(isDraftHolding).slice(0, maxPortfolioHoldings)
 			: [];
-		return { profile, holdings };
+		return { profile, holdings, horizon: ['short', 'swing', 'medium'].includes(parsed.horizon) ? parsed.horizon : 'swing', researchLevel: parsed.researchLevel === 'deep' ? 'deep' : 'standard' };
 	} catch {
-		return { profile: 'balanced', holdings: [] };
+		return { profile: 'balanced', holdings: [], horizon: 'swing', researchLevel: 'standard' };
 	}
 }
 
 export function writePortfolioDraft(draft: PortfolioDraft) {
 	const normalized = {
+ horizon: draft.horizon || 'swing',
+ researchLevel: draft.researchLevel || 'standard',
 		profile: portfolioProfiles.some((item) => item.id === draft.profile) ? draft.profile : 'balanced',
 		holdings: draft.holdings.filter(isDraftHolding).slice(0, maxPortfolioHoldings),
 	};

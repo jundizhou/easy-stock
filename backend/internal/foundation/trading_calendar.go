@@ -2,6 +2,42 @@ package foundation
 
 import "time"
 
+var AStockLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+// LatestCompletedAStockSession excludes today's incomplete daily bar.
+func LatestCompletedAStockSession(value time.Time) time.Time {
+	day := value.In(AStockLocation)
+	if day.Hour() < 15 {
+		day = day.AddDate(0, 0, -1)
+	}
+	for !IsAStockTradingDay(day) {
+		day = day.AddDate(0, 0, -1)
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, AStockLocation)
+}
+
+// AStockSessionLag counts completed exchange sessions missing after a data date.
+// Weekends and exchange holidays do not age market data. A bar dated today may
+// be provisional; freshness alone never confirms that its close has completed.
+// Counts are capped at six: callers only distinguish lags above five sessions.
+func AStockSessionLag(date string, asOf time.Time) (int, bool) {
+	day, err := time.ParseInLocation("2006-01-02", date, AStockLocation)
+	if err != nil || asOf.IsZero() || day.After(asOf) {
+		return 0, false
+	}
+	latest := LatestCompletedAStockSession(asOf)
+	lag := 0
+	for next := day.AddDate(0, 0, 1); !next.After(latest); next = next.AddDate(0, 0, 1) {
+		if IsAStockTradingDay(next) {
+			lag++
+		}
+		if lag > 5 {
+			break
+		}
+	}
+	return lag, true
+}
+
 // A-share exchanges are closed on weekends and the statutory holiday ranges
 // below. The list is kept locally so summary generation remains deterministic
 // and does not depend on a third-party calendar endpoint. Add each year's
@@ -23,7 +59,7 @@ var aStockHolidayRanges = [][2]string{
 }
 
 func IsAStockTradingDay(value time.Time) bool {
-	day := value.In(time.FixedZone("Asia/Shanghai", 8*60*60))
+	day := value.In(AStockLocation)
 	date := day.Format("2006-01-02")
 	for _, holiday := range aStockHolidayRanges {
 		if date >= holiday[0] && date <= holiday[1] {

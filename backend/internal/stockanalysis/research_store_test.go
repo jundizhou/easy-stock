@@ -176,3 +176,46 @@ func TestResearchServiceQuantitativeCompletesWithoutAI(t *testing.T) {
 		t.Fatalf("quantitative completion = %+v, error = %v", job, err)
 	}
 }
+
+func TestResearchCompletionHandlerReceivesPersistedTerminalResult(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		store, err := OpenResearchStore("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		completed := make(chan ResearchJob, 1)
+		service := NewResearchService(store, func(_ context.Context, request ResearchRequest, _ ResearchPublisher) (Analysis, *ResearchSnapshot, error) {
+			if failed {
+				return Analysis{}, nil, errors.New("test failure")
+			}
+			return Analysis{Symbol: request.Symbol, AI: AISynthesisStatus{Status: "ready"}}, nil, nil
+		}, func(job ResearchJob) {
+			stored, err := store.Get(context.Background(), job.ID)
+			if err != nil || stored.Status != job.Status || stored.CompletedAt == nil {
+				t.Errorf("callback preceded result persistence: %v", err)
+			}
+			completed <- job
+		})
+		job, err := service.Start(context.Background(), ResearchRequest{Symbol: "600519"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case result := <-completed:
+			want := "succeeded"
+			if failed {
+				want = "failed"
+			}
+			if result.ID != job.ID || result.Status != want {
+				t.Fatalf("wrong completion: %s", result.Status)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("completion handler not called")
+		}
+		service.Close()
+		if len(completed) != 0 {
+			t.Fatal("duplicate task notification")
+		}
+		store.Close()
+	}
+}
