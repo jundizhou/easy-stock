@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/agent"
+	"easy-stock/backend/internal/foundation"
 )
 
 const (

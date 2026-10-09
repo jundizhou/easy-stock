@@ -35,6 +35,10 @@ const (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	cache      *queryCache   // 可选；启用 WithCache 后用于缓存取数结果
+	stats      *Stats        // 调用统计与滚动延迟（镜像 quant-stock 延迟采集）
+	remotes   []DailySource  // 可选；远程备用日线源（多接口共用 / 负载均衡 / 故障转移）
+	multi     *MultiSource   // 由本地源 + remotes 聚合而成；非空时 DailyBars 走多源池
 }
 
 // Option 用于构造 Client 的可选参数。
@@ -58,16 +62,33 @@ func WithHTTPClient(value *http.Client) Option {
 	}
 }
 
-// NewClient 创建 stockdb 客户端。
+// NewClient 创建 stockdb 客户端。若有远程备用源（WithDailySource），则在选项之后
+// 自动构建多源池（本地 7899 为主，远程源为备，主源降级时负载均衡 + 故障转移）。
 func NewClient(options ...Option) *Client {
 	c := &Client{
 		baseURL:    defaultBaseURL,
 		httpClient: &http.Client{Timeout: defaultTimeout},
+		stats:      newStats(),
 	}
 	for _, opt := range options {
 		opt(c)
 	}
+	if len(c.remotes) > 0 {
+		c.multi = NewMultiSource(localDailySource{c}, c.remotes...)
+	}
 	return c
+}
+
+// WithDailySource 追加一个或多个远程日线备用源（多接口共用）。可多次调用以堆叠多个
+// 上游，本地源降级时它们按健康 + 轮询分摊流量，任一失败自动切换到下一个。
+func WithDailySource(srcs ...DailySource) Option {
+	return func(c *Client) {
+		for _, src := range srcs {
+			if src != nil {
+				c.remotes = append(c.remotes, src)
+			}
+		}
+	}
 }
 
 // RawQuery 执行 ?cmd=get&t=<t>&json=1，返回未解析的原始 JSON 字节。
@@ -75,6 +96,11 @@ func NewClient(options ...Option) *Client {
 func (c *Client) RawQuery(ctx context.Context, t string) ([]byte, error) {
 	if strings.TrimSpace(t) == "" {
 		return nil, fmt.Errorf("stockdb: empty query key")
+	}
+	if c.cache != nil {
+		if b, hit := c.cache.get(t); hit {
+			return b, nil
+		}
 	}
 	u := c.baseURL + "/?" + url.Values{
 		"cmd":  {"get"},
@@ -85,17 +111,26 @@ func (c *Client) RawQuery(ctx context.Context, t string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.stats.record(0, false, err.Error())
 		return nil, fmt.Errorf("stockdb: request %q: %w", t, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	elapsed := time.Since(started)
 	if err != nil {
+		c.stats.record(elapsed.Microseconds(), false, err.Error())
 		return nil, fmt.Errorf("stockdb: read %q: %w", t, err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		c.stats.record(elapsed.Microseconds(), false, fmt.Sprintf("http %d", resp.StatusCode))
 		return nil, fmt.Errorf("stockdb: %q -> http %d: %s", t, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	c.stats.record(elapsed.Microseconds(), true, "")
+	if c.cache != nil && len(body) > 0 {
+		c.cache.put(t, body)
 	}
 	return body, nil
 }
@@ -119,14 +154,16 @@ func (c *Client) KLineDaily(ctx context.Context, code, date string) (map[string]
 	return c.Query(ctx, joinKey("日k", code, date))
 }
 
-// KLineWeekly 周 K：表 周k:code:date。
-func (c *Client) KLineWeekly(ctx context.Context, code, date string) (map[string]any, error) {
-	return c.Query(ctx, joinKey("周k", code, date))
+// KLineWeekly 周 K：由日线重采样得到（stockdb 的 周k 表未预存历史，实测返回空）。
+// 返回最近 count 根周线（前复权口径，与 DailyBars 一致）。
+func (c *Client) KLineWeekly(ctx context.Context, code string, count int) ([]Bar, error) {
+	return c.WeeklyBars(ctx, code, count)
 }
 
-// KLineMonthly 月 K：表 月k:code:date。
-func (c *Client) KLineMonthly(ctx context.Context, code, date string) (map[string]any, error) {
-	return c.Query(ctx, joinKey("月k", code, date))
+// KLineMonthly 月 K：由日线重采样得到（stockdb 的 月k 表未预存历史，实测返回空）。
+// 返回最近 count 根月线（前复权口径，与 DailyBars 一致）。
+func (c *Client) KLineMonthly(ctx context.Context, code string, count int) ([]Bar, error) {
+	return c.MonthlyBars(ctx, code, count)
 }
 
 // KLineMinute 分钟 K：表 分钟k:code:YYYYMMDDHHMMSS。
@@ -220,4 +257,37 @@ func joinKey(table, key, sub string) string {
 		return table + ":" + key
 	}
 	return table + ":" + key + ":" + sub
+}
+
+// Probe 主动探测本地源连通性与延迟（镜像 quant-stock 的 sys_probe/net_probe），
+// 用于探活与「健康冷却」维护。返回探测耗时（毫秒）与错误。
+func (c *Client) Probe(ctx context.Context) (int64, error) {
+	started := time.Now()
+	_, err := c.RawQuery(ctx, "复权:000001")
+	elapsed := time.Since(started)
+	if err != nil {
+		c.stats.markProbe(false, err.Error())
+		return elapsed.Milliseconds(), err
+	}
+	c.stats.markProbe(true, "")
+	return elapsed.Milliseconds(), nil
+}
+
+// Stats 返回当前调用统计快照（含滚动 p50/p95 延迟）。
+func (c *Client) Stats() StatsSnapshot {
+	return c.stats.snapshot()
+}
+
+// Healthy 返回本地源是否处于健康（未降级）状态。
+func (c *Client) Healthy() bool {
+	return c.stats.Healthy()
+}
+
+// DailySources 返回日线多源池各源的健康快照（含本地主源与远程备用源）。
+// 未配置远程源时仅返回本地源。供 /api/v1/stockdb/status 暴露，便于观察「被封/降级/恢复」。
+func (c *Client) DailySources() []SourceStatus {
+	if c.multi == nil {
+		return []SourceStatus{{Name: "stockdb-local", OK: c.stats.Healthy(), QFQ: true, LatencyMs: c.stats.snapshot().P50Ms}}
+	}
+	return c.multi.Status()
 }

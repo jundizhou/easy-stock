@@ -150,6 +150,41 @@ export type LLMProfile = {
 	api_key: SecretSettingStatus;
 };
 
+// 数据归档采集（实时报价 / 资讯落盘）配置视图，对应后端 /api/v1/archive/config。
+export type ArchiveSymbolsSource = 'manual' | 'holdings';
+
+export type ArchiveConfig = {
+	enabled: boolean;
+	interval_seconds: number;
+	dir: string;
+	dir_effective: string;
+	symbols_source: ArchiveSymbolsSource | string;
+	symbols: string[];
+	trading_only: boolean;
+	news_limit: number;
+	resolved_symbols: string[];
+	holdings_count: number;
+	archive_status?: ArchiveStatusReport;
+};
+
+export type ArchiveStatusReport = {
+	dir?: string;
+	files?: number;
+	lines?: number;
+	last_write?: string;
+	last_error?: string;
+};
+
+export type ArchiveConfigUpdate = {
+	enabled?: boolean;
+	interval_seconds?: number;
+	dir?: string;
+	symbols_source?: ArchiveSymbolsSource | string;
+	symbols?: string[];
+	trading_only?: boolean;
+	news_limit?: number;
+};
+
 export type AgentSkillSetting = {
 	name: string;
 	description: string;
@@ -1990,6 +2025,24 @@ export async function requestJSON<T>(config: BackendConfig, path: string, init: 
   }
 	if (response.status === 204) return undefined as T;
 	return response.json() as Promise<T>;
+}
+
+// 读取数据归档采集配置（含解析后的实际采集清单预览）。
+export async function fetchArchiveConfig(config: BackendConfig, signal?: AbortSignal): Promise<ArchiveConfig> {
+	const payload = await requestJSON<{ data: ArchiveConfig }>(config, '/api/v1/archive/config', signal ? { signal } : {});
+	return payload.data;
+}
+
+// 保存数据归档采集配置（写入本机 settings.json；仅传入需要变更的字段）。
+export async function updateArchiveConfig(config: BackendConfig, patch: ArchiveConfigUpdate, signal?: AbortSignal): Promise<ArchiveConfig> {
+	const init: RequestInit = {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(patch),
+	};
+	if (signal) init.signal = signal;
+	const payload = await requestJSON<{ data: ArchiveConfig }>(config, '/api/v1/archive/config', init);
+	return payload.data;
 }
 
 function createRuntimeRequestID() {

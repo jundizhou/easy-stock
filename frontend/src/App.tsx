@@ -29,6 +29,7 @@ import {
 	ShieldCheck,
 	Sun,
 	Target,
+	TrendingUp,
 	Wifi,
 	WalletCards,
 } from 'lucide-react';
@@ -71,6 +72,7 @@ import { PortfolioInspectionWorkspace } from './components/PortfolioInspectionWo
 import { TokenUsageWorkspace } from './components/TokenUsageWorkspace';
 import { QuantTerminalWorkspace } from './components/QuantTerminalWorkspace';
 import { QuantSignalWorkspace } from './components/QuantSignalWorkspace';
+import { ShannonWorkspace } from './components/ShannonWorkspace';
 import { BoardExplorerWorkspace, type BoardFocus } from './components/BoardExplorerWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
 import { useTheme } from './lib/theme';
@@ -80,7 +82,7 @@ import { useThemeConstituents, sameTheme } from './lib/use-theme-constituents';
 import { useThemeKLines } from './lib/use-theme-klines';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage' | 'quant' | 'signals' | 'boards';
+type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage' | 'quant' | 'signals' | 'boards' | 'shannon';
 
 const emptyStockPagination = (): ThemeScreenPagination => ({
 	page: 1,
@@ -428,8 +430,8 @@ export function App() {
 	const currentSubStatus = workspaceMode === 'limit-up'
 		? limitUpData ? `${limitUpData.current.trade_date} · ${limitUpData.session_status} · ${limitUpData.meta.source.includes('duanxianxia') ? '开盘啦涨停池' : '东方财富兜底'} · ${limitUpData.concept_status === 'ready' ? '题材已归因' : limitUpState === 'loading' ? '题材补充中' : '题材暂不完整'}` : '开盘啦涨停池优先'
 		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Agent 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '逐股分析 · 组合风险 · 后台任务' : workspaceMode === 'ai' ? '本机 Agent AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : workspaceMode === 'token-usage' ? '模型输入、输出与功能模块消耗' : workspaceMode === 'quant' ? 'iframe 直挂本地终端 · 探活 8766/7899' : workspaceMode === 'signals' ? 'MER 状态 + clip_n300 前向轨 + OOS 门禁' : workspaceMode === 'boards' ? 'Free-StockDB 板块双向映射 · 1337 板块全量索引' : themeSourceStatus + ' · ' + streamStatus;
-	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '个股 AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : workspaceMode === 'token-usage' ? 'Token 统计' : workspaceMode === 'quant' ? '量化终端' : workspaceMode === 'signals' ? '策略信号' : workspaceMode === 'boards' ? '板块图谱' : 'AI 对话';
-	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Agent 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '多周期评分、隔日情景推演与账户级风控执行工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : workspaceMode === 'token-usage' ? '按日、按月和功能模块查看模型 Token 消耗' : workspaceMode === 'quant' ? '本地量化终端与数据底座的直挂视图工作台' : workspaceMode === 'signals' ? '市场状态、前向验证轨与样本外门禁的只读工作台' : workspaceMode === 'boards' ? '按类目浏览板块并反查个股归属的工作台' : '';
+	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '个股 AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : workspaceMode === 'token-usage' ? 'Token 统计' : workspaceMode === 'quant' ? '量化终端' : workspaceMode === 'signals' ? '策略信号' : workspaceMode === 'boards' ? '板块图谱' : workspaceMode === 'shannon' ? 'Brian Shannon 六层规则' : 'AI 对话';
+	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Agent 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '多周期评分、隔日情景推演与账户级风控执行工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : workspaceMode === 'token-usage' ? '按日、按月和功能模块查看模型 Token 消耗' : workspaceMode === 'quant' ? '本地量化终端与数据底座的直挂视图工作台' : workspaceMode === 'signals' ? '市场状态、前向验证轨与样本外门禁的只读工作台' : workspaceMode === 'boards' ? '按类目浏览板块并反查个股归属的工作台' : workspaceMode === 'shannon' ? 'Anchored VWAP · 5日线极性 · 多周期对齐 · 红绿灯 · 三步入场 · 仓位阶梯' : '';
 
 	return (
 		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${workspaceMode === 'ai' ? 'workspace-ai' : ''}`}>
@@ -444,6 +446,7 @@ export function App() {
 					<button type="button" className={workspaceMode === 'market' ? 'active' : ''} onClick={() => switchWorkspace('market')} title="行情总览"><BarChart3 size={18} /><span>行情总览</span></button>
 					<button type="button" className={workspaceMode === 'quant' ? 'active' : ''} onClick={() => switchWorkspace('quant')} title="量化终端"><Server size={18} /><span>量化终端</span></button>
 					<button type="button" className={workspaceMode === 'signals' ? 'active' : ''} onClick={() => switchWorkspace('signals')} title="策略信号"><Gauge size={18} /><span>策略信号</span></button>
+				<button type="button" className={workspaceMode === 'shannon' ? 'active' : ''} onClick={() => switchWorkspace('shannon')} title="Brian Shannon 六层规则"><TrendingUp size={18} /><span>Brian Shannon</span></button>
 					<button type="button" className={workspaceMode === 'boards' ? 'active' : ''} onClick={() => switchWorkspace('boards')} title="板块图谱"><Layers3 size={18} /><span>板块图谱</span></button>
 					<button type="button" className={workspaceMode === 'mastery' ? 'active' : ''} onClick={() => switchWorkspace('mastery')} title="游资心法"><BookMarked size={18} /><span>游资心法</span></button>
 				<button type="button" className={workspaceMode === 'ai' ? 'active' : ''} onClick={() => switchWorkspace('ai')} title="AI 对话"><Bot size={18} /><span>AI 对话</span></button>
@@ -493,7 +496,7 @@ export function App() {
 			</header>
 			</div>}
 
-			{workspaceMode === 'token-usage' ? <TokenUsageWorkspace config={config} refreshKey={tokenUsageRefreshKey} /> : workspaceMode === 'quant' ? <QuantTerminalWorkspace config={config} refreshKey={quantRefreshKey} /> : workspaceMode === 'signals' ? <QuantSignalWorkspace config={config} refreshKey={quantRefreshKey} /> : workspaceMode === 'boards' ? <BoardExplorerWorkspace config={config} refreshKey={boardsRefreshKey} focusBoard={boardFocus} onFocusConsumed={() => setBoardFocus(null)} onOpenStock={openBoardStockAnalysis} /> : workspaceMode === 'themes' ? <>
+			{workspaceMode === 'token-usage' ? <TokenUsageWorkspace config={config} refreshKey={tokenUsageRefreshKey} /> : workspaceMode === 'quant' ? <QuantTerminalWorkspace config={config} refreshKey={quantRefreshKey} /> : workspaceMode === 'signals' ? <QuantSignalWorkspace config={config} refreshKey={quantRefreshKey} /> : workspaceMode === 'shannon' ? <ShannonWorkspace config={config} refreshKey={quantRefreshKey} /> : workspaceMode === 'boards' ? <BoardExplorerWorkspace config={config} refreshKey={boardsRefreshKey} focusBoard={boardFocus} onFocusConsumed={() => setBoardFocus(null)} onOpenStock={openBoardStockAnalysis} /> : workspaceMode === 'themes' ? <>
 			<section className="market-strip" aria-label="市场概览">
 				<div><Activity size={16} aria-hidden="true" /><span>主线平均热度</span><strong>{marketPulse.average || '--'}</strong></div>
 				<div><Flame size={16} aria-hidden="true" /><span>活跃主线</span><strong>{rankedThemes.some(item => !item.provisional) ? marketPulse.active : '--'}</strong></div>

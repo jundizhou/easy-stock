@@ -54,6 +54,20 @@ func main() {
 	if masteryCacheDir == "" {
 		masteryCacheDir = dataPath(dataDir, "trading-mastery")
 	}
+	archiveDir := os.Getenv("A_STOCK_ARCHIVE_DIR")
+	if archiveDir == "" {
+		archiveDir = dataPath(dataDir, "data-archive")
+	}
+	archiveInterval := 60 * time.Second
+	if raw := strings.TrimSpace(os.Getenv("A_STOCK_ARCHIVE_INTERVAL")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			archiveInterval = d
+		}
+	}
+	archiveTradingOnly := true
+	if raw := strings.TrimSpace(os.Getenv("A_STOCK_ARCHIVE_TRADING_ONLY")); raw != "" {
+		archiveTradingOnly = !strings.EqualFold(raw, "false") && raw != "0"
+	}
 	logDirectory := os.Getenv("A_STOCK_LOG_DIR")
 	if logDirectory == "" {
 		logDirectory = dataPath(dataDir, "logs")
@@ -108,6 +122,13 @@ func main() {
 		MasteryLibrary:       masteryLibrary,
 		Logger:               log.Default(),
 		StrictPersistence:    true,
+		ArchiveDir:           archiveDir,
+		ArchiveCollector: httpapi.ArchiveCollectorConfig{
+			Interval:    archiveInterval,
+			Symbols:     httpapi.ParseArchiveSymbols(os.Getenv("A_STOCK_ARCHIVE_SYMBOLS")),
+			NewsLimit:   20,
+			TradingOnly: archiveTradingOnly,
+		},
 	})
 	if err := server.StartupError(); err != nil {
 		log.Fatalf("persistent data startup failed: %v", err)
@@ -118,6 +139,7 @@ func main() {
 	go server.RunRemoteDailyReviewScheduler(ctx)
 	go server.RunMarketEmotionScheduler(ctx)
 	go server.RunMasteryScheduler(ctx)
+	go server.RunArchiveScheduler(ctx, server.ArchiveCollectorConfig())
 	httpServer := &http.Server{Addr: addr, Handler: server}
 	go func() {
 		<-ctx.Done()

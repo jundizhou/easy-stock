@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -665,6 +666,10 @@ type promptJSONObjectOptions struct {
 	maxAttempts  int
 	disableTools bool
 	onAttempt    func(promptJSONAttempt)
+	// [ES_REPAIR_RETRY_ON_VALIDATION_PATCH] 可选语义校验钩子：返回非 nil 即视为
+	// 本次尝试失败，会连同错误原文一起触发纠错重试。
+	// 参数为 *T 的装箱值（即 *ResearchSynthesis 等），实现方自行断言。
+	afterValidation func(decoded any) error
 }
 
 type invalidJSONResponseError struct {
@@ -688,8 +693,16 @@ type promptJSONAttempt struct {
 	promptBytes   int
 	responseBytes int
 	err           string
+	// [ES_REPAIR_SEMANTICS_PATCH] §3 把「为什么不可用」显式带上，
+	// 避免所有原因都被压成同一句误导性的 "does not contain expected fields"。
+	failureClass jsonFailureClass
+	truncated    bool
 }
 
+// [ES_REPAIR_RETRY_ON_VALIDATION_PATCH] 让「JSON 能解析但语义校验不通过」也走
+// promptJSONObjectWithOptions 的自动纠错重试，并把校验错误原文回填给模型。
+// 这样做就把 repair 阶段的两次独立尝试合并为一次带反馈的重试，避免 7B 级模型
+// 因「自创包装字段 / 漏字段」被一次判死（实测 Fin-R1-7B 4 标的 1/4 成功）。
 func promptJSONObject[T any](ctx context.Context, prompter agent.Prompter, prompt, label string) (T, error) {
 	return promptJSONObjectWithOptions[T](ctx, prompter, prompt, label, promptJSONObjectOptions{maxAttempts: 2, disableTools: true})
 }
@@ -712,6 +725,8 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 		}
 		if callErr != nil {
 			diagnostic.err = callErr.Error()
+			// [ES_REPAIR_SEMANTICS_PATCH] §3 传输级归因：超时 / 流中断 / 其他。
+			diagnostic.failureClass = classifyTransportFailure(callErr)
 			if options.onAttempt != nil {
 				options.onAttempt(diagnostic)
 			}
@@ -723,6 +738,11 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 
 		decoded = *new(T)
 		decodeErr := decodeJSONObject(result.Content, &decoded)
+		if decodeErr == nil && options.afterValidation != nil {
+			// [ES_REPAIR_RETRY_ON_VALIDATION_PATCH] JSON 合法但语义不通过时，
+			// 也按 decode 失败处理，从而触发带反馈的纠错重试。
+			decodeErr = options.afterValidation(&decoded)
+		}
 		if decodeErr == nil {
 			if options.onAttempt != nil {
 				options.onAttempt(diagnostic)
@@ -730,6 +750,9 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 			return decoded, nil
 		}
 		diagnostic.err = decodeErr.Error()
+		// [ES_REPAIR_SEMANTICS_PATCH] §3 结构级归因：截断 / 二义 / 多根 / 契约不符。
+		diagnostic.failureClass = classifyDecodeFailure(result.Content, decodeErr)
+		diagnostic.truncated = diagnostic.failureClass == jsonFailureTruncated
 		if options.onAttempt != nil {
 			options.onAttempt(diagnostic)
 		}
@@ -763,18 +786,57 @@ func decodeJSONObject(content string, target any) error {
 	if strings.HasPrefix(content, `"`) && json.Unmarshal([]byte(content), &encoded) == nil {
 		content = strings.TrimSpace(encoded)
 	}
+	// [ES_REPAIR_SEMANTICS_PATCH] §3：**截断必须先于「片段扫描」判定**。
+	//
+	// 旧顺序是先 decodeJSONObjectRaw，它在截断输入上会命中「内部某个配平子对象」
+	// （如 `{"headline":"h","items":[{"text":"b"}` 里第一个配平的 `{...}`），
+	// rawErr==nil 直接返回成功——**把截断输出当成功**，且拿到的还是残缺片段。
+	//
+	// §3 明令「不能通过补齐括号把截断输出标为成功」，同理也不能靠截取片段放行。
+	// 因此先把「整体是否被截断」判掉：只有整体结构完整时才允许走后续扫描。
+	if defect := jsonStructuralDefectClass(analyzeStructureKind(content)); defect == jsonFailureTruncated {
+		return &truncatedJSONResponseError{raw: content}
+	}
+
+	// [ES_JSON_STRUCTURE_REPAIR_PATCH] 先用原文扫描；仅当原文完全解不出结果时，
+	// 再用结构修复版重扫一遍（修复版对合法 JSON 恒等于原文，因此无额外语义风险）。
+	rawErr := decodeJSONObjectRaw(content, target)
+	if rawErr == nil {
+		return nil
+	}
+	// [ES_REPAIR_SEMANTICS_PATCH] §3：结构修复必须**带判定**。
+	// 旧 sanitizeJSONStructure 只看 `len(stack) > 1` 就改写对象闭括号，
+	// 会把数组元素内的字段静默提升为顶层字段（字段归属被改），产物「看起来合法」。
+	// 这里改用 checked 版本：只有「无二义可修」才接受；二义/截断/多根一律拒绝，
+	// 让调用方按解码失败处理并**重新生成**（不得补齐括号把截断标为成功）。
+	sanitized, ok := sanitizeJSONStructureChecked(content)
+	if !ok || sanitized == content {
+		return rawErr
+	}
+	if err := decodeJSONObjectRaw(sanitized, target); err == nil {
+		return nil
+	}
+	return rawErr
+}
+
+// decodeJSONObjectRaw 单遍扫描：不做结构修复，只做数字容错与候选选择。
+func decodeJSONObjectRaw(content string, target any) error {
 	var lastErr error
+	// [ES_JSON_NUMERIC_COERCION_PATCH] 首个「已命中期望字段」的候选的具体解码错误，
+	// 优先于后续嵌套候选的 "does not contain expected fields" 暴露，避免误导排查。
+	var specificErr error
+	// [ES_REPAIR_SEMANTICS_PATCH] §3：识别「顶层兄弟对象」而非「嵌套旁支」。
+	//
+	// 现场缺陷：模型回显输入 evidence-pack，其 `analysis` 子对象含与目标同名的
+	// `limitations`（1/N 命中）→ 旧逻辑放行 → 空壳静默成功。
+	// 但 `{"...无效..."}\n{"summary":"最终有效结论"}` 里的第二个对象是**兄弟**，
+	// 必须仍被接受。因此这里记录「被其他候选对象跨度包裹」的位置集合，
+	// 只有真正**嵌套**在别的对象内的候选才需要额外严格判定。
+	spans := [][2]int{}
 	for start := strings.IndexByte(content, '{'); start >= 0; {
 		end := balancedJSONObjectEnd(content, start)
 		if end > start {
-			candidate := content[start:end]
-			if !hasKnownJSONField(candidate, target) {
-				lastErr = errors.New("JSON object does not contain expected fields")
-			} else if err := decodeFreshJSONObject(candidate, target); err == nil {
-				return nil
-			} else {
-				lastErr = err
-			}
+			spans = append(spans, [2]int{start, end})
 		}
 		next := strings.IndexByte(content[start+1:], '{')
 		if next < 0 {
@@ -782,10 +844,194 @@ func decodeJSONObject(content string, target any) error {
 		}
 		start += next + 1
 	}
+	isNested := func(i int) bool {
+		s, e := spans[i][0], spans[i][1]
+		for j, sp := range spans {
+			if j == i {
+				continue
+			}
+			if sp[0] <= s && e <= sp[1] && (sp[0] != s || sp[1] != e) {
+				return true
+			}
+		}
+		return false
+	}
+	for idx, sp := range spans {
+		candidate := content[sp[0]:sp[1]]
+		if !hasKnownJSONField(candidate, target) {
+			if specificErr == nil {
+				lastErr = errors.New("JSON object does not contain expected fields")
+			}
+		} else if isNested(idx) && !candidateIsUnambiguousForTarget(candidate, target) {
+			// 嵌套旁支的弱命中：不认定，继续找后续候选；找不到即失败（触发 retry）。
+			if specificErr == nil {
+				lastErr = errors.New("JSON object does not contain expected fields")
+			}
+		} else if err := decodeFreshJSONObject(coerceJSONNumbers(candidate), target); err == nil {
+			return nil
+		} else {
+			if specificErr == nil {
+				specificErr = err
+			}
+			lastErr = err
+		}
+	}
+	// [ES_JSON_NUMERIC_COERCION_PATCH] 真实原因优先
+	if specificErr != nil {
+		return specificErr
+	}
 	if lastErr != nil {
 		return lastErr
 	}
 	return errors.New("JSON object not found")
+}
+
+// candidateIsUnambiguousForTarget 判断一个**嵌套**候选对象是否足以认定为目标结果。
+//
+// 现场缺陷：模型回显输入 evidence-pack，其 `analysis` 子对象含与目标同名的
+// `limitations` 键（1/N 命中），旧逻辑直接放行 → 空壳静默成功。
+// 这里要求嵌套候选必须命中主体锚点字段，或命中数 ≥ 2，方可认定。
+func candidateIsUnambiguousForTarget(candidate string, target any) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(candidate), &fields); err != nil {
+		return false
+	}
+	for _, anchor := range []string{"headline", "questions", "conditions"} {
+		if _, ok := fields[anchor]; ok {
+			return true
+		}
+	}
+	targetType := reflect.TypeOf(target)
+	if targetType == nil {
+		return len(fields) > 0
+	}
+	for targetType.Kind() == reflect.Pointer {
+		targetType = targetType.Elem()
+	}
+	if targetType.Kind() != reflect.Struct {
+		return len(fields) > 0
+	}
+	hit := 0
+	for index := 0; index < targetType.NumField(); index++ {
+		field := targetType.Field(index)
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "" {
+			name = field.Name
+		}
+		if name == "-" {
+			continue
+		}
+		if _, ok := fields[name]; ok {
+			hit++
+		}
+	}
+	// 1 字段小目标：命中即整体
+	if targetType.NumField() <= 1 {
+		return hit == 1
+	}
+	return hit >= 2
+}
+
+// [ES_JSON_NUMERIC_COERCION_PATCH] 小模型常把数字写成字符串（"threshold":"39"）。
+// 这里把「整体是一个 JSON 值、且形如数字」的字符串字面量还原为数字，
+// 只处理顶层与嵌套对象/数组中的值，不触碰真正的文本字段（含空格/中文/非数字的串一律保留）。
+// 采用轻量扫描而非全量重编码，避免改变原始文本的空白与键顺序。
+func coerceJSONNumbers(raw string) string {
+	if !strings.Contains(raw, `":"`) && !strings.Contains(raw, `": "`) {
+		// 快路径：没有任何引号包裹的值，直接返回
+		if !hasQuotedNumericCandidate(raw) {
+			return raw
+		}
+	}
+	var out strings.Builder
+	out.Grow(len(raw))
+	i := 0
+	for i < len(raw) {
+		c := raw[i]
+		if c != '"' {
+			out.WriteByte(c)
+			i++
+			continue
+		}
+		// 读一个完整字符串字面量（含转义）
+		j := i + 1
+		escaped := false
+		for j < len(raw) {
+			if escaped {
+				escaped = false
+			} else if raw[j] == '\\' {
+				escaped = true
+			} else if raw[j] == '"' {
+				break
+			}
+			j++
+		}
+		if j >= len(raw) {
+			out.WriteString(raw[i:])
+			break
+		}
+		literal := raw[i : j+1] // 含引号
+		inner := raw[i+1 : j]   // 不含引号
+		if isJSONKeyPosition(out.String()) {
+			// 键名，原样保留
+			out.WriteString(literal)
+			i = j + 1
+			continue
+		}
+		if numericCandidate(inner) {
+			out.WriteString(inner) // 去掉引号，变成数字
+		} else {
+			out.WriteString(literal)
+		}
+		i = j + 1
+	}
+	return out.String()
+}
+
+// 判断当前输出位置是否处于「键名」位置：最后一个非空白字符是 '{' 或 ','
+func isJSONKeyPosition(prefix string) bool {
+	for k := len(prefix) - 1; k >= 0; k-- {
+		switch prefix[k] {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '{', ',':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// 纯数字字面量：可选负号 + 数字 + 可选小数/指数，且与 JSON 数字语法兼容
+func numericCandidate(s string) bool {
+	if s == "" {
+		return false
+	}
+	if _, err := strconv.ParseFloat(s, 64); err != nil {
+		return false
+	}
+	// 排除 ""、"  "、"00123"（前导零）这类非规范写法，避免误伤字符串
+	trimmed := strings.TrimSpace(s)
+	if trimmed != s {
+		return false
+	}
+	// 必须有数字字符，且首字符在 -0-9 内
+	if !(s[0] == '-' || (s[0] >= '0' && s[0] <= '9')) {
+		return false
+	}
+	// 前导零（非 "0" 本身）
+	if len(s) > 1 && s[0] == '0' {
+		return false
+	}
+	if len(s) > 2 && s[0] == '-' && s[1] == '0' {
+		return false
+	}
+	return true
+}
+
+func hasQuotedNumericCandidate(raw string) bool {
+	return strings.Contains(raw, `":"`) || strings.Contains(raw, `": `)
 }
 
 func hasKnownJSONField(candidate string, target any) bool {
@@ -803,6 +1049,10 @@ func hasKnownJSONField(candidate string, target any) bool {
 	if targetType.Kind() != reflect.Struct {
 		return len(fields) > 0
 	}
+	// 说明：本函数是**宽松闸门**（任一同名字段命中即 true），保留既有语义，
+	// 以兼容小模型分片作答（如 `{"summary":"…"}` 命中 aiConclusion 的 1/N 字段）。
+	// 对「嵌套旁支弱命中」的收紧在 candidateIsUnambiguousForTarget 中完成
+	// （[ES_REPAIR_SEMANTICS_PATCH] §3，修复回显空壳静默成功）。
 	for index := 0; index < targetType.NumField(); index++ {
 		field := targetType.Field(index)
 		name := strings.Split(field.Tag.Get("json"), ",")[0]
@@ -855,4 +1105,247 @@ func balancedJSONObjectEnd(content string, start int) int {
 		}
 	}
 	return -1
+}
+
+// [ES_JSON_STRUCTURE_REPAIR_PATCH] 7B 级金融模型高频产出的两种「结构性」JSON 缺陷：
+//
+//	① 多余的闭合括号：`"source_ids":["m-quote"]]`（多一个 ]）→ invalid character ']'
+//	② 尾随逗号：`{"a":1,}]` / `[...,]`              → invalid character ']'
+//
+// 这类缺陷会让 json.Unmarshal 整体失败，而 hasKnownJSONField 也就无法识别字段，
+// 最终报出误导性的 "JSON object does not contain expected fields"。
+//
+// 修复规则（都保留原文其余部分完全不动，因此结果对合法 JSON 恒等于原文）：
+//   - 闭括号没有可配对的开启符 → 丢弃（多余闭合符）；
+//   - 闭括号与栈顶类型不匹配   → 丢弃（典型的 `...]]` 双重闭合）；
+//   - 逗号紧随闭括号           → 丢弃该逗号（尾随逗号）。
+//
+// 仅在字符串字面量之外操作，不触碰正文内容。
+// sanitizeJSONStructure 做「保守的」JSON 结构补齐，把大模型常见的手写 JSON
+// 缺陷转成可解析文本。它只在字符串字面量之外动手，且当输入本身已是合法
+// JSON 时，输出与输入逐字节完全相同（由单测 JSON_STRUCTURE_REPAIR_PATCH_V2 保证）。
+//
+// 覆盖的缺陷形态（均来自真实模型输出取证）：
+//
+//	[1] 闭合符写错：`"source_ids":["m-quote"]]` 本应为 `..."]}`（Fin-R1-7B）；
+//	[2] 闭合符整体缺失：`"support":[{...},{...},"counter":[`
+//	    本应为 `"support":[{...},{...}],"counter":[`（qwen3:14b-64k）。
+//
+// 若不做修复，这些输入会让 json.Unmarshal 失败，最终报出误导性的
+// "JSON object does not contain expected fields"。
+//
+// [ES_REPAIR_SEMANTICS_PATCH] §3 弃用声明：
+// 本函数已被 sanitizeJSONStructureChecked 取代。二者差别只在**归属二义**的处置：
+//   - 本函数对 `{"a":[{"x":1],"b":2}]}` 会按 `len(stack)>1` 静默产出
+//     `{"a":[{"x":1}],"b":2}` —— 把元素字段提升为顶层字段，**归属被改**；
+//   - checked 版本对此**拒绝**（要求重新生成）。
+//
+// 生产路径（decodeJSONObject）已全部改走 checked 版本；本函数仅为历史回归测试
+// 保留，**不得**在新代码中调用。为避免误用，这里加一道 §3 守卫：
+// 一旦检测到归属二义，直接原样返回（不产出任何会改变归属的文本）。
+func sanitizeJSONStructure(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	// §3 守卫：二义输入原样返回，绝不产出改变字段归属的「修复」文本。
+	if hasOwnershipAmbiguityRisk(raw) {
+		return raw
+	}
+	return sanitizeLegacyJSONStructure(raw)
+}
+
+// hasOwnershipAmbiguityRisk 判断原文是否含「数组元素对象已闭合、随后紧跟一个键」
+// 的归属二义形态（即 §3 禁止自动修复的形态）。
+func hasOwnershipAmbiguityRisk(raw string) bool {
+	_, _, kind := sanitizeJSONStructureAnalyze(raw)
+	return kind == jsonStructureAmbiguous
+}
+
+// sanitizeLegacyJSONStructure 是 ES_JSON_STRUCTURE_REPAIR_PATCH 的原始实现。
+// 仅供历史回归测试使用；生产路径不使用（见上方弃用声明）。
+func sanitizeLegacyJSONStructure(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	out := make([]byte, 0, len(raw))
+	stack := make([]byte, 0, 32)   // 容器栈：'{' 或 '['
+	states := make([]uint8, 0, 32) // 每帧状态
+	inString := false
+	escaped := false
+
+	// 帧状态常量：对象走 key->colon->value；收值后 afterValue。数组只有 value/afterValue。
+	const (
+		stateKey        uint8 = iota // 对象等待键名
+		stateColon                   // 已读到键名，等待冒号
+		stateValue                   // 等待一个值
+		stateAfterValue              // 已完成一个值
+	)
+	topState := func() uint8 {
+		if len(states) == 0 {
+			return stateKey
+		}
+		return states[len(states)-1]
+	}
+	setTopState := func(s uint8) {
+		if len(states) > 0 {
+			states[len(states)-1] = s
+		}
+	}
+	// closeContainer 出栈，并把父容器标记为「刚收完一个值」。
+	closeContainer := func() {
+		if len(stack) > 0 {
+			stack = stack[:len(stack)-1]
+			states = states[:len(states)-1]
+		}
+		if len(states) > 0 {
+			setTopState(stateAfterValue)
+		}
+	}
+
+	for index := 0; index < len(raw); index++ {
+		current := raw[index]
+
+		if inString {
+			out = append(out, current)
+			if escaped {
+				escaped = false
+			} else if current == '\\' {
+				escaped = true
+			} else if current == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch current {
+		case '"':
+			// 前瞻：跳过本字符串（含转义），看后面是否紧跟 ':'（允许空白）。
+			// 若是，说明它是对象的键。
+			look := index + 1
+			for look < len(raw) {
+				if raw[look] == '\\' {
+					look += 2
+					continue
+				}
+				if raw[look] == '"' {
+					break
+				}
+				look++
+			}
+			look++
+			for look < len(raw) && isJSONSpace(raw[look]) {
+				look++
+			}
+			if look < len(raw) && raw[look] == ':' {
+				// 键只能出现在对象里：栈顶若是数组，则该数组漏了闭括号。
+				repaired := false
+				for len(stack) > 0 && stack[len(stack)-1] == '[' {
+					out = dropTrailingComma(out)
+					out = append(out, ']')
+					closeContainer()
+					repaired = true
+				}
+				if repaired && topState() == stateAfterValue {
+					// 顺带补回被一起吞掉的分隔逗号。
+					out = dropTrailingComma(out)
+					out = append(out, ',')
+				}
+			}
+			inString = true
+			out = append(out, current)
+		case '{', '[':
+			stack = append(stack, current)
+			if current == '{' {
+				states = append(states, stateKey)
+			} else {
+				states = append(states, stateValue)
+			}
+			out = append(out, current)
+		case '}', ']':
+			if len(stack) == 0 {
+				// 多余闭合符：丢弃。
+				continue
+			}
+			expected := byte('{')
+			if current == ']' {
+				expected = '['
+			}
+			if stack[len(stack)-1] != expected {
+				if current == ']' && stack[len(stack)-1] == '{' {
+					// [1] 对象闭合符误写成 ']' 的判别：
+					// 只有在「闭合后栈仍非空」时才改写，因为此时 `]` 后面若是
+					// 数组的下一个元素（`,`/值），说明该对象的 '}' 被写成了 ']'。
+					// 若本对象就是最外层，则该 ']' 只可能是多余的闭合符，丢弃。
+					if len(stack) > 1 {
+						out = dropTrailingComma(out)
+						out = append(out, '}')
+						closeContainer()
+						continue
+					}
+					// 根对象上的多余 ']'：丢弃。
+					continue
+				}
+				// 纯多余 / 无法判定的闭合符：丢弃。
+				continue
+			}
+			out = dropTrailingComma(out)
+			out = append(out, current)
+			closeContainer()
+		case ':':
+			if topState() == stateColon {
+				setTopState(stateValue)
+			}
+			out = append(out, current)
+		case ',':
+			if topState() == stateAfterValue {
+				if len(stack) > 0 && stack[len(stack)-1] == '{' {
+					setTopState(stateKey)
+				} else {
+					setTopState(stateValue)
+				}
+			}
+			out = append(out, current)
+		case ' ', '\t', '\n', '\r':
+			out = append(out, current)
+		default:
+			// 标量 token（数字 / true / false / null 等）。
+			if topState() == stateValue {
+				setTopState(stateAfterValue)
+			}
+			out = append(out, current)
+		}
+	}
+
+	// 收尾：补齐所有未闭合容器。
+	for len(stack) > 0 {
+		out = dropTrailingComma(out)
+		if stack[len(stack)-1] == '{' {
+			out = append(out, '}')
+		} else {
+			out = append(out, ']')
+		}
+		closeContainer()
+	}
+	return string(out)
+}
+
+func isJSONSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// dropTrailingComma 若 out 末尾（跳过空白）是逗号，则删除该逗号。
+func dropTrailingComma(out []byte) []byte {
+	end := len(out)
+	for end > 0 {
+		switch out[end-1] {
+		case ' ', '\t', '\n', '\r':
+			end--
+			continue
+		}
+		break
+	}
+	if end > 0 && out[end-1] == ',' {
+		out = append(out[:end-1], out[end:]...)
+	}
+	return out
 }

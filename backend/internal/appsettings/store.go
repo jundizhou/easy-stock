@@ -79,7 +79,78 @@ type Values struct {
 	ActiveLLMProfileID string           `json:"active_llm_profile_id,omitempty"`
 	Credentials        Credentials      `json:"credentials"`
 	ReviewAutomation   ReviewAutomation `json:"review_automation"`
+	Archive            Archive          `json:"archive"`
 	UpdatedAt          time.Time        `json:"updated_at,omitempty"`
+}
+
+// Archive 实时报价/资讯的本地归档采集配置（可在 App 界面可视化编辑，持久化到 settings.json）。
+type Archive struct {
+	// Enabled 是否开启常驻定时采集。
+	Enabled bool `json:"enabled"`
+	// IntervalSeconds 采集周期（秒），最小 5。
+	IntervalSeconds int `json:"interval_seconds"`
+	// Dir 归档根目录（支持 D:/xxx 绝对路径）；为空则用 <dataDir>/data-archive。
+	Dir string `json:"dir,omitempty"`
+	// SymbolsSource 清单来源：manual=手填清单；holdings=联动最近一次组合持仓。
+	SymbolsSource string `json:"symbols_source"`
+	// Symbols 手填清单（symbols_source=manual 时生效）。
+	Symbols []string `json:"symbols,omitempty"`
+	// TradingOnly 仅交易时段采集。
+	TradingOnly bool `json:"trading_only"`
+	// NewsLimit 每轮资讯条数上限。
+	NewsLimit int `json:"news_limit,omitempty"`
+}
+
+const (
+	ArchiveSymbolsSourceManual   = "manual"
+	ArchiveSymbolsSourceHoldings = "holdings"
+
+	DefaultArchiveIntervalSeconds = 60
+	MinArchiveIntervalSeconds     = 5
+	DefaultArchiveNewsLimit       = 20
+)
+
+// DefaultArchive 返回归档采集的默认配置。
+func DefaultArchive() Archive {
+	return Archive{
+		Enabled:         true,
+		IntervalSeconds: DefaultArchiveIntervalSeconds,
+		SymbolsSource:   ArchiveSymbolsSourceManual,
+		TradingOnly:     true,
+		NewsLimit:       DefaultArchiveNewsLimit,
+	}
+}
+
+// NormalizeArchive 校验并规范化归档配置。
+func NormalizeArchive(a Archive) Archive {
+	if a.IntervalSeconds < MinArchiveIntervalSeconds {
+		a.IntervalSeconds = DefaultArchiveIntervalSeconds
+	}
+	switch strings.TrimSpace(a.SymbolsSource) {
+	case ArchiveSymbolsSourceHoldings:
+		a.SymbolsSource = ArchiveSymbolsSourceHoldings
+	default:
+		a.SymbolsSource = ArchiveSymbolsSourceManual
+	}
+	if a.NewsLimit <= 0 {
+		a.NewsLimit = DefaultArchiveNewsLimit
+	}
+	a.Dir = strings.TrimSpace(a.Dir)
+	cleaned := make([]string, 0, len(a.Symbols))
+	seen := map[string]struct{}{}
+	for _, s := range a.Symbols {
+		s = strings.ToUpper(strings.TrimSpace(s))
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		cleaned = append(cleaned, s)
+	}
+	a.Symbols = cleaned
+	return a
 }
 
 type Store struct {
@@ -161,9 +232,13 @@ func (s *Store) load() error {
 		if _, exists := raw["review_automation"]; !exists {
 			s.values.ReviewAutomation = defaultValues().ReviewAutomation
 		}
+		if _, exists := raw["archive"]; !exists {
+			s.values.Archive = defaultValues().Archive
+		}
 	}
 	s.normalizeReviewProfiles()
 	s.normalizeLLMProfiles()
+	s.values.Archive = NormalizeArchive(s.values.Archive)
 	if err := os.Chmod(s.path, 0o600); err != nil {
 		return fmt.Errorf("secure settings permissions: %w", err)
 	}
@@ -225,11 +300,14 @@ func llmFromProfile(profile LLMProfile, responseTimeoutSeconds int) LLM {
 }
 
 func defaultValues() Values {
-	return Values{ReviewAutomation: ReviewAutomation{Profiles: []ReviewSourceProfile{
-		{ID: "wechat-default", Source: "wechat", Name: "微信公众号默认配置", SyncHour: 7, AutoAnalyze: true, Enabled: true},
-		{ID: "xueqiu-default", Source: "xueqiu", Name: "雪球默认配置", BaseURL: "https://xueqiu.com", SyncHour: 7, AutoAnalyze: true, Enabled: true},
-		{ID: "taoguba-default", Source: "taoguba", Name: "淘股吧默认配置", BaseURL: "https://www.tgb.cn", SyncHour: 7, AutoAnalyze: true, Enabled: true},
-	}}}
+	return Values{
+		ReviewAutomation: ReviewAutomation{Profiles: []ReviewSourceProfile{
+			{ID: "wechat-default", Source: "wechat", Name: "微信公众号默认配置", SyncHour: 7, AutoAnalyze: true, Enabled: true},
+			{ID: "xueqiu-default", Source: "xueqiu", Name: "雪球默认配置", BaseURL: "https://xueqiu.com", SyncHour: 7, AutoAnalyze: true, Enabled: true},
+			{ID: "taoguba-default", Source: "taoguba", Name: "淘股吧默认配置", BaseURL: "https://www.tgb.cn", SyncHour: 7, AutoAnalyze: true, Enabled: true},
+		}},
+		Archive: DefaultArchive(),
+	}
 }
 
 func (s *Store) normalizeReviewProfiles() {

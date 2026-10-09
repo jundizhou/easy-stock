@@ -189,6 +189,13 @@ type ResearchReport struct {
 	Compression     ResearchPromptCompression `json:"compression"`
 	Validation      string                    `json:"validation"`
 	ValidationNotes []string                  `json:"validation_notes"`
+	// [ES_PARTIAL_CORE_SAVE_PATCH] §4 受控分段保存标记。
+	// Partial 表示本报告只含通过校验的核心研究、交易计划未生成；
+	// PartialStatus 给出细分类别（当前仅 core_only）；CoreHash 为已保存 core 的版本 hash。
+	// 这三个字段为**新增可选字段**，对完整报告省略，因此对外 API 与磁盘格式保持兼容。
+	Partial       bool                  `json:"partial,omitempty"`
+	PartialStatus ResearchPartialStatus `json:"partial_status,omitempty"`
+	CoreHash      string                `json:"core_hash,omitempty"`
 }
 
 type SupplementFunc func(context.Context, ResearchSnapshot, ResearchQuestion) ([]ResearchSource, error)

@@ -25,6 +25,7 @@ import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLM
 import { llmBaseURLForAPIMode, llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
+import { ArchiveSettingsPanel } from './ArchiveSettingsPanel';
 import { SettingsSection } from './SettingsSection';
 
 type Props = {
@@ -561,6 +562,8 @@ export function SettingsDrawer({ config, open, onClose, onSaved }: Props) {
 						</SettingsSection>
 
 						<AppUpdatePanel />
+
+						<ArchiveSettingsPanel config={config} open={open} onSaved={onSaved} />
 
 						<SettingsSection className="runtime-log-section" title="运行日志" description="遇到问题时，可将此目录中的日志文件提供给开发者排查。" icon={<FolderOpen size={18} />}>
 							<div className="runtime-log-summary">

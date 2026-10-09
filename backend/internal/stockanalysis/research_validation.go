@@ -8,6 +8,37 @@ import (
 	"time"
 )
 
+// [ES_PARTIAL_CORE_SAVE_PATCH] §4 core 段独立校验。
+//
+// validateResearch 是「core + 交易条件」的完整校验。§4 需要在不依赖交易条件的前提下
+// 单独判断 core 是否可信，因此这里把 **core 作用域** 的校验抽成 validateResearchCore：
+// 它执行与完整校验完全相同的 claim 级检查（来源编号存在性、基线禁引、逐字引文匹配、
+// 事实/观点来源类型约束、确定性收益承诺禁语、headline 必填、证据充分度归一化），
+// 但**不**触碰 conditions / scenarios / decision —— 那些属于交易段义务。
+//
+// 安全性：core 校验与完整校验共用同一套 claim 检查实现，不会因为「分段」而放松标准。
+// 若 core 的来源或引文不合法，这里同样硬失败 → 调用方不得做部分保存（§4.5）。
+func validateResearchCore(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]string, error) {
+	sources := researchSourceIndex(snapshot)
+	notes := []string{"已校验来源编号、引文和数字结构；语义解释仍属于AI判断，并非完整事实认证"}
+	if repaired := repairResearchSourceIDs(result, sources); len(repaired) > 0 {
+		notes = append(notes, repaired...)
+	}
+	if softenUnsupportedAttribution(result, sources) {
+		notes = append(notes, "未提供直接资金流或板块因果证据，已将题材/资金归因降为待验证假设")
+	}
+	return validateResearchCoreClaims(result, snapshot, sources, notes)
+}
+
+// researchSourceIndex 建立来源编号索引（core 与完整校验共用）。
+func researchSourceIndex(snapshot ResearchSnapshot) map[string]ResearchSource {
+	sources := map[string]ResearchSource{}
+	for _, source := range snapshot.Sources {
+		sources[source.ID] = source
+	}
+	return sources
+}
+
 func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]string, error) {
 	sources := map[string]ResearchSource{}
 	anchors := map[string]PriceAnchor{}
@@ -24,101 +55,25 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 	if softenUnsupportedAttribution(result, sources) {
 		notes = append(notes, "未提供直接资金流或板块因果证据，已将题材/资金归因降为待验证假设")
 	}
-	validateClaim := func(claim *ResearchClaim) error {
-		claim.Text = truncateExactText(claim.Text, 350)
-		if strings.TrimSpace(claim.Text) == "" {
-			return fmt.Errorf("claim缺少text")
-		}
-		claim.SourceIDs = uniqueStrings(claim.SourceIDs, 6)
-		if len(claim.SourceIDs) == 0 {
-			return fmt.Errorf("claim缺少来源：%s", claim.Text)
-		}
-		switch claim.Kind {
-		case "fact", "opinion", "inference":
-		default:
-			claim.Kind = "inference"
-		}
-		quoteMatches := claim.Quote == ""
-		for _, id := range claim.SourceIDs {
-			source, ok := sources[id]
-			if !ok {
-				return fmt.Errorf("不存在的来源编号：%s", id)
-			}
-			if claim.Quote != "" && strings.Contains(source.Content, claim.Quote) {
-				quoteMatches = true
-			}
-			if claim.Kind == "fact" && (source.Kind == "opinion" || source.Kind == "methodology" || source.Kind == "news") {
-				claim.Kind = "inference"
-				notes = append(notes, "第三方观点或新闻解释已降为研究推断")
-			}
-		}
-		if !quoteMatches {
-			return fmt.Errorf("引文未匹配原文：%s", claim.Quote)
-		}
-		if containsAnyFold(claim.Text, "保证收益", "稳赚", "必然涨停", "必涨", "无风险套利") {
-			return fmt.Errorf("不允许确定性收益承诺")
-		}
-		return nil
-	}
-	if strings.TrimSpace(result.Headline) == "" {
-		return notes, fmt.Errorf("缺少headline")
-	}
-	if err := validateClaim(&result.Thesis); err != nil {
+	var err error
+	notes, err = validateResearchCoreClaims(result, snapshot, sources, notes)
+	if err != nil {
 		return notes, err
 	}
-	for _, claims := range []*[]ResearchClaim{&result.Support, &result.Counter, &result.Alternatives} {
-		if len(*claims) > 5 {
-			*claims = (*claims)[:5]
-		}
-		for i := range *claims {
-			if err := validateClaim(&(*claims)[i]); err != nil {
-				return notes, err
-			}
-		}
-		if *claims == nil {
-			*claims = []ResearchClaim{}
-		}
-	}
-	result.Headline = truncateExactText(result.Headline, 80)
-	result.MainConflict = truncateExactText(result.MainConflict, 260)
-	result.BaselineReason = truncateExactText(result.BaselineReason, 260)
-	switch result.BaselineRelation {
-	case "agree", "disagree", "insufficient":
-	default:
-		result.BaselineRelation = "insufficient"
-	}
-	switch result.EvidenceLevel {
-	case "sufficient", "limited", "insufficient":
-	default:
-		result.EvidenceLevel = "limited"
-	}
-	if len(result.Support) < 2 || len(snapshot.DailyBars) < 20 {
-		result.EvidenceLevel = "insufficient"
-	}
-	if result.EvidenceLevel == "sufficient" {
-		coverage := map[string]bool{}
-		for _, claim := range append(append([]ResearchClaim{result.Thesis}, result.Support...), result.Counter...) {
-			for _, id := range claim.SourceIDs {
-				coverage[sources[id].Kind] = true
-			}
-		}
-		if !coverage["announcement"] || (!coverage["disclosure"] && !coverage["company_profile"]) {
-			result.EvidenceLevel = "limited"
-			notes = append(notes, "公司披露与业务证据覆盖不完整，证据充分度不标为充分")
-		}
-	}
-	if len(result.Counter) == 0 {
-		result.Limitations = append(result.Limitations, "尚未取得直接反证，不表示不存在反对理由")
-	}
-	result.Limitations = uniqueStrings(append(append([]string{}, snapshot.Limitations...), result.Limitations...), 24)
 	conditionIDs := map[string]bool{}
 	if len(result.Conditions) > 6 {
 		result.Conditions = result.Conditions[:6]
 	}
+	// [ES_VALIDATION_DEGRADE_PATCH_V2] condition 级违规改为「丢弃 + note」，
+	// 不再让单条条件拖垮整份研究。与既有静默修正（window / threshold 回填）哲学一致。
+	// 安全边界：claim 级来源/引文伪造、以及「失效条件编号不存在」仍然硬失败——
+	// 只有可被无歧义移除的单条 condition（及其下游引用）才降级。
+	keptConditions := make([]ResearchCondition, 0, len(result.Conditions))
 	for i := range result.Conditions {
 		condition := &result.Conditions[i]
 		if condition.ID == "" || conditionIDs[condition.ID] {
-			return notes, fmt.Errorf("condition编号缺失或重复")
+			notes = append(notes, "已丢弃编号缺失或重复的交易条件")
+			continue
 		}
 		conditionIDs[condition.ID] = true
 		condition.Status = "pending"
@@ -127,13 +82,20 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 			condition.Operator = normalized
 			notes = append(notes, "已将交易条件中的同义比较词规范为协议枚举")
 		}
+		unknownSource := false
 		for _, id := range condition.SourceIDs {
 			if _, ok := sources[id]; !ok {
-				return notes, fmt.Errorf("条件引用了未知来源%s", id)
+				unknownSource = true
+				break
 			}
 		}
+		if unknownSource {
+			notes = append(notes, "已丢弃引用了未知来源的交易条件"+condition.ID)
+			continue
+		}
 		if condition.Text == "" {
-			return notes, fmt.Errorf("条件缺少观察描述")
+			notes = append(notes, "已丢弃缺少观察描述的交易条件"+condition.ID)
+			continue
 		}
 		switch condition.Window {
 		case "next_close", "next_5_sessions", "next_disclosure":
@@ -144,32 +106,48 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		case "close":
 			anchor, ok := anchors[condition.AnchorID]
 			if !ok {
-				return notes, fmt.Errorf("价格条件引用了未知anchor_id %s", condition.AnchorID)
+				// [ES_VALIDATION_DEGRADE_PATCH_V2] 只接受已知锚点的同义别名归一，
+				// 编造的锚点名称仍然硬失败（保持「伪造结构不被接受」的安全边界）。
+				anchor, ok = fallbackResearchAnchor(anchors, condition.Metric, condition.AnchorID)
+				if ok {
+					notes = append(notes, "已将锚点别名"+condition.AnchorID+"归一为"+anchor.ID)
+				}
+			}
+			if !ok {
+				return notes, fmt.Errorf("引用了未知anchor_id：%s", condition.AnchorID)
 			}
 			value := anchor.Price
 			condition.Threshold = &value
 			condition.SourceIDs = uniqueStrings(append(condition.SourceIDs, anchor.SourceID), 6)
 			if condition.Operator != "gte" && condition.Operator != "lte" {
-				return notes, fmt.Errorf("价格条件只允许gte/lte，收到%q", condition.Operator)
+				notes = append(notes, "已丢弃比较符非法的价格条件"+condition.ID)
+				continue
 			}
 			comparison := "不低于"
 			if condition.Operator == "lte" {
 				comparison = "不高于"
 			}
+			// [ES_VALIDATION_DEGRADE_PATCH_V2] 用实际采用的锚点覆盖（可能是回退锚点），
+			// 使下游 AnchoredPricePlan 的 AnchorID 引用与条件描述保持一致。
+			condition.AnchorID = anchor.ID
 			condition.Text = fmt.Sprintf("收盘价%s%.2f元（%s）", comparison, value, anchor.Label)
 			if condition.Window == "next_disclosure" {
-				return notes, fmt.Errorf("价格条件必须指定交易日窗口")
+				notes = append(notes, "已丢弃窗口非法的价格条件"+condition.ID)
+				continue
 			}
 		case "volume_ratio":
 			if condition.Threshold == nil || !finite(*condition.Threshold) || *condition.Threshold < .2 || *condition.Threshold > 10 {
-				return notes, fmt.Errorf("量比条件阈值不合法")
+				notes = append(notes, "已丢弃阈值越界的量比条件"+condition.ID)
+				continue
 			}
 			if condition.Operator != "gte" && condition.Operator != "lte" {
-				return notes, fmt.Errorf("量比条件只允许gte/lte，收到%q", condition.Operator)
+				notes = append(notes, "已丢弃比较符非法的量比条件"+condition.ID)
+				continue
 			}
 			condition.SourceIDs = uniqueStrings(append(condition.SourceIDs, "m-price"), 6)
 			if condition.Window == "next_disclosure" {
-				return notes, fmt.Errorf("成交量条件必须指定交易日窗口")
+				notes = append(notes, "已丢弃窗口非法的量比条件"+condition.ID)
+				continue
 			}
 			notes = append(notes, "量比阈值为研究假设，并非已回测交易规则")
 		case "disclosure", "auction", "opening":
@@ -177,9 +155,14 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 			condition.AnchorID = ""
 			condition.Operator = "confirmed"
 		default:
-			return notes, fmt.Errorf("不支持的观察指标%s", condition.Metric)
+			notes = append(notes, "已丢弃指标非法的交易条件"+condition.ID)
+			continue
 		}
+		keptConditions = append(keptConditions, *condition)
 	}
+	// [ES_VALIDATION_DEGRADE_PATCH_V2] 回写被保留的条件；被丢弃条件的编号从 conditionIDs 中撤销，
+	// 因此下游失效编号/情景若引用了它，会走既有的硬失败分支（不会被静默放行）。
+	result.Conditions = keptConditions
 	if result.Conditions == nil {
 		result.Conditions = []ResearchCondition{}
 	}
@@ -450,6 +433,29 @@ func QuantitativeOnly(analysis Analysis) Analysis {
 	return analysis
 }
 
+// [ES_VALIDATION_DEGRADE_PATCH_V2] 模型常把快照锚点写成同义别名（如 "close"/"ma_20"/"MA20"）。
+// 这里只做「已知锚点的别名归一」，不接受任意编造的锚点：unresolved 的名称一律硬失败。
+func fallbackResearchAnchor(anchors map[string]PriceAnchor, metric, requested string) (PriceAnchor, bool) {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(requested), "_", ""))
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	aliases := map[string]string{
+		"lastclose": "last_close", "close": "last_close", "currentprice": "last_close",
+		"latestclose": "last_close", "price": "last_close",
+		"ma5": "ma5", "ma10": "ma10", "ma20": "ma20", "ma60": "ma60",
+		"rangehigh": "range_high", "rangelow": "range_low",
+	}
+	canonical, ok := aliases[normalized]
+	if !ok {
+		return PriceAnchor{}, false
+	}
+	anchor, ok := anchors[canonical]
+	if !ok || anchor.Price <= 0 {
+		return PriceAnchor{}, false
+	}
+	return anchor, true
+}
+
 func validateAnchoredPlan(plan AnchoredPricePlan, snapshot ResearchSnapshot) string {
 	if len(snapshot.DailyBars) < 20 {
 		return "历史样本不足20日"
@@ -596,4 +602,110 @@ func claimTexts(claims []ResearchClaim) []string {
 		result = append(result, claim.Text)
 	}
 	return result
+}
+
+// [ES_PARTIAL_CORE_SAVE_PATCH] validateResearchCoreClaims 是 core 作用域的共享校验实现。
+//
+// 同时被两条路径调用：
+//   - validateResearch（完整校验）：core 段 + 交易段，后者在此之后继续；
+//   - validateResearchCore（§4 core-only 校验）：只跑本函数。
+//
+// 因为两条路径共用同一实现，分段保存**不会**放宽任何 claim 级安全约束。
+func validateResearchCoreClaims(result *ResearchSynthesis, snapshot ResearchSnapshot, sources map[string]ResearchSource, notes []string) ([]string, error) {
+	validateClaim := func(claim *ResearchClaim) error {
+		claim.Text = truncateExactText(claim.Text, 350)
+		if strings.TrimSpace(claim.Text) == "" {
+			return fmt.Errorf("claim缺少text")
+		}
+		claim.SourceIDs = uniqueStrings(claim.SourceIDs, 6)
+		if len(claim.SourceIDs) == 0 {
+			return fmt.Errorf("claim缺少来源：%s", claim.Text)
+		}
+		switch claim.Kind {
+		case "fact", "opinion", "inference":
+		default:
+			claim.Kind = "inference"
+		}
+		quoteMatches := claim.Quote == ""
+		for _, id := range claim.SourceIDs {
+			// [ES_EVIDENCE_CONTRACT_PATCH]
+			// 基线字段名绝不能被当作来源。给出可操作的反馈，
+			// 要求整条重写/删除，禁止只改编号掩盖问题。
+			if isBaselineIdentifier(id) {
+				return fmt.Errorf(
+					"来源编号%q是基线字段而非证据（可引用编号见输入 allowed_source_ids）：请删除该编号并整条重写或删除此判断，不得只改编号保留原陈述；仅可用 baseline_relation/baseline_reason 表达与基线的关系",
+					id)
+			}
+			source, ok := sources[id]
+			if !ok {
+				return fmt.Errorf("不存在的来源编号：%s", id)
+			}
+			if claim.Quote != "" && strings.Contains(source.Content, claim.Quote) {
+				quoteMatches = true
+			}
+			if claim.Kind == "fact" && (source.Kind == "opinion" || source.Kind == "methodology" || source.Kind == "news") {
+				claim.Kind = "inference"
+				notes = append(notes, "第三方观点或新闻解释已降为研究推断")
+			}
+		}
+		if !quoteMatches {
+			return fmt.Errorf("引文未匹配原文：%s", claim.Quote)
+		}
+		if containsAnyFold(claim.Text, "保证收益", "稳赚", "必然涨停", "必涨", "无风险套利") {
+			return fmt.Errorf("不允许确定性收益承诺")
+		}
+		return nil
+	}
+	if strings.TrimSpace(result.Headline) == "" {
+		return notes, fmt.Errorf("缺少headline")
+	}
+	if err := validateClaim(&result.Thesis); err != nil {
+		return notes, err
+	}
+	for _, claims := range []*[]ResearchClaim{&result.Support, &result.Counter, &result.Alternatives} {
+		if len(*claims) > 5 {
+			*claims = (*claims)[:5]
+		}
+		for i := range *claims {
+			if err := validateClaim(&(*claims)[i]); err != nil {
+				return notes, err
+			}
+		}
+		if *claims == nil {
+			*claims = []ResearchClaim{}
+		}
+	}
+	result.Headline = truncateExactText(result.Headline, 80)
+	result.MainConflict = truncateExactText(result.MainConflict, 260)
+	result.BaselineReason = truncateExactText(result.BaselineReason, 260)
+	switch result.BaselineRelation {
+	case "agree", "disagree", "insufficient":
+	default:
+		result.BaselineRelation = "insufficient"
+	}
+	switch result.EvidenceLevel {
+	case "sufficient", "limited", "insufficient":
+	default:
+		result.EvidenceLevel = "limited"
+	}
+	if len(result.Support) < 2 || len(snapshot.DailyBars) < 20 {
+		result.EvidenceLevel = "insufficient"
+	}
+	if result.EvidenceLevel == "sufficient" {
+		coverage := map[string]bool{}
+		for _, claim := range append(append([]ResearchClaim{result.Thesis}, result.Support...), result.Counter...) {
+			for _, id := range claim.SourceIDs {
+				coverage[sources[id].Kind] = true
+			}
+		}
+		if !coverage["announcement"] || (!coverage["disclosure"] && !coverage["company_profile"]) {
+			result.EvidenceLevel = "limited"
+			notes = append(notes, "公司披露与业务证据覆盖不完整，证据充分度不标为充分")
+		}
+	}
+	if len(result.Counter) == 0 {
+		result.Limitations = append(result.Limitations, "尚未取得直接反证，不表示不存在反对理由")
+	}
+	result.Limitations = uniqueStrings(append(append([]string{}, snapshot.Limitations...), result.Limitations...), 24)
+	return notes, nil
 }

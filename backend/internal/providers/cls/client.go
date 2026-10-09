@@ -49,13 +49,17 @@ func (c *Client) LatestNews(ctx context.Context, limit int) ([]foundation.NewsIt
 		limit = 20
 	}
 	requestURL := c.baseURL + "/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9"
+	// 抗封：同主机最小间隔限速。
+	if !foundation.Throttle(ctx, foundation.HostOf(requestURL), 150*time.Millisecond) {
+		return nil, ctx.Err()
+	}
 	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	foundation.ApplyBrowserHeaders(req)
 	req.Header.Set("Referer", "https://www.cls.cn/")
-	req.Header.Set("User-Agent", "Mozilla/5.0 easy-stock/0.1")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

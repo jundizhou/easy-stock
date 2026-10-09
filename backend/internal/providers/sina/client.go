@@ -139,14 +139,18 @@ func (c *Client) Realtime(ctx context.Context, symbols []string) ([]foundation.Q
 	values.Set("list", strings.Join(sinaCodes, ","))
 	requestURL := c.requestURL(values)
 
+	// 抗封：同主机最小间隔限速，避免突发高频触发新浪风控。
+	if !foundation.Throttle(ctx, foundation.HostOf(requestURL), 120*time.Millisecond) {
+		return nil, ctx.Err()
+	}
 	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	foundation.ApplyBrowserHeaders(req)
 	req.Header.Set("Host", "hq.sinajs.cn")
 	req.Header.Set("Referer", "https://finance.sina.com.cn/")
-	req.Header.Set("User-Agent", "Mozilla/5.0 easy-stock/0.1")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err

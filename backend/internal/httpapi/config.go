@@ -142,6 +142,11 @@ type Config struct {
 	MasteryLibrary       *methodology.Library
 	Logger               *log.Logger
 	StrictPersistence    bool
+	// ArchiveDir 实时报价/资讯落盘根目录（默认 <dataDir>/data-archive）。
+	// 为空则不落盘。子目录 realtime/、news/ 由 archive 包自动创建。
+	ArchiveDir string
+	// ArchiveCollector 常驻定时采集配置（周期/关注清单/仅交易时段）。
+	ArchiveCollector ArchiveCollectorConfig
 }
 
 func normalizeConfig(value any) Config {

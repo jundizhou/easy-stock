@@ -16,8 +16,8 @@ func genTradingStamps(date string) []string {
 			stamps = append(stamps, fmt.Sprintf("%s%02d%02d00", date, total/60, total%60))
 		}
 	}
-	appendRange(9, 30, 120)  // 上午 09:30-11:29
-	appendRange(13, 0, 120)  // 下午 13:00-14:59
+	appendRange(9, 30, 120) // 上午 09:30-11:29
+	appendRange(13, 0, 120) // 下午 13:00-14:59
 	return stamps
 }
 

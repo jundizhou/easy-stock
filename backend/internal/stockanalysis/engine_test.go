@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/agent"
+	"easy-stock/backend/internal/foundation"
 )
 
 func TestAnalyzeNewListingWithOneTradingDay(t *testing.T) {

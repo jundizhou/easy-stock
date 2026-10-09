@@ -76,16 +76,25 @@ func (s *Server) stockDBCodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, data)
 }
 
-// stockDBStatus 暴露后端视角下的 stockdb 连通状态（探活用）。
+// stockDBStatus 暴露后端视角下的 stockdb 连通状态与延迟统计（探活用）。
 //
 //	GET /api/v1/stockdb/status
 func (s *Server) stockDBStatus(w http.ResponseWriter, r *http.Request) {
-	_, err := s.stockDBProvider.Codes(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
+	ms, perr := s.stockDBProvider.Probe(r.Context())
+	snap := s.stockDBProvider.Stats()
+	ok := perr == nil
+	payload := map[string]any{
+		"ok":         ok,
+		"latency_ms": ms,
+		"stats":      snap,
+		// 日线多源池各源健康快照：本地主源 + 腾讯/东财远程备用源，
+		// 便于观察「被封 / 降级 / 恢复」与负载均衡状态。
+		"daily_sources": s.stockDBProvider.DailySources(),
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if perr != nil {
+		payload["error"] = perr.Error()
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func periodToStockDBTable(period string) string {

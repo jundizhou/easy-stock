@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"strconv"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -50,6 +51,34 @@ func reasoningCapability(source, wire, note, fallback string, values ...string) 
 	return c
 }
 
+// [ES_OLLAMA_LOCAL_REASONING_PATCH] 判定是否为本机 / 私网推理端点。
+// 仅覆盖 loopback、RFC1918 私网、IPv6 loopback 与云元数据之外的常见本地写法；
+// 公网域名/公网 IP 不受影响，避免误关远程模型的思考。
+func isLocalReasoningHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" || host == "0.0.0.0" || host == "host.docker.internal" {
+		return true
+	}
+	if strings.HasPrefix(host, "127.") {
+		return true
+	}
+	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") {
+		return true
+	}
+	if strings.HasPrefix(host, "172.") {
+		parts := strings.Split(host, ".")
+		if len(parts) >= 2 {
+			if second, err := strconv.Atoi(parts[1]); err == nil && second >= 16 && second <= 31 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c ReasoningCapability) Allows(value string) bool {
 	for _, option := range c.Options {
 		if option.Value == value {
@@ -77,6 +106,23 @@ func OfficialReasoningCapability(cfg appsettings.LLM) ReasoningCapability {
 		return unknown
 	}
 	host := strings.ToLower(u.Hostname())
+	// [ES_OLLAMA_LOCAL_REASONING_PATCH] 本机 / 私网 Ollama 等 OpenAI 兼容端点：
+	// 官方域名白名单不覆盖，但它确实支持关闭思考（reasoning.enabled=false 或
+	// reasoning_effort=none）。若不在此显式声明 none 能力，则：
+	//   ① validateReasoning 拒绝 effort="none"；② Normalize 把 none 降级为 default；
+	//   ③ applyReasoning 的 none 注入分支永远走不到 → thinking 吃光 max_tokens →
+	//      AI 研究「核心判断」拿到空 content 而失败。
+	var localMode = cfg.APIMode
+	if localMode == "" {
+		localMode = "chat_completions"
+	}
+	if localMode == "chat_completions" && isLocalReasoningHost(host) {
+		c := reasoningCapability("local_ollama", "openai_chat",
+			"本机 OpenAI 兼容端点（Ollama / LM Studio / vLLM 等）：默认模型自带思考，可在此显式关闭。",
+			"none", "none", "default")
+		c.EffectiveModel = cfg.Model
+		return c
+	}
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
 	mode := cfg.APIMode
 	if mode == "" {
@@ -365,8 +411,16 @@ func (r *HermesRuntime) applyReasoning(config map[string]any, cfg appsettings.LL
 			extra = map[string]any{}
 		}
 		delete(extra, "reasoning")
-		if c.Wire == "openai_responses" && effort == "none" {
-			extra["reasoning"] = map[string]any{"effort": "none"}
+		// Responses: OpenAI 规范；Chat Completions: Ollama / 兼容端点需要显式关闭 thinking，
+		// 否则 thinking 会吃光 max_tokens 导致 content 为空（AI 研究「核心判断」失败）。
+		// [ES_OLLAMA_LOCAL_REASONING_PATCH] openai_chat 覆盖本机 OpenAI 兼容端点；
+		// 这类端点（Ollama 0.35+ 实测）认 reasoning.enabled=false 与 reasoning_effort=none。
+		if effort == "none" && (c.Wire == "openai_responses" || c.Wire == "chat_completions" || c.Wire == "openai_chat") {
+			if c.Wire == "openai_responses" {
+				extra["reasoning"] = map[string]any{"effort": "none"}
+			} else {
+				extra["reasoning"] = map[string]any{"enabled": false, "effort": "none"}
+			}
 		}
 		if len(extra) > 0 {
 			provider["extra_body"] = extra

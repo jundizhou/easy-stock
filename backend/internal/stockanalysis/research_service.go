@@ -138,10 +138,19 @@ func (s *ResearchService) execute(ctx context.Context, key string, job ResearchJ
 		job.Stage = "cancelled"
 		job.Message = "研究已停止，保留已完成的数据"
 	} else if err != nil {
-		job.Status = "failed"
-		job.Stage = "failed"
-		job.Error = err.Error()
-		job.Message = "研究未完成，已保存可用数据"
+		// [ES_PARTIAL_CORE_SAVE_PATCH] §4：core 可用但交易段失败 → 受控部分成功。
+		// 不得标 succeeded（§4.3），也不得标 failed（那样等于把已校验的 core 说成失败）。
+		if partial, ok := isPartialResearch(err); ok {
+			job.Status = "partial"
+			job.Stage = "completed"
+			job.Message = "研究可用，交易计划未生成"
+			job.Error = partial.TradeErr.Error()
+		} else {
+			job.Status = "failed"
+			job.Stage = "failed"
+			job.Error = err.Error()
+			job.Message = "研究未完成，已保存可用数据"
+		}
 	} else if job.Request.AnalysisLevel == ResearchLevelQuantitative && analysis.Symbol != "" {
 		job.Status = "succeeded"
 		job.Stage = "completed"

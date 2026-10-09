@@ -16,6 +16,7 @@ import (
 
 	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/archive"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
@@ -26,15 +27,16 @@ import (
 	futurespositionprovider "easy-stock/backend/internal/providers/futuresposition"
 	"easy-stock/backend/internal/providers/hotstock"
 	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
-	"easy-stock/backend/internal/providers/sina"
-	"easy-stock/backend/internal/providers/tencent"
-	"easy-stock/backend/internal/providers/stockdb"
 	"easy-stock/backend/internal/providers/quant"
+	"easy-stock/backend/internal/providers/sina"
+	"easy-stock/backend/internal/providers/stockdb"
+	"easy-stock/backend/internal/providers/tencent"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/sector"
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
+	"easy-stock/backend/internal/strategy/shannon"
 )
 
 type Server struct {
@@ -55,9 +57,18 @@ type Server struct {
 	hotStockProvider      HotStockProvider
 	futuresPosition       FuturesPositionProvider
 	marketOverview        MarketOverviewProvider
-	stockDBProvider        *stockdb.Client
-	quantProvider          *quant.Client
+	stockDBProvider       *stockdb.Client
+	quantProvider         *quant.Client
+	realtimeArchiver      *archive.RealtimeArchiver
+	newsArchiver          *archive.NewsArchiver
+	archiveCollector      ArchiveCollectorConfig
+	archiveBaseDir        string
+	archiveMu             sync.Mutex
+	archiveActiveDir      string
+	realtimeProviderRaw   RealtimeProvider
+	newsProviderRaw       NewsProvider
 	inflection            InflectionEvaluator
+	shannonFeed           *shannon.Feed
 	themeSnapshots        *themeSnapshotCache
 	limitUpSnapshots      *limitUpLadderCache
 	limitUpProgress       *shortTermCache[limitUpLadderData]
@@ -100,10 +111,23 @@ func NewServer(config any) *Server {
 	eastMoneyClient := eastmoney.NewClient()
 	tencentClient := tencent.NewClient()
 	clsClient := cls.NewClient()
-	stockDBProvider := stockdb.NewClient(stockdb.WithBaseURL(os.Getenv("A_STOCK_STOCKDB_URL")))
+	stockDBProvider := stockdb.NewClient(
+		stockdb.WithBaseURL(os.Getenv("A_STOCK_STOCKDB_URL")),
+		stockdb.WithCache(30*time.Second),
+		// 多接口共用 / 负载均衡 / 故障转移（镜像 quant-stock 的多源抗封设计）：
+		// 本地 stockdb 7899 为主源；腾讯 fqkline 与东方财富 push2his 为远程备用源，
+		// 三者前复权口径一致。主源降级时远程源按健康 + 轮询分摊流量，任一失败自动
+		// 切换到下一个，从架构上消除「单接口被封被限制」的单点风险。
+		stockdb.WithDailySource(
+			stockdb.NewTencentDailySource(""),
+			stockdb.NewEastmoneyDailySource(""),
+		),
+	)
 	quantProvider := quant.NewClient(quant.WithBaseURL(os.Getenv("A_STOCK_QUANT_URL")))
 	if cfg.Realtime == nil {
-		cfg.Realtime = sinaClient
+		// 多源抗封：sina（主）+ tencent（备）。腾讯 qt.gtimg 实时报价作为
+		// sina 的互补第二源，sina 被封/被限流时自动切换并保持 30s 冷却。
+		cfg.Realtime = NewMultiRealtime(sinaClient, tencentClient)
 	}
 	if cfg.KLinePrimary == nil {
 		cfg.KLinePrimary = eastMoneyClient
@@ -112,7 +136,9 @@ func NewServer(config any) *Server {
 		cfg.KLineFallback = sinaClient
 	}
 	if cfg.News == nil {
-		cfg.News = clsClient
+		// 多源抗封：cls 财联社快讯（主）+ eastmoney 公告（备）。
+		// 公告与快讯互补，单源被封时由另一源顶上。
+		cfg.News = NewMultiNews(clsClient, eastMoneyClient)
 	}
 	var kaipanlaService *duanxianxia.Service
 	if strings.TrimSpace(cfg.ThemeRadarDBPath) != "" {
@@ -287,6 +313,29 @@ func NewServer(config any) *Server {
 			Client:  cfg.ReviewHTTP,
 		})
 	}
+	// 实时报价/资讯落盘：成功拉取后归档到本地单一专用文件夹（默认 <dataDir>/data-archive）。
+	// 落盘失败只记录不阻断主流程。
+	var realtimeArchiver *archive.RealtimeArchiver
+	var newsArchiver *archive.NewsArchiver
+	// 记录归档器包装前的原始 provider，供运行时目录热切换（rebindArchivers）复用。
+	realtimeProviderRaw := cfg.Realtime
+	newsProviderRaw := cfg.News
+	if strings.TrimSpace(cfg.ArchiveDir) != "" && cfg.Realtime != nil {
+		if ar, err := archive.NewRealtimeArchiver(cfg.Realtime, cfg.ArchiveDir, archive.Options{}); err == nil {
+			realtimeArchiver = ar
+			cfg.Realtime = ar
+		} else if cfg.Logger != nil {
+			cfg.Logger.Printf("level=warn event=archive_init kind=realtime err=%q", err.Error())
+		}
+	}
+	if strings.TrimSpace(cfg.ArchiveDir) != "" && cfg.News != nil {
+		if ar, err := archive.NewNewsArchiver(cfg.News, cfg.ArchiveDir, archive.Options{}); err == nil {
+			newsArchiver = ar
+			cfg.News = ar
+		} else if cfg.Logger != nil {
+			cfg.Logger.Printf("level=warn event=archive_init kind=news err=%q", err.Error())
+		}
+	}
 	s := &Server{
 		mux:                   http.NewServeMux(),
 		token:                 cfg.Token,
@@ -306,7 +355,14 @@ func NewServer(config any) *Server {
 		marketOverview:        cfg.MarketOverview,
 		stockDBProvider:       stockDBProvider,
 		quantProvider:         quantProvider,
+		realtimeArchiver:      realtimeArchiver,
+		newsArchiver:          newsArchiver,
+		archiveCollector:      cfg.ArchiveCollector,
+		archiveBaseDir:        cfg.ArchiveDir,
+		realtimeProviderRaw:   realtimeProviderRaw,
+		newsProviderRaw:       newsProviderRaw,
 		inflection:            cfg.Inflection,
+		shannonFeed:           shannon.NewFeed(stockDBProvider),
 		themeSnapshots:        newThemeSnapshotCache(30 * time.Second),
 		themeProgress:         newThemeProgressCache(),
 		limitUpSnapshots:      newLimitUpLadderCache(30 * time.Second),
@@ -502,6 +558,10 @@ func (s *Server) refreshMasterySnapshot(ctx context.Context, force bool) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.health)
 	s.mux.HandleFunc("GET /api/v1/sources", s.sources)
+	s.mux.HandleFunc("GET /api/v1/archive/status", s.archiveStatus)
+	s.mux.HandleFunc("POST /api/v1/archive/collect", s.archiveCollectNow)
+	s.mux.HandleFunc("GET /api/v1/archive/config", s.archiveConfigGet)
+	s.mux.HandleFunc("PUT /api/v1/archive/config", s.archiveConfigUpdate)
 	s.mux.HandleFunc("GET /api/v1/quotes/realtime", s.realtime)
 	s.mux.HandleFunc("GET /api/v1/quotes/kline", s.kline)
 	s.mux.HandleFunc("GET /api/v1/quotes/kline/batch", s.klineBatch)
@@ -602,6 +662,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/settings/llm/test", s.settingsLLMTest)
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)
+	s.mux.HandleFunc("POST /api/v1/strategy/shannon/scan", s.shannonScan)
+	s.mux.HandleFunc("POST /api/v1/strategy/shannon/analyze", s.shannonAnalyze)
+	s.mux.HandleFunc("GET /api/v1/strategy/shannon/boards", s.shannonBoards)
 	s.mux.HandleFunc("GET /api/v1/ws/stream", s.stream)
 }
 
@@ -614,17 +677,68 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
+	sources := []foundation.SourceHealth{
+		{ID: "duanxianxia", Name: "短线侠 / 开盘啦", Category: "theme,leaders,limit-up,concept", OK: true, CheckedAt: time.Now()},
+		{ID: "eastmoney", Name: "东方财富", Category: "quote,kline,f10,report,news", OK: true, CheckedAt: time.Now()},
+		{ID: "sina", Name: "新浪财经", Category: "quote,kline,money-flow", OK: true, CheckedAt: time.Now()},
+		{ID: "tencent", Name: "腾讯财经", Category: "quote,index,hk", OK: true, CheckedAt: time.Now()},
+		{ID: "cls", Name: "财联社", Category: "news,calendar", OK: true, CheckedAt: time.Now()},
+		{ID: "tradingview", Name: "TradingView", Category: "news", OK: true, CheckedAt: time.Now()},
+		{ID: "tushare", Name: "Tushare", Category: "basic,daily,index", OK: false, Message: "requires token", CheckedAt: time.Now()},
+	}
+	// 暴露实时报价 / 资讯多源子源的健康（抗封冷却状态）
+	if mr, ok := s.realtimeProvider.(*multiRealtime); ok {
+		sources = append(sources, mr.Statuses()...)
+	}
+	if mn, ok := s.newsProvider.(*multiNews); ok {
+		sources = append(sources, mn.Statuses()...)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"sources": []foundation.SourceHealth{
-			{ID: "duanxianxia", Name: "短线侠 / 开盘啦", Category: "theme,leaders,limit-up,concept", OK: true, CheckedAt: time.Now()},
-			{ID: "eastmoney", Name: "东方财富", Category: "quote,kline,f10,report", OK: true, CheckedAt: time.Now()},
-			{ID: "sina", Name: "新浪财经", Category: "quote,kline,money-flow", OK: true, CheckedAt: time.Now()},
-			{ID: "tencent", Name: "腾讯财经", Category: "quote,index,hk", OK: true, CheckedAt: time.Now()},
-			{ID: "cls", Name: "财联社", Category: "news,calendar", OK: true, CheckedAt: time.Now()},
-			{ID: "tradingview", Name: "TradingView", Category: "news", OK: true, CheckedAt: time.Now()},
-			{ID: "tushare", Name: "Tushare", Category: "basic,daily,index", OK: false, Message: "requires token", CheckedAt: time.Now()},
-		},
+		"sources": sources,
 	})
+}
+
+// archiveStatus 暴露实时报价/资讯的本地归档目录、文件数、累计行数与最近写入时间。
+//
+//	GET /api/v1/archive/status
+func (s *Server) archiveStatus(w http.ResponseWriter, r *http.Request) {
+	payload := map[string]any{"enabled": s.realtimeArchiver != nil || s.newsArchiver != nil}
+	if s.realtimeArchiver != nil {
+		payload["realtime"] = s.realtimeArchiver.Report()
+	}
+	if s.newsArchiver != nil {
+		payload["news"] = s.newsArchiver.Report()
+	}
+	cfg := s.archiveCollector
+	payload["collector"] = map[string]any{
+		"interval_seconds": int(cfg.Interval.Seconds()),
+		"symbols":          cfg.Symbols,
+		"symbol_count":     len(cfg.Symbols),
+		"news_limit":       cfg.NewsLimit,
+		"trading_only":     cfg.TradingOnly,
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// archiveCollectNow 手动触发一次采集（忽略交易时段限制），用于即时验证/补采。
+//
+//	POST /api/v1/archive/collect
+func (s *Server) archiveCollectNow(w http.ResponseWriter, r *http.Request) {
+	if s.realtimeArchiver == nil && s.newsArchiver == nil {
+		writeError(w, http.StatusServiceUnavailable, "archive is not enabled")
+		return
+	}
+	cfg := s.archiveCollector
+	cfg.TradingOnly = false // 手动触发强制采集
+	s.collectOnce(r.Context(), cfg)
+	payload := map[string]any{"ok": true}
+	if s.realtimeArchiver != nil {
+		payload["realtime"] = s.realtimeArchiver.Report()
+	}
+	if s.newsArchiver != nil {
+		payload["news"] = s.newsArchiver.Report()
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
@@ -873,6 +987,59 @@ func (s *Server) inflectionEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+func (s *Server) shannonScan(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request shannon.ScanRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid shannon scan request: "+err.Error())
+		return
+	}
+	ctx := r.Context()
+	resp, err := s.shannonFeed.Scan(ctx, request, shannon.DefaultConfig())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
+func (s *Server) shannonAnalyze(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request struct {
+		Code   string  `json:"code"`
+		Equity float64 `json:"equity"`
+	}
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid shannon analyze request: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(request.Code) == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+	ctx := r.Context()
+	result, msg := s.shannonFeed.ScanOne(ctx, strings.TrimSpace(request.Code), shannon.DefaultConfig(), request.Equity)
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+func (s *Server) shannonBoards(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	boards, err := s.shannonFeed.ListBoards(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": boards})
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {

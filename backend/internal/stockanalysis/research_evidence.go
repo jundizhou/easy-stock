@@ -40,6 +40,9 @@ type researchEvidencePack struct {
 	Anchors     []PriceAnchor          `json:"anchors,omitempty"`
 	Baseline    *Scorecard             `json:"rule_baseline,omitempty"`
 	Stats       researchPromptStats    `json:"stats"`
+	// [ES_EVIDENCE_CONTRACT_PATCH] 本次运行实际可引用的来源编号（运行时派生，
+	// 不落盘：json:"-" 保持既有持久化结构不变）。
+	allowedSourceIDs []string `json:"-"`
 }
 
 type researchPromptStats struct {
@@ -123,6 +126,9 @@ func buildResearchEvidencePack(snapshot ResearchSnapshot, request ResearchReques
 		pack.Baseline = &baseline
 	}
 	_ = request
+	// [ES_EVIDENCE_CONTRACT_PATCH] 由**本次运行实际证据**派生白名单，
+	// 供 prompt 与后端校验共享（禁止写死档案里的固定编号）。
+	pack.allowedSourceIDs = researchAllowedSources(snapshot, pack)
 	return pack
 }
 
@@ -167,11 +173,14 @@ func buildResearchTradeEvidencePack(snapshot ResearchSnapshot, request ResearchR
 		selectedBytes += len([]byte(card.Text))
 		announcementCount++
 	}
-	return researchEvidencePack{
+	tradePack := researchEvidencePack{
 		Version: ResearchCompressionVersion, Phase: researchPromptSynthesis, Symbol: full.Symbol, Name: full.Name,
 		CutoffAt: full.CutoffAt, Evidence: selected, Limitations: uniqueStrings(full.Limitations, policy.MaxLimitations), Anchors: limitResearchAnchors(full.Anchors, policy.MaxAnchors),
 		Baseline: full.Baseline, Stats: researchPromptStats{OriginalSourceCount: full.Stats.OriginalSourceCount, SelectedSourceCount: len(selected), OriginalContentBytes: full.Stats.OriginalContentBytes, SelectedContentBytes: selectedBytes},
 	}
+	// 白名单必须按**实际送出的卡片**重算，不能沿用未裁剪的全集。
+	tradePack.allowedSourceIDs = researchAllowedSources(snapshot, tradePack)
+	return tradePack
 }
 
 func compactResearchCardForTrade(card researchEvidenceCard) researchEvidenceCard {
@@ -230,11 +239,14 @@ func buildResearchCoreEvidencePack(snapshot ResearchSnapshot, request ResearchRe
 	for _, card := range full.Evidence {
 		add(card)
 	}
-	return researchEvidencePack{
+	corePack := researchEvidencePack{
 		Version: ResearchCompressionVersion, Phase: researchPromptSynthesis, Symbol: full.Symbol, Name: full.Name,
 		CutoffAt: full.CutoffAt, Evidence: selected, Limitations: uniqueStrings(full.Limitations, policy.MaxLimitations), Anchors: limitResearchAnchors(full.Anchors, policy.MaxAnchors),
 		Baseline: full.Baseline, Stats: researchPromptStats{OriginalSourceCount: full.Stats.OriginalSourceCount, SelectedSourceCount: len(selected), OriginalContentBytes: full.Stats.OriginalContentBytes, SelectedContentBytes: selectedBytes},
 	}
+	// 白名单必须按**实际送出的卡片**重算，不能沿用未裁剪的全集。
+	corePack.allowedSourceIDs = researchAllowedSources(snapshot, corePack)
+	return corePack
 }
 
 func compressResearchSource(source ResearchSource, queries []string, phase researchPromptPhase, policy researchLevelPolicy) researchEvidenceCard {
