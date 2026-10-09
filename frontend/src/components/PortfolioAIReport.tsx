@@ -13,19 +13,19 @@ export function PortfolioAIReportView({ report, onNew, onOpenStockAnalysis, onRe
  const reused = report.holdings.filter((r) => r.research_origin === 'reused').length;
  const fresh = report.holdings.filter((r) => r.research_origin === 'new').length;
  const names = new Map(report.holdings.map((r) => [r.holding.symbol, r.holding.name || r.analysis?.name || r.holding.symbol]));
- const score = ai.score_available && typeof ai.total_score === 'number' ? ai.total_score : '待完成';
+ const score = ai.score_available && typeof ai.total_score === 'number' && Number.isFinite(ai.total_score) ? ai.total_score : undefined;
  const stopCoverage = metrics.stop_loss_coverage_percent ?? 0;
  return <div className="portfolio-report stock-research-report portfolio-ai-report">
   <header className={`stock-ai-verdict portfolio-report-verdict ${ai.risk_level.includes('高') || ai.risk_level === '中' ? 'risk' : 'strong'}`}>
-   <div className="stock-ai-identity"><span>持仓 AI 分析</span><h2>{report.profile.label}型组合</h2><small>{portfolioDate(report.generated_at)} · {horizonLabel(report.request?.horizon)}</small></div>
-   <div className="stock-ai-conclusion"><div className="stock-ai-tags"><span>{ai.risk_level === '待评估' ? '风险待评估' : `${ai.risk_level}风险`}</span><span>AI 研究 {successful}/{report.holdings.length} 只 · {coverage}% 持仓</span><span>复用 {reused} 份 · 新研究 {fresh} 份</span></div><h3>{report.algorithm_version === portfolioScoringVersion ? '股票组合健康度' : '组合综合评分'} <strong>{score}{typeof score === 'number' && <small> / 100</small>}</strong></h3><p>{ai.executive_summary}</p><small>风险判断：{ai.risk_reason || '组合评估尚未完成'}</small></div>
+   <div className="stock-ai-identity"><span>持仓 AI 分析</span><h2>{report.profile.label}型组合</h2><div className={`portfolio-total-score${score === undefined ? ' pending' : ''}`} role="group" aria-label="本次持仓分析综合评分"><span>巡检综合评分</span><strong>{score ?? '待完成'}{score !== undefined && <small>/ 100</small>}</strong></div><small>{portfolioDate(report.generated_at)} · {horizonLabel(report.request?.horizon)}</small></div>
+   <div className="stock-ai-conclusion"><div className="stock-ai-tags"><span>{ai.risk_level === '待评估' ? '风险待评估' : `${ai.risk_level}风险`}</span><span>AI 研究 {successful}/{report.holdings.length} 只 · {coverage}% 持仓</span><span>复用 {reused} 份 · 新研究 {fresh} 份</span></div><h3>组合结论</h3><p>{ai.executive_summary}</p><small>风险判断：{ai.risk_reason || '组合评估尚未完成'}</small></div>
    <div className="stock-ai-verdict-actions">{onOptimize && <button type="button" className="primary" disabled={busy} onClick={onOptimize}><BrainCircuit size={15} />AI 优化持仓</button>}<button type="button" className="primary" disabled={busy} onClick={onNew}><Plus size={15} />新建分析</button></div>
   </header>
-  {afterSummary}
   {ai.score_available && <p className="portfolio-scoring-scope">{report.algorithm_version === portfolioScoringVersion ? '评分仅评价股票组合：总仓位、满仓和现金比例不加扣分；集中度按股票内部配比评价。60分基本可用，70分整体合理，80分较好。' : '此报告使用历史评分口径；重新评估后采用不计总仓位和现金比例的新口径。'}</p>}
   {ai.score_available && <section className="stock-ai-kpis portfolio-score-dimensions" aria-label="组合 AI 四维评分">
    {(ai.dimensions || []).map((d, i) => <article key={d.key} className={`stock-ai-kpi ${['blue', 'purple', 'amber', 'green'][i]}`}><div>{i === 0 ? <HeartPulse size={17} /> : i === 1 ? <Scale size={17} /> : i === 2 ? <ShieldCheck size={17} /> : <Activity size={17} />}{d.label}</div><strong>{d.score}</strong><small>权重 {d.weight}%</small><p>{d.reason}</p><details><summary>评分依据与来源</summary>{(d.adjustments || []).map((a, i) => <p key={i}><b>{a.points > 0 ? '+' : ''}{a.points} · </b>{a.reason}</p>)}{(d.limitations || []).map((l, i) => <div className="portfolio-evidence-limitation" key={i}><p>{l}</p><ExplanationEvidence report={report} path={`dimensions.${d.key}.limitations[${i}]`} /></div>)}<PortfolioEvidence refs={d.evidence_refs || []} report={report} /></details></article>)}
   </section>}
+  {afterSummary}
   <div className="portfolio-report-grid">
    <ResearchPanel label="优先处理" title="处理顺序" icon={ListChecks}><ReportList report={report} field="adjustment_order" items={ai.adjustment_order || []} empty="组合评估完成后生成处理顺序" ordered /></ResearchPanel>
    <ResearchPanel label="风险识别" title="主要风险" icon={CircleAlert} className="stock-research-counter"><ReportList report={report} field="primary_risks" items={ai.primary_risks || []} empty={ai.score_available ? '没有识别到突出风险' : '组合评估尚未完成'} /></ResearchPanel>

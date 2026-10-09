@@ -15,17 +15,33 @@ const markup = (value = report) => renderToStaticMarkup(<PortfolioAIReportView r
 describe('portfolio AI report', () => {
  it('labels the stock-only score and preserves historical scoring scope', () => {
   const current = markup({ ...report, algorithm_version: portfolioScoringVersion });
-  expect(current).toContain('股票组合健康度');
+  expect(current).toContain('本次持仓分析综合评分');
+  expect(current).toContain('<span>巡检综合评分</span><strong>71<small>/ 100</small>');
   expect(current).toContain('总仓位、满仓和现金比例不加扣分');
   expect(current).toContain('70分整体合理');
   expect(markup()).toContain('此报告使用历史评分口径');
   expect(markup()).not.toContain('总仓位、满仓和现金比例不加扣分');
  });
  it('shows complete AI scores without requiring static stops and separates scope', () => {
-  const text = markup(); expect(text).toContain('组合综合评分'); expect(text).toContain('71'); expect(text).toContain('未设置有效静态止损方案'); expect(text).toContain('复用成功报告'); expect(text).toContain('原研究周期'); expect(text).toContain('成本未填写'); expect(text).not.toContain('覆盖不足，暂不评分');
+  const text = markup(); expect(text).toContain('综合评分'); expect(text).toContain('71'); expect(text).toContain('未设置有效静态止损方案'); expect(text).toContain('复用成功报告'); expect(text).toContain('原研究周期'); expect(text).toContain('成本未填写'); expect(text).not.toContain('覆盖不足，暂不评分');
  });
  it('does not present incomplete output as a zero score', () => {
   const value = { ...report, conclusion: { ...report.conclusion, total_score: undefined, score_available: false } }; const text = markup(value); expect(text).toContain('待完成'); expect(text).not.toContain('组合 AI 四维评分');
+ });
+ it('shows the completed inspection score and dimensions before optimization', () => {
+  const text = renderToStaticMarkup(<PortfolioAIReportView report={{ ...report, algorithm_version: portfolioScoringVersion, conclusion: { ...report.conclusion, total_score: 66 } }} afterSummary={<section>优化模块</section>} onNew={() => {}} onRefresh={() => {}} onOpenStockAnalysis={() => {}} />);
+  expect(text).toContain('<span>巡检综合评分</span><strong>66<small>/ 100</small>');
+  expect(text.indexOf('本次持仓分析综合评分')).toBeLessThan(text.indexOf('优化模块'));
+  expect(text.indexOf('组合 AI 四维评分')).toBeLessThan(text.indexOf('优化模块'));
+ });
+ it('preserves a valid zero and never substitutes a stale or invalid total', () => {
+  const complete = markup({ ...report, conclusion: { ...report.conclusion, total_score: 0 } });
+  expect(complete).toContain('<strong>0<small>/ 100</small>');
+  for (const conclusion of [{ ...report.conclusion, score_available: false }, { ...report.conclusion, total_score: Number.NaN }]) {
+   const text = markup({ ...report, conclusion });
+   expect(text).toContain('<strong>待完成</strong>');
+   expect(text).not.toContain('<small>/ 100</small>');
+  }
  });
  it('does not present unset timestamps as real report dates', () => { expect(portfolioDate('0001-01-01T00:00:00Z')).toBe('时间未知'); });
  it('shows retained evidence for normalized explanation objects and dimension limitations', () => {

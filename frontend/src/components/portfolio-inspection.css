@@ -127,8 +127,11 @@
 .portfolio-score-dimensions .stock-ai-kpi p { font-size:13px; line-height:1.7; color:var(--muted); }
 .portfolio-score-dimensions details { border-top:1px solid var(--line); padding-top:10px; margin-top:12px; }
 .portfolio-score-dimensions summary, .portfolio-research-baseline > summary { cursor:pointer; font-weight:600; font-size:13px; }
-.portfolio-ai-report .stock-ai-conclusion h3 strong { color:var(--theme-blue, #2476d2); margin-left:8px; }
-.portfolio-ai-report .stock-ai-conclusion h3 small { font-size:13px; color:var(--muted); }
+.portfolio-total-score { display:grid; gap:4px; margin:12px 0; }
+.portfolio-total-score > span { color:var(--muted); font-size:13px; }
+.portfolio-total-score > strong { display:flex; align-items:baseline; gap:6px; color:var(--theme-blue, #2476d2); font-size:40px; font-variant-numeric:tabular-nums; line-height:1.15; }
+.portfolio-total-score > strong > small { color:var(--muted); font-size:13px; font-weight:400; }
+.portfolio-total-score.pending > strong { color:var(--muted); font-size:24px; }
 .portfolio-evidence details { margin-top:8px; padding:8px 10px; border-radius:8px; background:var(--surface-2); }
 .portfolio-evidence summary { cursor:pointer; font-size:12px; color:var(--muted); }
 .portfolio-evidence p { white-space:pre-wrap; overflow-wrap:anywhere; max-height:250px; overflow:auto; font-size:12px; }

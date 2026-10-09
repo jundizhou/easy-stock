@@ -6,7 +6,7 @@ export const portfolioOptimizationPromptVersion = 'portfolio-optimization-prompt
 export const targetPortfolioOptimizationScore = 70;
 export const minimumPortfolioOptimizationScore = 65;
 
-function verifiedOptimizationScore(conclusion?: PortfolioInspectionReport['conclusion']): number | undefined {
+export function verifiedOptimizationScore(conclusion?: PortfolioInspectionReport['conclusion']): number | undefined {
  if (!conclusion?.score_available || typeof conclusion.total_score !== 'number' || conclusion.dimensions?.length!==4) return undefined;
  const weights: Record<string,number>={holding_logic:35,portfolio_structure:25,risk_capacity:25,strategy_fit:15};
  const seen=new Set<string>();let total=0;
