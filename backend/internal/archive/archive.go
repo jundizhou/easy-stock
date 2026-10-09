@@ -31,6 +31,25 @@ type Writer[T any] struct {
 	written   int64
 	lastWrite time.Time
 	lastError string
+
+	// [ES_ARCHIVE_DEDUP] 跨周期去重：数据源只提供滚动窗口（如财联社 ~20 条），
+	// 逐周期拉取会反复落盘同一批记录。这里按 key 记住「今天已写过的」，
+	// 只追加新增，避免存档被重复行稀释（实测 44 行里仅 33 条唯一）。
+	keyOf   func(T) string     // nil 表示不去重
+	seen    map[string]struct{} // 当日已写 key
+	seenDay string              // seen 对应的日期，跨日自动重置
+	skipped int64               // 累计被去重跳过的条数
+}
+
+// WithKey 启用按 key 跨周期去重。key 为空字符串的记录会被跳过。
+func (w *Writer[T]) WithKey(keyOf func(T) string) *Writer[T] {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.keyOf = keyOf
+	if w.seen == nil {
+		w.seen = make(map[string]struct{})
+	}
+	return w
 }
 
 // New 创建某个类别的归档写入器（如 name="realtime"）。
@@ -49,6 +68,28 @@ func New[T any](root string, name string) (*Writer[T], error) {
 	}, nil
 }
 
+// admitLocked 判断一条记录是否应写入（去重）。返回 false 表示跳过。
+// 调用方必须已持有 w.mu。跨日自动重置 seen。
+func (w *Writer[T]) admitLocked(record T, day string) bool {
+	if w.keyOf == nil {
+		return true
+	}
+	if w.seenDay != day {
+		w.seen = make(map[string]struct{})
+		w.seenDay = day
+	}
+	key := w.keyOf(record)
+	if key == "" {
+		return false
+	}
+	if _, ok := w.seen[key]; ok {
+		w.skipped++
+		return false
+	}
+	w.seen[key] = struct{}{}
+	return true
+}
+
 // Dir 返回该类别归档目录。
 func (w *Writer[T]) Dir() string { return w.dir }
 
@@ -65,7 +106,13 @@ func (w *Writer[T]) Append(record T) (time.Time, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	daily := filepath.Join(w.dir, now.Format("2006-01-02")+".jsonl")
+	day := now.Format("2006-01-02")
+	// [ES_ARCHIVE_DEDUP] 跨周期去重：同一批滚动资讯不重复落盘。
+	if !w.admitLocked(record, day) {
+		return now, nil
+	}
+
+	daily := filepath.Join(w.dir, day+".jsonl")
 	f, err := os.OpenFile(daily, os.O_CREATE|os.O_WRONLY|os.O_APPEND, w.fileMode)
 	if err != nil {
 		w.recordErrorLocked(err)
@@ -94,14 +141,34 @@ func (w *Writer[T]) Append(record T) (time.Time, error) {
 }
 
 // AppendBatch 追加一批记录（每行一条），并刷新 latest.json 为整批数组。
+// 启用去重时，整批中「今日已写过」或「批内重复」的记录会被跳过。
 func (w *Writer[T]) AppendBatch(records []T) (int, error) {
 	if len(records) == 0 {
 		return 0, nil
 	}
 	now := time.Now()
+	day := now.Format("2006-01-02")
 
-	lines := make([][]byte, 0, len(records))
-	for _, r := range records {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// [ES_ARCHIVE_DEDUP] 先过滤，再序列化，避免为重复记录做无谓 marshal。
+	kept := records
+	if w.keyOf != nil {
+		kept = make([]T, 0, len(records))
+		for _, r := range records {
+			if w.admitLocked(r, day) {
+				kept = append(kept, r)
+			}
+		}
+		if len(kept) == 0 {
+			w.lastWrite = now
+			return 0, nil
+		}
+	}
+
+	lines := make([][]byte, 0, len(kept))
+	for _, r := range kept {
 		line, err := json.Marshal(r)
 		if err != nil {
 			w.recordError(err)
@@ -110,10 +177,7 @@ func (w *Writer[T]) AppendBatch(records []T) (int, error) {
 		lines = append(lines, line)
 	}
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	daily := filepath.Join(w.dir, now.Format("2006-01-02")+".jsonl")
+	daily := filepath.Join(w.dir, day+".jsonl")
 	f, err := os.OpenFile(daily, os.O_CREATE|os.O_WRONLY|os.O_APPEND, w.fileMode)
 	if err != nil {
 		w.recordErrorLocked(err)
@@ -132,16 +196,16 @@ func (w *Writer[T]) AppendBatch(records []T) (int, error) {
 	}
 
 	// latest.json 用整批数组（便于阅读"最近一次长什么样"）
-	batch, err := json.MarshalIndent(records, "", "  ")
+	batch, err := json.MarshalIndent(kept, "", "  ")
 	if err == nil {
 		if err := writeAtomic(w.latest, batch, w.fileMode); err != nil {
 			w.recordErrorLocked(err)
 		}
 	}
 
-	w.written += int64(len(records))
+	w.written += int64(len(kept))
 	w.lastWrite = now
-	return len(records), nil
+	return len(kept), nil
 }
 
 // Status 返回归档状态快照。
@@ -151,13 +215,15 @@ type Status struct {
 	Lines     int64     `json:"lines"`
 	LastWrite time.Time `json:"last_write,omitempty"`
 	LastError string    `json:"last_error,omitempty"`
+	// [ES_ARCHIVE_DEDUP] 本次进程内被去重跳过的累计条数，便于观察「重复率」。
+	Skipped int64 `json:"skipped,omitempty"`
 }
 
 // Report 汇总目录内文件数与总行数。
 func (w *Writer[T]) Report() Status {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	st := Status{Dir: w.dir, LastWrite: w.lastWrite, LastError: w.lastError}
+	st := Status{Dir: w.dir, LastWrite: w.lastWrite, LastError: w.lastError, Skipped: w.skipped}
 	entries, err := os.ReadDir(w.dir)
 	if err != nil {
 		return st

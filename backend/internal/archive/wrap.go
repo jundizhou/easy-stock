@@ -2,6 +2,8 @@ package archive
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
 	"easy-stock/backend/internal/foundation"
@@ -13,6 +15,34 @@ type Record[T any] struct {
 	Kind       string    `json:"kind"` // "realtime" | "news"
 	Source     string    `json:"source,omitempty"`
 	Payload    T         `json:"payload"`
+}
+
+// realtimeKey 实时报价去重键：同一标的同一次成交时间只存一份。
+// 盘中价格会变动，所以带上 TradeTime；盘后重复拉取同一快照会被去重。
+func realtimeKey(r Record[foundation.Quote]) string {
+	q := r.Payload
+	if q.Symbol == "" {
+		return ""
+	}
+	if q.TradeTime.IsZero() {
+		// 无成交时间（盘后/停牌）时退化为「标的+价格」，价格未变即视为重复。
+		return q.Symbol + "|" + strconv.FormatFloat(q.Price, 'f', 4, 64)
+	}
+	return q.Symbol + "|" + q.TradeTime.Format(time.RFC3339)
+}
+
+// newsKey 资讯去重键：优先用源 ID，缺 ID 时退化为标题。
+// 财联社等源只提供滚动窗口，逐周期拉取会反复命中同一批，靠此去重。
+func newsKey(r Record[foundation.NewsItem]) string {
+	it := r.Payload
+	if it.ID != "" {
+		return "id:" + it.ID
+	}
+	title := strings.TrimSpace(it.Title)
+	if title == "" {
+		return ""
+	}
+	return "title:" + title
 }
 
 // RealtimeProvider 与 httpapi.RealtimeProvider 签名一致。
@@ -37,6 +67,8 @@ func NewRealtimeArchiver(inner RealtimeProvider, root string, opts Options) (*Re
 	if err != nil {
 		return nil, err
 	}
+	// [ES_ARCHIVE_DEDUP] 启用跨周期去重。
+	wr.WithKey(realtimeKey)
 	return &RealtimeArchiver{inner: inner, opts: opts, wr: wr}, nil
 }
 
@@ -83,6 +115,8 @@ func NewNewsArchiver(inner NewsProvider, root string, opts Options) (*NewsArchiv
 	if err != nil {
 		return nil, err
 	}
+	// [ES_ARCHIVE_DEDUP] 启用跨周期去重：滚动窗口重复拉取不再重复落盘。
+	wr.WithKey(newsKey)
 	return &NewsArchiver{inner: inner, opts: opts, wr: wr}, nil
 }
 
