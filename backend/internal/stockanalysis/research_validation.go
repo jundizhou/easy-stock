@@ -40,6 +40,7 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 			claim.Kind = "inference"
 		}
 		quoteMatches := claim.Quote == ""
+		hasFactualSource := false
 		for _, id := range claim.SourceIDs {
 			source, ok := sources[id]
 			if !ok {
@@ -48,10 +49,13 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 			if claim.Quote != "" && strings.Contains(source.Content, claim.Quote) {
 				quoteMatches = true
 			}
-			if claim.Kind == "fact" && (source.Kind == "opinion" || source.Kind == "methodology" || source.Kind == "news") {
-				claim.Kind = "inference"
-				notes = append(notes, "第三方观点或新闻解释已降为研究推断")
-			}
+			hasFactualSource = hasFactualSource || researchSourceCanSupportFact(source)
+		}
+		// A secondary opinion must not erase a fact also supported by a usable
+		// disclosure or report. Classification is independent of citation order.
+		if claim.Kind == "fact" && !hasFactualSource {
+			claim.Kind = "inference"
+			notes = append(notes, "仅有观点、标题或出处不完整的材料，事实陈述按待核实推断处理")
 		}
 		if !quoteMatches {
 			return fmt.Errorf("引文未匹配原文：%s", claim.Quote)
@@ -95,25 +99,23 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		result.EvidenceLevel = "limited"
 		result.EvidenceReasons = append(result.EvidenceReasons, "模型未返回有效的证据充分度，暂按有限处理")
 	}
-	if len(result.Support) < 2 {
+	if len(result.Support) == 0 {
 		result.EvidenceLevel = "insufficient"
-		result.EvidenceReasons = append(result.EvidenceReasons, "有效支持依据少于2条，尚不足以支撑核心判断")
+		result.EvidenceReasons = append(result.EvidenceReasons, "没有有效支持依据，尚不足以支撑核心判断")
 	}
 	if result.EvidenceLevel == "sufficient" {
-		// Financial disclosures and reproducible price calculations can support
-		// their own scoped judgments without an unrelated announcement. News
-		// summaries and title-only announcements cannot establish a core thesis.
-		primary := researchClaimHasPrimaryEvidence(result.Thesis, sources)
-		directSupport := 0
+		// Check evidence availability, not an arbitrary two-claim quota. The
+		// model assesses whether the content supports this scoped judgment;
+		// traceable reporting is not automatically a verified company disclosure.
+		usableThesis := researchClaimHasUsableEvidence(result.Thesis, sources)
+		usableSupport := false
 		for _, claim := range result.Support {
-			if researchClaimHasPrimaryEvidence(claim, sources) {
-				directSupport++
-			}
+			usableSupport = usableSupport || researchClaimHasUsableEvidence(claim, sources)
 		}
-		if !primary || directSupport < 2 {
+		if !usableThesis || !usableSupport {
 			result.EvidenceLevel = "limited"
-			result.EvidenceReasons = append(result.EvidenceReasons, "核心判断或支持依据仅依赖第三方摘要、观点或公告标题，直接披露或可复算的数据依据不足")
-			notes = append(notes, "核心判断缺少直接证据，证据充分度按有限处理")
+			result.EvidenceReasons = append(result.EvidenceReasons, "核心判断或支持依据仅有观点、标题或出处不完整的第三方摘要，缺少可检查的事实内容")
+			notes = append(notes, "核心判断存在具体来源缺口，证据充分度按有限处理；不代表相关消息为假")
 		}
 		coreSourceIDs := append([]string{}, result.Thesis.SourceIDs...)
 		for _, claim := range result.Support {
@@ -303,10 +305,17 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 	return uniqueStrings(notes, 12), nil
 }
 
-func researchClaimHasPrimaryEvidence(claim ResearchClaim, sources map[string]ResearchSource) bool {
+func researchSourceCanSupportFact(s ResearchSource) bool {
+	return s.Kind == "disclosure" || s.Kind == "company_profile" || s.Kind == "calculation" ||
+		(s.Kind == "announcement" && ResearchSourceHasBody(s)) || researchNewsTraceable(s)
+}
+
+func researchClaimHasUsableEvidence(claim ResearchClaim, sources map[string]ResearchSource) bool {
+	if claim.Kind == "opinion" {
+		return false
+	}
 	for _, id := range claim.SourceIDs {
-		s := sources[id]
-		if s.Kind == "disclosure" || s.Kind == "company_profile" || s.Kind == "calculation" || (s.Kind == "announcement" && ResearchSourceHasBody(s)) {
+		if researchSourceCanSupportFact(sources[id]) {
 			return true
 		}
 	}

@@ -113,7 +113,7 @@ func TestRepairReservesSpaceAndCannotBypassInputLimit(t *testing.T) {
 		outputBytes int
 		wantCalls   int
 		wantSuccess bool
-	}{{"fits_reserved_space", 6000, 2, true}, {"observed_response_fits_repair", 9941, 2, true}, {"oversized_repair_is_blocked", 11000, 1, false}} {
+	}{{"fits_reserved_space", 6000, 2, true}, {"observed_response_fits_repair", 9941, 2, true}, {"oversized_repair_is_blocked", MaxModelPromptBytes - MaxEvidenceModelPromptBytes + 1, 1, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &testGateway{}
 			s, _, _ := setupService(t, g)
@@ -123,7 +123,7 @@ func TestRepairReservesSpaceAndCannotBypassInputLimit(t *testing.T) {
 			j.ID = tc.name
 			j.Stage = "assessing"
 			validations := 0
-			err := s.model(context.Background(), &j, strings.Repeat("x", MaxInitialModelPromptBytes), func(string) error {
+			err := s.model(context.Background(), &j, strings.Repeat("x", MaxEvidenceModelPromptBytes), func(string) error {
 				validations++
 				if validations == 1 {
 					return errors.New("test validation failure")
@@ -155,8 +155,8 @@ func TestRepairCanRemoveDuplicateSchemaWithoutChangingFrozenDataOrRules(t *testi
 	}
 	// Add a duplicate output example; compact contracts no longer carry one.
 	prompt = strings.Replace(prompt, "[资料JSON]\n", `{"issues":[],"example":"`+strings.Repeat("s", 1000)+`"}`+"\n[资料JSON]\n", 1)
-	prompt = strings.Repeat("x", MaxInitialModelPromptBytes-len(prompt)) + prompt
-	output := strings.Repeat("r", 10351)
+	prompt = strings.Repeat("x", MaxEvidenceModelPromptBytes-len(prompt)) + prompt
+	output := strings.Repeat("r", MaxModelPromptBytes-MaxEvidenceModelPromptBytes+111)
 	repair := modelRepairPrompt(prompt, output, errors.New("invalid character '.' after object key:value pair"))
 	_, originalData, _ := strings.Cut(prompt, "[资料JSON]\n")
 	if len(repair) > MaxModelPromptBytes || !strings.Contains(repair, "[资料JSON]\n"+originalData) || !strings.HasSuffix(repair, output) {

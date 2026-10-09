@@ -174,9 +174,21 @@ func buildScoringPrompt(request Request, results []HoldingResult, metrics Metric
 		research := boundedSynthesis(report.ResearchSynthesis)
 		sources := make([]map[string]any, 0)
 		used := synthesisSources(research)
+		earnings, hasEarnings := stockanalysis.LatestResearchEarningsDisclosure(report.Sources, report.CutoffAt)
+		if hasEarnings {
+			used[earnings.ID] = true
+		}
 		for _, s := range report.Sources {
 			if used[s.ID] {
-				sources = append(sources, map[string]any{"id": s.ID, "title": clip(s.Title, 160), "kind": s.Kind, "published_at": s.PublishedAt, "url": s.URL, "excerpt": clip(s.Content, 320)})
+				source := map[string]any{"id": s.ID, "title": clip(s.Title, 160), "kind": s.Kind, "published_at": s.PublishedAt, "url": s.URL, "excerpt": clip(s.Content, 320)}
+				if hasEarnings && s.ID == earnings.ID {
+					source["excerpt"] = stockanalysis.ResearchEarningsExcerpt(s, 700)
+					source["content_status"] = s.ContentStatus
+				}
+				if news := stockanalysis.ResearchNewsEvidenceContext(s, 0); news != nil {
+					source["news_context"] = news
+				}
+				sources = append(sources, source)
 			}
 		}
 		holdings = append(holdings, map[string]any{"holding": map[string]any{"symbol": r.Holding.Symbol, "name": r.Holding.Name, "equity_weight_percent": EquityPercent(r.Holding.Weight, metrics.TotalPositionPercent), "cost_price": r.Holding.CostPrice}, "report_id": r.AnalysisID, "origin": r.ResearchOrigin, "completed_at": r.ReportCompletedAt, "cutoff_at": r.ResearchCutoffAt, "original_request": report.Request, "research": research, "sources": sources, "quote_status": r.QuoteStatus, "quote_message": r.QuoteMessage})
@@ -196,7 +208,7 @@ func buildScoringPrompt(request Request, results []HoldingResult, metrics Metric
 每只真实持仓都必须出现在holdings，股票使用规范代码；条件化行动优先级考虑仓位和研究风险。risk_contribution不用填写，由后端保留量化代理值供历史兼容。风险组的symbols只含真实持仓，仓位由程序计算。
 输出类型约束：primary_risks、concentration_findings、adjustment_order、next_checklist、data_limitations，以及每个维度的limitations，均为纯字符串数组（无内容用[]）。每条直接写完整文字，不返回title/reason等嵌套对象；相关引用放入维度或风险组的evidence_refs。limitations每维度最多10条。所有score和points使用整数，不用字符串；evidence_refs是对象数组。
 严格输出一个JSON对象，最多8条主要风险、8条结构发现、10条调整/检查/缺口、3个情景、6个风险组。示例结构（分数和理由必须按事实重写）：
-{"risk_level":"中","risk_reason":"原因","style_match":"匹配|部分偏离|明显偏离","executive_summary":"组合结论、主要矛盾和首要行动","confidence_level":"中","confidence_reason":"置信度理由","dimensions":[{"key":"holding_logic","score":60,"reason":"依据","adjustments":[{"risk_id":"待验证逻辑","reason":"原因","points":-10}],"evidence_refs":[{"report_id":"报告编号","source_id":"来源编号"}],"limitations":[]},{"key":"portfolio_structure","score":60,"reason":"依据","adjustments":[],"evidence_refs":[{"fact":"equity_max_single_percent"}],"limitations":[]},{"key":"risk_capacity","score":60,"reason":"依据","adjustments":[],"evidence_refs":[{"fact":"stop_loss_coverage_percent"}],"limitations":[]},{"key":"strategy_fit","score":60,"reason":"依据","adjustments":[],"evidence_refs":[{"fact":"profile.scoring_description"}],"limitations":[]}],"risk_groups":[{"name":"共同交易驱动","symbols":["规范股票代码"],"reason":"证据支持的驱动","evidence_refs":[{"report_id":"报告编号","source_id":"来源编号"}]}],"primary_risks":["主要风险的文字说明"],"concentration_findings":["组合结构发现的文字说明"],"holdings":[{"symbol":"规范股票代码","portfolio_role":"核心|进攻|防守|观察|风险拖累","conclusion":"组合中的持有判断","action_priority":"观察|保持|优先处理","action":"条件化动作","confirmation":"确认条件","invalidation":"失效条件"}],"adjustment_order":["按条件执行的处理顺序说明"],"scenarios":[{"name":"市场增强","condition":"可观察条件","portfolio_action":"应对"},{"name":"震荡分化","condition":"可观察条件","portfolio_action":"应对"},{"name":"风险退潮","condition":"可观察条件","portfolio_action":"应对"}],"next_checklist":["下一次需要核验的事项"],"data_limitations":["证据缺口或时点限制的文字说明"]}
+{"risk_level":"中","risk_reason":"原因","style_match":"匹配|部分偏离|明显偏离","executive_summary":"组合结论、主要矛盾和首要行动","confidence_level":"中","confidence_reason":"置信度理由","dimensions":[{"key":"holding_logic","score":60,"reason":"依据","adjustments":[{"risk_id":"已披露经营恶化","reason":"原因","points":-10}],"evidence_refs":[{"report_id":"报告编号","source_id":"来源编号"}],"limitations":[]},{"key":"portfolio_structure","score":60,"reason":"依据","adjustments":[],"evidence_refs":[{"fact":"equity_max_single_percent"}],"limitations":[]},{"key":"risk_capacity","score":60,"reason":"依据","adjustments":[],"evidence_refs":[{"fact":"stop_loss_coverage_percent"}],"limitations":[]},{"key":"strategy_fit","score":60,"reason":"依据","adjustments":[],"evidence_refs":[{"fact":"profile.scoring_description"}],"limitations":[]}],"risk_groups":[{"name":"共同交易驱动","symbols":["规范股票代码"],"reason":"证据支持的驱动","evidence_refs":[{"report_id":"报告编号","source_id":"来源编号"}]}],"primary_risks":["主要风险的文字说明"],"concentration_findings":["组合结构发现的文字说明"],"holdings":[{"symbol":"规范股票代码","portfolio_role":"核心|进攻|防守|观察|风险拖累","conclusion":"组合中的持有判断","action_priority":"观察|保持|优先处理","action":"条件化动作","confirmation":"确认条件","invalidation":"失效条件"}],"adjustment_order":["按条件执行的处理顺序说明"],"scenarios":[{"name":"市场增强","condition":"可观察条件","portfolio_action":"应对"},{"name":"震荡分化","condition":"可观察条件","portfolio_action":"应对"},{"name":"风险退潮","condition":"可观察条件","portfolio_action":"应对"}],"next_checklist":["下一次需要核验的事项"],"data_limitations":["证据缺口或时点限制的文字说明"]}
 [组合证据JSON]
 ` + string(data), nil
 }

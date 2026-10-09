@@ -110,7 +110,7 @@ func (c *Client) SearchStockNews(ctx context.Context, symbol, query string, limi
 			content = string(runes[:2400])
 		}
 		items = append(items, foundation.NewsItem{ID: row.ID, Title: title,
-			Content: "新闻检索摘要（非全文，第三方报道需核实）：\n" + content, URL: row.URL, PublishedAt: published,
+			Content: "新闻检索摘要（非全文）：\n" + content, URL: row.URL, PublishedAt: published,
 			Meta: foundation.SourceMeta{Source: "eastmoney:stock-news-search:" + clean(row.Media), SourceURL: requestURL, FetchedAt: time.Now().UTC(), LatencyMS: time.Since(started).Milliseconds()},
 		})
 	}

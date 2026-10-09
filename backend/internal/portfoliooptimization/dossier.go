@@ -2,6 +2,7 @@ package portfoliooptimization
 
 import (
 	pi "easy-stock/backend/internal/portfolioinspection"
+	"easy-stock/backend/internal/stockanalysis"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -9,20 +10,25 @@ import (
 	"strings"
 )
 
-const ModelPromptVersion = "portfolio-optimization-prompts-v31"
-const MaxModelPromptBytes = 32 * 1024
+const ModelPromptVersion = "portfolio-optimization-prompts-v34"
+const MaxModelPromptBytes = 64 * 1024
+
+// Stage sizes below are compression targets, not model context limits. Rich
+// evidence must not fail solely because a portfolio has ten rather than eleven
+// stocks. After exhausting compact representations, allow a bounded dossier
+// with 16 KiB still reserved for a repair's schema and failed response.
+const MaxEvidenceModelPromptBytes = 48 * 1024
 
 // Proposal responses contain all stock judgments. Reviews contain two concise
 // scores, so each stage reserves room appropriate to its expected response.
 const MaxInitialModelPromptBytes = 22 * 1024
 
-// More than ten researched stocks use compact cards and at most 28 KiB.
-// This remains below the 32 KiB hard request ceiling, including repairs.
+// More than ten researched stocks have a larger initial compression target.
 const MaxLargeInitialModelPromptBytes = 28 * 1024
 const MaxReviewModelPromptBytes = 24 * 1024
 
 // A revision includes prior deficiencies; reserve the same 8 KiB response
-// space as a review. The shared 32 KiB hard call limit remains unchanged.
+// space as a review before using the bounded evidence fallback.
 const MaxRevisionModelPromptBytes = 24 * 1024
 
 // Deliberately separate the model DTO from persisted research. Adding a field
@@ -46,7 +52,19 @@ func (d dossierDriver) MarshalJSON() ([]byte, error) {
 	return json.Marshal([3]any{d.Name, d.MarketStatus, d.Evidence})
 }
 
-var stockDossierColumns = []string{"symbol", "name", "report_id", "cutoff_at", "purpose", "horizon", "decision_reason", "prior_position_opinion", "prior_blockers", "thesis", "support", "counter", "business", "drivers", "catalysts", "limitations", "anchors", "sources"}
+var stockDossierColumns = []string{"symbol", "name", "report_id", "cutoff_at", "purpose", "horizon", "decision_reason", "prior_position_opinion", "prior_blockers", "thesis", "support", "counter", "business", "drivers", "catalysts", "limitations", "earnings_disclosure", "anchors", "sources"}
+
+var newsDossierColumns = []string{"provider", "url", "published_at", "content_status", "traceable", "excerpt"}
+
+// Share provenance keys across all cited articles. The excerpt follows the
+// same detail budget as the claims; provenance and citation IDs never shrink.
+type dossierNews struct {
+	*stockanalysis.NewsEvidenceContext
+}
+
+func (n dossierNews) MarshalJSON() ([]byte, error) {
+	return json.Marshal([6]any{n.Provider, n.URL, n.PublishedAt, n.ContentStatus, n.Traceable, n.Excerpt})
+}
 
 func shortText(value string, limit int) string {
 	r := []rune(value)
@@ -110,6 +128,12 @@ func stockDossier(r pi.HoldingResult, detail int) map[string]any {
 		limits = append(limits, shortText(v, detail))
 	}
 	d["limitations"] = limits
+	// A legacy summary may say the notice was unavailable although the frozen
+	// report contains its body. Let allocation/review inspect that evidence too.
+	if earnings, ok := stockanalysis.LatestResearchEarningsDisclosure(rr.Sources, rr.CutoffAt); ok {
+		used[earnings.ID] = true
+		d["earnings_disclosure"] = dossierClaim{stockanalysis.ResearchEarningsExcerpt(earnings, max(180, min(600, detail*4))), []string{earnings.ID}}
+	}
 	if logic := rr.TradingLogic; logic != nil {
 		if logic.Business != nil {
 			d["business"] = dossierClaim{shortText(logic.Business.Text, max(detail, 30)), refs(logic.Business.SourceIDs)}
@@ -246,8 +270,18 @@ func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]a
 		// Dictionary encode repeated source metadata, keeping actual source IDs
 		// untouched. This is lossless and never abbreviates citations.
 		sources := []any{}
+		newsContexts := map[string]*stockanalysis.NewsEvidenceContext{}
+		for _, source := range r.Analysis.ResearchReport.Sources {
+			if news := stockanalysis.ResearchNewsEvidenceContext(source, max(60, min(180, detail*2))); news != nil {
+				newsContexts[source.ID] = news
+			}
+		}
 		for _, s := range d["sources"].([][3]string) {
-			sources = append(sources, []any{s[0], index(&kinds, s[1]), index(&times, s[2])})
+			row := []any{s[0], index(&kinds, s[1]), index(&times, s[2])}
+			if news := newsContexts[s[0]]; news != nil {
+				row = append(row, dossierNews{news})
+			}
+			sources = append(sources, row)
 		}
 		d["sources"] = sources
 		row := make([]any, len(columns))
@@ -271,7 +305,7 @@ func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]a
 		table["rows"] = rows
 		table["row_columns"] = []string{"symbol", "values"}
 	}
-	return map[string]any{"prompt_version": ModelPromptVersion, "horizon": job.Source.Request.Horizon, "profile": job.Source.Profile, "snapshot_at": job.SnapshotAt, "stock_columns": columns, "driver_columns": []string{"name", "market_status", "claim"}, "claim_columns": []string{"text", "source_ids"}, "anchor_columns": []string{"id", "price", "source_id", "as_of"}, "source_columns": []string{"id", "kind_index", "time_index"}, "source_kinds": kinds, "source_times": times, "stocks": stocks, "stock_facts": table}
+	return map[string]any{"prompt_version": ModelPromptVersion, "horizon": job.Source.Request.Horizon, "profile": job.Source.Profile, "snapshot_at": job.SnapshotAt, "stock_columns": columns, "driver_columns": []string{"name", "market_status", "claim"}, "claim_columns": []string{"text", "source_ids"}, "anchor_columns": []string{"id", "price", "source_id", "as_of"}, "source_columns": []string{"id", "kind_index", "time_index", "news_context"}, "news_columns": newsDossierColumns, "source_kinds": kinds, "source_times": times, "stocks": stocks, "stock_facts": table}
 }
 
 // A shared column retains the exact per-stock fact identity and availability.
@@ -349,7 +383,7 @@ func compactStockDossier(r pi.HoldingResult) map[string]any {
 			used[id] = true
 		}
 	}
-	for _, key := range []string{"thesis", "business"} {
+	for _, key := range []string{"thesis", "business", "earnings_disclosure"} {
 		if c, ok := d[key].(dossierClaim); ok {
 			claim(c)
 		}
@@ -468,7 +502,7 @@ func boundedModelPrompt(build func(int) (string, error)) (string, error) {
 	return boundedModelPromptWithLimit(MaxInitialModelPromptBytes, build)
 }
 func boundedModelPromptWithLimit(limit int, build func(int) (string, error)) (string, error) {
-	smallest := 0
+	smallest := ""
 	for _, detail := range []int{90, 60, 30, 12, 0} {
 		prompt, err := build(detail)
 		if err != nil {
@@ -477,9 +511,14 @@ func boundedModelPromptWithLimit(limit int, build func(int) (string, error)) (st
 		if len(prompt) <= limit {
 			return prompt, nil
 		}
-		smallest = len(prompt)
+		if smallest == "" || len(prompt) < len(smallest) {
+			smallest = prompt
+		}
 	}
-	return "", fmt.Errorf("优化必要证据仍为%d字节，超过%d KiB本阶段初次输入上限；已保留报告，不启动超大模型请求", smallest, limit/1024)
+	if len(smallest) <= MaxEvidenceModelPromptBytes {
+		return smallest, nil
+	}
+	return "", fmt.Errorf("优化必要证据仍为%d字节，超过%d KiB资料上限；已保留报告，不启动超大模型请求", len(smallest), MaxEvidenceModelPromptBytes/1024)
 }
 func modelJSON(value any) (string, error) {
 	data, err := json.Marshal(value)

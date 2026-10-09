@@ -100,7 +100,8 @@ func TestResearchTitleOnlyAnnouncementCannotMakeEvidenceSufficient(t *testing.T)
 	snapshot.Sources = append(snapshot.Sources, source)
 	result := validResearch()
 	result.EvidenceLevel = "sufficient"
-	result.Support[0].SourceIDs = []string{source.ID}
+	result.Thesis.SourceIDs = []string{source.ID}
+	result.Support = []ResearchClaim{{Text: "仅有公告标题", Kind: "fact", SourceIDs: []string{source.ID}}}
 	if _, err := validateResearch(&result, snapshot); err != nil {
 		t.Fatal(err)
 	}

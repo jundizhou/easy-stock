@@ -71,7 +71,7 @@ func TestSavedOptimizationPromptAudit(t *testing.T) {
 	}
 	proposal, err := proposalPrompt(j)
 	if err != nil {
-		for k, v := range commonDossier(j, j.Results, 12) {
+		for k, v := range commonDossier(j, j.Results, 0) {
 			data, _ := json.Marshal(v)
 			t.Logf("minimal_common_field=%s bytes=%d", k, len(data))
 		}

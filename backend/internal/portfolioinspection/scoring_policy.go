@@ -1,14 +1,18 @@
 package portfolioinspection
 
-import "strings"
+import (
+	"strings"
+
+	"easy-stock/backend/internal/stockanalysis"
+)
 
 // Shared by inspection and the independent optimization review. Trading limits
 // remain separate: these judgments concern the stock sleeve, regardless of cash.
-const ScoringPolicy = `评分对象是股票组合本身：满仓、现金为0、总仓位高低均不加扣分，也不据此降低风格匹配或风险评价。同一股票配比仅改变总仓位，四维分不变。股票与风险组按股票合计=100%归一化，总资产仓位仅作执行约束。
+const ScoringPolicy = stockanalysis.NewsEvidencePolicy + `评分对象是股票组合本身：满仓、现金为0、总仓位高低均不加扣分，也不据此降低风格匹配或风险评价。同一股票配比仅改变总仓位，四维分不变。股票与风险组按股票合计=100%归一化，总资产仓位仅作执行约束。
 四维0至100整数：holding_logic持仓逻辑35%仅评盈利质量、增长兑现、估值/价格透支、催化与经营反证；portfolio_structure组合结构25%独占单票/前三集中、共同驱动、相关性与互补；risk_capacity风险管理25%仅评股票自身波动回撤、流动性、跳空及退出可执行性；strategy_fit策略匹配15%仅评研究周期、持仓角色、交易方式与所选风格。集中只扣结构，经营反证只扣逻辑；同一问题只归一维，其余仅说明。
 统一标尺：90-100突出且依据充分；80-89较好；70-79整体合理、风险可管理；60-69基本可用但有明确缺陷；40-59存在重大缺陷；0-39严重不足。70不要求无缺点也非保底；按事实选档定位，不为目标倒推、不按引用数量扣分。
 锚点：逻辑70=主要持仓经营理由成立、无主导性反证，80=增长/盈利兑现且价格合理，60=部分重要持仓逻辑薄弱；结构70=集中可解释且有互补，80=集中受控且共振较低，60=明显集中或共同驱动；风险70=波动可承受且退出明确，80=波动/流动性较好且退出可执行，60=明显波动或退出缺陷；策略70=周期/角色/交易方式基本一致，80=一致且分工清晰，60=有明确错配。
-缺正文、未知估值、覆盖/时效不足降低置信度并列核验，不自动扣投资分；已证实亏损、债务、价格透支、交易障碍按所属维度评价。未知不假定优质或经营差。无静态止损≠无语义退出；待入场限制执行≠逻辑失败。分数非胜率或收益预测。
+未知估值、覆盖/时效不足按对核心判断的影响评价置信度；可信报道已支持的事实不因缺公告正文机械降置信度或投资分。纯资料缺口只放data_limitations/limitations/next_checklist，不进入primary_risks、扣分项或调整理由。已证实亏损、债务、价格透支、交易障碍按所属维度评价。未知不假定优质或经营差。无静态止损≠无语义退出；待入场限制执行≠逻辑失败。分数非胜率或收益预测。
 `
 
 func EquityPercent(weight, total int) float64 {

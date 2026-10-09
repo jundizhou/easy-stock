@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDossierDoesNotGrowWithUnrelatedFullReportFields(t *testing.T) {
@@ -26,6 +27,95 @@ func TestDossierDoesNotGrowWithUnrelatedFullReportFields(t *testing.T) {
 	}
 	if a != b || len(b) > MaxModelPromptBytes {
 		t.Fatal("full report leaked across model DTO boundary", len(a), len(b))
+	}
+}
+
+func TestNewsProvenanceSurvivesCompactAllocationAndReview(t *testing.T) {
+	j := fixtureJob()
+	for _, result := range j.Results {
+		source := &result.Analysis.ResearchReport.Sources[0]
+		source.Kind, source.ContentStatus = "news", "excerpt"
+		source.Provider, source.URL = "eastmoney:stock-news-search:证券时报", "https://finance.example.com/forecast"
+		source.PublishedAt = time.Date(2026, 10, 8, 8, 0, 0, 0, time.UTC)
+		source.Content = "公司发布前三季度业绩预告，预计归母净利润12.6至13.1亿元。"
+	}
+	before, _ := json.Marshal(j)
+	for _, detail := range []int{60, 0} {
+		dossier := commonDossier(j, j.Results, detail)
+		columns := dossier["stock_columns"].([]string)
+		for _, raw := range dossier["stocks"].([]any) {
+			row := raw.([]any)
+			for i, column := range columns {
+				if column != "sources" {
+					continue
+				}
+				source := row[i].([]any)[0].([]any)
+				news := source[3].(dossierNews)
+				if !news.Traceable || news.Provider != "eastmoney:stock-news-search:证券时报" || !strings.Contains(news.Excerpt, "12.6至13.1") || news.ContentStatus != "excerpt" {
+					t.Fatal("compact dossier discarded reporting provenance", news)
+				}
+				encoded, err := json.Marshal(news)
+				var values []json.RawMessage
+				if err != nil || json.Unmarshal(encoded, &values) != nil || len(values) != len(newsDossierColumns) {
+					t.Fatal("provenance does not match shared columns", string(encoded), err)
+				}
+				restored := map[string]json.RawMessage{}
+				for n, key := range newsDossierColumns {
+					restored[key] = values[n]
+				}
+				encoded, _ = json.Marshal(restored)
+				var original stockanalysis.NewsEvidenceContext
+				if json.Unmarshal(encoded, &original) != nil || !reflect.DeepEqual(original, *news.NewsEvidenceContext) {
+					t.Fatal("provenance table changed source fields")
+				}
+			}
+		}
+	}
+	prompt, err := proposalPrompt(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := fixtureProposal()
+	j.Proposal = &p
+	plan := Plan{Original: pi.OptimizationReport(j.Source.Request, j.Results), Proposed: pi.OptimizationReport(j.Source.Request, j.Results)}
+	review, err := pairedPrompt(j, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{prompt, review} {
+		if !strings.Contains(text, stockanalysis.NewsEvidencePolicy) || !strings.Contains(text, `"news_context"`) || !strings.Contains(text, "证券时报") || !strings.Contains(text, "12.6至13.1") {
+			t.Fatal("allocation/review lost news semantics or provenance")
+		}
+	}
+	j.Proposal = nil
+	after, _ := json.Marshal(j)
+	if string(before) != string(after) {
+		t.Fatal("dossier changed historical research")
+	}
+}
+
+func TestUncitedEarningsNoticeSurvivesCompactDossier(t *testing.T) {
+	j := fixtureJob()
+	rr := j.Results[0].Analysis.ResearchReport
+	rr.CutoffAt = time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)
+	notice := stockanalysis.NewResearchSource("announcement", "前三季度业绩预告", "报告期1月1日至9月30日，预计归母净利润12.6至13.1亿元，未经审计；未发现重大不确定因素。", "exchange", "https://example.com/notice", rr.CutoffAt.Add(-time.Hour), rr.CutoffAt)
+	rr.Sources = append(rr.Sources, notice)
+	rr.Counter = []stockanalysis.ResearchClaim{{Text: "预告待兑现且未取得原文", SourceIDs: []string{"s1"}}}
+	before, _ := json.Marshal(j)
+	for _, detail := range []int{60, 0} {
+		dossier := commonDossier(j, j.Results, detail)
+		encoded, _ := json.Marshal(dossier)
+		if !strings.Contains(string(encoded), notice.Content) || !strings.Contains(string(encoded), notice.ID) {
+			t.Fatal("uncited earnings body was lost in allocation dossier")
+		}
+		// Both the excerpt and citation dictionary retain the notice ID.
+		if strings.Count(string(encoded), notice.ID) != 2 {
+			t.Fatal("earnings citation not resolvable")
+		}
+	}
+	after, _ := json.Marshal(j)
+	if string(before) != string(after) {
+		t.Fatal("old research was modified")
 	}
 }
 

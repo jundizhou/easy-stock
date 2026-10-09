@@ -5,7 +5,7 @@ import (
 )
 
 func NeedsResearchRevalidation(report *ResearchReport) bool {
-	return report != nil && (report.PromptVersion == "stock-research-v7" || report.PromptVersion == "stock-research-v8") && report.ValidationVersion != ResearchValidationVersion
+	return report != nil && (report.PromptVersion == "stock-research-v7" || report.PromptVersion == "stock-research-v8" || report.PromptVersion == "stock-research-v9" || report.PromptVersion == ResearchPromptVersion) && report.ValidationVersion != ResearchValidationVersion
 }
 
 // Replay only the original successful model outputs against their frozen
@@ -63,7 +63,7 @@ func RevalidateReusableResearch(job ResearchJob) ResearchJob {
 	report := *copy.Analysis.ResearchReport
 	report.ResearchSynthesis = result
 	report.ValidationVersion = ResearchValidationVersion
-	report.ValidationNotes = append(notes, "复用原模型输出，按交易日、分离的证据/交易校验及可选价格计划重新检查；未调用AI、未补充新资料，原报告完成时点不变")
+	report.ValidationNotes = append(notes, "复用原模型输出，按交易日、来源内容、分离的证据/交易校验及可选价格计划重新检查；未调用AI、未补充新资料，原报告完成时点不变")
 	ApplyResearch(copy.Analysis, &report, *copy.Snapshot)
 	// Keep the snapshot immutable for any later persistence by callers.
 	copy.Snapshot = job.Snapshot

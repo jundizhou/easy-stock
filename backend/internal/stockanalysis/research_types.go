@@ -8,8 +8,8 @@ import (
 	"easy-stock/backend/internal/foundation"
 )
 
-const ResearchPromptVersion = "stock-research-v8"
-const ResearchValidationVersion = "stock-research-validation-v3"
+const ResearchPromptVersion = "stock-research-v10"
+const ResearchValidationVersion = "stock-research-validation-v4"
 
 type ResearchRequest struct {
 	Symbol        string        `json:"symbol"`
