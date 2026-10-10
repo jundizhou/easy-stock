@@ -84,6 +84,7 @@ type Server struct {
 	notificationSender       notificationSender
 	notifications            *notification.Dispatcher
 	reviewAutomation         *review.Automation
+	reviewScheduler          *review.DailyScheduler
 	remoteDailySync          *review.RemoteDailySync
 	agentGateway             agent.Gateway
 	usageGateway             agent.Gateway
@@ -393,6 +394,11 @@ func NewServer(config any) *Server {
 	s.portfolioInspection.ConfigureCompletion(s.notifyPortfolioInspection)
 	s.portfolioInspection.ConfigureResearch(s.resolvePortfolioResearch, s.refreshPortfolioQuotes)
 	s.portfolioScheduler = portfolioinspection.NewScheduler(cfg.PortfolioStore, s.portfolioInspection)
+	if cfg.ReviewCalendar == nil {
+		cfg.ReviewCalendar = review.NewExchangeCalendar(cfg.ReviewStore, cfg.ReviewHTTP)
+	}
+	s.reviewScheduler = review.NewDailyScheduler(cfg.ReviewStore, s.reviewAutomation, cfg.ReviewCalendar)
+	s.reviewAutomation.SetDailySummaryCompleted(s.notifyDailySummary)
 	s.portfolioOptimization = portfoliooptimization.NewService(cfg.PortfolioStore, usageGateway, portfoliooptimization.Dependencies{Collect: s.collectOptimizationUniverse, Research: s.resolvePortfolioResearch, Quotes: s.refreshOptimizationQuotes})
 	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
 	s.themeIndex = cfg.ThemeIndex
@@ -436,6 +442,9 @@ func (s *Server) Close() error {
 	}
 	if s.emotionProgress != nil {
 		s.emotionProgress.close()
+	}
+	if s.reviewScheduler != nil {
+		s.reviewScheduler.Close()
 	}
 	if s.portfolioScheduler != nil {
 		s.portfolioScheduler.Close()
@@ -621,6 +630,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reviews/posts", s.reviewPosts)
 	s.mux.HandleFunc("GET /api/v1/reviews/posts/{id}", s.reviewPost)
 	s.mux.HandleFunc("DELETE /api/v1/reviews/posts/{id}", s.reviewPostDelete)
+	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/schedule", s.reviewScheduleGet)
+	s.mux.HandleFunc("PUT /api/v1/reviews/daily-summary/schedule", s.reviewScheduleSave)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary", s.reviewDailySummaryGet)
 	s.mux.HandleFunc("POST /api/v1/reviews/daily-summary/anonymize", s.reviewDailySummaryAnonymize)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/window", s.reviewDailySummaryWindow)

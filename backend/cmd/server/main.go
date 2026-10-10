@@ -115,6 +115,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go server.RunReviewScheduler(ctx)
+	go server.RunDailySummaryScheduler(ctx)
 	go server.RunRemoteDailyReviewScheduler(ctx)
 	go server.RunMarketEmotionScheduler(ctx)
 	go server.RunMasteryScheduler(ctx)

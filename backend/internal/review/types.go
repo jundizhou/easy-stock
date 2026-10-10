@@ -256,21 +256,23 @@ type DailySummary struct {
 }
 
 type DailySummaryJob struct {
-	TradeDate        string    `json:"trade_date"`
-	WindowStart      time.Time `json:"window_start,omitempty"`
-	WindowEnd        time.Time `json:"window_end,omitempty"`
-	FreshnessRule    string    `json:"freshness_rule,omitempty"`
-	Status           string    `json:"status"`
-	Stage            string    `json:"stage"`
-	CompletedAuthors int       `json:"completed_authors"`
-	TotalAuthors     int       `json:"total_authors"`
-	ArticleCount     int       `json:"article_count"`
-	Message          string    `json:"message"`
-	Error            string    `json:"error,omitempty"`
-	StartedAt        time.Time `json:"started_at,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at,omitempty"`
-	CompletedAt      time.Time `json:"completed_at,omitempty"`
-	SummaryAvailable bool      `json:"summary_available"`
+	ScheduledTargetDate  string    `json:"scheduled_target_date,omitempty"`
+	NotificationChannels []string  `json:"notification_channels,omitempty"`
+	TradeDate            string    `json:"trade_date"`
+	WindowStart          time.Time `json:"window_start,omitempty"`
+	WindowEnd            time.Time `json:"window_end,omitempty"`
+	FreshnessRule        string    `json:"freshness_rule,omitempty"`
+	Status               string    `json:"status"`
+	Stage                string    `json:"stage"`
+	CompletedAuthors     int       `json:"completed_authors"`
+	TotalAuthors         int       `json:"total_authors"`
+	ArticleCount         int       `json:"article_count"`
+	Message              string    `json:"message"`
+	Error                string    `json:"error,omitempty"`
+	StartedAt            time.Time `json:"started_at,omitempty"`
+	UpdatedAt            time.Time `json:"updated_at,omitempty"`
+	CompletedAt          time.Time `json:"completed_at,omitempty"`
+	SummaryAvailable     bool      `json:"summary_available"`
 }
 
 type DailySummaryWindow struct {

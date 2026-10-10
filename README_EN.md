@@ -76,6 +76,8 @@ Post-market reviews from well-known A-share commentators are scattered across Xu
 
 Once collection finishes, one click generates a "today's consensus" report — distilling shared focus areas, key disagreements, market facts, and conditions to verify in the next session:
 
+**Scheduled reviews** use the Shenzhen Stock Exchange calendar and run on the calendar day before each trading session, at **22:00 Beijing time** by default (configurable). The article window extends from the latest completed close to the scheduled time. Select Feishu and/or DingTalk for complete Markdown analysis, including every author's views but excluding article bodies and evidence details; long reports are split automatically. Keep the app running and the computer awake, and sync articles beforehand. Missed runs catch up only before 09:30 on the target trading day and wait for any active review. The calendar refreshes daily, with complete cached months usable for up to seven days during outages; without a usable calendar, scheduling pauses and retries.
+
 <p align="center">
   <img src="./docs/assets/easy-stock-ai-daily-consensus.png" width="1280" alt="easy-stock AI consensus of commentator views and next-session expectations" />
 </p>

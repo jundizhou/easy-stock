@@ -47,6 +47,7 @@ type Automation struct {
 	dailySummaryMu         sync.Mutex
 	dailySummaryJobMu      sync.Mutex
 	dailySummaryRunning    bool
+	dailySummaryCompleted  func(DailySummaryJob, *DailySummary)
 	dailyMarketProvider    DailyMarketProvider
 	dailyValidationMu      sync.Mutex
 	dailyValidationRunning map[string]bool
@@ -996,4 +997,9 @@ func analyzeWithHermes(ctx context.Context, prompter agent.Prompter, post Post) 
 	}
 	result.KeyPoints = nonNilStrings(result.KeyPoints)
 	return result, nil
+}
+
+// SetDailySummaryCompleted is configured before starting background workers.
+func (a *Automation) SetDailySummaryCompleted(fn func(DailySummaryJob, *DailySummary)) {
+	a.dailySummaryCompleted = fn
 }

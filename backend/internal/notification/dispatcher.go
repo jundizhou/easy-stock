@@ -93,7 +93,7 @@ func eventEnabled(events appsettings.NotificationEvents, event Event) bool {
 	if event.Failed && !events.TaskFailed {
 		return false
 	}
-	if event.Kind == "portfolio_inspection" && event.Channels != nil {
+	if (event.Kind == "portfolio_inspection" || event.Kind == "daily_review") && event.Channels != nil {
 		return true
 	}
 	switch event.Kind {

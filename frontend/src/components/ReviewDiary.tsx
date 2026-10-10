@@ -27,12 +27,14 @@ import {
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
+import { ReviewSchedulePanel } from './ReviewSchedulePanel';
 import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
 import { applyTheme } from '../lib/theme';
 
 type Props = {
 	config: BackendConfig | null;
 	refreshKey: number;
+ onOpenNotificationSettings: () => void;
 };
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -47,7 +49,7 @@ const sourceTabs: Array<{ id: string; name: string }> = [
 	{ id: 'wechat', name: '微信公众号' },
 ];
 
-export function ReviewDiary({ config, refreshKey }: Props) {
+export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: Props) {
 	const [sources, setSources] = useState<ReviewSource[]>([]);
 	const [authors, setAuthors] = useState<ReviewAuthor[]>([]);
 	const [posts, setPosts] = useState<ReviewPost[]>([]);
@@ -144,6 +146,20 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 
 	const dailySummaryRunning = dailySummaryJob?.status === 'running';
 	const dailyValidationRunning = dailyValidationJob?.status === 'running';
+
+ const viewScheduledSummary = async (start: string, end: string) => {
+  if (!config) return;
+  setError('');
+  try {
+   const [summary, job] = await Promise.all([
+    requestJSON<{ data: ReviewDailySummary | null }>(config, summaryWindowQuery(start, end, '/api/v1/reviews/daily-summary')),
+    requestJSON<{ data: ReviewDailySummaryJob }>(config, summaryWindowQuery(start, end, '/api/v1/reviews/daily-summary/status')),
+   ]);
+   setDailySummary(summary.data); setDailySummaryJob(job.data); setReviewView('summary');
+   if (!summary.data && job.data.status !== 'running') setNotice('本次定时复盘尚无可用结果，可查看任务状态后重试');
+  } catch (cause) { setError(cause instanceof Error ? cause.message : '读取定时复盘结果失败'); }
+ };
+
 	const loadDailyValidationResult = useCallback(async (summaryDate = '') => {
 		if (!config) return null;
 		const query = summaryDate ? `?summary_date=${encodeURIComponent(summaryDate)}` : '';
@@ -464,6 +480,8 @@ export function ReviewDiary({ config, refreshKey }: Props) {
 					</form>}
 				</div>
 			</header>
+
+			<ReviewSchedulePanel config={config} onOpenSettings={onOpenNotificationSettings} onView={(start, end) => void viewScheduledSummary(start, end)} />
 
 			<nav className="review-view-tabs" aria-label="复盘日记视图">
 				<button type="button" className={reviewView === 'library' ? 'active' : ''} onClick={() => setReviewView('library')}><BookOpen size={16} /><span><strong>原文资料</strong><small>{total} 篇本地文章</small></span></button>

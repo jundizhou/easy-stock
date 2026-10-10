@@ -53,6 +53,7 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS review_schedule_state (key TEXT PRIMARY KEY, content_json TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS review_posts (
 			id TEXT PRIMARY KEY,
 			source TEXT NOT NULL,

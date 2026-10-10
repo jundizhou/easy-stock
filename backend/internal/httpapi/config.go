@@ -166,6 +166,7 @@ type Config struct {
 	SettingsPath             string
 	SettingsStore            *appsettings.Store
 	ReviewAutomation         *review.Automation
+	ReviewCalendar           review.TradingCalendar
 	RemoteDailyReviewURL     string
 	RemoteDailySync          *review.RemoteDailySync
 	AgentGateway             agent.Gateway

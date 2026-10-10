@@ -274,6 +274,10 @@ func (a *Automation) StartTodaySummaryWithWindow(ctx context.Context, force bool
 }
 
 func (a *Automation) startTodaySummary(ctx context.Context, force bool, window reviewFreshnessWindow) (DailySummaryJob, error) {
+	return a.startSummary(ctx, force, window, nil)
+}
+
+func (a *Automation) startSummary(ctx context.Context, force bool, window reviewFreshnessWindow, scheduled *DailySchedule) (DailySummaryJob, error) {
 	if a.store == nil {
 		return DailySummaryJob{}, errors.New("复盘日记存储不可用")
 	}
@@ -284,6 +288,9 @@ func (a *Automation) startTodaySummary(ctx context.Context, force bool, window r
 	defer a.dailySummaryJobMu.Unlock()
 
 	if a.dailySummaryRunning {
+		if scheduled != nil {
+			return DailySummaryJob{}, errDailySummaryBusy
+		}
 		job, err := a.store.GetDailySummaryJob(ctx, window.TradeDate)
 		if err == nil {
 			return job, nil
@@ -315,7 +322,14 @@ func (a *Automation) startTodaySummary(ctx context.Context, force bool, window r
 		StartedAt:     now,
 		UpdatedAt:     now,
 	}
-	job, err := a.store.SaveDailySummaryJob(ctx, job)
+	var err error
+	if scheduled != nil {
+		job.ScheduledTargetDate = scheduled.LastTargetDate
+		job.NotificationChannels = append([]string{}, scheduled.Channels...)
+		job, err = a.store.saveScheduledSummary(ctx, job, *scheduled)
+	} else {
+		job, err = a.store.SaveDailySummaryJob(ctx, job)
+	}
 	if err != nil {
 		return DailySummaryJob{}, err
 	}
@@ -416,7 +430,14 @@ func (a *Automation) runDailySummaryJob(job DailySummaryJob, window reviewFreshn
 	}
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
-	_, _ = a.store.SaveDailySummaryJob(persistCtx, job)
+	_, saveErr := a.store.SaveDailySummaryJob(persistCtx, job)
+	if saveErr == nil && job.ScheduledTargetDate != "" && a.dailySummaryCompleted != nil {
+		var result *DailySummary
+		if err == nil {
+			result = &summary
+		}
+		a.dailySummaryCompleted(job, result)
+	}
 }
 
 func (a *Automation) SummarizeToday(ctx context.Context) (DailySummary, error) {
