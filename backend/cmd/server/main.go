@@ -17,6 +17,11 @@ import (
 	"easy-stock/backend/internal/runtimelog"
 )
 
+// buildCommit 由构建时通过 -ldflags "-X main.buildCommit=<git-sha>" 注入。
+// 目的是让运行日志能精确标识实际运行的二进制来源，避免所有构建都显示
+// version="development" 而无法区分整改是否真正进入正在运行的产物。
+var buildCommit = ""
+
 func main() {
 	addr := os.Getenv("A_STOCK_ADDR")
 	if addr == "" {
@@ -147,7 +152,7 @@ func main() {
 		defer shutdownCancel()
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
-	log.Printf("easy-stock data foundation listening on http://%s", addr)
+	log.Printf("easy-stock data foundation (%s) listening on http://%s", runtimeVersion(), addr)
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -157,10 +162,14 @@ func main() {
 }
 
 func runtimeVersion() string {
-	if value := strings.TrimSpace(os.Getenv("A_STOCK_APP_VERSION")); value != "" {
-		return value
+	base := strings.TrimSpace(os.Getenv("A_STOCK_APP_VERSION"))
+	if base == "" {
+		base = "development"
 	}
-	return "development"
+	if commit := strings.TrimSpace(buildCommit); commit != "" {
+		return base + "+" + commit
+	}
+	return base
 }
 
 func preferredDataDir(configDir string) string {

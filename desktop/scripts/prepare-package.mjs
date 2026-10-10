@@ -15,6 +15,20 @@ const resourcesRoot = path.join(desktopRoot, 'resources');
 const backendName = process.platform === 'win32' ? 'easy-stock-backend.exe' : 'easy-stock-backend';
 const targetArch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
 
+// 解析用于注入后端二进制的 git 提交号（-X main.buildCommit）。
+// 优先取 A_STOCK_BUILD_COMMIT，其次本地 git；两者都不可用时返回空串（不注入）。
+function resolveBuildCommit() {
+	const fromEnv = (process.env.A_STOCK_BUILD_COMMIT || '').trim();
+	if (fromEnv) {
+		return fromEnv;
+	}
+	const probe = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+	const sha = (probe.stdout || '').trim();
+	return probe.status === 0 ? sha : '';
+}
+
+const buildCommit = resolveBuildCommit();
+
 if (targetArch !== process.arch) {
 	throw new Error(`Desktop target architecture ${targetArch} must match runner architecture ${process.arch} because native runtimes are bundled`);
 }
@@ -23,7 +37,13 @@ fs.rmSync(resourcesRoot, { recursive: true, force: true });
 fs.mkdirSync(path.join(resourcesRoot, 'backend'), { recursive: true });
 
 runNpm(['--workspace', 'frontend', 'run', 'build'], repoRoot);
-run('go', ['build', '-trimpath', '-o', path.join(resourcesRoot, 'backend', backendName), './cmd/server'], path.join(repoRoot, 'backend'), { CGO_ENABLED: process.env.CGO_ENABLED || '0' });
+const backendBuildArgs = ['build', '-trimpath'];
+if (buildCommit) {
+	backendBuildArgs.push('-ldflags', `-X main.buildCommit=${buildCommit}`);
+}
+backendBuildArgs.push('-o', path.join(resourcesRoot, 'backend', backendName), './cmd/server');
+run('go', backendBuildArgs, path.join(repoRoot, 'backend'), { CGO_ENABLED: process.env.CGO_ENABLED || '0' });
+console.log(`Backend binary buildCommit=${buildCommit || '(unset)'}`);
 fs.cpSync(path.join(repoRoot, 'frontend', 'dist'), path.join(resourcesRoot, 'frontend', 'dist'), { recursive: true });
 // [p5-sidecar] 装载 Free-StockDB 引擎与 Quant Terminal（缺失仅告警，不阻塞上游打包）
 const sidecarSources = resolveSidecarSources({
