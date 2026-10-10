@@ -8,7 +8,7 @@ type Props = {
 	onSelect: (id: string) => void;
 	onAdd: () => void;
 	onRename: (name: string) => boolean;
-	onRemove: () => boolean;
+	onRemove: () => boolean | Promise<boolean>;
 };
 
 export function PortfolioPlanPicker({ state, disabled, onSelect, onAdd, onRename, onRemove }: Props) {
@@ -33,6 +33,6 @@ export function PortfolioPlanPicker({ state, disabled, onSelect, onAdd, onRename
 			<button type="submit" disabled={disabled || !name.trim()}><Check size={14} />保存名称</button>
 			<button type="button" onClick={() => setEditing(false)}><X size={14} />取消</button>
 		</form>}
-		{confirming && <div className="portfolio-plan-delete" role="alert"><span>删除“{active.name}”及其持仓配置？已生成的巡检记录会保留。</span><button type="button" disabled={disabled} onClick={() => { if (onRemove()) setConfirming(false); }}>确认删除方案</button><button type="button" onClick={() => setConfirming(false)}>取消</button></div>}
+		{confirming && <div className="portfolio-plan-delete" role="alert"><span>删除“{active.name}”及其持仓配置？定时巡检将一并停止，已生成的巡检记录会保留。</span><button type="button" disabled={disabled} onClick={async () => { if (await onRemove()) setConfirming(false); }}>确认删除方案</button><button type="button" onClick={() => setConfirming(false)}>取消</button></div>}
 	</section>;
 }

@@ -66,7 +66,7 @@ func (s *Service) ConfigureResearch(resolver ResearchResolver, quotes QuoteRefre
 }
 
 func (s *Service) Start(ctx context.Context, request Request) (Job, error) {
-	return s.start(ctx, request, nil)
+	return s.start(ctx, request, nil, nil)
 }
 
 func (s *Service) Resume(ctx context.Context, id string) (Job, error) {
@@ -78,10 +78,10 @@ func (s *Service) Resume(ctx context.Context, id string) (Job, error) {
 		return Job{}, errors.New("该持仓报告无需恢复，请重新分析组合")
 	}
 	previous.Request.ForceSymbols = nil
-	return s.start(ctx, previous.Request, &previous)
+	return s.start(ctx, previous.Request, &previous, nil)
 }
 
-func (s *Service) start(ctx context.Context, request Request, previous *Job) (Job, error) {
+func (s *Service) start(ctx context.Context, request Request, previous *Job, schedule *Schedule) (Job, error) {
 	normalized, err := normalizeRequest(request)
 	if err != nil {
 		return Job{}, err
@@ -111,6 +111,8 @@ func (s *Service) start(ctx context.Context, request Request, previous *Job) (Jo
 	}
 	if previous != nil {
 		job.ResumedFrom = previous.ID
+		job.ScheduleID = previous.ScheduleID
+		job.NotificationChannels = append([]string{}, previous.NotificationChannels...)
 		for i, old := range previous.Results {
 			if i >= len(job.Results) {
 				break
@@ -124,7 +126,14 @@ func (s *Service) start(ctx context.Context, request Request, previous *Job) (Jo
 			}
 		}
 	}
-	if _, err := s.store.Save(ctx, job); err != nil {
+	if schedule != nil {
+		job.ScheduleID = normalized.PortfolioPlanID
+		job.NotificationChannels = append([]string{}, schedule.Channels...)
+		schedule.LastJobID = job.ID
+		if err := s.store.saveScheduledJob(ctx, job, *schedule); err != nil {
+			return Job{}, err
+		}
+	} else if _, err := s.store.Save(ctx, job); err != nil {
 		return Job{}, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())

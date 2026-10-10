@@ -172,6 +172,8 @@ type Report struct {
 }
 
 type Job struct {
+	ScheduleID            string          `json:"schedule_id,omitempty"`
+	NotificationChannels  []string        `json:"notification_channels,omitempty"`
 	ID                    string          `json:"id"`
 	Status                string          `json:"status"`
 	Stage                 string          `json:"stage"`

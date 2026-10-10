@@ -118,6 +118,7 @@ func main() {
 	go server.RunRemoteDailyReviewScheduler(ctx)
 	go server.RunMarketEmotionScheduler(ctx)
 	go server.RunMasteryScheduler(ctx)
+	go server.RunPortfolioScheduler(ctx)
 	httpServer := &http.Server{Addr: addr, Handler: server}
 	go func() {
 		<-ctx.Done()

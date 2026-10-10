@@ -1170,6 +1170,7 @@ export type PortfolioInspectionReport = {
 };
 
 export type PortfolioInspectionJob = {
+ schedule_id?: string;
  resumed_from?: string;
  resume_available?: boolean;
  reused_stocks?: number;

@@ -24,7 +24,9 @@ await context.route('**/api/**', async (route) => {
  const pathname = new URL(req.url()).pathname;
  let data = [];
  if (req.method() !== 'GET') writes.push(pathname);
- if (pathname === '/api/v1/stocks/directory') data = { stocks: [{ symbol: '600001.SH', code: '600001', name: '示例原持仓' }, { symbol: '600002.SH', code: '600002', name: '示例新持仓' }] };
+ if (pathname.startsWith('/api/v1/portfolio-schedules/')) data = null;
+ else if (pathname === '/api/v1/settings/notifications') data = { feishu: { enabled: false, webhook: { configured: false } }, dingtalk: { enabled: false, webhook: { configured: false } }, events: {} };
+ else if (pathname === '/api/v1/stocks/directory') data = { stocks: [{ symbol: '600001.SH', code: '600001', name: '示例原持仓' }, { symbol: '600002.SH', code: '600002', name: '示例新持仓' }] };
  else if (pathname === '/api/v1/quotes/realtime') {
   if (failQuotes) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '测试行情中断' }) }); return; }
   data = new URL(req.url()).searchParams.get('symbols').split(',').map((symbol) => ({ symbol, price: prices[symbol], change_percent: 2, trade_time: '2026-10-10T07:00:00Z', meta: { source: 'ui-fixture', fetched_at: new Date().toISOString(), stale: false } }));
@@ -125,9 +127,11 @@ try {
  assert.equal((await saved()).plans.length, 3);
  await page.getByRole('button', { name: '删除当前方案', exact: true }).click();
  await page.getByRole('button', { name: '确认删除方案', exact: true }).click();
+ await page.waitForFunction(() => JSON.parse(localStorage.getItem('easy-stock.portfolio-plans.v1')).plans.length === 2);
  assert.equal((await saved()).plans.length, 2);
  assert.equal(await plan('方案 1').getAttribute('aria-pressed'), 'true');
- assert.deepEqual(writes, [], 'editing plans must not start analysis or write to the backend');
+ assert.equal(writes.length, 1);
+ assert.ok(writes[0].startsWith('/api/v1/portfolio-schedules/'), 'deleting a plan only removes its schedule');
  await plan('短线观察组合').click();
  await page.getByRole('button', { name: '开始 AI 巡检', exact: true }).click();
  await page.getByRole('button', { name: '停止持仓分析', exact: true }).waitFor();

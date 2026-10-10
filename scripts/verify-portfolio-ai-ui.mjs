@@ -31,7 +31,9 @@ let submitted; const apiWrites = [];
 await context.route('**/api/**', async (route) => {
  const req = route.request(); const pathname = new URL(req.url()).pathname; let data = [];
  if (req.method() !== 'GET') apiWrites.push(pathname);
- if (pathname === '/api/v1/stocks/directory') data = { stocks: [{ symbol: holding.symbol, code: holding.symbol.split('.')[0], name: holding.name }] };
+ if (pathname.startsWith('/api/v1/portfolio-schedules/')) data = null;
+ else if (pathname === '/api/v1/settings/notifications') data = { feishu: { enabled: false, webhook: { configured: false } }, dingtalk: { enabled: false, webhook: { configured: false } }, events: {} };
+ else if (pathname === '/api/v1/stocks/directory') data = { stocks: [{ symbol: holding.symbol, code: holding.symbol.split('.')[0], name: holding.name }] };
  else if (pathname.includes('/portfolio-inspections')) {
   if (req.method() === 'POST' && pathname.endsWith('/cancel')) { job = { ...job, status: 'partial', resume_available: true, error: 'UI TEST FIXTURE 汇总失败', report: { ...report, conclusion: { ...conclusion, total_score: undefined, score_available: false } } }; data = {}; }
   else if (req.method() === 'POST') { submitted = req.postDataJSON(); job = { ...job, id: 'ui-running', status: 'running', stage: 'analyzing_stocks', started_at: now, report: undefined, completed_stocks: 0, results: [{ ...results[0], status: 'running', research_origin: 'shared_running' }], message: 'UI TEST FIXTURE 共享已有研究' }; data = job; }

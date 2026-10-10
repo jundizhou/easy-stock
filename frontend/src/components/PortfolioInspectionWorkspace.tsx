@@ -34,6 +34,7 @@ import {
 } from '../lib/backend';
 import { activePortfolioPlan, addPortfolioPlan, portfolioDraftChangedEvent, portfolioDraftStorageKey, portfolioDraftToHoldings, portfolioPlansStorageKey, portfolioProfiles, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioPlans } from '../lib/portfolio-draft';
 import { applyPortfolioOptimization } from '../lib/apply-portfolio-optimization';
+import { PortfolioSchedulePanel } from './PortfolioSchedulePanel';
 import { PortfolioPlanPicker } from './PortfolioPlanPicker';
 import { PortfolioSetupForm } from './PortfolioSetupForm';
 import { ResearchPanel } from './StockResearchReport';
@@ -66,6 +67,8 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	viewRef.current = viewKey;
 	const [loading, setLoading] = useState(true);
 	const [starting, setStarting] = useState(false);
+ const [removing, setRemoving] = useState(false);
+ const [savingSchedule, setSavingSchedule] = useState(false);
 	const [error, setError] = useState('');
 	const [notice, setNotice] = useState('');
  const [optimizationSignal,setOptimizationSignal] = useState(0);
@@ -84,16 +87,18 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		if (!config) { setLoading(false); return; }
 		setLoading(true);
 		const filter = historyScope === 'all' ? '' : `&portfolio_plan_id=${encodeURIComponent(historyScope === 'current' ? activePlan.id : '')}`;
-		requestJSON<{ data: PortfolioInspectionJob[] }>(config, `/api/v1/portfolio-inspections?limit=12${filter}`, { signal: controller.signal })
+		const loadHistory = () => requestJSON<{ data: PortfolioInspectionJob[] }>(config, `/api/v1/portfolio-inspections?limit=12${filter}`, { signal: controller.signal })
 			.then(({ data }) => {
 				if (controller.signal.aborted) return;
 				setHistory(data || []);
 				const active = data?.find((item) => item.status === 'running');
-				if (active) setJob(active);
+				setJob((current) => current ? data?.find((item) => item.id === current.id) || current : active || null);
 			})
 			.catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '持仓巡检数据加载失败'); })
 			.finally(() => { if (!controller.signal.aborted) setLoading(false); });
-		return () => controller.abort();
+  void loadHistory();
+  const timer = window.setInterval(() => void loadHistory(), 30000);
+		return () => { controller.abort(); window.clearInterval(timer); };
 	}, [config, refreshKey, activePlan.id, historyScope]);
 
 	useEffect(() => {
@@ -162,7 +167,17 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		return () => { active = false; window.clearInterval(timer); };
 	}, [config, job?.id, job?.status, viewKey]);
 
-	const startInspection = async (forceSymbols: string[] = [], existing?: PortfolioResearchRequest) => {
+	const deletePlan = async () => {
+  if (!config || starting || running || applyingRef.current || removing) return false;
+  setRemoving(true); setError('');
+  try {
+   await requestJSON(config, `/api/v1/portfolio-schedules/${encodeURIComponent(activePlan.id)}`, { method: 'DELETE' });
+   return changePlan(() => removePortfolioPlan(activePlan.id), true);
+  } catch (cause) { setError(cause instanceof Error ? cause.message : '停止定时巡检失败，方案未删除'); return false; }
+  finally { setRemoving(false); }
+ };
+
+ const startInspection = async (forceSymbols: string[] = [], existing?: PortfolioResearchRequest) => {
 		if (!config || starting || applyingRef.current || (!existing && (draft.holdings.length === 0 || totalWeight > 100))) return;
 		if (existing && !existing.portfolio_plan_id) { setError('请先将这份历史记录绑定到持仓方案'); return; }
 		setStarting(true);
@@ -246,14 +261,15 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 				{!loading && history.length === 0 && <span className="portfolio-history-empty">暂无报告</span>}
 				{history.map((item) => <button type="button" className={job?.id === item.id ? 'active' : ''} disabled={starting || applying} onClick={() => setJob(item)} key={item.id}>
 					<span>{item.status === 'running' ? <LoaderCircle className="spin" size={14} /> : item.status === 'succeeded' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}</span>
-					<div><strong>{item.request.holdings.length} 只持仓 · {profileLabel(item.request.trader_profile)}</strong><small>{historyScope !== 'current' && `${plans.plans.find((plan) => plan.id === item.request.portfolio_plan_id)?.name || item.request.portfolio_plan_name || '未绑定方案'} · `}{formatDate(item.updated_at || item.started_at)}</small></div>
+					<div><strong>{item.schedule_id ? '定时 · ' : ''}{item.request.holdings.length} 只持仓 · {profileLabel(item.request.trader_profile)}</strong><small>{historyScope !== 'current' && `${plans.plans.find((plan) => plan.id === item.request.portfolio_plan_id)?.name || item.request.portfolio_plan_name || '未绑定方案'} · `}{formatDate(item.updated_at || item.started_at)}</small></div>
 					<ChevronRight size={14} />
 				</button>)}
 			</div>
 		</aside>
 
 		<section className="portfolio-inspection-main">
-			<PortfolioPlanPicker key={activePlan.id} state={plans} disabled={starting || applying || Boolean(running)} onSelect={(id) => changePlan(() => selectPortfolioPlan(id), true)} onAdd={() => changePlan(addPortfolioPlan, true)} onRename={(name) => changePlan(() => renamePortfolioPlan(activePlan.id, name))} onRemove={() => changePlan(() => removePortfolioPlan(activePlan.id), true)} />
+			<PortfolioPlanPicker key={activePlan.id} state={plans} disabled={starting || applying || removing || savingSchedule || Boolean(running)} onSelect={(id) => changePlan(() => selectPortfolioPlan(id), true)} onAdd={() => changePlan(addPortfolioPlan, true)} onRename={(name) => changePlan(() => renamePortfolioPlan(activePlan.id, name))} onRemove={deletePlan} />
+   <PortfolioSchedulePanel key={`schedule:${activePlan.id}`} config={config} plan={activePlan} disabled={starting || applying || removing} onBusyChange={setSavingSchedule} onOpenSettings={onOpenSettings} />
 			{notice && <div className="portfolio-notice" role="status"><CheckCircle2 size={16} /><span>{notice}</span>{appliedPlanId && <button type="button" onClick={() => changePlan(() => selectPortfolioPlan(appliedPlanId), true)}>查看持仓方案</button>}</div>}
 			{error && <div className="portfolio-error" role="alert"><CircleAlert size={16} /><span>{error}</span>{error.includes('模型') && <button type="button" onClick={onOpenSettings}>配置模型</button>}</div>}
 

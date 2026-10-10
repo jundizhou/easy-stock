@@ -38,7 +38,9 @@ let submitted;
 await context.route('**/api/**', async (route) => {
  const request = route.request(); const url = new URL(request.url()); const p = url.pathname;
  let data = [];
- if (p === '/api/v1/stocks/directory') data = { stocks: [...holdings, target[1]].map((h) => ({ symbol: h.symbol, name: h.name, code: h.symbol.split('.')[0] })) };
+ if (p.startsWith('/api/v1/portfolio-schedules/')) data = null;
+ else if (p === '/api/v1/settings/notifications') data = { feishu: { enabled: false, webhook: { configured: false } }, dingtalk: { enabled: false, webhook: { configured: false } }, events: {} };
+ else if (p === '/api/v1/stocks/directory') data = { stocks: [...holdings, target[1]].map((h) => ({ symbol: h.symbol, name: h.name, code: h.symbol.split('.')[0] })) };
  else if (p === '/api/v1/quotes/realtime') data = url.searchParams.get('symbols').split(',').filter((symbol) => quoteMode !== 'missing' || symbol !== '600003.SH').map((symbol) => ({ symbol, price: prices[symbol], trade_time: now, meta: { source: 'fixture', fetched_at: now, stale: quoteMode === 'stale' && symbol === '600003.SH' } }));
  else if (p === '/api/v1/portfolio-inspections' && request.method() === 'GET') {
   historyQueries.push(url.searchParams.has('portfolio_plan_id') ? url.searchParams.get('portfolio_plan_id') : 'all');

@@ -43,7 +43,10 @@ func OpenStore(path string) (*Store, error) {
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS portfolio_inspection_jobs (
+		CREATE TABLE IF NOT EXISTS portfolio_inspection_schedules (
+ plan_id TEXT PRIMARY KEY, content_json TEXT NOT NULL
+ );
+ CREATE TABLE IF NOT EXISTS portfolio_inspection_jobs (
 			id TEXT PRIMARY KEY,
 			status TEXT NOT NULL,
 			stage TEXT NOT NULL,

@@ -11,9 +11,11 @@ import (
 type SendFunc func(context.Context, string, appsettings.NotificationChannel, Message) error
 
 type Event struct {
-	Kind    string
-	Failed  bool
-	Message Message
+	// Nil follows global event settings; a non-nil list selects scheduled delivery channels.
+	Channels []string
+	Kind     string
+	Failed   bool
+	Message  Message
 }
 
 type delivery struct {
@@ -55,7 +57,7 @@ func (d *Dispatcher) Publish(event Event) {
 		name   string
 		config appsettings.NotificationChannel
 	}{{"feishu", cfg.Feishu}, {"dingtalk", cfg.Dingtalk}} {
-		if !channel.config.Enabled || channel.config.Webhook == "" {
+		if !selectedChannel(event, channel.name) || !channel.config.Enabled || channel.config.Webhook == "" {
 			continue
 		}
 		if !d.started {
@@ -105,6 +107,9 @@ func eventEnabled(events appsettings.NotificationEvents, event Event) bool {
 	if event.Failed && !events.TaskFailed {
 		return false
 	}
+	if event.Kind == "portfolio_inspection" && event.Channels != nil {
+		return true
+	}
 	switch event.Kind {
 	case "stock_research":
 		return events.StockResearch
@@ -121,4 +126,16 @@ func (d *Dispatcher) Close() {
 	d.cancel()
 	d.mu.Unlock()
 	d.wg.Wait()
+}
+
+func selectedChannel(event Event, channel string) bool {
+	if event.Channels == nil {
+		return true
+	}
+	for _, selected := range event.Channels {
+		if selected == channel {
+			return true
+		}
+	}
+	return false
 }

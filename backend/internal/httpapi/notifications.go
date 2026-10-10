@@ -46,8 +46,12 @@ func (s *Server) notifyPortfolioInspection(job portfolioinspection.Job) {
 			summary = job.Report.Conclusion.ExecutiveSummary
 		}
 	}
-	s.notifications.Publish(notification.Event{Kind: "portfolio_inspection", Failed: failed, Message: notification.Message{
+	var channels []string
+	if job.ScheduleID != "" {
+		channels = append([]string{}, job.NotificationChannels...)
+	}
+	s.notifications.Publish(notification.Event{Channels: channels, Kind: "portfolio_inspection", Failed: failed, Message: notification.Message{
 		Title: "easy-stock 持仓巡检" + status,
-		Text:  fmt.Sprintf("完成 %d/%d 只个股研究\n\n%s\n\n任务：%s\n请在 easy-stock 持仓 AI 巡检中查看完整报告。", job.CompletedStocks, job.TotalStocks, truncateRunes(summary, 1000), job.ID),
+		Text:  fmt.Sprintf("方案：%s\n\n完成 %d/%d 只个股研究\n\n%s\n\n任务：%s\n请在 easy-stock 持仓 AI 巡检中查看完整报告。", job.Request.PortfolioPlanName, job.CompletedStocks, job.TotalStocks, truncateRunes(summary, 1000), job.ID),
 	}})
 }

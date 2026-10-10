@@ -1,0 +1,24 @@
+.portfolio-schedule { padding: 16px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--theme-surface, #fff); }
+.portfolio-schedule summary { display: grid; grid-template-columns: auto auto minmax(0,1fr) auto; align-items: center; gap: 10px; cursor: pointer; }
+.portfolio-schedule summary > span { margin-left: auto; color: var(--muted); font-size: 12px; }
+.portfolio-schedule form { margin-top: 18px; }
+.portfolio-schedule fieldset { display: grid; gap: 16px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.portfolio-schedule p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 10px 0 0; }
+.portfolio-schedule fieldset p { margin: 0; }
+.portfolio-schedule-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.portfolio-schedule-check input { width: 16px; height: 16px; accent-color: #287ddd; }
+.portfolio-schedule-presets, .portfolio-schedule-channels, .portfolio-schedule footer { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.portfolio-schedule button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #fff); color: inherit; cursor: pointer; }
+.portfolio-schedule button[aria-pressed="true"] { color: #287ddd; border-color: #287ddd; background: rgba(40,125,221,.08); }
+.portfolio-schedule button:disabled { opacity: .5; cursor: not-allowed; }
+.portfolio-schedule-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.portfolio-schedule-grid label { display: grid; gap: 8px; font-size: 12px; }
+.portfolio-schedule-grid input, .portfolio-schedule-grid select { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #fff); color: inherit; }
+.portfolio-schedule-channels strong { font-size: 13px; }
+.portfolio-schedule footer span { font-size: 12px; }
+.portfolio-schedule .portfolio-schedule-warning { color: #b36b17; }
+.portfolio-schedule-note { padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .portfolio-schedule-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .portfolio-schedule summary { grid-template-columns: auto minmax(0,1fr) auto; } .portfolio-schedule summary > span { margin-left: 0; grid-column: 1 / -1; grid-row: 2; } .portfolio-schedule-chevron { grid-column: 3; grid-row: 1; } }
+
+.portfolio-schedule-chevron { transition: transform .15s; flex-shrink: 0; }
+.portfolio-schedule[open] .portfolio-schedule-chevron { transform: rotate(180deg); }

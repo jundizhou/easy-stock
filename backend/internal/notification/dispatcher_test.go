@@ -118,3 +118,46 @@ func TestQueuedNotificationsUseCurrentRobotCredentials(t *testing.T) {
 		t.Fatal("queued notification not delivered")
 	}
 }
+
+func TestScheduledDeliveryUsesOnlySelectedChannels(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		channels                       []string
+		global, failed, failureEnabled bool
+		want                           []string
+	}{
+		{name: "ding only", channels: []string{"dingtalk"}, want: []string{"dingtalk"}},
+		{name: "feishu only", channels: []string{"feishu"}, global: true, want: []string{"feishu"}},
+		{name: "none despite global", channels: []string{}, global: true},
+		{name: "both", channels: []string{"dingtalk", "feishu"}, want: []string{"feishu", "dingtalk"}},
+		{name: "failure opt out", channels: []string{"dingtalk"}, failed: true},
+		{name: "failure opt in", channels: []string{"dingtalk"}, failed: true, failureEnabled: true, want: []string{"dingtalk"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := make(chan string, 4)
+			cfg := appsettings.Notifications{Feishu: appsettings.NotificationChannel{Enabled: true, Webhook: "fake"}, Dingtalk: appsettings.NotificationChannel{Enabled: true, Webhook: "fake"}, Events: appsettings.NotificationEvents{PortfolioInspection: tc.global, TaskFailed: tc.failureEnabled}}
+			d := NewDispatcher(func(_ context.Context, channel string, _ appsettings.NotificationChannel, _ Message) error {
+				sent <- channel
+				return nil
+			}, func() appsettings.Notifications { return cfg }, nil)
+			defer d.Close()
+			d.Publish(Event{Kind: "portfolio_inspection", Channels: tc.channels, Failed: tc.failed})
+			for _, want := range tc.want {
+				select {
+				case got := <-sent:
+					if got != want {
+						t.Fatalf("got %s want %s", got, want)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("missing scheduled notification")
+				}
+			}
+			// Let a wrongly included extra channel reach the fake sender before checking.
+			select {
+			case extra := <-sent:
+				t.Fatalf("unexpected notification: %s", extra)
+			case <-time.After(30 * time.Millisecond):
+			}
+		})
+	}
+}
