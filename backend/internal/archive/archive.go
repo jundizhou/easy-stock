@@ -35,10 +35,15 @@ type Writer[T any] struct {
 	// [ES_ARCHIVE_DEDUP] 跨周期去重：数据源只提供滚动窗口（如财联社 ~20 条），
 	// 逐周期拉取会反复落盘同一批记录。这里按 key 记住「今天已写过的」，
 	// 只追加新增，避免存档被重复行稀释（实测 44 行里仅 33 条唯一）。
-	keyOf   func(T) string     // nil 表示不去重
+	keyOf   func(T) string      // nil 表示不去重
 	seen    map[string]struct{} // 当日已写 key
 	seenDay string              // seen 对应的日期，跨日自动重置
 	skipped int64               // 累计被去重跳过的条数
+
+	// [ES_ARCHIVE_DEDUP_PERSIST] 持久化去重层（V0.2 任务五 P0 整改）。
+	// 原 seen 为纯内存，进程重启即清零 → realtime 重复率实测 91.7%。
+	// 非 nil 时启用「内存 + 磁盘」双层去重。
+	persistent *PersistentSeen
 }
 
 // WithKey 启用按 key 跨周期去重。key 为空字符串的记录会被跳过。
@@ -70,7 +75,12 @@ func New[T any](root string, name string) (*Writer[T], error) {
 
 // admitLocked 判断一条记录是否应写入（去重）。返回 false 表示跳过。
 // 调用方必须已持有 w.mu。跨日自动重置 seen。
+//
+// [ES_ARCHIVE_DEDUP_PERSIST] 若启用了持久化去重层，则走双层判定。
 func (w *Writer[T]) admitLocked(record T, day string) bool {
+	if w.persistent != nil {
+		return w.admitLockedPersistent(record, day)
+	}
 	if w.keyOf == nil {
 		return true
 	}

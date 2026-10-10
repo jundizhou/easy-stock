@@ -154,8 +154,15 @@ type multiNews struct {
 }
 
 // NewMultiNews 构建实时资讯多源。第一个参数为首选源（通常 cls 快讯），
-// 其余为回退源（通常 eastmoney 公告）。多源正常时合并去重返回，
+// 其余为回退源（通常 eastmoney 公告）。多源正常时**按配额合并**去重返回，
 // 单源失败时由另一源顶上，同样带冷却保护。
+//
+// [ES_NEWS_QUOTA] 配额分配（修正单源垄断）：
+// 早期实现给**每个源**都传完整 limit，合并后统一截断到 limit。
+// 由于主源 cls 快讯发布密集、时间戳更新，排序后几乎占满全部名额，
+// eastmoney 公告被系统性挤出（实测 10-09 归档 44 条 100% 为 cls）。
+// 现在改为：limit 在 N 个源之间**均分**（余数给主源），
+// 使每个源都有固定配额 → 保证多源真实生效。
 func NewMultiNews(primary NewsProvider, others ...NewsProvider) NewsProvider {
 	all := append([]NewsProvider{primary}, others...)
 	m := &multiNews{}
@@ -163,6 +170,23 @@ func NewMultiNews(primary NewsProvider, others ...NewsProvider) NewsProvider {
 		m.entries = append(m.entries, multiEntry{name: sourceName(p, i), provider: p})
 	}
 	return m
+}
+
+// quotaFor 计算第 i 个源的取数配额（共 n 个源，总 limit）。
+// 均分，余数优先给靠前的源（主源）。
+func quotaFor(idx, n, limit int) int {
+	if n <= 0 {
+		return limit
+	}
+	base := limit / n
+	rem := limit % n
+	if idx < rem {
+		return base + 1
+	}
+	if base <= 0 {
+		return 1 // 至少给 1，避免源被完全饿死
+	}
+	return base
 }
 
 func (m *multiNews) LatestNews(ctx context.Context, limit int) ([]foundation.NewsItem, error) {
@@ -178,19 +202,28 @@ func (m *multiNews) LatestNews(ctx context.Context, limit int) ([]foundation.New
 		}
 		pending = append(pending, i)
 	}
+	total := len(m.entries)
 	m.mu.Unlock()
 
-	merged := make([]foundation.NewsItem, 0)
+	merged := make([]foundation.NewsItem, 0, limit)
 	var lastErr error
 	for _, i := range pending {
 		provider := m.entries[i].provider.(NewsProvider)
-		items, err := provider.LatestNews(ctx, limit)
+		// 按配额取数，而非每个源都取 limit
+		q := quotaFor(i, total, limit)
+		items, err := provider.LatestNews(ctx, q)
 		if err != nil || len(items) == 0 {
 			lastErr = err
 			m.markFailure(i)
 			continue
 		}
 		m.markSuccess(i)
+		// 标记真实来源（主源此前不改写，导致归档无法区分多源）
+		for k := range items {
+			if items[k].Meta.Source == "" {
+				items[k].Meta.Source = m.entries[i].name
+			}
+		}
 		merged = append(merged, items...)
 	}
 	if len(merged) == 0 {
@@ -200,7 +233,7 @@ func (m *multiNews) LatestNews(ctx context.Context, limit int) ([]foundation.New
 		return nil, fmt.Errorf("all news sources returned no items")
 	}
 
-	// 去重（按 ID）
+	// 去重（按 ID，退化标题）
 	seen := make(map[string]struct{}, len(merged))
 	deduped := make([]foundation.NewsItem, 0, len(merged))
 	for _, it := range merged {
