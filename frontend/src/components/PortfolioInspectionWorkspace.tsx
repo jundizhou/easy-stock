@@ -46,12 +46,13 @@ type Props = {
 	config: BackendConfig | null;
 	refreshKey: number;
 	onOpenSettings: () => void;
+ onOpenNotificationSettings: () => void;
 	onOpenStockAnalysis: (analysis: StockAIAnalysis) => void;
 };
 
 const directoryStorageKey = 'easy-stock.stock-directory.v1';
 
-export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSettings, onOpenStockAnalysis }: Props) {
+export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSettings, onOpenNotificationSettings, onOpenStockAnalysis }: Props) {
 	const [plans, setPlans] = useState(readPortfolioPlans);
 	const activePlan = activePortfolioPlan(plans);
 	const draft = activePlan.draft;
@@ -269,7 +270,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 
 		<section className="portfolio-inspection-main">
 			<PortfolioPlanPicker key={activePlan.id} state={plans} disabled={starting || applying || removing || savingSchedule || Boolean(running)} onSelect={(id) => changePlan(() => selectPortfolioPlan(id), true)} onAdd={() => changePlan(addPortfolioPlan, true)} onRename={(name) => changePlan(() => renamePortfolioPlan(activePlan.id, name))} onRemove={deletePlan} />
-   <PortfolioSchedulePanel key={`schedule:${activePlan.id}`} config={config} plan={activePlan} disabled={starting || applying || removing} onBusyChange={setSavingSchedule} onOpenSettings={onOpenSettings} />
+   <PortfolioSchedulePanel key={`schedule:${activePlan.id}`} config={config} plan={activePlan} disabled={starting || applying || removing} onBusyChange={setSavingSchedule} onOpenSettings={onOpenNotificationSettings} />
 			{notice && <div className="portfolio-notice" role="status"><CheckCircle2 size={16} /><span>{notice}</span>{appliedPlanId && <button type="button" onClick={() => changePlan(() => selectPortfolioPlan(appliedPlanId), true)}>查看持仓方案</button>}</div>}
 			{error && <div className="portfolio-error" role="alert"><CircleAlert size={16} /><span>{error}</span>{error.includes('模型') && <button type="button" onClick={onOpenSettings}>配置模型</button>}</div>}
 

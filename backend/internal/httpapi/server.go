@@ -654,6 +654,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/settings/llm/test", s.settingsLLMTest)
 	s.mux.HandleFunc("GET /api/v1/settings/notifications", s.settingsNotificationsGet)
 	s.mux.HandleFunc("PUT /api/v1/settings/notifications", s.settingsNotificationsUpdate)
+	s.mux.HandleFunc("POST /api/v1/settings/notifications/reveal", s.settingsNotificationsReveal)
 	s.mux.HandleFunc("POST /api/v1/settings/notifications/test", s.settingsNotificationsTest)
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)

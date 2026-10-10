@@ -1,15 +1,17 @@
 import type { NotificationChannelSettings, NotificationSettings } from './backend';
 
+export const notificationSettingsChangedEvent = 'easy-stock:notification-settings-changed';
+
 export type NotificationChannel = 'feishu' | 'dingtalk';
 export type NotificationDraft = NotificationChannelSettings & { webhook_value: string; secret_value: string; clear_webhook: boolean; clear_secret: boolean };
 
 export function notificationDraft(settings: NotificationChannelSettings): NotificationDraft {
-	return { ...settings, webhook_value: '', secret_value: '', clear_webhook: false, clear_secret: false };
+	return { ...settings, enabled: settings.webhook.configured ? settings.enabled : true, webhook_value: '', secret_value: '', clear_webhook: false, clear_secret: false };
 }
 
 export function notificationUpdate(draft: NotificationDraft) {
 	return {
-		enabled: draft.enabled,
+		enabled: draft.enabled && !draft.clear_webhook && (draft.webhook.configured || Boolean(draft.webhook_value.trim())),
 		webhook: draft.webhook_value.trim() || undefined,
 		secret: draft.secret_value.trim() || undefined,
 		keyword: draft.keyword.trim(),
@@ -19,6 +21,6 @@ export function notificationUpdate(draft: NotificationDraft) {
 }
 
 export function emptyNotifications(): NotificationSettings {
-	const channel = () => ({ enabled: false, webhook: { configured: false }, secret: { configured: false }, keyword: '' });
+	const channel = () => ({ enabled: true, webhook: { configured: false }, secret: { configured: false }, keyword: '' });
 	return { feishu: channel(), dingtalk: channel(), events: { stock_research: true, portfolio_inspection: true, task_failed: true } };
 }

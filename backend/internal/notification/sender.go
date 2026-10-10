@@ -73,7 +73,7 @@ func (s *Sender) Send(ctx context.Context, channel string, cfg appsettings.Notif
 	}
 	endpoint, _ := url.Parse(strings.TrimSpace(cfg.Webhook))
 	title := clip(message.Title, 100)
-	text := clip(message.Text, 2500)
+	text := message.Text
 	if cfg.Keyword != "" {
 		text = cfg.Keyword + "\n" + text
 	}
@@ -104,6 +104,9 @@ func (s *Sender) Send(ctx context.Context, channel string, cfg appsettings.Notif
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("构造通知失败")
+	}
+	if len(body) > maxPayloadBytes {
+		return fmt.Errorf("通知内容过长，请分段发送")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {

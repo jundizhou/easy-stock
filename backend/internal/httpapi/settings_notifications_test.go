@@ -114,3 +114,44 @@ func TestNotificationEndpointsRequireLocalAPIToken(t *testing.T) {
 		}
 	}
 }
+
+func TestNotificationRevealReturnsOnlySelectedField(t *testing.T) {
+	s := NewServer(Config{Token: "local-api-token"})
+	defer s.Close()
+	_, err := s.settingsStore.Update(func(values *appsettings.Values) error {
+		values.Notifications.Dingtalk = appsettings.NotificationChannel{Webhook: "ding-webhook-fixture", Secret: "ding-secret-fixture"}
+		values.Notifications.Feishu = appsettings.NotificationChannel{Webhook: "fei-webhook-fixture", Secret: "fei-secret-fixture"}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/settings/notifications/reveal"
+	if rec := notificationRequest(s, http.MethodPost, path, `{"channel":"dingtalk","field":"secret"}`); rec.Code != http.StatusUnauthorized {
+		t.Fatal("reveal bypassed authentication")
+	}
+	for _, channel := range []string{"dingtalk", "feishu"} {
+		for _, field := range []string{"webhook", "secret"} {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"channel":"`+channel+`","field":"`+field+`"}`))
+			req.Header.Set("Authorization", "Bearer local-api-token")
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			prefix := "ding"
+			if channel == "feishu" {
+				prefix = "fei"
+			}
+			if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || strings.TrimSpace(rec.Body.String()) != `{"data":{"value":"`+prefix+`-`+field+`-fixture"}}` {
+				t.Fatal("incorrect reveal response")
+			}
+		}
+	}
+	for _, body := range []string{`{"channel":"other","field":"webhook"}`, `{"channel":"dingtalk","field":"keyword"}`} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer local-api-token")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != 400 || strings.Contains(rec.Body.String(), "fixture") {
+			t.Fatal("invalid reveal request accepted")
+		}
+	}
+}

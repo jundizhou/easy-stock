@@ -1,6 +1,7 @@
 import { CalendarClock, ChevronDown, LoaderCircle, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { requestJSON, type BackendConfig, type NotificationSettings } from '../lib/backend';
+import { notificationSettingsChangedEvent } from '../lib/notifications';
 import type { PortfolioPlan } from '../lib/portfolio-draft';
 import { defaultSchedule, scheduleRequest, scheduleSnapshotMatches, scheduleTimeLabel, type PortfolioSchedule, type PortfolioScheduleConfig, type ScheduleChannel } from '../lib/portfolio-schedule';
 import './portfolio-schedule.css';
@@ -43,6 +44,17 @@ export function PortfolioSchedulePanel({ config, plan, disabled, onOpenSettings,
   }, 30000);
   return () => { controller.abort(); window.clearInterval(timer); };
  }, [config, loaded, path]);
+ useEffect(() => {
+  if (!config) return;
+  const controller = new AbortController();
+  const refreshNotifications = () => {
+   requestJSON<{ data: NotificationSettings }>(config, '/api/v1/settings/notifications', { signal: controller.signal })
+    .then(({ data }) => { if (!controller.signal.aborted) setNotifications(data); })
+    .catch(() => { if (!controller.signal.aborted) setError('刷新机器人配置失败，请重新打开巡检页面'); });
+  };
+  window.addEventListener(notificationSettingsChangedEvent, refreshNotifications);
+  return () => { controller.abort(); window.removeEventListener(notificationSettingsChangedEvent, refreshNotifications); };
+ }, [config]);
  const update = (patch: Partial<PortfolioScheduleConfig>) => { setForm((value) => ({ ...value, ...patch })); setMessage('修改尚未保存，请保存定时设置'); };
  const save = async () => {
   if (!config || !loaded || saving) return;

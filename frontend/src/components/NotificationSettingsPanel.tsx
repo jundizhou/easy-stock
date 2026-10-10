@@ -1,7 +1,7 @@
 import { Bell, CheckCircle2, CircleAlert, Eye, EyeOff, LoaderCircle, Save, Send, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BackendConfig, NotificationSettings, requestJSON } from '../lib/backend';
-import { emptyNotifications, notificationDraft, notificationUpdate, NotificationChannel, NotificationDraft } from '../lib/notifications';
+import { emptyNotifications, notificationSettingsChangedEvent, notificationDraft, notificationUpdate, NotificationChannel, NotificationDraft } from '../lib/notifications';
 import { SettingsSection } from './SettingsSection';
 
 const channelDefinitions = {
@@ -14,7 +14,8 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 		const values = emptyNotifications();
 		return { feishu: notificationDraft(values.feishu), dingtalk: notificationDraft(values.dingtalk) };
 	});
-	const [events, setEvents] = useState(emptyNotifications().events);
+	const [revision, setRevision] = useState(0);
+ const [events, setEvents] = useState(emptyNotifications().events);
 	const [state, setState] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading');
 	const [loaded, setLoaded] = useState(false);
 	const [message, setMessage] = useState('');
@@ -22,6 +23,7 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 	const [testResults, setTestResults] = useState<Partial<Record<NotificationChannel, { ok: boolean; message: string }>>>({});
 
 	const loadValues = (values: NotificationSettings) => {
+  setRevision((value) => value + 1);
 		setDrafts({ feishu: notificationDraft(values.feishu), dingtalk: notificationDraft(values.dingtalk) });
 		setEvents(values.events);
 	};
@@ -55,6 +57,7 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 			loadValues(data);
 			setState('ready');
 			setMessage('通知配置已保存');
+   window.dispatchEvent(new Event(notificationSettingsChangedEvent));
 		} catch (error) {
 			setState('error');
 			setMessage(error instanceof Error ? error.message : '保存通知配置失败');
@@ -75,7 +78,15 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 		}
 	};
 
-	return <SettingsSection title="消息通知" description="通过飞书、钉钉群机器人接收个股研究和持仓巡检结果。" icon={<Bell size={18} />}>
+ const readSavedValue = async (channel: NotificationChannel, field: 'webhook' | 'secret', signal: AbortSignal) => {
+  if (!config) throw new Error('服务未连接');
+  const { data } = await requestJSON<{ data: { value: string } }>(config, '/api/v1/settings/notifications/reveal', {
+   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, field }), signal,
+  });
+  return data.value;
+ };
+
+	return <SettingsSection title="钉钉与飞书机器人" description="通过飞书、钉钉群机器人接收个股研究和持仓巡检结果。" icon={<Bell size={18} />}>
 		{state === 'loading' && <div className="agent-settings-loading"><LoaderCircle className="spin" size={18} />读取通知配置</div>}
 		<fieldset className="notification-settings-fields" disabled={!loaded || busy}>
 			{(['feishu', 'dingtalk'] as const).map((channel) => {
@@ -85,20 +96,48 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 				return <article className="notification-channel-card" key={channel}>
 					<header><div><strong>{definition.label}机器人</strong><small>{draft.webhook.configured && !draft.clear_webhook ? '已配置 Webhook' : '尚未配置 Webhook'}</small></div><label className="notification-toggle"><input type="checkbox" checked={draft.enabled} onChange={(event) => update(channel, { enabled: event.target.checked })} /><span>启用通知</span></label></header>
 					<p>{definition.help}</p>
-					<NotificationSecretField label={`${definition.label} Webhook`} value={draft.webhook_value} configured={draft.webhook.configured} clearing={draft.clear_webhook} placeholder={definition.placeholder} onChange={(value) => update(channel, { webhook_value: value, clear_webhook: false })} onClear={() => update(channel, { clear_webhook: !draft.clear_webhook, webhook_value: '', enabled: false })} />
-					<NotificationSecretField label={`${definition.label}签名密钥（可选）`} value={draft.secret_value} configured={draft.secret.configured} clearing={draft.clear_secret} placeholder="未开启签名校验时留空" onChange={(value) => update(channel, { secret_value: value, clear_secret: false })} onClear={() => update(channel, { clear_secret: !draft.clear_secret, secret_value: '' })} />
+					<NotificationSecretField key={`${channel}-webhook-${revision}`} readSavedValue={(signal) => readSavedValue(channel, 'webhook', signal)} label={`${definition.label} Webhook`} value={draft.webhook_value} configured={draft.webhook.configured} clearing={draft.clear_webhook} placeholder={definition.placeholder} onChange={(value) => update(channel, { webhook_value: value, clear_webhook: false })} onClear={() => update(channel, { clear_webhook: !draft.clear_webhook, webhook_value: '', enabled: false })} />
+					<NotificationSecretField key={`${channel}-secret-${revision}`} readSavedValue={(signal) => readSavedValue(channel, 'secret', signal)} label={`${definition.label}签名密钥（可选）`} value={draft.secret_value} configured={draft.secret.configured} clearing={draft.clear_secret} placeholder="未开启签名校验时留空" onChange={(value) => update(channel, { secret_value: value, clear_secret: false })} onClear={() => update(channel, { clear_secret: !draft.clear_secret, secret_value: '' })} />
 					<label><span>安全关键词（可选）</span><input value={draft.keyword} maxLength={100} placeholder="与机器人安全设置中的关键词一致" onChange={(event) => update(channel, { keyword: event.target.value })} /></label>
 					<div className="notification-test-row"><span className={result?.ok ? 'success' : 'error'} role={result?.ok === false ? 'alert' : 'status'}>{result ? <>{result.ok ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}{result.message}</> : '测试会向群发送一条消息，不会保存配置。'}</span><button type="button" onClick={() => void test(channel)} disabled={!draft.webhook_value.trim() && (!draft.webhook.configured || draft.clear_webhook)}>{testing === channel ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}测试发送</button></div>
 				</article>;
 			})}
 			<div className="notification-events"><strong>通知事件</strong><label className="notification-toggle"><input type="checkbox" checked={events.stock_research} onChange={(event) => setEvents({ ...events, stock_research: event.target.checked })} /><span>个股 AI 研究完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.portfolio_inspection} onChange={(event) => setEvents({ ...events, portfolio_inspection: event.target.checked })} /><span>手动持仓 AI 巡检完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.task_failed} onChange={(event) => setEvents({ ...events, task_failed: event.target.checked })} /><span>同时提醒所选任务失败或未完成</span></label></div>
 		</fieldset>
-		<p className="settings-field-note">Webhook 和签名密钥仅保存在本机，留空保留原值。通知发送报告摘要；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
+		<p className="settings-field-note">两个机器人默认勾选启用，填写 Webhook 并保存后生效。Webhook 和签名密钥仅保存在本机，留空保留原值。个股研究发送摘要，持仓巡检发送完整 Markdown 结果（不含具体证据），长报告自动分段；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
 		<div className={`agent-settings-footer ${state === 'error' ? 'error' : ''}`}><span role={state === 'error' ? 'alert' : 'status'}>{message || '通知配置单独保存，两个渠道可同时启用。'}</span><button type="button" onClick={() => void save()} disabled={!config || !loaded || busy}>{state === 'saving' ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}保存通知配置</button></div>
 	</SettingsSection>;
 }
 
-function NotificationSecretField({ label, value, configured, clearing, placeholder, onChange, onClear }: { label: string; value: string; configured: boolean; clearing: boolean; placeholder: string; onChange: (value: string) => void; onClear: () => void }) {
-	const [visible, setVisible] = useState(false);
-	return <label><span>{label}</span><div className="notification-secret-input"><input aria-label={label} type={visible ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={value} placeholder={clearing ? '保存后清除' : configured ? '已保存，留空保留；输入新值替换' : placeholder} onChange={(event) => onChange(event.target.value)} /><button type="button" aria-label={`${visible ? '隐藏' : '显示'}${label}`} disabled={!value} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={15} /> : <Eye size={15} />}</button>{configured && <button type="button" aria-label={`${clearing ? '取消清除' : '清除'}${label}`} aria-pressed={clearing} onClick={onClear}><Trash2 size={15} /></button>}</div></label>;
+function NotificationSecretField({ label, value, configured, clearing, placeholder, onChange, onClear, readSavedValue }: { label: string; value: string; configured: boolean; clearing: boolean; placeholder: string; onChange: (value: string) => void; onClear: () => void; readSavedValue: (signal: AbortSignal) => Promise<string> }) {
+ const [visible, setVisible] = useState(false);
+ const [savedValue, setSavedValue] = useState('');
+ const [loading, setLoading] = useState(false);
+ const [error, setError] = useState('');
+ const pending = useRef<AbortController | null>(null);
+ useEffect(() => () => pending.current?.abort(), []);
+ const reset = () => {
+  pending.current?.abort(); pending.current = null;
+  setVisible(false); setSavedValue(''); setLoading(false); setError('');
+ };
+ const reveal = async () => {
+  reset();
+  if (visible) return;
+  if (value) { setVisible(true); return; }
+  if (!configured || clearing) return;
+  const controller = new AbortController(); pending.current = controller; setLoading(true);
+  try {
+   const saved = await readSavedValue(controller.signal);
+   if (!controller.signal.aborted) { setSavedValue(saved); setVisible(true); }
+  } catch {
+   if (!controller.signal.aborted) setError('读取已保存内容失败，请重试');
+  } finally {
+   if (!controller.signal.aborted) { pending.current = null; setLoading(false); }
+  }
+ };
+ return <label><span>{label}</span><div className="notification-secret-input">
+  <input aria-label={label} type={visible ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} disabled={clearing} value={value || (visible ? savedValue : '')} placeholder={clearing ? '保存后清除' : configured ? '••••••••••••' : placeholder} onChange={(event) => { reset(); onChange(event.target.value); }} />
+  <button type="button" aria-label={`${visible ? '隐藏' : '显示'}${label}`} aria-pressed={visible} aria-busy={loading} disabled={loading || clearing || (!value && !configured)} onClick={() => void reveal()}>{loading ? <LoaderCircle size={15} className="spin" /> : visible ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+  {configured && <button type="button" aria-label={`${clearing ? '取消清除' : '清除'}${label}`} aria-pressed={clearing} onClick={() => { reset(); onClear(); }}><Trash2 size={15} /></button>}
+ </div>{error && <small role="alert">{error}</small>}</label>;
 }

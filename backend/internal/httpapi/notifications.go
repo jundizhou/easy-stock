@@ -39,12 +39,8 @@ func (s *Server) notifyPortfolioInspection(job portfolioinspection.Job) {
 	}
 	failed := job.Status != "succeeded"
 	status := "未完成"
-	summary := "已有个股报告已保留，请在持仓 AI 巡检中继续研究或重试组合评估。"
 	if !failed {
 		status = "完成"
-		if job.Report != nil {
-			summary = job.Report.Conclusion.ExecutiveSummary
-		}
 	}
 	var channels []string
 	if job.ScheduleID != "" {
@@ -52,6 +48,6 @@ func (s *Server) notifyPortfolioInspection(job portfolioinspection.Job) {
 	}
 	s.notifications.Publish(notification.Event{Channels: channels, Kind: "portfolio_inspection", Failed: failed, Message: notification.Message{
 		Title: "easy-stock 持仓巡检" + status,
-		Text:  fmt.Sprintf("方案：%s\n\n完成 %d/%d 只个股研究\n\n%s\n\n任务：%s\n请在 easy-stock 持仓 AI 巡检中查看完整报告。", job.Request.PortfolioPlanName, job.CompletedStocks, job.TotalStocks, truncateRunes(summary, 1000), job.ID),
+		Text:  portfolioinspection.NotificationMarkdown(job),
 	}})
 }

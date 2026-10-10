@@ -183,3 +183,38 @@ func (s *Server) settingsNotificationsTest(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"message": "测试通知已发送，请检查机器人所在群", "latency_ms": time.Since(started).Milliseconds()}})
 }
+
+// Reveal only the requested saved field after an explicit local UI action.
+func (s *Server) settingsNotificationsReveal(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	var request struct {
+		Channel string `json:"channel"`
+		Field   string `json:"field"`
+	}
+	if err := decodeNotificationRequest(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	cfg := s.settingsStore.Snapshot().Notifications
+	var channel appsettings.NotificationChannel
+	switch request.Channel {
+	case "feishu":
+		channel = cfg.Feishu
+	case "dingtalk":
+		channel = cfg.Dingtalk
+	default:
+		writeError(w, http.StatusBadRequest, "不支持的通知渠道")
+		return
+	}
+	var value string
+	switch request.Field {
+	case "webhook":
+		value = channel.Webhook
+	case "secret":
+		value = channel.Secret
+	default:
+		writeError(w, http.StatusBadRequest, "不支持的机器人配置字段")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"value": value}})
+}

@@ -31,7 +31,7 @@ import { NotificationSettingsPanel } from './NotificationSettingsPanel';
 type Props = {
 	config: BackendConfig | null;
 	open: boolean;
-	initialSection?: 'updates';
+	initialSection?: 'updates' | 'notifications';
 	onClose: () => void;
 	onSaved?: () => void;
 };
@@ -87,15 +87,17 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	const [openingRuntimeLogs, setOpeningRuntimeLogs] = useState(false);
 	const modelFetchSequence = useRef(0);
 	const updateSectionRef = useRef<HTMLDivElement>(null);
+ const notificationSectionRef = useRef<HTMLDivElement>(null);
 	const updateSectionFocused = useRef(false);
 
 	useEffect(() => {
-		if (!open || initialSection !== 'updates' || state === 'loading') {
+		if (!open || !initialSection || state === 'loading') {
 			updateSectionFocused.current = false;
 			return;
 		}
 		if (updateSectionFocused.current) return;
-		const section = updateSectionRef.current?.querySelector('details');
+		const target = initialSection === 'notifications' ? notificationSectionRef : updateSectionRef;
+  const section = target.current?.querySelector('details');
 		if (!section) return;
 		section.open = true;
 		section.scrollIntoView({ block: 'start' });
@@ -508,7 +510,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		<div className="settings-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 			<aside className="settings-drawer" role="dialog" aria-modal="true" aria-label="系统设置">
 				<header className="settings-header">
-					<div><span>AI RUNTIME</span><h2>系统设置</h2><p>管理运行引擎、共享模型、数据源与消息通知</p></div>
+					<div><span>AI RUNTIME</span><h2>系统设置</h2><p>管理运行引擎、共享模型、数据源与钉钉和飞书机器人</p></div>
 					<button type="button" onClick={onClose} aria-label="关闭设置"><X size={20} /></button>
 				</header>
 
@@ -578,7 +580,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 							<SecretField label="东方财富 Cookie" secretKey="eastmoney_cookie" status={settings?.credentials.eastmoney_cookie} value={secrets.eastmoney_cookie} clearing={clearSecrets.has('eastmoney_cookie')} onChange={updateSecret} onClear={toggleClear} hint="当前公共行情不需要，预留登录态接口" />
 						</SettingsSection>
 
-						<NotificationSettingsPanel config={config} />
+						<div ref={notificationSectionRef}><NotificationSettingsPanel config={config} /></div>
 
 						<div ref={updateSectionRef}><AppUpdatePanel /></div>
 

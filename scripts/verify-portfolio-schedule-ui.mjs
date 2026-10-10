@@ -17,6 +17,9 @@ const schedules = new Map();
 let failSave = false;
 let failDelete = false;
 let notificationReady = true;
+let savedRobots = null;
+let robotUpdate;
+const reveals = [];
 const mutations = [];
 await context.route('**/api/**', async (route) => {
  const req = route.request(); const p = new URL(req.url()).pathname;
@@ -32,7 +35,17 @@ await context.route('**/api/**', async (route) => {
   if (req.method() === 'PUT') schedules.set(id, { ...req.postDataJSON(), next_run_at: '2026-11-01T07:30:00Z', last_run_at: '0001-01-01T00:00:00Z', updated_at: new Date().toISOString() });
   if (req.method() === 'DELETE') schedules.delete(id);
   data = schedules.get(id) || null;
- } else if (p === '/api/v1/settings/notifications') data = { feishu: { enabled: notificationReady, webhook: { configured: notificationReady } }, dingtalk: { enabled: notificationReady, webhook: { configured: notificationReady } }, events: { task_failed: true } };
+ } else if (p === '/api/v1/settings/notifications/reveal') {
+  const body = req.postDataJSON(); reveals.push(body);
+  data = { value: body.field === 'webhook' ? 'https://oapi.dingtalk.com/robot/send?access_token=fixture-only' : 'SEC-fixture-only' };
+ } else if (p === '/api/v1/settings/notifications') {
+  const channel = () => ({ enabled: notificationReady, webhook: { configured: notificationReady }, secret: { configured: false }, keyword: '' });
+  if (req.method() === 'PUT') {
+   robotUpdate = req.postDataJSON();
+   savedRobots = { ...robotUpdate, feishu: { ...channel(), enabled: robotUpdate.feishu.enabled, webhook: { configured: Boolean(robotUpdate.feishu.webhook) } }, dingtalk: { ...channel(), enabled: robotUpdate.dingtalk.enabled, webhook: { configured: Boolean(robotUpdate.dingtalk.webhook) } } };
+  }
+  data = savedRobots || { feishu: channel(), dingtalk: channel(), events: { stock_research: true, portfolio_inspection: true, task_failed: true } };
+ } else if (p === '/api/v1/settings') data = { agent_runtime: 'hermes', llm: { provider: 'openai', model: 'fixture', api_key: { configured: false } }, credentials: {} };
  else if (p === '/api/v1/stocks/directory') data = { stocks: [] };
  else if (p === '/api/v1/quotes/realtime') data = [{ symbol: '600519.SH', price: 100, trade_time: new Date().toISOString(), meta: { source: 'fixture', stale: false } }];
  else if (p === '/api/v1/agent/status') data = { available: true, configured: true };
@@ -112,6 +125,54 @@ try {
  await page.reload(); await open();
  assert.equal(await panel.getByRole('checkbox', { name: /钉钉/ }).isDisabled(), true);
  assert.equal(await panel.getByRole('checkbox', { name: /飞书/ }).isDisabled(), true);
+ await panel.getByLabel('巡检间隔', { exact: true }).fill('5');
+ await panel.getByRole('button', { name: '配置通知机器人', exact: true }).click();
+ const dialog = page.getByRole('dialog', { name: '系统设置' });
+ const section = dialog.locator('details').filter({ has: page.getByRole('heading', { name: '钉钉与飞书机器人', exact: true }) });
+ await page.waitForFunction(() => [...document.querySelectorAll('.settings-section')].some((section) => section.open && section.querySelector('h3')?.textContent === '钉钉与飞书机器人'));
+ const toggles = section.getByRole('checkbox', { name: '启用通知', exact: true });
+ await toggles.first().waitFor();
+ assert.equal(await toggles.count(), 2);
+ assert.equal(await toggles.nth(0).isChecked(), true);
+ assert.equal(await toggles.nth(1).isChecked(), true);
+ const summary = await section.locator('summary').boundingBox();
+ assert.ok(summary && summary.y >= 0 && summary.y < 700, 'robot settings should scroll into view');
+ await section.getByLabel('钉钉 Webhook', { exact: true }).fill('https://oapi.dingtalk.com/robot/send?access_token=fixture-only');
+ await section.getByRole('button', { name: '保存通知配置', exact: true }).click();
+ await section.getByText('通知配置已保存', { exact: true }).waitFor();
+ assert.equal(robotUpdate.dingtalk.enabled, true);
+ assert.equal(robotUpdate.feishu.enabled, false, 'blank robot should not block configuring the other one');
+ await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+ assert.equal(await panel.getByLabel('巡检间隔', { exact: true }).inputValue(), '5', 'robot configuration must preserve unsaved schedule edits');
+ await page.waitForFunction(() => ![...document.querySelectorAll('.portfolio-schedule-channels label')].find((label) => label.textContent.includes('钉钉')).querySelector('input').disabled);
+ assert.equal(await panel.getByRole('checkbox', { name: /飞书/ }).isDisabled(), true);
+ savedRobots.dingtalk.secret = { configured: true };
+ // Repeat the deep link after manually collapsing the section and closing it.
+ await panel.getByRole('button', { name: '配置通知机器人', exact: true }).click();
+ await section.locator('summary').click();
+ await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+ await panel.getByRole('button', { name: '配置通知机器人', exact: true }).click();
+ await page.waitForFunction(() => [...document.querySelectorAll('.settings-section')].some((section) => section.open && section.querySelector('h3')?.textContent === '钉钉与飞书机器人'));
+ const webhook = section.getByLabel('钉钉 Webhook', { exact: true });
+ const secret = section.getByLabel('钉钉签名密钥（可选）', { exact: true });
+ assert.equal(await webhook.inputValue(), '');
+ assert.equal(await webhook.getAttribute('placeholder'), '••••••••••••');
+ assert.equal(reveals.length, 0, 'saved values must not be fetched on load');
+ await section.getByRole('button', { name: '显示钉钉 Webhook', exact: true }).click();
+ await page.waitForFunction(() => document.querySelector('input[aria-label="钉钉 Webhook"]').value.includes('fixture-only'));
+ assert.equal(await webhook.getAttribute('type'), 'text');
+ await section.getByRole('button', { name: '隐藏钉钉 Webhook', exact: true }).click();
+ assert.equal(await webhook.inputValue(), '');
+ assert.equal(await webhook.getAttribute('type'), 'password');
+ await section.getByRole('button', { name: '显示钉钉签名密钥（可选）', exact: true }).click();
+ await page.waitForFunction(() => document.querySelector('input[aria-label="钉钉签名密钥（可选）"]').value === 'SEC-fixture-only');
+ assert.equal(await secret.getAttribute('type'), 'text');
+ await section.getByRole('button', { name: '保存通知配置', exact: true }).click();
+ await section.getByText('通知配置已保存', { exact: true }).waitFor();
+ assert.equal(robotUpdate.dingtalk.webhook, undefined, 'viewing must not resubmit the saved webhook');
+ assert.equal(robotUpdate.dingtalk.secret, undefined, 'viewing must not resubmit the saved secret');
+ assert.equal(await secret.inputValue(), '');
+ assert.equal(await secret.getAttribute('type'), 'password');
  assert.deepEqual(errors, []);
  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, fixture_only: true, mutations, errors }, null, 2));
  console.log(`Portfolio schedule UI checks passed: ${output}`);
