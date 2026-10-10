@@ -31,7 +31,8 @@ import {
 	StockDirectoryEntry,
 	requestJSON,
 } from '../lib/backend';
-import { portfolioDraftToHoldings, portfolioProfiles, readPortfolioDraft, writePortfolioDraft } from '../lib/portfolio-draft';
+import { activePortfolioPlan, addPortfolioPlan, portfolioDraftChangedEvent, portfolioDraftStorageKey, portfolioDraftToHoldings, portfolioPlansStorageKey, portfolioProfiles, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioPlans } from '../lib/portfolio-draft';
+import { PortfolioPlanPicker } from './PortfolioPlanPicker';
 import { PortfolioSetupForm } from './PortfolioSetupForm';
 import { ResearchPanel } from './StockResearchReport';
 import { PortfolioAIReportView, originLabel } from './PortfolioAIReport';
@@ -48,7 +49,9 @@ type Props = {
 const directoryStorageKey = 'easy-stock.stock-directory.v1';
 
 export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSettings, onOpenStockAnalysis }: Props) {
-	const [draft, setDraft] = useState(readPortfolioDraft);
+	const [plans, setPlans] = useState(readPortfolioPlans);
+	const activePlan = activePortfolioPlan(plans);
+	const draft = activePlan.draft;
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedDirectory);
 	const [history, setHistory] = useState<PortfolioInspectionJob[]>([]);
 	const [job, setJob] = useState<PortfolioInspectionJob | null>(null);
@@ -87,8 +90,30 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	}, [loadWorkspace, refreshKey]);
 
 	useEffect(() => {
-		writePortfolioDraft(draft);
-	}, [draft]);
+		const sync = () => setPlans(readPortfolioPlans());
+		const onStorage = (event: StorageEvent) => {
+			if (!event.key || event.key === portfolioPlansStorageKey || event.key === portfolioDraftStorageKey) sync();
+		};
+		window.addEventListener(portfolioDraftChangedEvent, sync);
+		window.addEventListener('storage', onStorage);
+		return () => {
+			window.removeEventListener(portfolioDraftChangedEvent, sync);
+			window.removeEventListener('storage', onStorage);
+		};
+	}, []);
+
+	const changePlan = (update: () => PortfolioPlans, showSetup = false) => {
+		if (starting || running) return false;
+		try {
+			setPlans(update());
+			setError('');
+			if (showSetup) { setJob(null); setNotice(''); setOptimizationSignal(0); }
+			return true;
+		} catch (cause) {
+			setError(`持仓方案保存失败：${cause instanceof Error ? cause.message : '请检查本机存储后重试'}`);
+			return false;
+		}
+	};
 
 	useEffect(() => {
 		if (!config || !job || job.status !== 'running') return;
@@ -162,12 +187,13 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		</aside>
 
 		<section className="portfolio-inspection-main">
+			<PortfolioPlanPicker key={activePlan.id} state={plans} disabled={starting || Boolean(running)} onSelect={(id) => changePlan(() => selectPortfolioPlan(id), true)} onAdd={() => changePlan(addPortfolioPlan, true)} onRename={(name) => changePlan(() => renamePortfolioPlan(activePlan.id, name))} onRemove={() => changePlan(() => removePortfolioPlan(activePlan.id), true)} />
 			{notice && <div className="portfolio-notice" role="status"><CheckCircle2 size={16} /><span>{notice}</span></div>}
 			{error && <div className="portfolio-error" role="alert"><CircleAlert size={16} /><span>{error}</span>{error.includes('模型') && <button type="button" onClick={onOpenSettings}>配置模型</button>}</div>}
 
 			{(!job?.report || job.status === 'running') && <>
 				<header className="stock-ai-search-hero portfolio-setup-hero"><div><span>持仓 AI 巡检</span><h2>配置持仓，检查组合风险</h2><p>选择交易风格，填写持仓占比与成本后开始巡检。</p></div><WalletCards size={32} aria-hidden="true" /></header>
-				<PortfolioSetupForm showResearchOptions draft={draft} directory={directory} disabled={Boolean(running)} busy={starting || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={setDraft} onSubmit={() => void startInspection()} />
+				<PortfolioSetupForm key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={starting || Boolean(running)} busy={starting || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={() => void startInspection()} />
 			</>}
 
 			{job?.status === 'running' && <><InspectionProgress job={job} /><button type="button" className="portfolio-task-action" disabled={starting} onClick={() => void cancelInspection()}>停止持仓分析</button></>}

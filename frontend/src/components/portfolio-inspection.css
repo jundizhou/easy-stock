@@ -9,6 +9,32 @@
 	background: transparent;
 }
 .portfolio-inspection-main { container: portfolio-inspection / inline-size; }
+.portfolio-plan-picker { min-width: 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--theme-surface, #fff); }
+.portfolio-plan-picker > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.portfolio-plan-picker > header strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.portfolio-plan-picker > header small { color: var(--muted); font-size: 12px; }
+.portfolio-plan-controls { display: flex; align-items: flex-start; gap: 12px; }
+.portfolio-plan-options { display: flex; flex: 1; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.portfolio-plan-picker button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--theme-surface, #fff); cursor: pointer; font-size: 13px; }
+.portfolio-plan-picker button:disabled { opacity: .45; cursor: not-allowed; }
+.portfolio-plan-picker button:not(:disabled):hover { border-color: var(--theme-blue, #2476d2); }
+.portfolio-plan-options button { max-width: 100%; }
+.portfolio-plan-options button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portfolio-plan-options button small { flex-shrink: 0; color: var(--muted); font-size: 11px; }
+.portfolio-plan-options button.active { border-color: var(--theme-blue, #2476d2); color: var(--theme-blue, #2476d2); background: var(--theme-blue-soft, #eaf3ff); font-weight: 600; }
+.portfolio-plan-options .portfolio-plan-add { width: 36px; flex-shrink: 0; border-style: dashed; color: var(--theme-blue, #2476d2); }
+.portfolio-plan-actions { display: flex; gap: 6px; }
+.portfolio-plan-edit, .portfolio-plan-delete { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.portfolio-plan-edit input { flex: 1 1 140px; min-width: 0; max-width: 300px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--theme-surface, #fff); color: var(--text); font-size: 13px; }
+.portfolio-plan-delete > span { flex: 1 1 220px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.portfolio-plan-delete > button:first-of-type { color: var(--theme-red, #c4313b); }
+@container portfolio-inspection (max-width: 440px) {
+	.portfolio-plan-controls { flex-wrap: wrap; }
+	.portfolio-plan-options { flex-basis: 100%; }
+	.portfolio-plan-actions { margin-left: auto; }
+	.portfolio-inspection-workspace .portfolio-weight-control { min-width: 0; grid-template-columns: minmax(0, 1fr) 64px; }
+	.portfolio-inspection-workspace .portfolio-weight-control > input { min-width: 0; margin-inline: 0; }
+}
 .portfolio-inspection-workspace .portfolio-history,
 .portfolio-inspection-workspace .portfolio-builder,
 .portfolio-inspection-workspace .portfolio-progress {
