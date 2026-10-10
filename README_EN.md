@@ -153,17 +153,21 @@ Save multiple portfolio plans: click **+** above the setup form to add one, then
 Choose an aggressive, balanced, or steady style, set a holding horizon, and add up to 10 stocks. Total assets default to CNY 500,000 and are editable. Costs default to a valid quote fetched when adding a stock and can be overridden. Whole-share quantities are estimated from assets, weights, and costs; the form shows current prices, market values, and per-stock and aggregate profit/loss. Unallocated funds remain cash. Inspection reuses **valid AI stock reports from the past 24 hours**, researches missing stocks, and produces a portfolio conclusion. Individual stock research can also be refreshed separately.
 
 <details>
-<summary>View portfolio setup: style, horizon, research depth, and weights</summary>
+<summary>View portfolio setup: plans, assets and P/L, trading style, weights, and costs</summary>
 
-<p align="center"><img src="./docs/assets/easy-stock-portfolio-setup-2026-10.jpg" width="1280" alt="Current portfolio setup with trading styles, horizon, report reuse, and allocation sliders; fictional data" /></p>
+<p align="center"><img src="./docs/assets/easy-stock-portfolio-setup-2026-10.jpg" width="1280" alt="Portfolio setup screenshot with multiple plans, assets and P/L, trading style, holding horizon, allocation sliders, and costs" /></p>
+
+The setup screenshot shows a saved plan with market value, remaining cash, and P/L at the top, followed by trading style, research settings, and per-stock weights and costs. Share quantities and market values are estimates based on the inputs and quotes.
 
 </details>
 
 AI explains four scoring dimensions; the application recomputes and validates their fixed-weight total: **holding thesis 35%, portfolio structure 25%, risk management 25%, and strategy fit 15%**. Scoring evaluates the stock portfolio itself. Being fully invested, the cash percentage, and total exposure do not add or subtract points; concentration uses weights within the stock portfolio.
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-portfolio-report-2026-10.jpg" width="1280" alt="Current portfolio report excerpt: prominent inspection score, four dimensions, priorities, and risks; fictional data" />
+  <img src="./docs/assets/easy-stock-portfolio-report-2026-10.jpg" width="1280" alt="Portfolio inspection screenshot with a score of 65, medium risk, research reuse counts, and four scoring dimensions" />
 </p>
+
+The inspection shown covers 4 holdings, reusing 3 reports and researching 1 stock anew. It scores 65 with medium risk. The four cards explain the holding thesis, portfolio structure, risk management, and strategy fit, with expandable scoring evidence and sources.
 
 The report also retains per-stock judgments, common drivers, historical correlations, research sources, and confirmation and invalidation conditions. Existing stock reports open directly. Tasks run in the background, with reports and recovery state saved locally.
 
@@ -179,8 +183,10 @@ Start optimization from an inspection report. Candidate screening, stock researc
 - **Saved progress:** stock judgments, investment comparisons, and review blocks are saved separately. Recovery continues missing work; restarting can still reuse valid research.
 
 <p align="center">
-  <img src="./docs/assets/easy-stock-portfolio-optimization-2026-10.jpg" width="1280" alt="AI portfolio optimization with original and proposed holdings, inspection score provenance, paired review scores, and capital constraints; fictional data" />
+  <img src="./docs/assets/easy-stock-portfolio-optimization-2026-10.jpg" width="1280" alt="AI portfolio optimization screenshot with a pending entry condition, original and proposed holdings, paired review scores of 64 and 74, and per-stock allocation changes" />
 </p>
+
+The screenshot retains the original inspection score of 65 and separately shows optimization review scores of 64 for the original holdings and 74 for the proposal: a 10-point improvement in the paired review. The side-by-side view shows reductions, unchanged weights, and additions. The pending-entry notice means the target requires price or other conditions to be met; the proposed allocation has not been executed.
 
 Applying a proposal starts a new inspection of its target holdings. It **does not place orders or change actual positions**. Scores evaluate current research evidence; they are not expected returns or win probabilities.
 
