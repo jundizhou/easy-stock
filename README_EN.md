@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
+  <img src="./desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
 </p>
 
 <h1 align="center">easy-stock: An AI Research Workbench for the China A-Share Market</h1>
 
-<p align="center"><strong>A local-first desktop app for A-share market analysis, stock research, and AI-powered review — built for individual investors</strong></p>
+<p align="center"><strong>A local-first desktop workbench for market discovery, stock research, portfolio inspection, and AI portfolio optimization</strong></p>
 
 <p align="center"><sub>English | <a href="./README.md">简体中文</a></sub></p>
 
@@ -36,14 +36,6 @@
   <a href="https://github.com/jundizhou/easy-stock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jundizhou/easy-stock?style=flat" /></a>
 </p>
 
-<p align="center">
-  <a href="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-product-overview.png">
-    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-product-overview.png" width="1280" alt="easy-stock product overview: trend themes, leading-stock ladder, daily K-line and leader analysis" />
-  </a>
-</p>
-
-<p align="center"><sub>Market Overview · Automated Review Digest · Theme Radar · Sentiment & Limit-Up Ladder · AI Stock Analysis · Portfolio Inspection · Local Research Memory</sub></p>
-
 ---
 
 ## Why easy-stock
@@ -70,6 +62,8 @@ easy-stock is an AI-native workbench that speaks this language. It unifies quote
 
 ## Core Features
 
+> Compared with [v1.5.0](https://github.com/jundizhou/easy-stock/releases/tag/v1.5.0), the current main branch includes fixes for news and earnings-disclosure evidence assessment, portfolio optimization recovery, and score presentation. These fixes are not included in the v1.5.0 installers.
+
 ### 01 · Automated Post-Market Review Digest
 
 #### Let AI collect and organize what multiple market writers actually said
@@ -77,13 +71,13 @@ easy-stock is an AI-native workbench that speaks this language. It unifies quote
 Post-market reviews from well-known A-share commentators are scattered across Xueqiu, TaoGuba, and WeChat. Manually visiting each profile, filtering for today's articles, and copying text is a time sink. easy-stock organizes all of it into a unified review timeline:
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-auto-review.png" width="2560" height="1692" alt="easy-stock automated review digest and daily sync workbench" />
+  <img src="./docs/assets/easy-stock-auto-review.png" width="1280" alt="easy-stock automated review digest and daily sync workbench" />
 </p>
 
 Once collection finishes, one click generates a "today's consensus" report — distilling shared focus areas, key disagreements, market facts, and conditions to verify in the next session:
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-ai-daily-consensus.png" width="2560" height="1692" alt="easy-stock AI consensus of commentator views and next-session expectations" />
+  <img src="./docs/assets/easy-stock-ai-daily-consensus.png" width="1280" alt="easy-stock AI consensus of commentator views and next-session expectations" />
 </p>
 
 The goal is not "AI guessing what rises tomorrow" — it is turning dozens of unstructured articles into a readable, verifiable opinion map you can keep tracking.
@@ -92,10 +86,10 @@ The goal is not "AI guessing what rises tomorrow" — it is turning dozens of un
 
 #### See the ladder, the promotion rate, and where you are in the sentiment cycle
 
-A-shares have a ±10% daily price limit, so reading the limit-up ladder (how many stocks sealed the limit, how many consecutive days, which rung failed) is central to Chinese short-term trading. easy-stock puts the limit-up pool, consecutive limit-up ladder, yesterday's follow-through, promotion rates, and sentiment history in one view, with a built-in algorithm for sentiment-cycle staging:
+A-share daily price limits vary by board and stock status. Reading the limit-up ladder—how many stocks reached the limit, for how many consecutive sessions, and which rung failed—is central to short-term market analysis. easy-stock puts the limit-up pool, consecutive limit-up ladder, yesterday's follow-through, promotion rates, and sentiment history in one view, with a built-in algorithm for sentiment-cycle staging:
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-short-term-analysis.png" width="2560" height="1692" alt="easy-stock limit-up ladder, market sentiment and promotion structure analysis" />
+  <img src="./docs/assets/easy-stock-short-term-2026-10.jpg" width="1280" alt="easy-stock limit-up ladder, market sentiment and promotion structure analysis" />
 </p>
 
 ### 03 · Theme Radar
@@ -104,9 +98,18 @@ A-shares have a ±10% daily price limit, so reading the limit-up ladder (how man
 
 Aggregates theme rankings, momentum strength, money flow, market breadth, and streak duration; breaks down industry chains, concept nodes, and sub-directions through a theme map; and combines AI reads of the market trend, theme stage, and conditional entry points for trend stocks.
 
+Daily, weekly, and monthly theme-index candles with volume help track the sector as a whole. The interface distinguishes provider indices from equal-weight reference indices.
+
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-theme-radar.png" width="2560" height="1696" alt="easy-stock theme radar, mainline heat and stock ladder analysis" />
+  <img src="./docs/assets/easy-stock-theme-radar.png" width="1280" alt="easy-stock theme radar, mainline heat and stock ladder analysis" />
 </p>
+
+<details>
+<summary>View the theme-index candlestick example</summary>
+
+<p align="center"><img src="./docs/assets/easy-stock-theme-index.jpg" width="690" alt="Daily, weekly, and monthly theme-index candles with volume; this example uses an equal-weight reference index" /></p>
+
+</details>
 
 ### 04 · Market Overview
 
@@ -115,53 +118,76 @@ Aggregates theme rankings, momentum strength, money flow, market breadth, and st
 Core indices, news flashes, industry trend strength, sector money flow, themes, per-stock inflows/outflows, the Dragon-Tiger list, announcement radar, institutional views, and industry research — unified into a single research entry point. Every page keeps its data source and fetch time, and you can hand the current context straight to AI for interpretation, instead of hopping between quote terminals and news pages.
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png" width="2560" height="1696" alt="easy-stock market overview with core indices and cross-market trend analysis" />
+  <img src="./docs/assets/easy-stock-market-overview-indices.png" width="1280" alt="easy-stock market overview with core indices and cross-market trend analysis" />
 </p>
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-research.png" width="2560" height="1696" alt="easy-stock market overview with institutional views and research report evidence" />
+  <img src="./docs/assets/easy-stock-market-overview-research.png" width="1280" alt="easy-stock market overview with institutional views and research report evidence" />
 </p>
 
-### 05 · AI Stock Analysis
+### 05 · Tiered Stock Research
 
-#### One explainable decision system for both trend stocks and sentiment stocks
+#### Choose your research purpose, horizon, and depth
 
-For any stock, the engine first classifies the likely path — sentiment ladder, trend capacity, trend growth, range-bound watch, or weak/risk — then weights each path and blends your own trading experience, review notes, and short-term trading wisdom into a personalized stock report.
+Select observation, a potential new position, or an existing holding; choose a short, swing, or medium-term horizon. Cost is optional for existing holdings.
+
+| Research mode | Use case |
+| --- | --- |
+| **Quantitative preview** | Inspect prices, trends, and a quantitative baseline without calling an AI model |
+| **Quick AI assessment** | Summarize the main thesis and questions that need checking |
+| **Standard AI assessment** | Compare business drivers, catalysts, supporting evidence, and counter-evidence |
+| **Deep AI research** | Investigate core disagreements further and develop scenarios and follow-up checks |
+
+Reports distinguish source statements, third-party opinions, and research inferences. They retain citations and evidence timestamps alongside the business thesis, disagreements, counter-evidence, confirmation conditions, and invalidation conditions. Completed research stages are saved and can be resumed when recovery requirements are met.
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-stock-ai-analysis-overview.png" width="2560" height="1696" alt="easy-stock AI stock analysis overview with multi-dimensional scoring and theme positioning" />
+  <img src="./docs/assets/easy-stock-stock-research-2026-10.jpg" width="1280" alt="Current standard stock-research excerpt: purpose, horizon, thesis, supporting evidence, and counter-evidence; fictional data" />
 </p>
-
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-stock-ai-analysis-evidence.png" width="2560" height="1696" alt="easy-stock AI stock analysis with conditional decisions, fact chains and risk boundaries" />
-</p>
-
-<p align="center"><sub>Screenshots show page structure; stock states, theme tags, scores, and risk parameters change dynamically with trading days, cached snapshots, and data source availability.</sub></p>
 
 ### 06 · Portfolio AI Inspection
 
-#### From single-stock calls to portfolio-level checks
+#### Evaluate individual research in the context of the whole portfolio
 
-Choose an aggressive, balanced, or steady trading style, add up to 10 holdings by name or code, and set position weights on a slider (the remainder is treated as cash). The engine then runs the full per-stock analysis in the background and produces a portfolio report.
+Choose an aggressive, balanced, or steady style, set a holding horizon, and add up to 10 stocks. Set weights and optionally costs; the remainder is cash. Inspection reuses **valid AI stock reports from the past 24 hours**, researches missing stocks, and produces a portfolio conclusion. Individual stock research can also be refreshed separately.
+
+<details>
+<summary>View portfolio setup: style, horizon, research depth, and weights</summary>
+
+<p align="center"><img src="./docs/assets/easy-stock-portfolio-setup-2026-10.jpg" width="1280" alt="Current portfolio setup with trading styles, horizon, report reuse, and allocation sliders; fictional data" /></p>
+
+</details>
+
+AI explains four scoring dimensions; the application recomputes and validates their fixed-weight total: **holding thesis 35%, portfolio structure 25%, risk management 25%, and strategy fit 15%**. Scoring evaluates the stock portfolio itself. Being fully invested, the cash percentage, and total exposure do not add or subtract points; concentration uses weights within the stock portfolio.
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-portfolio-inspection-setup.png" width="2560" height="1688" alt="easy-stock portfolio inspection setup: trading style, stock search and weight configuration" />
+  <img src="./docs/assets/easy-stock-portfolio-report-2026-10.jpg" width="1280" alt="Current portfolio report excerpt: prominent inspection score, four dimensions, priorities, and risks; fictional data" />
 </p>
 
-The report uses a deterministic health score, broken down into stock quality, risk resilience, diversification, and style fit — then flags theme concentration, pairwise correlation, stop-loss risk, and risk contribution. Each stock gets an action, a confirmation condition, and an invalidation condition; stocks with a completed analysis can jump straight to their full report without another AI call.
+The report also retains per-stock judgments, common drivers, historical correlations, research sources, and confirmation and invalidation conditions. Existing stock reports open directly. Tasks run in the background, with reports and recovery state saved locally.
+
+### 07 · AI Portfolio Optimization
+
+#### Compare the original and proposed portfolios—and explain where the capital goes
+
+Start optimization from an inspection report. Candidate screening, stock research, investment comparisons, allocation search, and independent review produce target weights, funding sources, and entry and exit conditions. The process compares adding to existing holdings with introducing new stocks.
+
+- **Capital constraints:** total stock exposure and cash remain fixed. Cumulative replacement is capped at 70% of the optimization chain's initial stock allocation, with at most 2 new stocks and 10 target holdings.
+- **Paired review:** original and proposed portfolios are independently scored using the same evidence and market snapshot. Improvement uses that review's scores. The earlier inspection score remains separate; two AI evaluations may differ.
+- **Substantive improvement:** investment value, structure, trading eligibility, and risk constraints are checked together. A higher score alone does not qualify a proposal. Results may be conditional, a qualified alternative, or no adjustment.
+- **Saved progress:** stock judgments, investment comparisons, and review blocks are saved separately. Recovery continues missing work; restarting can still reuse valid research.
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-portfolio-inspection-report.png" width="2560" height="1688" alt="easy-stock portfolio inspection report: health score, key risks, concentration and per-stock actions" />
+  <img src="./docs/assets/easy-stock-portfolio-optimization-2026-10.jpg" width="1280" alt="AI portfolio optimization with original and proposed holdings, inspection score provenance, paired review scores, and capital constraints; fictional data" />
 </p>
 
-<p align="center"><sub>Portfolio inspection is for research and risk awareness; health scores, risk contributions, and action conditions change with the market, your configuration, and data coverage.</sub></p>
+Applying a proposal starts a new inspection of its target holdings. It **does not place orders or change actual positions**. Scores evaluate current research evidence; they are not expected returns or win probabilities.
 
-### 07 · Trading Wisdom Library & AI Copilot
+### 08 · Trading Wisdom Library & AI Copilot
 
 #### Turn hard-won trading experience into durable, re-readable knowledge — and let AI learn how you research
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-trading-mastery.png" width="2560" height="1696" alt="easy-stock trading wisdom library, trader profiles and Hermes deep reading" />
+  <img src="./docs/assets/easy-stock-trading-mastery.png" width="1280" alt="easy-stock trading wisdom library, trader profiles and Hermes deep reading" />
 </p>
 
 ### The Daily Research Loop
@@ -169,8 +195,9 @@ The report uses a deterministic health score, broken down into stock quality, ri
 | Stage | What easy-stock provides |
 | --- | --- |
 | **Intraday discovery** | Market overview, trend themes, live quotes, theme map, limit-up ladder, and data source status |
-| **Stock research** | Path classification, multi-timeframe trends, relative strength, theme attribution, next-day scenarios, and risk boundaries |
-| **Portfolio inspection** | Style matching, portfolio health, concentration and correlation risks, per-stock actions, and links to full reports |
+| **Stock research** | Quantitative preview and tiered AI research, business drivers, evidence and counter-evidence, conditions, and scenarios |
+| **Portfolio inspection** | Valid report reuse, four-dimensional scoring, concentration and correlation risks, per-stock judgments, and sources |
+| **Portfolio optimization** | Candidate screening, investment comparisons, allocation search, paired review, and conditional proposals |
 | **Post-market review** | Sentiment timeline, yesterday's follow-through, promotion structure, and limit-up ladder analysis |
 | **Information gathering** | Automatic profile sync from commentators, article import, text cleaning, and local archiving |
 | **AI distillation** | Per-article summaries, per-author synthesis, cross-author consensus, disagreements, and next-session watch conditions |
@@ -218,15 +245,15 @@ The Go backend collects market data, computes quantitative baselines, organizes 
 
 | Layer | Responsibility |
 | --- | --- |
-| **AI research workbench** | React + TypeScript: market overview, trend themes, limit-up ladder, tiered stock research, portfolio inspection, review digest, trading wisdom, and AI copilot |
+| **AI research workbench** | React + TypeScript: market overview, trend themes, limit-up ladder, tiered stock research, portfolio inspection and optimization, review digest, trading wisdom, and AI copilot |
 | **Local Go API** | HTTP queries and background job polling; WebSocket quotes and AI events; local authentication, request validation, and request logging |
-| **Domain services and orchestration** | Theme fusion, ladder and sentiment calculations, inflection evaluation, stock research, portfolio report reuse and scoring, viewpoint consensus, next-day verification, and scheduled sync |
-| **Data and local evidence** | Source adapters and fallbacks, unified market models, theme attribution, versioned snapshots with source and time metadata; SQLite stores reviews, research jobs, portfolio inspections, sentiment history, and theme caches |
+| **Domain services and orchestration** | Theme fusion, ladder and sentiment calculations, inflection evaluation, stock research, portfolio report reuse and scoring, candidate screening and optimization review, viewpoint consensus, next-day verification, and scheduled sync |
+| **Data and local evidence** | Source adapters and fallbacks, unified market models, theme attribution, versioned snapshots with source and time metadata; SQLite stores reviews, research jobs, portfolio inspections and optimization checkpoints, sentiment history, and theme caches |
 | **Shared agent service** | Shared model profiles, reasoning settings, Skills, and MCP; Hermes or Codex selection; task-bound configuration, session resumption, approvals, clarification, and token usage. Codex uses its native App Server and requires a Responses connection |
 | **Electron desktop host** | Bundled Go / Hermes / Codex / Python; local ports and startup tokens; Preload / IPC; Xueqiu and TaoGuba Browser Bridges, agent-browser fallback, and WeChat link parsing; logs, updates, and backups before installation |
 | **External ecosystem** | Market and research data sources, content platforms, public review feeds and trading wisdom, plus model providers or compatible endpoints called directly by the selected runtime |
 
-Stock research saves stage checkpoints and can resume when model configuration and evidence still match. Portfolio inspection first reuses successful stock reports completed within 24 hours, then fills missing research before generating a portfolio report. See the [current architecture and code entry points](./backend/docs/architecture.md) (Chinese).
+Stock research saves stage checkpoints and can resume when model configuration and evidence still match. Portfolio inspection first reuses successful stock reports completed within 24 hours, then fills missing research before generating a portfolio report. Portfolio optimization saves stock judgments, investment comparisons, and review checkpoints so recovery can continue missing work. See the [current architecture and code entry points](./backend/docs/architecture.md) (Chinese).
 
 ---
 

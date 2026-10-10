@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
+  <img src="./desktop/assets/easy-stock.png" width="112" height="112" alt="easy-stock Logo" />
 </p>
 
 <h1 align="center">easy-stock：A股 AI 智能投研工作台</h1>
 
-<p align="center"><strong>面向个人投资者的 A股行情分析、股票分析与 AI投研桌面应用</strong></p>
+<p align="center"><strong>从行情与题材，到个股研究、持仓巡检与 AI 持仓优化</strong></p>
 
 <p align="center"><sub><a href="./README_EN.md">English</a> | 简体中文</sub></p>
 
@@ -49,14 +49,6 @@
   <a href="#许可与商业使用">许可</a>
 </p>
 
-<p align="center">
-  <a href="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-product-overview.png">
-    <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-product-overview.png" width="1280" alt="easy-stock A股 AI 智能投研工作台产品全景图，展示趋势题材、主线梯队、个股日 K 与龙头分析" />
-  </a>
-</p>
-
-<p align="center"><sub>行情总览 · 大 V 自动复盘 · 趋势题材雷达 · 超短情绪 · 个股 AI 分析 · 持仓 AI 巡检 · 本地研究记忆</sub></p>
-
 ---
 
 ## 为什么要做 easy-stock
@@ -81,6 +73,7 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 
 ## 核心产品能力
 
+
 ### 01 · 大 V 自动复盘
 
 #### 兼听则明，客观则赢：让 AI 自动收集和整理多位市场作者的观点
@@ -88,13 +81,13 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 大 V 的盘后复盘通常分散在雪球、淘股吧和微信公众号中，手工逐个打开主页、筛选当天文章、复制正文并整理观点非常耗时。easy-stock 将这些内容组织为统一的复盘时间流：
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-auto-review.png" width="2560" height="1692" alt="easy-stock 大 V 自动复盘与每日同步工作台" />
+  <img src="./docs/assets/easy-stock-auto-review.png" width="1280" alt="easy-stock 大 V 自动复盘与每日同步工作台" />
 </p>
 
 文章收集完成后，可以一键生成「今日大 V 观点共识」，从文章集合中提炼共同关注方向、主要分歧、盘面事实与下一交易日需要验证的条件。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-ai-daily-consensus.png" width="2560" height="1692" alt="easy-stock AI 今日大 V 观点共识与明日预期" />
+  <img src="./docs/assets/easy-stock-ai-daily-consensus.png" width="1280" alt="easy-stock AI 今日大 V 观点共识与明日预期" />
 </p>
 
 这套能力希望解决的不是“让 AI 猜明天涨什么”，而是把几十篇非结构化文章转化为一份可阅读、可核验、可在次日继续跟踪的观点地图。
@@ -103,20 +96,29 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 
 #### 看清梯队、晋级和情绪周期，寻找真正的超短节点
 
-系统将涨停池、连板梯队、昨日反馈、晋级率和情绪历史放在同一视图中,并设计一套算法分析情绪周期：
+系统将涨停池、连板梯队、昨日反馈、晋级率和情绪历史放在同一视图中，结合历史快照识别情绪周期；各模块独立加载，已有数据可先行展示。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-short-term-analysis.png" width="2560" height="1692" alt="easy-stock 超短连板、市场情绪与晋级结构分析" />
+  <img src="./docs/assets/easy-stock-short-term-2026-10.jpg" width="1280" alt="easy-stock 超短连板、市场情绪与晋级结构分析" />
 </p>
 
 ### 03 · 趋势题材雷达
 
 #### 从板块涨跌中识别真正的市场主线：牛市进程分歧研究，熊市进程分歧防守
-聚合题材排名、涨跌强度、资金流、上涨宽度和持续天数，通过题材地图拆解产业链、概念节点和细分方向。结合 AI 分析市场趋势、题材阶段和趋势股的条件化介入点
+聚合题材排名、涨跌强度、资金流、上涨宽度和持续天数，通过题材地图拆解产业链、概念节点和细分方向。结合 AI 分析市场趋势、题材阶段和趋势股的条件化介入点。
+
+新增题材指数日 K、周 K 与月 K，结合成交量观察板块整体走势；页面区分数据源指数与等权参考指数，避免将参考曲线误当成官方指数。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-theme-radar.png" width="2560" height="1696" alt="easy-stock 趋势题材雷达、主线热度与个股梯队分析" />
+  <img src="./docs/assets/easy-stock-theme-radar.png" width="1280" alt="easy-stock 趋势题材雷达、主线热度与个股梯队分析" />
 </p>
+
+<details>
+<summary>查看题材指数 K 线示例</summary>
+
+<p align="center"><img src="./docs/assets/easy-stock-theme-index.jpg" width="690" alt="题材指数日 K、周 K、月 K 切换与成交量，示例为等权参考指数" /></p>
+
+</details>
 
 ### 04 · 行情总览
 
@@ -125,55 +127,76 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 行情总览将市场核心指数、新闻快讯、行业趋势强度、行业资金、题材概念、个股资金流入流出、龙虎榜、公告雷达、机构观点与产业透视统一到同一个研究入口。每个页面保留数据来源与抓取时间，并可将当前上下文直接交给 AI 解读，减少在多个行情终端和资讯页面之间来回切换。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-indices.png" width="2560" height="1696" alt="easy-stock 行情总览、市场核心指数与跨市场走势分析" />
+  <img src="./docs/assets/easy-stock-market-overview-indices.png" width="1280" alt="easy-stock 行情总览、市场核心指数与跨市场走势分析" />
 </p>
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-market-overview-research.png" width="2560" height="1696" alt="easy-stock 行情总览、机构观点与研报证据检索" />
+  <img src="./docs/assets/easy-stock-market-overview-research.png" width="1280" alt="easy-stock 行情总览、机构观点与研报证据检索" />
 </p>
 
-### 05 · 个股 AI 分析
+### 05 · 个股分级研究
 
-#### 把趋势股与情绪股放进同一套可解释决策系统
+#### 先确定研究目的，再选择需要多深的分析
 
-个股 AI 分析会系统判断个股更接近情绪连板、趋势容量、趋势成长、震荡观察还是弱势风险路径，再为不同路径分配不同权重，结合你的个人操作经验，复盘文章，游资心得等差异化内容让ai定制你的专属个股报告。
+支持「观察」「准备新开仓」「已有持仓」三种用途，以及超短、波段和中期三个周期。已有持仓可选填成本，用于理解当前仓位的执行边界。
+
+| 研究方式 | 适合的场景 |
+| --- | --- |
+| **量化速览** | 先看行情、趋势和量化基线，无需调用 AI 模型 |
+| **AI 快速研判** | 快速整理当前主要逻辑与需要核实的问题 |
+| **AI 标准研判** | 比较主营、催化、支持与反对证据，形成条件化判断 |
+| **AI 深度研究** | 围绕核心分歧进一步补证，展开情景与后续核验 |
+
+研究报告把来源陈述、第三方观点与研究推断分开，展示主营逻辑、核心分歧、反证、确认与失效条件，并保留引用和证据时点。研究阶段会保存已完成内容，可在满足恢复条件时继续缺失阶段。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-stock-ai-analysis-overview.png" width="2560" height="1696" alt="easy-stock 个股 AI 分析总览、多维评分与题材定位" />
+  <img src="./docs/assets/easy-stock-stock-research-2026-10.jpg" width="1280" alt="当前个股标准研判局部示例：研究目的、周期、核心判断、支持与反对证据；数据为虚构" />
 </p>
-
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-stock-ai-analysis-evidence.png" width="2560" height="1696" alt="easy-stock 个股 AI 分析条件决策、事实链与风险边界" />
-</p>
-
-<p align="center"><sub>截图用于展示页面结构；股票状态、题材标签、评分和风险参数会随交易日、缓存快照与数据源可用性动态变化。</sub></p>
 
 ### 06 · 持仓 AI 巡检
 
-#### 从单只股票研判走向组合巡检，识别集中度、联动与风格错配风险
+#### 将逐股研究放回组合，检查逻辑、结构、风险和策略
 
-持仓 AI 巡检支持选择激进、均衡或稳重的交易风格，通过股票名称或代码搜索添加最多 10 只持仓，并用滑杆配置仓位占比、按需填写持仓成本。总仓位不超过 100%，剩余部分自动视为现金。
+选择激进、均衡或稳重风格，设置持有周期，添加最多 10 只股票并配置仓位；成本选填，剩余仓位视为现金。巡检优先复用 **24 小时内有效的个股 AI 报告**，补齐缺失研究后生成组合结论，支持单独刷新某只股票的研究。
+
+<details>
+<summary>查看持仓配置：风格、周期、研究深度与仓位</summary>
+
+<p align="center"><img src="./docs/assets/easy-stock-portfolio-setup-2026-10.jpg" width="1280" alt="新版持仓配置界面：三种风格、持有周期、报告复用与仓位滑杆；数据为虚构" /></p>
+
+</details>
+
+组合综合评分由 AI 按四个维度给出依据，程序按固定权重复算和校验：**持仓逻辑质量 35%、组合结构合理性 25%、风险管理质量 25%、策略匹配度 15%**。评分只评价股票组合，满仓、现金比例和总仓位本身不加扣分；集中度按股票内部配比衡量。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-portfolio-inspection-setup.png" width="2560" height="1688" alt="easy-stock 持仓 AI 巡检的交易风格选择、股票搜索与仓位配置" />
+  <img src="./docs/assets/easy-stock-portfolio-report-2026-10.jpg" width="1280" alt="新版持仓巡检报告局部：醒目的巡检综合评分、四维评分依据、处理顺序和主要风险；数据为虚构" />
 </p>
 
-开始巡检后，系统会在后台逐只调用完整的个股分析能力，再结合交易风格、仓位结构与个股风险生成组合报告。长任务运行期间可以继续使用其他功能，完成后的报告会保存在本机巡检记录中。
+报告同时保留逐股判断、共同驱动与历史相关性、研究来源、确认和失效条件。完成的个股报告可直接打开；任务在后台运行，报告和恢复记录保存在本机。
 
-组合报告采用确定性健康度评分，拆分展示个股质量、风险韧性、分散程度与风格匹配，并进一步识别题材集中、个股联动、止损风险和风险贡献。逐股巡检会给出动作、确认条件与失效条件；已成功生成完整分析的股票可以一键跳转查看对应的个股报告，无需再次调用 AI。
+### 07 · AI 持仓优化
+
+#### 比较原组合与建议组合，解释资金为什么从这里调到那里
+
+在巡检报告中点击「AI 优化持仓」，依次完成候选筛选、个股研究、投资比较、程序配仓和独立复评。既比较增持已有股票，也研究引入新股票的必要性，输出目标比例、资金来源及入场和退出条件。
+
+- **保留资金边界**：股票总仓位与现金不变；累计替换不超过优化链初始股票仓位的 70%，最多新增 2 只，目标持仓最多 10 只。
+- **同次比较**：原持仓与建议持仓使用统一资料和行情独立复评，评分改善按这次复评计算。原巡检分单独保留，两次 AI 评估可能存在差异。
+- **检查实际改善**：综合投资价值、组合结构、交易资格和风险约束，评分提高本身不足以通过采纳检查。结果可能是条件性方案、合格备选，或本次暂不调整。
+- **保存中间结果**：股票判断、投资比较和复评部分分别保存；失败后可恢复尚未完成的部分，重新开始时仍可复用有效研究。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-portfolio-inspection-report.png" width="2560" height="1688" alt="easy-stock 持仓 AI 巡检组合健康度、主要风险、集中联动与逐股报告" />
+  <img src="./docs/assets/easy-stock-portfolio-optimization-2026-10.jpg" width="1280" alt="AI 持仓优化界面示例：原持仓与建议持仓左右对照、巡检评分来源说明、同次优化复评分与资金约束；数据为虚构" />
 </p>
 
-<p align="center"><sub>持仓巡检用于组合研究与风险提示；健康度、风险贡献和操作条件会随行情、持仓配置及数据覆盖情况动态变化。</sub></p>
+「使用该方案发起新巡检」会把目标组合带入新的分析，**不会自动下单或修改实际持仓**。评分代表当前证据下的研究评价，不代表收益率或胜率。
 
-### 07 · 游资心法与 AI Copilot
+### 08 · 游资心法与 AI Copilot
 
 #### 把经验材料变成可持续研读的知识，让 AI 越用越懂你的研究方式
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jundizhou/easy-stock@main/docs/assets/easy-stock-trading-mastery.png" width="2560" height="1696" alt="easy-stock 游资心法库、人物资料与 Hermes 深度研读" />
+  <img src="./docs/assets/easy-stock-trading-mastery.png" width="1280" alt="easy-stock 游资心法库、人物资料与 Hermes 深度研读" />
 </p>
 
 ### 每日研究闭环
@@ -181,8 +204,9 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 | 阶段 | easy-stock 提供的能力 |
 | --- | --- |
 | **盘中发现** | 行情总览、趋势题材、实时行情、题材地图、涨停梯队和数据源状态 |
-| **个股研判** | 路径识别、多周期趋势、相对强度、题材归因、隔日情景和风险边界 |
-| **持仓巡检** | 交易风格匹配、组合健康度、集中与联动风险、逐股动作和个股报告联动 |
+| **个股研判** | 量化速览与分级 AI 研究、主营与催化、支持与反对证据、条件与情景 |
+| **持仓巡检** | 有效报告复用、四维综合评分、集中与联动风险、逐股判断和来源核验 |
+| **持仓优化** | 候选筛选、投资比较、程序配仓、原 / 目标同次复评与条件性方案 |
 | **收盘复盘** | 情绪时间轴、昨日反馈、晋级结构和连板梯队分析 |
 | **信息收集** | 大 V 主页自动同步、文章导入、正文清洗和本地归档 |
 | **AI 提炼** | 单篇摘要、作者归纳、跨作者共识、分歧和明日观察条件 |
@@ -232,15 +256,15 @@ Go 后端负责行情采集、量化计算、证据组织与任务编排，统�
 
 | 层级 | 核心职责 |
 | --- | --- |
-| **AI 投研工作台** | React + TypeScript：行情总览、趋势题材、短线连板、个股分级研究、持仓巡检、大 V 复盘、游资心法与 AI Copilot |
+| **AI 投研工作台** | React + TypeScript：行情总览、趋势题材、短线连板、个股分级研究、持仓巡检与优化、大 V 复盘、游资心法与 AI Copilot |
 | **Go 本地 API** | HTTP 查询与后台任务轮询；WebSocket 行情与 AI 事件；本机鉴权、参数校验与请求日志 |
-| **领域服务与任务编排** | 题材融合、梯队与情绪计算、拐点评估、个股研究、持仓报告复用与组合评分、观点共识、次日验证与定时同步 |
-| **数据与本地证据** | 多源适配与回退、统一行情模型、题材归因、带来源和时间的版本化快照；SQLite 保存复盘、研究任务、持仓巡检、情绪历史与题材缓存 |
+| **领域服务与任务编排** | 题材融合、梯队与情绪计算、拐点评估、个股研究、持仓报告复用与组合评分、候选筛选与优化复评、观点共识、次日验证与定时同步 |
+| **数据与本地证据** | 多源适配与回退、统一行情模型、题材归因、带来源和时间的版本化快照；SQLite 保存复盘、研究任务、持仓巡检与优化检查点、情绪历史与题材缓存 |
 | **统一 Agent 服务** | 共享模型连接、思考强度、Skills 与 MCP；选择 Hermes 或 Codex；任务绑定配置、会话续接、授权与澄清、Token 用量统计。Codex 使用原生 App Server，仅支持 Responses 连接 |
 | **Electron 桌面宿主** | 装配 Go / Hermes / Codex / Python；分配本机端口与启动 Token；Preload / IPC；雪球与淘股吧 Browser Bridge、agent-browser 回退、微信链接解析；日志、更新与安装前备份 |
 | **外部生态** | 行情与研究数据源、内容平台、公共复盘与心法资料，以及由所选运行时直接调用的模型服务商或兼容端点 |
 
-个股研究按阶段保存检查点，支持在模型配置与证据一致时继续执行；持仓巡检优先复用 24 小时内成功的个股报告，补齐缺失研究后生成组合报告。模块与代码入口见 [当前架构说明](./backend/docs/architecture.md)。
+个股研究按阶段保存检查点，支持在模型配置与证据一致时继续执行；持仓巡检优先复用 24 小时内成功的个股报告，补齐缺失研究后生成组合报告。持仓优化保存股票判断、投资比较和复评检查点，恢复时继续缺失部分。模块与代码入口见 [当前架构说明](./backend/docs/architecture.md)。
 
 ---
 
