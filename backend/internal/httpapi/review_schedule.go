@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"easy-stock/backend/internal/sqliteutil"
+
 	"easy-stock/backend/internal/notification"
 	"easy-stock/backend/internal/review"
 )
@@ -47,6 +49,12 @@ func (s *Server) reviewScheduleSave(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	value, err := s.reviewScheduler.Save(ctx, c, time.Now())
 	if err != nil {
+		if sqliteutil.IsBusy(err) {
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, "数据库正在处理其他任务，定时设置尚未保存，请稍后重试")
+			return
+		}
+
 		writeError(w, 400, err.Error())
 		return
 	}

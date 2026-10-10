@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"easy-stock/backend/internal/sqliteutil"
 )
 
 type Store struct {
@@ -31,11 +31,10 @@ func OpenStore(path string) (*Store, error) {
 			return nil, fmt.Errorf("create review data directory: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", dataSource)
+	db, err := sqliteutil.Open(dataSource)
 	if err != nil {
 		return nil, fmt.Errorf("open review database: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"easy-stock/backend/internal/sqliteutil"
 )
 
 type Store struct {
@@ -28,11 +28,10 @@ func OpenStore(path string) (*Store, error) {
 	} else if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create portfolio inspection data directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", dataSource)
+	db, err := sqliteutil.Open(dataSource)
 	if err != nil {
 		return nil, fmt.Errorf("open portfolio inspection database: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"easy-stock/backend/internal/sqliteutil"
+
 	"easy-stock/backend/internal/portfolioinspection"
 )
 
@@ -59,6 +61,12 @@ func (s *Server) portfolioScheduleSave(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, err := s.portfolioScheduler.Save(r.Context(), r.PathValue("id"), value, time.Now())
 	if err != nil {
+		if sqliteutil.IsBusy(err) {
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, "数据库正在处理其他任务，定时设置尚未保存，请稍后重试")
+			return
+		}
+
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

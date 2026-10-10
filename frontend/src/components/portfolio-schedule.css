@@ -1,6 +1,9 @@
-.portfolio-schedule { padding: 16px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--theme-surface, #fff); }
-.portfolio-schedule summary { display: grid; grid-template-columns: auto auto minmax(0,1fr) auto; align-items: center; gap: 10px; cursor: pointer; }
-.portfolio-schedule summary > span { margin-left: auto; color: var(--muted); font-size: 12px; }
+.portfolio-schedule { padding: 16px 20px; border: 1px solid #2377d3; border-radius: 12px; background: var(--theme-surface, #fff); }
+.portfolio-schedule > summary { display: grid; grid-template-columns: auto auto minmax(0,1fr) auto; align-items: center; gap: 10px; margin: -16px -20px; padding: 16px 20px; border-radius: 11px; background: #1d67ba; color: #fff; cursor: pointer; transition: background-color .15s; }
+.portfolio-schedule > summary:hover { background: #18589f; }
+.portfolio-schedule > summary:focus-visible { outline: 2px solid #fff; outline-offset: -5px; }
+.portfolio-schedule[open] > summary { margin-bottom: 0; border-radius: 11px 11px 0 0; }
+.portfolio-schedule summary > span { margin-left: auto; color: rgba(255,255,255,.9); font-size: 12px; }
 .portfolio-schedule form { margin-top: 18px; }
 .portfolio-schedule fieldset { display: grid; gap: 16px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .portfolio-schedule p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 10px 0 0; }
