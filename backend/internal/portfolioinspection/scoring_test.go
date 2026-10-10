@@ -118,6 +118,7 @@ func waitPortfolio(t *testing.T, s *Service, id string) Job {
 }
 func TestPortfolioRecoveryOnlyRetriesAggregation(t *testing.T) {
 	req, results, _, report := scoreFixture()
+	req.PortfolioPlanID, req.PortfolioPlanName = "plan-a", "长线组合"
 	encoded, _ := json.Marshal(report)
 	gateway := &scoreGateway{content: string(encoded)}
 	gateway.fail.Store(true)
@@ -149,7 +150,7 @@ func TestPortfolioRecoveryOnlyRetriesAggregation(t *testing.T) {
 		t.Fatal(err)
 	}
 	done = waitPortfolio(t, service, resumed.ID)
-	if done.Status != "succeeded" || researchCalls.Load() != 1 || !done.Report.Conclusion.ScoreAvailable {
+	if done.Status != "succeeded" || researchCalls.Load() != 1 || !done.Report.Conclusion.ScoreAvailable || done.Request.PortfolioPlanID != "plan-a" || done.Report.Request.PortfolioPlanName != "长线组合" {
 		t.Fatalf("aggregation recovery repeated stocks %+v calls=%d", done, researchCalls.Load())
 	}
 }

@@ -75,12 +75,40 @@ func (s *Server) portfolioInspectionList(w http.ResponseWriter, r *http.Request)
 		}
 		limit = parsed
 	}
-	jobs, err := s.portfolioInspection.List(r.Context(), limit)
+	var planFilter []string
+	if r.URL.Query().Has("portfolio_plan_id") {
+		planFilter = append(planFilter, strings.TrimSpace(r.URL.Query().Get("portfolio_plan_id")))
+	}
+	jobs, err := s.portfolioInspection.List(r.Context(), limit, planFilter...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": jobs})
+}
+
+func (s *Server) portfolioInspectionBindPlan(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var binding struct {
+		ID   string `json:"portfolio_plan_id"`
+		Name string `json:"portfolio_plan_name"`
+	}
+	if err := decoder.Decode(&binding); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	job, err := s.portfolioInspection.BindPlan(r.Context(), r.PathValue("id"), binding.ID, binding.Name)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": job})
 }
 
 func (s *Server) portfolioInspectionResume(w http.ResponseWriter, r *http.Request) {

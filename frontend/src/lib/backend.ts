@@ -1063,6 +1063,8 @@ export type PortfolioProfileRules = {
 };
 
 export type PortfolioResearchRequest = {
+	portfolio_plan_id?: string;
+	portfolio_plan_name?: string;
  source_optimization_id?: string;
  trader_profile: PortfolioTraderProfile;
  holdings: PortfolioHolding[];

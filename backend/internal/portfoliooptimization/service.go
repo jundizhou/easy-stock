@@ -397,6 +397,16 @@ func (s *Service) ValidateApplication(ctx context.Context, req pi.Request) error
 	if req.TraderProfile != j.Source.Request.TraderProfile || req.Horizon != j.Source.Request.Horizon || !equalWeights(req.Holdings, p.Target) {
 		return errors.New("新巡检须沿用优化目标、风格与周期；修改实际持仓请新建基准")
 	}
+	planID := j.Source.Request.PortfolioPlanID
+	if planID == "" {
+		// A legacy source may have been explicitly bound after this optimization.
+		if source, err := s.store.Get(ctx, j.SourceID); err == nil {
+			planID = source.Request.PortfolioPlanID
+		}
+	}
+	if planID != "" && strings.TrimSpace(req.PortfolioPlanID) != planID {
+		return errors.New("新巡检须沿用原持仓方案绑定")
+	}
 	return nil
 }
 func equalWeights(a, b []pi.Holding) bool {

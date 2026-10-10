@@ -46,6 +46,10 @@
 .portfolio-inspection-workspace .portfolio-history > header { justify-content: flex-start; min-height: 64px; padding: 12px 15px; }
 .portfolio-inspection-workspace .portfolio-history > header strong { font-size: 15px; }
 .portfolio-inspection-workspace .portfolio-history > header small { font-size: 12px; }
+.portfolio-history-scope { display: block; width: calc(100% - 24px); margin: 0 12px 10px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface, #fff); color: var(--text); }
+.portfolio-record-binding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.portfolio-record-binding button, .portfolio-notice button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface, #fff); color: var(--theme-blue, #2476d2); cursor: pointer; }
+.portfolio-record-binding button:disabled { opacity: .5; cursor: default; }
 .portfolio-inspection-workspace .portfolio-history > div > button { min-height: 64px; padding: 12px; }
 .portfolio-inspection-workspace .portfolio-history > div > button.active { background: var(--theme-blue-soft, #eaf3ff); }
 .portfolio-inspection-workspace .portfolio-history > div > button strong { font-size: 13px; }

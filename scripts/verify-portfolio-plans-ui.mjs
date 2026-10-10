@@ -131,7 +131,7 @@ try {
  await plan('短线观察组合').click();
  await page.getByRole('button', { name: '开始 AI 巡检', exact: true }).click();
  await page.getByRole('button', { name: '停止持仓分析', exact: true }).waitFor();
- assert.deepEqual(submitted, { trader_profile: 'aggressive', horizon: 'short', research_level: 'deep', holdings: [{ symbol: '600002.SH', name: '示例新持仓', weight_percent: 60, cost_price: 25.8 }], force_symbols: [] });
+ assert.deepEqual(submitted, { portfolio_plan_id: (await saved()).activeId, portfolio_plan_name: '短线观察组合', trader_profile: 'aggressive', horizon: 'short', research_level: 'deep', holdings: [{ symbol: '600002.SH', name: '示例新持仓', weight_percent: 60, cost_price: 25.8 }], force_symbols: [] });
  assert.equal(await page.getByRole('button', { name: '添加持仓方案', exact: true }).isDisabled(), true);
  assert.equal(await plan('方案 1').isDisabled(), true);
  assert.deepEqual((await saved()).plans[0].draft, { ...legacy, totalAssets: 500000 });

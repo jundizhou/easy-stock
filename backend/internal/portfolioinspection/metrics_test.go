@@ -114,8 +114,8 @@ func successfulHolding(holding Holding, name string, score, risk int, theme stri
 }
 
 func TestNormalizePreservesOptimizationChain(t *testing.T) {
-	req, err := normalizeRequest(Request{SourceOptimizationID: "po-root", TraderProfile: ProfileBalanced, Holdings: []Holding{{Symbol: "600519", Weight: 80}}})
-	if err != nil || req.SourceOptimizationID != "po-root" {
+	req, err := normalizeRequest(Request{PortfolioPlanID: " plan-a ", PortfolioPlanName: " 长线组合 ", SourceOptimizationID: "po-root", TraderProfile: ProfileBalanced, Holdings: []Holding{{Symbol: "600519", Weight: 80}}})
+	if err != nil || req.SourceOptimizationID != "po-root" || req.PortfolioPlanID != "plan-a" || req.PortfolioPlanName != "长线组合" {
 		t.Fatalf("optimization provenance lost: %+v %v", req, err)
 	}
 }

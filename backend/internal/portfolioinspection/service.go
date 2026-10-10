@@ -171,15 +171,48 @@ func (s *Service) Get(ctx context.Context, id string) (Job, error) {
 	return decorateJob(job), err
 }
 
-func (s *Service) List(ctx context.Context, limit int) ([]Job, error) {
+func (s *Service) List(ctx context.Context, limit int, planID ...string) ([]Job, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("持仓巡检服务不可用")
 	}
-	jobs, err := s.store.List(ctx, limit)
+	jobs, err := s.store.List(ctx, limit, planID...)
 	for i := range jobs {
 		jobs[i] = decorateJob(jobs[i])
 	}
 	return jobs, err
+}
+
+// BindPlan associates a legacy record with a local plan without changing its
+// research or scores. An existing binding cannot be moved to another plan.
+func (s *Service) BindPlan(ctx context.Context, id, planID, planName string) (Job, error) {
+	if s == nil || s.store == nil {
+		return Job{}, errors.New("持仓巡检服务不可用")
+	}
+	planID, planName = strings.TrimSpace(planID), strings.TrimSpace(planName)
+	if planID == "" || planName == "" || len(planID) > 128 || len([]rune(planName)) > 40 {
+		return Job{}, errors.New("请选择有效的持仓方案")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, err := s.store.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if job.Status == "running" || s.runningID == id {
+		return Job{}, errors.New("请等待巡检结束后再绑定方案")
+	}
+	if job.Request.PortfolioPlanID != "" {
+		if job.Request.PortfolioPlanID == planID {
+			return decorateJob(job), nil
+		}
+		return Job{}, errors.New("该记录已绑定其他持仓方案")
+	}
+	job.Request.PortfolioPlanID, job.Request.PortfolioPlanName = planID, planName
+	if job.Report != nil {
+		job.Report.Request.PortfolioPlanID, job.Report.Request.PortfolioPlanName = planID, planName
+	}
+	job, err = s.store.Save(ctx, job)
+	return decorateJob(job), err
 }
 
 func (s *Service) run(ctx context.Context, job Job) {
@@ -480,7 +513,12 @@ func normalizeRequest(request Request) (Request, error) {
 	if !oneOf(string(request.ResearchLevel), "standard", "deep") {
 		return Request{}, errors.New("补齐个股研究请选择标准或深度")
 	}
-	normalized := Request{SourceOptimizationID: strings.TrimSpace(request.SourceOptimizationID), TraderProfile: request.TraderProfile, Horizon: request.Horizon, ResearchLevel: request.ResearchLevel, Holdings: make([]Holding, 0, len(request.Holdings))}
+	request.PortfolioPlanID = strings.TrimSpace(request.PortfolioPlanID)
+	request.PortfolioPlanName = strings.TrimSpace(request.PortfolioPlanName)
+	if len(request.PortfolioPlanID) > 128 || len([]rune(request.PortfolioPlanName)) > 40 || (request.PortfolioPlanID == "" && request.PortfolioPlanName != "") {
+		return Request{}, errors.New("持仓方案信息无效")
+	}
+	normalized := Request{PortfolioPlanID: request.PortfolioPlanID, PortfolioPlanName: request.PortfolioPlanName, SourceOptimizationID: strings.TrimSpace(request.SourceOptimizationID), TraderProfile: request.TraderProfile, Horizon: request.Horizon, ResearchLevel: request.ResearchLevel, Holdings: make([]Holding, 0, len(request.Holdings))}
 	for _, holding := range request.Holdings {
 		symbol, err := foundation.NormalizeSymbol(holding.Symbol)
 		if err != nil {

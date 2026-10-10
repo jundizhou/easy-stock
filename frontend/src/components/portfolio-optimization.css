@@ -76,6 +76,7 @@
 .portfolio-optimization-apply small { flex:1; min-width:200px; color:var(--muted); font-size:12px; line-height:1.7; }
 .portfolio-optimization-apply > button { padding:9px 12px; border:1px solid var(--theme-blue, #2476d2); border-radius:7px; background:var(--theme-blue, #2476d2); color:#fff; font-size:13px; cursor:pointer; }
 .portfolio-optimization-apply > button:disabled { opacity:.6; cursor:default; }
+.portfolio-optimization-apply > button:not(.primary) { background:var(--theme-surface, #fff); color:var(--theme-blue, #2476d2); }
 @container portfolio-report (max-width:600px) {
  .portfolio-comparison { grid-template-columns:minmax(0,1fr); }
  .portfolio-comparison-arrow .desktop-arrow { display:none; }

@@ -192,11 +192,20 @@ func (s *Store) Get(ctx context.Context, id string) (Job, error) {
 	return job, nil
 }
 
-func (s *Store) List(ctx context.Context, limit int) ([]Job, error) {
+// An omitted planID lists all records; an empty planID lists legacy unbound records.
+func (s *Store) List(ctx context.Context, limit int, planID ...string) ([]Job, error) {
 	if limit <= 0 || limit > 30 {
 		limit = 10
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT content_json FROM portfolio_inspection_jobs ORDER BY updated_at DESC LIMIT ?`, limit)
+	query := `SELECT content_json FROM portfolio_inspection_jobs`
+	args := []any{}
+	if len(planID) > 0 {
+		query += ` WHERE COALESCE(json_extract(content_json, '$.request.portfolio_plan_id'), '') = ?`
+		args = append(args, strings.TrimSpace(planID[0]))
+	}
+	query += ` ORDER BY updated_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list portfolio inspection jobs: %w", err)
 	}

@@ -66,7 +66,7 @@ func TestPortfolioInspectionReusesReportsAndReturnsIndependentAIScore(t *testing
 	server := NewServer(Config{Realtime: stockAnalysisRealtime{}, ReviewDBPath: ":memory:", PortfolioDBPath: ":memory:", SettingsPath: "", AgentGateway: gateway})
 	t.Cleanup(func() { server.Close() })
 	seedPortfolioResearch(t, server)
-	request := `{"trader_profile":"balanced","horizon":"medium","holdings":[{"symbol":"600519","weight_percent":60,"cost_price":1000}]}`
+	request := `{"portfolio_plan_id":"plan-a","portfolio_plan_name":"长线组合","trader_profile":"balanced","horizon":"medium","holdings":[{"symbol":"600519","weight_percent":60,"cost_price":1000}]}`
 	job := httpPortfolioRequest(t, server, http.MethodPost, "/api/v1/portfolio-inspections", request)
 	done := awaitPortfolioHTTP(t, server, job.ID)
 	if done.Status != "succeeded" {
@@ -76,6 +76,9 @@ func TestPortfolioInspectionReusesReportsAndReturnsIndependentAIScore(t *testing
 		t.Fatal("组合汇总未禁用工具或运行时重试")
 	}
 	r := done.Report
+	if done.Request.PortfolioPlanID != "plan-a" || r.Request.PortfolioPlanName != "长线组合" {
+		t.Fatalf("lost plan metadata: %+v", done)
+	}
 	if r.AlgorithmVersion != "portfolio-ai-score-v4" || r.Metrics.StopLossCoveragePercent != 0 || !r.Conclusion.ScoreAvailable || *r.Conclusion.TotalScore != 71 || r.Conclusion.RiskLevel != "高" || r.Holdings[0].ResearchOrigin != "reused" || calls.Load() != 1 {
 		t.Fatalf("incorrect report %+v calls=%d", r, calls.Load())
 	}
@@ -89,6 +92,29 @@ func TestPortfolioInspectionReusesReportsAndReturnsIndependentAIScore(t *testing
 	original, err := server.stockResearchStore.Get(context.Background(), "reuse-http")
 	if err != nil || original.Request.Purpose != "observe" || original.Request.CostPrice != nil {
 		t.Fatal("cached report overwritten")
+	}
+	// Legacy records remain accessible and can be explicitly assigned once.
+	for _, test := range []struct {
+		query string
+		count int
+	}{{"portfolio_plan_id=plan-a", 1}, {"portfolio_plan_id=", 1}, {"", 2}, {"portfolio_plan_id=absent", 0}} {
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/portfolio-inspections?limit=12&"+test.query, nil))
+		var payload struct {
+			Data []portfolioinspection.Job `json:"data"`
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil || res.Code != http.StatusOK || len(payload.Data) != test.count {
+			t.Fatalf("list %q: %s %v", test.query, res.Body.String(), err)
+		}
+	}
+	bound := httpPortfolioRequest(t, server, http.MethodPost, "/api/v1/portfolio-inspections/"+done.ID+"/bind-plan", `{"portfolio_plan_id":"plan-b","portfolio_plan_name":"波段组合"}`)
+	if bound.Request.PortfolioPlanID != "plan-b" || bound.Report.Request.PortfolioPlanID != "plan-b" || *bound.Report.Holdings[0].Holding.CostPrice != 900 {
+		t.Fatalf("incorrect binding: %+v", bound)
+	}
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v1/portfolio-inspections/"+done.ID+"/bind-plan", strings.NewReader(`{"portfolio_plan_id":"plan-a","portfolio_plan_name":"长线组合"}`)))
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("rebind: %d %s", res.Code, res.Body.String())
 	}
 }
 func TestPortfolioInspectionRejectsOverAllocation(t *testing.T) {

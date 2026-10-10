@@ -7,13 +7,15 @@ import { PortfolioEvidence } from './PortfolioAIReport';
 import './portfolio-optimization.css';
 import { optimizationCandidateSource, optimizationLiquiditySource, portfolioScoreImprovement, portfolioOptimizationVersion, portfolioOptimizationPromptVersion, qualifiedOptimizationScore, verifiedOptimizationScore } from '../lib/portfolio-optimization';
 
-type Props = { config: BackendConfig | null; sourceId: string; canStart: boolean; startSignal: number; onApply: (request: PortfolioResearchRequest) => void; onOpenStockAnalysis: (analysis: StockAIAnalysis) => void; applyBusy: boolean; onRefreshSource: () => void };
+type ApplyToPlanProps = { onApplyToPlan?: (holdings: PortfolioHolding[]) => void; originalPlanName?: string; applyingToPlan?: boolean };
+
+type Props = ApplyToPlanProps & { config: BackendConfig | null; sourceId: string; canStart: boolean; startSignal: number; onApply: (request: PortfolioResearchRequest) => void; onOpenStockAnalysis: (analysis: StockAIAnalysis) => void; applyBusy: boolean; onRefreshSource: () => void };
 const outcomeLabel: Record<string,string> = { conditional: '需等待条件', accepted: '有可采纳方案', unchanged: '本次未调整', no_feasible_plan: '未生成可行调整方案', below_target_score: '评分与改善要求未通过', review_invalid: '复评无效，未生成优化结果', incomplete: '研究 / 评估未完成' };
 const optimizationSteps = [{ key:'preparing', label:'准备资料' }, { key:'screening', label:'筛选候选' }, { key:'researching', label:'个股研究' }, { key:'proposing', label:'搜索配仓' }, { key:'assessing', label:'独立复评' }, { key:'completed', label:'完成' }];
 const stageLabel = Object.fromEntries(optimizationSteps.map((step) => [step.key,step.label]));
 const dateLabel = (value?: string) => value && !value.startsWith('0001-') && Number.isFinite(new Date(value).getTime()) ? new Date(value).toLocaleString('zh-CN', { hour12:false }) : '待确认';
 
-export function PortfolioOptimizationWorkspace({ config, sourceId, canStart, startSignal, onApply, onOpenStockAnalysis, applyBusy, onRefreshSource }: Props) {
+export function PortfolioOptimizationWorkspace({ config, sourceId, canStart, startSignal, onApply, onOpenStockAnalysis, applyBusy, onRefreshSource, onApplyToPlan, originalPlanName, applyingToPlan }: Props) {
  const [jobs,setJobs] = useState<Array<Pick<PortfolioOptimizationJob,'id'|'status'|'started_at'|'outcome'>>>([]);
  const [job,setJob] = useState<PortfolioOptimizationJob | null>(null);
  const [busy,setBusy] = useState(false);
@@ -71,7 +73,7 @@ export function PortfolioOptimizationWorkspace({ config, sourceId, canStart, sta
   {completed && <div className="portfolio-optimization-primary">
    {job.version && job.version!==portfolioOptimizationVersion && <div className="portfolio-report-warning"><CircleAlert size={16}/><span>这份记录使用历史评分或筛选规则。请重新优化以应用当前筛选、复评与采纳规则，24小时内有效个股研究继续复用。</span></div>}
    {job.version===portfolioOptimizationVersion && job.model_prompt_version!==portfolioOptimizationPromptVersion && <div className="portfolio-report-warning"><CircleAlert size={16}/><span>这份记录使用旧版复评，请重新优化后再使用目标方案；24小时内有效个股研究继续复用。</span></div>}
-   {approved && preferredPlan ? <OptimizationPlan job={job} plan={preferredPlan} selected={approved} applyBusy={applyBusy} onApply={onApply} onOpenStockAnalysis={onOpenStockAnalysis}/> : <UnchangedResult job={job}/>}
+   {approved && preferredPlan ? <OptimizationPlan job={job} plan={preferredPlan} selected={approved} applyBusy={applyBusy} onApplyToPlan={onApplyToPlan} originalPlanName={originalPlanName} applyingToPlan={applyingToPlan} onApply={onApply} onOpenStockAnalysis={onOpenStockAnalysis}/> : <UnchangedResult job={job}/>}
   </div>}
   {!!job?.revision_history?.length && <details className="stock-ai-panel portfolio-optimization-fold"><summary>查看方案改进记录（{job.revision_history.length}）</summary><div>{job.revision_history.map((r,i) => <article key={i}><p>第{r.round}轮 · {r.name} · 独立复评 {r.conclusion.total_score ?? '未知'}分 / 优化目标70分</p><p>{r.error}</p>{r.conclusion.dimensions?.map((d) => <p key={d.key}>{d.label} {d.score}：{d.reason}</p>)}<p>{r.assessment?.residual_risks?.join('；')}</p></article>)}</div></details>}
   {!!job?.proposal?.range_adjustments?.length && <details className="stock-ai-panel portfolio-optimization-fold"><summary>查看配仓范围调整</summary><div>{job.proposal.range_adjustments.map((r) => <p key={r.symbol}>{job.results.find((s) => s.holding.symbol===r.symbol)?.holding.name || r.symbol} · AI范围建议 {r.min_weight}%–{r.max_weight}% · {r.reason}</p>)}{job.proposal.range_bound_corrections?.map((text,i) => <p key={i}>{text}</p>)}</div></details>}
@@ -108,7 +110,7 @@ function UnchangedResult({job}: {job:PortfolioOptimizationJob}) {
  return <ResearchPanel label="评估完成" title={job.outcome==='below_target_score'?'评分与改善要求未通过，保留原持仓':job.outcome==='no_feasible_plan'?'未生成可行调整方案':job.outcome==='review_invalid'?'独立复评无效，原持仓未调整':'本次未生成调整方案'} icon={job.outcome==='below_target_score'?CircleAlert:ShieldCheck} className="portfolio-optimization-result"><p className="portfolio-optimization-decision">{job.outcome_reason || '当前投资比较与约束下未形成可采纳的新组合，原持仓暂未调整，不代表已通过优化推荐。'}</p><HoldingComparison original={holdings} target={holdings} targetLabel="原持仓（暂未调整）"/></ResearchPanel>;
 }
 
-export function OptimizationPlan({job,plan,selected,onApply,onOpenStockAnalysis,applyBusy}: {job:PortfolioOptimizationJob;plan:PortfolioOptimizationPlan;selected:boolean;onApply:Props['onApply'];onOpenStockAnalysis:Props['onOpenStockAnalysis'];applyBusy:boolean}) {
+export function OptimizationPlan({job,plan,selected,onApply,onOpenStockAnalysis,applyBusy,onApplyToPlan,originalPlanName,applyingToPlan}: ApplyToPlanProps & {job:PortfolioOptimizationJob;plan:PortfolioOptimizationPlan;selected:boolean;onApply:Props['onApply'];onOpenStockAnalysis:Props['onOpenStockAnalysis'];applyBusy:boolean}) {
  if (!plan.checks?.valid) return <ResearchPanel label="方案校验" title={plan.name} icon={CircleAlert}><p>{plan.error || plan.checks?.errors.join('；') || '未形成可行配置'}</p></ResearchPanel>;
  const current = job.source_report.request!.holdings;
  const rows = [...current.map((h) => h.symbol),...plan.target.filter((h) => !current.some((o) => o.symbol===h.symbol)).map((h) => h.symbol),...plan.allocations.filter((a) => !current.some((h) => h.symbol===a.symbol) && !plan.target.some((h) => h.symbol===a.symbol)).map((a) => a.symbol)];
@@ -131,7 +133,11 @@ export function OptimizationPlan({job,plan,selected,onApply,onOpenStockAnalysis,
   {scoreImprovement !== undefined && <p className="portfolio-scoring-scope">本次优化复评 {originalScore} → {targetScore} 分 · 本次优化改善 {scoreImprovement > 0 ? '+' : ''}{scoreImprovement} 分（同次独立复评）。总仓位和现金比例不参与评分。</p>}
   <div className="stock-ai-tags"><span>总仓位 {total}% → {plan.checks.total_position_percent}%</span><span>现金 {100-total}% → {plan.checks.cash_percent}%</span><span>相对初始替换 {plan.checks.replacement_ratio_percent.toFixed(1)}% / 上限70%</span><span>保留重叠 {plan.checks.retained_percent}% 总资产</span></div>
   {plan.status!=='invalid_review' && <p className="portfolio-optimization-decision">{selected && plan.target_comparison.conclusion.total_score!<70 ? job.outcome_reason : (!selected && (plan.rejection_reasons?.join('；') || plan.error)) || plan.assessment?.reason || '方案仅为建议配置，尚未成交。'}</p>}
-  {selected && <div className="portfolio-optimization-apply"><button type="button" className="primary" disabled={applyBusy} onClick={apply}>使用该方案发起新巡检</button><small>新增/增持成本为空，待实际成交后确认；原报告和原成本保持可追溯。确认条件未满足时先保留原组合。</small></div>}
+  {selected && <div className="portfolio-optimization-apply">
+   <button type="button" className="primary" disabled={applyBusy || !onApplyToPlan} onClick={() => onApplyToPlan?.(plan.target)}>{applyingToPlan ? '正在获取现价并应用…' : '应用到原方案'}</button>
+   <button type="button" disabled={applyBusy} onClick={apply}>使用该方案发起新巡检</button>
+   <small>{originalPlanName ? `应用将覆盖「${originalPlanName}」的持仓与仓位，全部成本更新为现价。` : '请先绑定原方案，或检查原方案是否已删除。'}</small>
+  </div>}
   <details className="portfolio-optimization-result-details"><summary>查看评分对比与调仓依据</summary><div>
   {plan.allocation_search && <p>程序配仓搜索：{plan.allocation_search.method} · 检查 {plan.allocation_search.evaluated_allocations.toLocaleString()} 个整数配仓状态 · 归母和扣非均盈利仓位 {plan.allocation_search.profitable_weight_percent}% · 扣非亏损仓位 {plan.allocation_search.deducted_loss_weight_percent}% · ATR与历史相关性的波动代理 {plan.allocation_search.volatility_proxy_percent.toFixed(2)}%（用于排序，不是复评分数或未来损失预测）。</p>}
   <p>本次资金来源 {plan.trade_sold_percent ?? plan.checks.sold_percent} 个总资产百分点 → 买入用途 {plan.trade_bought_percent ?? plan.checks.bought_percent} 个百分点；累计替换始终相对优化链初始组合。</p>{(plan.funding || []).map((f,i) => <p key={i}>目标资金配对：{originalMap.get(f.from_symbol)?.name || f.from_symbol} → {targetMap.get(f.to_symbol)?.name || f.to_symbol} {f.weight_percent} 个百分点（尚未成交）</p>)}

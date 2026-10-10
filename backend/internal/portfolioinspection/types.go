@@ -43,6 +43,8 @@ type Holding struct {
 }
 
 type Request struct {
+	PortfolioPlanID      string                      `json:"portfolio_plan_id,omitempty"`
+	PortfolioPlanName    string                      `json:"portfolio_plan_name,omitempty"`
 	SourceOptimizationID string                      `json:"source_optimization_id,omitempty"`
 	TraderProfile        TraderProfile               `json:"trader_profile"`
 	Holdings             []Holding                   `json:"holdings"`

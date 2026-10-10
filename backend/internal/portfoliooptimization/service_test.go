@@ -203,6 +203,24 @@ func TestEndToEndDedupResearchReuseAndSafeApplication(t *testing.T) {
 	if err := s.ValidateApplication(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
+	// Historical optimizations inherit a later explicit binding of their source.
+	sourceBinding, err := store.Get(context.Background(), "source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceBinding.Request.PortfolioPlanID = "original-plan"
+	sourceBinding.Request.PortfolioPlanName = "长线组合"
+	if _, err := store.Save(context.Background(), sourceBinding); err != nil {
+		t.Fatal(err)
+	}
+	request.PortfolioPlanID = "other-plan"
+	if s.ValidateApplication(context.Background(), request) == nil {
+		t.Fatal("cross-plan application accepted")
+	}
+	request.PortfolioPlanID = "original-plan"
+	if err := s.ValidateApplication(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
 	request.Holdings[0].Weight++
 	if s.ValidateApplication(context.Background(), request) == nil {
 		t.Fatal("modified target bypass")
