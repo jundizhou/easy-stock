@@ -7728,3 +7728,40 @@ a:focus-visible {
 .shannon-steps strong { display: block; margin-bottom: 4px; color: var(--theme-muted, #52779e); }
 .shannon-steps ol, .shannon-steps ul { margin: 0; padding-left: 18px; }
 .shannon-steps li { margin: 2px 0; }
+
+/* ---- 策略板块共用骨架（core2 中线 / 拐点引擎 / 双确认共振 / 市场环境） ---- */
+.strategy-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 2px; }
+.strategy-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify: center; gap: 8px; color: var(--theme-muted, #52779e); }
+.strategy-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.strategy-heading h2 { margin: 0; font-size: 17px; }
+.strategy-heading p { margin: 3px 0 0; color: var(--theme-muted, #52779e); font-size: 11px; }
+.strategy-card { padding: 12px 14px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 10px; background: var(--theme-surface, #fff); }
+.strategy-card h3 { margin: 0 0 8px; font-size: 13px; }
+.strategy-card-note { margin: 0 0 10px; color: var(--theme-muted, #52779e); font-size: 11px; line-height: 1.5; }
+.strategy-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
+.strategy-stat { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 8px; background: var(--theme-bg, #f5f7fa); }
+.strategy-stat span { font-size: 11px; color: var(--theme-muted, #52779e); }
+.strategy-stat strong { font-size: 18px; font-family: "SFMono-Regular", Consolas, monospace; color: var(--theme-text, #1f2733); }
+.strategy-table-wrap { overflow-x: auto; }
+.strategy-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.strategy-table th, .strategy-table td { padding: 7px 9px; text-align: left; border-bottom: 1px solid var(--theme-line, #dce2e6); white-space: nowrap; }
+.strategy-table th { color: var(--theme-muted, #52779e); font-weight: 600; }
+.strategy-table td { color: var(--theme-text, #1f2733); font-family: "SFMono-Regular", Consolas, monospace; }
+.strategy-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.strategy-badge.ok { background: rgba(39,174,96,0.16); color: #1e8449; }
+.strategy-badge.warn { background: rgba(243,156,18,0.18); color: #b9770e; }
+.strategy-badge.bad { background: rgba(192,57,43,0.14); color: var(--red, #c0392b); }
+.strategy-badge.mute { background: rgba(120,130,140,0.14); color: var(--theme-muted, #52779e); }
+.strategy-alert { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px dashed var(--red, #c0392b); border-radius: 8px; color: var(--red, #c0392b); font-size: 12px; background: rgba(192,57,43,0.06); line-height: 1.55; }
+.strategy-alert.neutral { border-color: var(--theme-line, #dce2e6); color: var(--theme-muted, #52779e); background: transparent; }
+.strategy-list { margin: 0; padding-left: 18px; color: var(--theme-muted, #52779e); font-size: 11px; display: grid; gap: 4px; line-height: 1.5; }
+.strategy-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; margin: 0; }
+.strategy-kv dt { color: var(--theme-muted, #52779e); white-space: nowrap; }
+.strategy-kv dd { margin: 0; color: var(--theme-text, #1f2733); font-family: "SFMono-Regular", Consolas, monospace; word-break: break-all; }
+.strategy-action { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent, #2f7df6); color: #fff; font-size: 13px; font-weight: 650; cursor: pointer; }
+.strategy-action:disabled { opacity: 0.6; cursor: default; }
+.strategy-action.ghost { background: transparent; border: 1px solid var(--theme-line, #dce2e6); color: var(--theme-text, #1f2733); }
+.strategy-meter { position: relative; height: 6px; border-radius: 3px; background: var(--theme-line, #dce2e6); overflow: hidden; margin-top: 5px; }
+.strategy-meter i { position: absolute; inset: 0 auto 0 0; background: var(--accent, #2f7df6); }
+.strategy-sub { font-size: 11px; color: var(--theme-muted, #52779e); margin: 6px 0 0; line-height: 1.5; }
+.strategy-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; align-items: start; }
