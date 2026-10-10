@@ -104,7 +104,7 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 			})}
 			<div className="notification-events"><strong>通知事件</strong><label className="notification-toggle"><input type="checkbox" checked={events.stock_research} onChange={(event) => setEvents({ ...events, stock_research: event.target.checked })} /><span>个股 AI 研究完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.portfolio_inspection} onChange={(event) => setEvents({ ...events, portfolio_inspection: event.target.checked })} /><span>手动持仓 AI 巡检完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.task_failed} onChange={(event) => setEvents({ ...events, task_failed: event.target.checked })} /><span>同时提醒所选任务失败或未完成</span></label></div>
 		</fieldset>
-		<p className="settings-field-note">两个机器人默认勾选启用，填写 Webhook 并保存后生效。Webhook 和签名密钥仅保存在本机，留空保留原值。个股研究发送摘要，持仓巡检发送完整 Markdown 结果（不含具体证据），长报告自动分段；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
+		<p className="settings-field-note">两个机器人默认勾选启用，填写 Webhook 并保存后生效。Webhook 和签名密钥仅保存在本机，留空保留原值。个股研究和持仓巡检均发送完整 Markdown 结果（不含具体证据），失败或未完成时发送已生成结果，长报告自动分段；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
 		<div className={`agent-settings-footer ${state === 'error' ? 'error' : ''}`}><span role={state === 'error' ? 'alert' : 'status'}>{message || '通知配置单独保存，两个渠道可同时启用。'}</span><button type="button" onClick={() => void save()} disabled={!config || !loaded || busy}>{state === 'saving' ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}保存通知配置</button></div>
 	</SettingsSection>;
 }

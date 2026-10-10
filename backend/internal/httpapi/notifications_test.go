@@ -28,11 +28,11 @@ func TestTaskNotificationsKeepReportReferenceAndSkipCancellation(t *testing.T) {
 		sent <- message
 		return nil
 	}, func() appsettings.Notifications { return s.settingsStore.Snapshot().Notifications }, nil)
-	s.notifyStockResearch(stockanalysis.ResearchJob{ID: "stock-task-reference", Status: "succeeded", Request: stockanalysis.ResearchRequest{Symbol: "600519.SH"}, Analysis: &stockanalysis.Analysis{ResearchReport: &stockanalysis.ResearchReport{ResearchSynthesis: stockanalysis.ResearchSynthesis{Headline: "摘要", Thesis: stockanalysis.ResearchClaim{Text: strings.Repeat("研究结论", 3000)}}}}})
+	s.notifyStockResearch(stockanalysis.ResearchJob{ID: "stock-task-reference", Status: "succeeded", Request: stockanalysis.ResearchRequest{Symbol: "600519.SH"}, Analysis: &stockanalysis.Analysis{ResearchReport: &stockanalysis.ResearchReport{ResearchSynthesis: stockanalysis.ResearchSynthesis{Headline: "摘要", Thesis: stockanalysis.ResearchClaim{Text: strings.Repeat("研究结论", 350)}}}}})
 	select {
 	case message := <-sent:
-		if !strings.Contains(message.Text, "stock-task-reference") || len([]rune(message.Text)) > 1200 {
-			t.Fatal("long summary lost task reference or exceeded budget")
+		if !strings.Contains(message.Text, "stock-task-reference") || !strings.Contains(message.Text, strings.Repeat("研究结论", 350)) {
+			t.Fatal("full report lost task reference or truncated results")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stock completion notification missing")
