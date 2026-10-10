@@ -121,7 +121,7 @@ func TestResearchAnnouncementSummaryIsBounded(t *testing.T) {
 }
 
 func TestResearchLevelEvidenceBudgets(t *testing.T) {
-	if ResearchCompressionVersion != "evidence-pack-v7" {
+	if ResearchCompressionVersion != "evidence-pack-v9" {
 		t.Fatalf("compression version = %q", ResearchCompressionVersion)
 	}
 	lines := syntheticTrendLines("600519.SH", 180, 10, .05, 1_000_000_000)

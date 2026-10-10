@@ -94,9 +94,12 @@ printf '%s\n' '{"method":"reasoning.delta","params":{"text":"thinking"}}'
 sleep 0.03
 done
 `)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// Include process startup in the outer budget. Under a full test run the
+	// shell can take over a second to start; the assertion must exercise active
+	// generation rather than time out before the fixture produces any events.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	result, err := r.PromptWithOptions(ctx, "test", PromptOptions{Sandbox: true, FirstResponseTimeout: 2 * time.Second, IdleTimeout: 2 * time.Second})
+	result, err := r.PromptWithOptions(ctx, "test", PromptOptions{Sandbox: true, FirstResponseTimeout: 4 * time.Second, IdleTimeout: 4 * time.Second})
 	var timeout *PromptTimeoutError
 	if !errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) || result.Progress.ReasoningBytes == 0 {
 		t.Fatalf("total deadline lost: %+v %v", result, err)
@@ -110,9 +113,10 @@ printf '%s\n' '{"method":"reasoning.delta","params":{"text":"thinking"}}'
 printf '%s\n' '{"method":"status.update","params":{"kind":"retry","text":"retry 2"}}'
 printf '%s\n' '{"method":"message.complete","params":{"content":"must not succeed"}}'
 `)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// This tests retry accounting, not shell startup latency.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := r.PromptWithOptions(ctx, "test", PromptOptions{Sandbox: true, FirstResponseTimeout: time.Second, IdleTimeout: time.Second, MaxAttempts: 2})
+	result, err := r.PromptWithOptions(ctx, "test", PromptOptions{Sandbox: true, FirstResponseTimeout: 3 * time.Second, IdleTimeout: time.Second, MaxAttempts: 2})
 	var limit *PromptRetryLimitError
 	if !errors.As(err, &limit) || result.Content != "draft" || result.Progress.RetryCount != 2 || limit.Progress.ReasoningBytes == 0 {
 		t.Fatalf("retry loop escaped its limit or draft was lost: %+v %v", result, err)

@@ -14,6 +14,26 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 )
 
+func TestRoutineAuditCaveatUsesLocalRepairWithoutSuppressingRealRisk(t *testing.T) {
+	j, p := fixtureJob(), fixtureProposal()
+	for _, risk := range []string{"预告未经审计", "业绩快报尚未审计。", "未经审计"} {
+		p.Alternatives[0].Allocations[0].Investment.Risk = risk
+		if err := validateInvestment(j, p.Alternatives[0].Allocations[0]); err == nil || !strings.Contains(err.Error(), "不能单独作为投资风险") {
+			t.Fatal("routine caveat became an investment risk", risk, err)
+		}
+		parts := collectProposalParts(j, p)
+		if parts == nil || len(parts.parts) != 1 || parts.parts[0].symbol != p.Alternatives[0].Allocations[0].Symbol {
+			t.Fatal("caveat did not use the existing partial repair")
+		}
+	}
+	for _, risk := range []string{"预告未经审计，且收入确认存在重大不确定性", "预告下修导致亏损", "审计保留意见", "无额外异常，保留行业波动风险"} {
+		p.Alternatives[0].Allocations[0].Investment.Risk = risk
+		if err := validateInvestment(j, p.Alternatives[0].Allocations[0]); err != nil {
+			t.Fatal("real operating or audit risk was suppressed", risk, err)
+		}
+	}
+}
+
 func TestCitationOnlyRepairFreezesEveryInvestmentField(t *testing.T) {
 	j, p := fixtureJob(), fixtureProposal()
 	c := InvestmentComparison{FromSymbol: "600519.SH", ToSymbol: "000858.SZ", Dimension: "business", Reason: "接收资金方经营更适合本周期", Tradeoff: "放弃原弹性", EvidenceRefs: []pi.EvidenceRef{{ReportID: "report-000858.SZ", SourceID: "s1"}}}

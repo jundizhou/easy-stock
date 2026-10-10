@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1576" viewBox="0 0 1680 1576" role="img" aria-labelledby="title desc">
 <title id="title">easy-stock AI 原生架构：本地证据与 Hermes / Codex 双运行时</title>
-<desc id="desc">基于开源版当前代码。Electron 管理本地 Go 服务、Hermes 与 Codex 运行时、浏览器桥接和微信解析服务。React 工作台通过 HTTP 与 WebSocket 访问 Go API。领域服务直接使用多源行情、统一证据模型与本地 SQLite，并按需通过统一 Agent 服务调用一个所选运行时。深度个股研究先计算量化基线，再生成问题、由 Go 只读补证、生成判断和交易条件、校验引用，保存阶段检查点。持仓巡检复用个股报告。模型服务、行情源与内容平台位于本机边界之外。</desc>
+<desc id="desc">基于开源版当前代码。Electron 管理本地 Go 服务、Hermes 与 Codex 运行时、浏览器桥接和微信解析服务。React 工作台通过 HTTP 与 WebSocket 访问 Go API。领域服务直接使用多源行情、统一证据模型与本地 SQLite，并按需通过统一 Agent 服务调用一个所选运行时。深度个股研究先计算量化基线，再生成问题、由 Go 只读补证、生成判断和交易条件、校验引用，保存阶段检查点。持仓巡检复用个股报告，持仓优化完成候选筛选、程序配仓与独立复评，并保存分块检查点。模型服务、行情源与内容平台位于本机边界之外。</desc>
 <defs>
 <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#ffffff"/><stop offset=".5" stop-color="#ffffff"/><stop offset="1" stop-color="#eaf1fc"/></linearGradient>
 <marker id="arrowData" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M1 1 7 4 1 7" fill="none" stroke="#2476d2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
@@ -20,7 +20,7 @@
 <text x="1247.0" y="82" font-size="13" fill="#14865f" font-weight="600" text-anchor="middle">LOCAL FIRST</text>
 <rect x="1332" y="63" width="260" height="28" rx="5" fill="#edf5ff" stroke="#edf5ff" />
 <text x="1462.0" y="82" font-size="13" fill="#2476d2" font-weight="600" text-anchor="middle">HERMES / CODEX</text>
-<text x="1592" y="125" font-size="19" fill="#172033" font-weight="600" text-anchor="end">发现 → 研判 → 巡检 → 复盘 → 核验</text>
+<text x="1592" y="125" font-size="19" fill="#172033" font-weight="600" text-anchor="end">发现 → 研判 → 巡检 → 优化 → 核验</text>
 <text x="1592" y="153" font-size="15" fill="#56657a" font-weight="400" text-anchor="end">React + TypeScript  /  Go  /  Electron</text>
 <!-- Local desktop boundary. -->
 <rect x="40" y="214" width="1600" height="1126" rx="18" fill="#ffffff" stroke="#d7dee8" />
@@ -107,8 +107,8 @@
 <g transform="translate(988 318)" fill="none" stroke="#14865f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 <rect x="2" y="5" width="20" height="15" rx="3"/><path d="M2 8V4a2 2 0 0 1 2-2h14M22 10h-6v6h6M18 13h1"/>
 </g>
-<text x="1020" y="336" font-size="16" fill="#172033" font-weight="650">持仓 AI 巡检</text>
-<text x="988" y="365" font-size="12.5" fill="#56657a" font-weight="400">组合评分 · 个股联动</text>
+<text x="1020" y="336" font-size="16" fill="#172033" font-weight="650">持仓巡检</text>
+<text x="988" y="365" font-size="12.5" fill="#56657a" font-weight="400">组合评分 · AI 优化</text>
 <rect x="1133" y="305" width="145" height="77" rx="8" fill="#f3f6fa" stroke="#e8edf3" />
 <g transform="translate(1145 318)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 <rect x="4" y="3" width="18" height="18" rx="2"/><path d="M4 7H2v12a2 2 0 0 0 2 2M8 7h5v5H8zM17 7h2M17 11h2M8 16h11"/>
@@ -163,10 +163,10 @@
 <text x="868" y="719" font-size="14" fill="#56657a" font-weight="400">证据快照 · 条件核验</text>
 <rect x="1104" y="618" width="240" height="122" rx="10" fill="#ffffff" stroke="#d7dee8" />
 <rect x="1105" y="635" width="3" height="42" rx="1" fill="#e8edf3" stroke="#e8edf3" />
-<text x="1120" y="647" font-size="20" fill="#172033" font-weight="700">持仓 AI 巡检</text>
-<text x="1120" y="670" font-size="13" fill="#56657a" font-weight="400" class="mono">portfolioinspection</text>
-<text x="1120" y="695" font-size="14" fill="#56657a" font-weight="400">复用个股报告 · 缺失时补齐</text>
-<text x="1120" y="719" font-size="14" fill="#56657a" font-weight="400">组合评分 · 集中与联动风险</text>
+<text x="1120" y="647" font-size="20" fill="#172033" font-weight="700">持仓巡检与优化</text>
+<text x="1120" y="670" font-size="13" fill="#56657a" font-weight="400">组合评分 · 配仓 · 独立复评</text>
+<text x="1120" y="695" font-size="14" fill="#56657a" font-weight="400">24h 报告复用 · 缺失时补齐</text>
+<text x="1120" y="719" font-size="14" fill="#56657a" font-weight="400">资金约束 · 分块检查点恢复</text>
 <rect x="1356" y="618" width="240" height="122" rx="10" fill="#ffffff" stroke="#d7dee8" />
 <rect x="1357" y="635" width="3" height="42" rx="1" fill="#e8edf3" stroke="#e8edf3" />
 <text x="1372" y="647" font-size="20" fill="#172033" font-weight="700">复盘与知识</text>
@@ -221,7 +221,7 @@
 </g>
 <text x="404" y="1219" font-size="20" fill="#172033" font-weight="650">SQLite 与本地缓存</text>
 <text x="366" y="1246" font-size="15" fill="#56657a" font-weight="400" class="mono">reviews · stock-research · portfolio-inspections</text>
-<text x="366" y="1270" font-size="15" fill="#56657a" font-weight="400" class="mono">market-emotion · theme-radar · 研究检查点</text>
+<text x="366" y="1270" font-size="15" fill="#56657a" font-weight="400" class="mono">market-emotion · theme-radar · 研究与优化检查点</text>
 <rect x="960" y="910" width="656" height="398" rx="12" fill="#ffffff" stroke="#bdd2ed" />
 <rect x="980" y="926" width="30" height="30" rx="6" fill="#edf5ff" stroke="#edf5ff" />
 <text x="995" y="948" font-size="15" fill="#2476d2" font-weight="700" text-anchor="middle" class="mono">05</text>

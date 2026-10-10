@@ -88,7 +88,7 @@ function ResearchPanel({ label, title, icon: Icon, children, action, className =
 }
 
 function Claim({ claim, onSource }: { claim: ResearchClaim; onSource: (id: string) => void }) {
-	return <div className="stock-research-claim"><span>{claim.kind === 'fact' ? '原文陈述' : claim.kind === 'opinion' ? '第三方观点' : '研究推断'}</span><p>{claim.text}</p><div>{claim.source_ids.map((id) => <button type="button" key={id} onClick={() => onSource(id)} title={`查看证据 ${id}`}><FileText size={12} />{id}</button>)}</div></div>;
+	return <div className="stock-research-claim"><span>{claim.kind === 'fact' ? '来源陈述' : claim.kind === 'opinion' ? '第三方观点' : '研究推断'}</span><p>{claim.text}</p><div>{claim.source_ids.map((id) => <button type="button" key={id} onClick={() => onSource(id)} title={`查看证据 ${id}`}><FileText size={12} />{id}</button>)}</div></div>;
 }
 
 function ResearchDecision({ analysis, onSource }: { analysis: StockAIAnalysis; onSource: (id: string) => void }) {

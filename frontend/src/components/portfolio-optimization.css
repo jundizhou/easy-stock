@@ -49,6 +49,8 @@
 .portfolio-optimization .portfolio-comparison-side h3 { margin:0 0 4px; font-size:16px; }
 .portfolio-comparison-score { display:grid; flex-shrink:0; gap:3px; text-align:right; color:var(--theme-blue, #2476d2); font-size:22px; font-weight:700; line-height:1.25; }
 .portfolio-comparison-score small { font-weight:400; }
+.portfolio-score-provenance p { margin:0; }
+.portfolio-score-provenance p + p { margin-top:4px; }
 .portfolio-comparison-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 10px; min-height:86px; padding:12px 0; border-bottom:1px solid var(--line-soft); align-content:center; }
 .portfolio-comparison-row strong { color:var(--theme-text, #172033); font-size:14px; }
 .portfolio-comparison-row b { color:var(--theme-blue, #2476d2); font-size:16px; }

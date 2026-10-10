@@ -55,6 +55,12 @@ func validateInvestment(job Job, a Allocation) error {
 			return fmt.Errorf("%s六项投资判断、退出与机会成本须完整且简洁", a.Symbol)
 		}
 	}
+	// A required risk field can tempt the model to reuse routine disclosure
+	// boilerplate despite the evidence policy. Repair only this unambiguous
+	// case; never suppress a concrete audit qualification or operating risk.
+	if routineAuditCaveat.MatchString(strings.TrimSpace(i.Risk)) {
+		return fmt.Errorf("%s：常规未经审计说明不能单独作为投资风险；保留原行动与范围，按已有资料改写具体经营、估值、波动或集中风险，没有异常则如实说明，不编造风险", a.Symbol)
+	}
 	// A stock's own supplied condition references belong to the same investment
 	// row. Reuse those exact citations rather than demanding a duplicate in the
 	// top-level list. Correlation alone still cannot stand in for company facts.
@@ -105,6 +111,7 @@ func validateInvestment(job Job, a Allocation) error {
 	return nil
 }
 
+var routineAuditCaveat = regexp.MustCompile(`^(?:业绩预告|预告|业绩快报|快报|财报|业绩|数据)?(?:尚未|未经|未)(?:正式)?审计[。；;，,\s]*$`)
 var directDeductedAmount = regexp.MustCompile(`扣非(?:净利润|利润)?(?:为|约)?(亏损|盈利)?\s*([-+]?\d+(?:\.\d+)?)\s*(亿|万|元)`)
 
 // Catch the observed confusion between 644% growth and 6.44亿元 of profit.

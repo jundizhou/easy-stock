@@ -40,10 +40,10 @@ func TestSavedScoringPromptFitsBudget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(prompt) > MaxReviewModelPromptBytes {
+		if len(prompt) > MaxEvidenceModelPromptBytes {
 			t.Fatal("scoring policy exceeded existing input budget")
 		}
-		t.Logf("frozen plan %d: %d bytes / %d; no model call or score reused", i+1, len(prompt), MaxReviewModelPromptBytes)
+		t.Logf("frozen plan %d: %d bytes / %d; no model call or score reused", i+1, len(prompt), MaxEvidenceModelPromptBytes)
 	}
 }
 

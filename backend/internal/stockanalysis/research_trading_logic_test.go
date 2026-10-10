@@ -72,7 +72,7 @@ func TestTradingLogicDropsBadReferencesWithoutDiscardingGoodReport(t *testing.T)
 	if len(result.TradingLogic.Secondary) != 0 || len(result.TradingLogic.Catalysts) != 0 || len(result.TradingLogic.Gaps) == 0 || len(result.TradingLogic.Mainlines) != 1 {
 		t.Fatalf("invalid optional logic contaminated report: %+v", result.TradingLogic)
 	}
-	news := NewResearchSource("news", "新品报道", "端侧NPU新品进展", "test", "https://example.com/news", snapshot.CutoffAt.Add(-time.Hour), snapshot.CutoffAt)
+	news := NewResearchSource("news", "新品报道", "端侧NPU新品进展", "test", "", snapshot.CutoffAt.Add(-time.Hour), snapshot.CutoffAt)
 	AppendResearchSources(&snapshot, []ResearchSource{news})
 	result = validResearch()
 	result.TradingLogic = fixtureTradingLogic()
@@ -81,7 +81,7 @@ func TestTradingLogicDropsBadReferencesWithoutDiscardingGoodReport(t *testing.T)
 		t.Fatal(err)
 	}
 	if result.TradingLogic.Mainlines[0].EvidenceLevel != "limited" {
-		t.Fatal("third-party news treated as verified company disclosure")
+		t.Fatal("untraceable news treated as usable company evidence")
 	}
 }
 

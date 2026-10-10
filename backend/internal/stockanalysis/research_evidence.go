@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const ResearchCompressionVersion = "evidence-pack-v7"
+const ResearchCompressionVersion = "evidence-pack-v9"
 
 type researchPromptPhase string
 
@@ -19,14 +19,15 @@ const (
 )
 
 type researchEvidenceCard struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	Title       string `json:"title"`
-	Date        string `json:"date,omitempty"`
-	Provider    string `json:"provider,omitempty"`
-	Text        string `json:"text"`
-	Exact       bool   `json:"exact"`
-	Compression string `json:"compression"`
+	ID          string               `json:"id"`
+	Kind        string               `json:"kind"`
+	Title       string               `json:"title"`
+	Date        string               `json:"date,omitempty"`
+	Provider    string               `json:"provider,omitempty"`
+	Text        string               `json:"text"`
+	Exact       bool                 `json:"exact"`
+	Compression string               `json:"compression"`
+	NewsContext *NewsEvidenceContext `json:"news_context,omitempty"`
 }
 
 type researchEvidencePack struct {
@@ -85,6 +86,7 @@ func buildResearchEvidencePack(snapshot ResearchSnapshot, request ResearchReques
 		maxCards, maxChars = policy.MaxCards, policy.MaxEvidenceBytes
 	}
 	priorityIDs := researchRequestedSourceIDs(outline)
+	earnings, hasEarnings := LatestResearchEarningsDisclosure(snapshot.Sources, snapshot.CutoffAt)
 	candidates := make([]researchEvidenceCandidate, 0, len(snapshot.Sources))
 	originalBytes := 0
 	for _, source := range snapshot.Sources {
@@ -128,7 +130,11 @@ func buildResearchEvidencePack(snapshot ResearchSnapshot, request ResearchReques
 	})
 	collapseDuplicateResearchEvidence(candidates)
 
-	selected := selectResearchEvidence(candidates, maxCards, maxChars, policy.MaxAnnouncements, phase, priorityIDs)
+	earningsID := ""
+	if hasEarnings {
+		earningsID = earnings.ID
+	}
+	selected := selectResearchEvidence(candidates, maxCards, maxChars, policy.MaxAnnouncements, phase, priorityIDs, earningsID)
 	selectedBytes := 0
 	for _, item := range selected {
 		selectedBytes += len([]byte(item.Text))
@@ -167,6 +173,15 @@ func buildResearchTradeEvidencePack(snapshot ResearchSnapshot, request ResearchR
 	level, _ := normalizeResearchLevel(request.AnalysisLevel)
 	policy := researchLevelPolicyFor(level)
 	keep := map[string]bool{"m-price": true, "m-sector": true, "m-quote": true, "f-financial": true, "f-business": true}
+	earnings, hasEarnings := LatestResearchEarningsDisclosure(snapshot.Sources, snapshot.CutoffAt)
+	if hasEarnings {
+		keep[earnings.ID] = true
+		// Even when the old core cited only news, do not let those citations
+		// consume the trade-stage budget before the available primary notice.
+		sort.SliceStable(full.Evidence, func(i, j int) bool {
+			return full.Evidence[i].ID == earnings.ID && full.Evidence[j].ID != earnings.ID
+		})
+	}
 	claims := append(append(append([]ResearchClaim{core.Thesis}, core.Support...), core.Counter...), core.Alternatives...)
 	if core.TradingLogic != nil {
 		if core.TradingLogic.Business != nil {
@@ -188,6 +203,10 @@ func buildResearchTradeEvidencePack(snapshot ResearchSnapshot, request ResearchR
 	compact := func(card researchEvidenceCard) researchEvidenceCard {
 		card = compactResearchCardForTrade(card)
 		if card.Kind == "announcement" {
+			if hasEarnings && card.ID == earnings.ID {
+				card.Text = ResearchEarningsExcerpt(earnings, min(policy.AnnouncementChars, policy.TradeEvidenceBytes/24))
+				return card
+			}
 			queries := append(append([]string{}, researchRiskTerms...), researchBusinessTerms...)
 			card.Text = ResearchSourceExcerpt(card.Text, queries, min(policy.AnnouncementChars, policy.TradeEvidenceBytes/32))
 		}
@@ -242,7 +261,10 @@ func compactResearchCardForTrade(card researchEvidenceCard) researchEvidenceCard
 	if json.Unmarshal([]byte(card.Text), &value) != nil {
 		return card
 	}
-	policy := researchLevelPolicy{DailyBars: 20, RelativeBars: 6}
+	// Core judgment already carries window statistics. Five recent OHLCV rows
+	// suffice for execution context and leave room for the current disclosure;
+	// do not drop the entire price card when a notice is present.
+	policy := researchLevelPolicy{DailyBars: 5, RelativeBars: 6}
 	value = compactResearchJSON(value, 0, card.ID, policy)
 	if fields, ok := value.(map[string]any); ok {
 		if card.ID == "f-financial" {
@@ -296,6 +318,13 @@ func buildResearchCoreEvidencePack(snapshot ResearchSnapshot, request ResearchRe
 			add(card)
 		}
 	}
+	if earnings, ok := LatestResearchEarningsDisclosure(snapshot.Sources, snapshot.CutoffAt); ok {
+		for _, card := range full.Evidence {
+			if card.ID == earnings.ID {
+				add(card)
+			}
+		}
+	}
 	for _, card := range researchBusinessCards(full.Evidence, snapshot) {
 		add(card)
 	}
@@ -338,7 +367,7 @@ func compressResearchSource(source ResearchSource, queries []string, phase resea
 		compression = "仅公告标题，未取得正文；不能据此确认交易条款或业务细节"
 	}
 	if source.Kind == "news" && source.ContentStatus == "excerpt" {
-		compression = "第三方新闻检索摘要，非全文；不能声称已读取完整报道，不能升级为公司披露"
+		compression = "新闻检索摘要，非全文；可评估已展示的事实转述，不声称已读完整报道或公告原文"
 	}
 	if !exact {
 		compression = "结构化字段；不用于逐字引文，完整来源保存在快照"
@@ -346,6 +375,7 @@ func compressResearchSource(source ResearchSource, queries []string, phase resea
 	return researchEvidenceCard{
 		ID: source.ID, Kind: source.Kind, Title: truncateExactText(source.Title, 100), Date: date,
 		Provider: truncateExactText(source.Provider, 40), Text: text, Exact: exact, Compression: compression,
+		NewsContext: ResearchNewsEvidenceContext(source, 0),
 	}
 }
 
@@ -384,6 +414,9 @@ func compactResearchContent(source ResearchSource, queries []string, phase resea
 		return truncateExactText(source.Title, 160)
 	}
 	if source.Kind == "announcement" {
+		if isResearchEarningsDisclosure(source) {
+			return ResearchEarningsExcerpt(source, policy.AnnouncementChars)
+		}
 		return compactResearchAnnouncement(text, queries, policy.AnnouncementChars)
 	}
 	limit := 520
@@ -477,7 +510,7 @@ func compactResearchJSON(value any, depth int, sourceID string, policy researchL
 	}
 }
 
-func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, maxChars, maxAnnouncements int, phase researchPromptPhase, priorityIDs map[string]bool) []researchEvidenceCard {
+func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, maxChars, maxAnnouncements int, phase researchPromptPhase, priorityIDs map[string]bool, earningsID string) []researchEvidenceCard {
 	selected := make([]researchEvidenceCard, 0, maxCards)
 	used := map[string]bool{}
 	chars := 0
@@ -505,6 +538,13 @@ func selectResearchEvidence(candidates []researchEvidenceCandidate, maxCards, ma
 	}
 	for _, candidate := range candidates {
 		if isResearchMustKeep(candidate.source) {
+			add(candidate)
+		}
+	}
+	// Read the newest earnings notice before an older IR transcript or a
+	// secondary news summary can consume the disclosure budget.
+	for _, candidate := range candidates {
+		if candidate.source.ID == earningsID {
 			add(candidate)
 		}
 	}

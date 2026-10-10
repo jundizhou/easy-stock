@@ -95,28 +95,27 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		result.EvidenceLevel = "limited"
 		result.EvidenceReasons = append(result.EvidenceReasons, "模型未返回有效的证据充分度，暂按有限处理")
 	}
-	// [ES_MERGE_V150] 采用上游 v1.5.0 口径：证据充分度只由「支持依据条数」决定，
-	// 不再与日线样本数耦合。价格样本不足仅影响「可执行性」（decision 层阻断交易
-	// 计划），不得否定公司披露/业务事实的可信度——两者是不同维度。
-	if len(result.Support) < 2 {
+	// [ES_MERGE_V150] 采用上游 10-09 fix 口径：证据充分度只看「是否存在有效支持
+	// 依据」（上游已把旧阈值 <2 放宽为 0），不再与日线样本数耦合。价格样本不足
+	// 仅影响「可执行性」（decision 层阻断交易计划），不得否定公司披露/业务事实的
+	// 可信度——两者是不同维度。
+	if len(result.Support) == 0 {
 		result.EvidenceLevel = "insufficient"
-		result.EvidenceReasons = append(result.EvidenceReasons, "有效支持依据少于2条，尚不足以支撑核心判断")
+		result.EvidenceReasons = append(result.EvidenceReasons, "没有有效支持依据，尚不足以支撑核心判断")
 	}
 	if result.EvidenceLevel == "sufficient" {
-		// Financial disclosures and reproducible price calculations can support
-		// their own scoped judgments without an unrelated announcement. News
-		// summaries and title-only announcements cannot establish a core thesis.
-		primary := researchClaimHasPrimaryEvidence(result.Thesis, sources)
-		directSupport := 0
+		// Check evidence availability, not an arbitrary two-claim quota. The
+		// model assesses whether the content supports this scoped judgment;
+		// traceable reporting is not automatically a verified company disclosure.
+		usableThesis := researchClaimHasUsableEvidence(result.Thesis, sources)
+		usableSupport := false
 		for _, claim := range result.Support {
-			if researchClaimHasPrimaryEvidence(claim, sources) {
-				directSupport++
-			}
+			usableSupport = usableSupport || researchClaimHasUsableEvidence(claim, sources)
 		}
-		if !primary || directSupport < 2 {
+		if !usableThesis || !usableSupport {
 			result.EvidenceLevel = "limited"
-			result.EvidenceReasons = append(result.EvidenceReasons, "核心判断或支持依据仅依赖第三方摘要、观点或公告标题，直接披露或可复算的数据依据不足")
-			notes = append(notes, "核心判断缺少直接证据，证据充分度按有限处理")
+			result.EvidenceReasons = append(result.EvidenceReasons, "核心判断或支持依据仅有观点、标题或出处不完整的第三方摘要，缺少可检查的事实内容")
+			notes = append(notes, "核心判断存在具体来源缺口，证据充分度按有限处理；不代表相关消息为假")
 		}
 		// [ES_MERGE_V150] 上游 v1.5.0 已删除旧的 source-kind coverage 检查：
 		// 该检查要求「公告 + 披露/公司资料」同时覆盖才允许 sufficient，与新增的
@@ -344,10 +343,17 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 	return uniqueStrings(notes, 12), nil
 }
 
-func researchClaimHasPrimaryEvidence(claim ResearchClaim, sources map[string]ResearchSource) bool {
+func researchSourceCanSupportFact(s ResearchSource) bool {
+	return s.Kind == "disclosure" || s.Kind == "company_profile" || s.Kind == "calculation" ||
+		(s.Kind == "announcement" && ResearchSourceHasBody(s)) || researchNewsTraceable(s)
+}
+
+func researchClaimHasUsableEvidence(claim ResearchClaim, sources map[string]ResearchSource) bool {
+	if claim.Kind == "opinion" {
+		return false
+	}
 	for _, id := range claim.SourceIDs {
-		s := sources[id]
-		if s.Kind == "disclosure" || s.Kind == "company_profile" || s.Kind == "calculation" || (s.Kind == "announcement" && ResearchSourceHasBody(s)) {
+		if researchSourceCanSupportFact(sources[id]) {
 			return true
 		}
 	}
@@ -812,9 +818,10 @@ func validateResearchCoreClaims(result *ResearchSynthesis, snapshot ResearchSnap
 	default:
 		result.EvidenceLevel = "limited"
 	}
-	// [ES_MERGE_V150] 与 validateResearch 保持一致：证据充分度只看支持条数，
-	// 不与日线样本数耦合；coverage 检查随上游 v1.5.0 移除。
-	if len(result.Support) < 2 {
+	// [ES_MERGE_V150] 与 validateResearch 保持一致：证据充分度只看「是否存在
+	// 有效支持依据」（上游 10-09 fix 已把阈值由 <2 放宽为 0），不与日线样本数
+	// 耦合；coverage 检查随上游 v1.5.0 移除。
+	if len(result.Support) == 0 {
 		result.EvidenceLevel = "insufficient"
 	}
 	if len(result.Counter) == 0 {
@@ -843,6 +850,7 @@ func validateResearchClaim(claim *ResearchClaim, result *ResearchSynthesis, sour
 		claim.Kind = "inference"
 	}
 	quoteMatches := claim.Quote == ""
+	hasFactualSource := false
 	for _, id := range claim.SourceIDs {
 		// [ES_EVIDENCE_CONTRACT_PATCH]
 		// 基线字段名绝不能被当作来源。给出可操作的反馈，
@@ -859,11 +867,16 @@ func validateResearchClaim(claim *ResearchClaim, result *ResearchSynthesis, sour
 		if claim.Quote != "" && strings.Contains(source.Content, claim.Quote) {
 			quoteMatches = true
 		}
-		if claim.Kind == "fact" && (source.Kind == "opinion" || source.Kind == "methodology" || source.Kind == "news") {
-			claim.Kind = "inference"
-			if notes != nil {
-				*notes = append(*notes, "第三方观点或新闻解释已降为研究推断")
-			}
+		// [ES_MERGE_V150_1] 采用上游 10-09 fix：分类与引用顺序无关，
+		// 次要观点不得抹掉同时存在的可用事实来源（disclosure/report 等）。
+		hasFactualSource = hasFactualSource || researchSourceCanSupportFact(source)
+	}
+	// A secondary opinion must not erase a fact also supported by a usable
+	// disclosure or report. Classification is independent of citation order.
+	if claim.Kind == "fact" && !hasFactualSource {
+		claim.Kind = "inference"
+		if notes != nil {
+			*notes = append(*notes, "仅有观点、标题或出处不完整的材料，事实陈述按待核实推断处理")
 		}
 	}
 	if !quoteMatches {

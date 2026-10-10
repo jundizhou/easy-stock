@@ -11,7 +11,7 @@ import (
 const researchTradingLogicRules = `
 近期交易逻辑：trading_logic回答“近期市场可能在交易什么预期”，与主营行业、量化题材评分和已确认盘面共振分开。
 优先识别输入原文中的具体产品、应用、业绩兑现、订单、资本事件及板块共同修复；可以提出端侧AI、SoC等细分逻辑，不限于预设题材名称。端侧NPU、消费电子SoC不能自动等同于云端算力、光通信或CPO；必须说明具体公司关系。事实与市场解释分开：公司涉及某业务不证明该业务主导涨价，逻辑解释一律inference。
-公司经营预期与最近两日上涨原因分别判断：有公司原文支持的新品、客户导入、量产和业绩逻辑，即使没有异动当天新公告，仍可列为候选并标注盘面待验证。候选排序须比较具体经营进展、兑现阶段、风险与事件时效，不能仅因资本公告日期较新就排在主线。公司预计、有望、客户预测不等于已量产或已实现收入，不能删去原文限定条件。
+公司经营预期与最近两日上涨原因分别判断：有公司披露或可信报道支持的新品、客户导入、量产和业绩逻辑，即使没有异动当天新公告，仍可列为候选并标注盘面待验证。候选排序须比较具体经营进展、兑现阶段、风险与事件时效，不能仅因资本公告日期较新就排在主线。公司预计、有望、客户预测不等于已量产或已实现收入，不能删去原文限定条件。
 business是有来源的主营背景；mainlines最多2项、secondary最多2项、catalysts最多3条，每项name至多24字、explanation至多140字。只有输入证据支持的候选才能输出，没有依据就空数组并在gaps写具体缺口，不能凭模型记忆填事实。催化事件必须交代来源日期，日期未知须明示，旧消息不能当作新催化。新闻检索摘要不是全文，第三方报道不能自动升级为公司披露。
 每项的evidence_level仅评价公司关系与事件依据，取sufficient/limited/insufficient；market_status单独取supported/mixed/unverified。market_evidence引用同日期、与候选相关的m-sector样本或usable_for_current_move=true的m-themes节点，说明样本范围；它只是价格对照研究推断，不能证明因果、资金流或完整板块表现。泛行业样本不能确认细分题材，缺少相关数据就unverified并写gaps。没有确认盘面时保留有依据的候选，不能回退为泛行业名称。以市场逻辑为假设，比较已有alternatives，不强求唯一主线。
 trading_logic内每个explanation、business、catalyst、market_evidence都用ResearchClaim结构text/kind/source_ids/可选quote，引用本次输入编号；gaps只写尚未解决的具体缺口，不伪造引用。缺少证据时business和market_evidence可为null。
@@ -42,7 +42,7 @@ func normalizeTradingLogic(logic *ResearchTradingLogic, snapshot ResearchSnapsho
 	companyEvidence := func(claim ResearchClaim) bool {
 		for _, id := range claim.SourceIDs {
 			source := sources[id]
-			if source.Kind == "company_profile" || source.Kind == "disclosure" || (source.Kind == "announcement" && ResearchSourceHasBody(source)) {
+			if source.Kind == "company_profile" || source.Kind == "disclosure" || (source.Kind == "announcement" && ResearchSourceHasBody(source)) || researchNewsTraceable(source) {
 				return true
 			}
 		}
@@ -71,7 +71,7 @@ func normalizeTradingLogic(logic *ResearchTradingLogic, snapshot ResearchSnapsho
 			}
 			if item.EvidenceLevel == "sufficient" && !companyEvidence(item.Explanation) {
 				item.EvidenceLevel = "limited"
-				item.Gaps = append(item.Gaps, "公司关系或事件仍需原始披露核实")
+				item.Gaps = append(item.Gaps, "公司关系或事件缺少披露内容或可追溯报道，仍需补证")
 			}
 			if item.MarketEvidence != nil && !valid(item.MarketEvidence) {
 				item.MarketEvidence = nil

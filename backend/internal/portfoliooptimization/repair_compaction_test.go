@@ -79,7 +79,7 @@ func TestSavedQualityPromptBudgets(t *testing.T) {
 		t.Fatal("revision", err)
 	}
 	t.Logf("revision prompt=%d", len(revision))
-	if len(prompt) > MaxInitialModelPromptBytes || len(revision) > MaxRevisionModelPromptBytes {
+	if len(prompt) > MaxEvidenceModelPromptBytes || len(revision) > MaxEvidenceModelPromptBytes {
 		t.Fatal("stage input cap exceeded")
 	}
 	if path := os.Getenv("EASY_STOCK_OPTIMIZATION_RESPONSE"); path != "" {
