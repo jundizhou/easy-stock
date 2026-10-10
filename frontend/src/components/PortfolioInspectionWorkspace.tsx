@@ -193,7 +193,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 
 			{(!job?.report || job.status === 'running') && <>
 				<header className="stock-ai-search-hero portfolio-setup-hero"><div><span>持仓 AI 巡检</span><h2>配置持仓，检查组合风险</h2><p>选择交易风格，填写持仓占比与成本后开始巡检。</p></div><WalletCards size={32} aria-hidden="true" /></header>
-				<PortfolioSetupForm key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={starting || Boolean(running)} busy={starting || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={() => void startInspection()} />
+				<PortfolioSetupForm config={config} key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={starting || Boolean(running)} busy={starting || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={() => void startInspection()} />
 			</>}
 
 			{job?.status === 'running' && <><InspectionProgress job={job} /><button type="button" className="portfolio-task-action" disabled={starting} onClick={() => void cancelInspection()}>停止持仓分析</button></>}

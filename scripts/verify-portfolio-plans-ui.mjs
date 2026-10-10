@@ -16,6 +16,8 @@ await context.addInitScript((draft) => {
 }, legacy);
 let job;
 let submitted;
+const prices = { '600001.SH': 15, '600002.SH': 20 };
+let failQuotes = false;
 const writes = [];
 await context.route('**/api/**', async (route) => {
  const req = route.request();
@@ -23,7 +25,10 @@ await context.route('**/api/**', async (route) => {
  let data = [];
  if (req.method() !== 'GET') writes.push(pathname);
  if (pathname === '/api/v1/stocks/directory') data = { stocks: [{ symbol: '600001.SH', code: '600001', name: '示例原持仓' }, { symbol: '600002.SH', code: '600002', name: '示例新持仓' }] };
- else if (pathname === '/api/v1/portfolio-inspections' && req.method() === 'POST') {
+ else if (pathname === '/api/v1/quotes/realtime') {
+  if (failQuotes) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '测试行情中断' }) }); return; }
+  data = new URL(req.url()).searchParams.get('symbols').split(',').map((symbol) => ({ symbol, price: prices[symbol], change_percent: 2, trade_time: '2026-10-10T07:00:00Z', meta: { source: 'ui-fixture', fetched_at: new Date().toISOString(), stale: false } }));
+ } else if (pathname === '/api/v1/portfolio-inspections' && req.method() === 'POST') {
   submitted = req.postDataJSON();
   job = { id: 'plan-ui-inspection', request: submitted, status: 'running', stage: 'analyzing_stocks', started_at: new Date().toISOString(), total_stocks: 1, completed_stocks: 0, results: [{ holding: submitted.holdings[0], status: 'running', research_origin: 'new' }], message: '界面测试，不调用模型' };
   data = job;
@@ -43,7 +48,7 @@ try {
  await page.goto(base);
  await page.getByRole('button', { name: '添加持仓方案', exact: true }).waitFor();
  assert.equal(await page.getByLabel('持有周期').inputValue(), 'medium');
- assert.equal(await page.getByPlaceholder('选填').inputValue(), '12.5');
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '12.5');
  assert.equal(await plan('方案 1').getAttribute('aria-pressed'), 'true');
  await page.getByRole('button', { name: '添加持仓方案', exact: true }).click();
  await page.getByText('尚未录入持仓', { exact: true }).waitFor();
@@ -54,19 +59,32 @@ try {
  await page.getByLabel('缺失报告研究深度').selectOption('deep');
  await page.getByRole('textbox', { name: '搜索持仓股票' }).fill('600002');
  await page.getByRole('option', { name: /示例新持仓/ }).click();
- await page.getByPlaceholder('选填').fill('25.8');
+ await page.locator('.portfolio-cost-input input').waitFor();
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '20');
+ assert.equal(await page.getByRole('spinbutton', { name: '总资产（元）' }).inputValue(), '500000');
+ await page.locator('.portfolio-holding-valuation').getByText('2,500 股', { exact: true }).waitFor();
+ prices['600002.SH'] = 22;
+ await page.getByRole('button', { name: '刷新行情', exact: true }).click();
+ await page.locator('.portfolio-holding-valuation').getByText('+5,000.00 元', { exact: true }).waitFor();
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '20');
+ await page.getByRole('spinbutton', { name: '总资产（元）' }).fill('1000000');
+ await page.locator('.portfolio-holding-valuation').getByText('5,000 股', { exact: true }).waitFor();
+ await page.locator('.portfolio-cost-input input').fill('');
+ await page.getByRole('spinbutton', { name: '总资产（元）' }).focus();
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '20');
+ await page.locator('.portfolio-cost-input input').fill('25.8');
  await page.locator('.portfolio-weight-control input[type=number]').fill('60');
  await page.getByRole('button', { name: '重命名当前方案' }).click();
  await page.getByRole('textbox', { name: '方案名称', exact: true }).fill('短线观察组合');
  await page.getByRole('button', { name: '保存名称', exact: true }).click();
  await plan('方案 1').click();
- assert.equal(await page.getByPlaceholder('选填').inputValue(), '12.5');
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '12.5');
  assert.equal(await page.getByLabel('持有周期').inputValue(), 'medium');
  assert.equal(await page.locator('.portfolio-weight-control input[type=number]').inputValue(), '35');
  await page.getByRole('textbox', { name: '搜索持仓股票' }).fill('unfinished search');
  await plan('短线观察组合').click();
  assert.equal(await page.getByRole('textbox', { name: '搜索持仓股票' }).inputValue(), '');
- assert.equal(await page.getByPlaceholder('选填').inputValue(), '25.8');
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '25.8');
  assert.equal(await page.locator('.portfolio-weight-control input[type=number]').inputValue(), '60');
  await page.reload();
  await plan('短线观察组合').waitFor();
@@ -74,14 +92,34 @@ try {
  assert.equal(await page.getByLabel('持有周期').inputValue(), 'short');
  assert.equal(await page.getByLabel('缺失报告研究深度').inputValue(), 'deep');
  let state = await saved();
- assert.deepEqual(state.plans[0].draft, legacy);
+ assert.deepEqual(state.plans[0].draft, { ...legacy, totalAssets: 500000 });
+ assert.equal(state.plans[1].draft.totalAssets, 1000000);
+ assert.equal(state.plans[1].draft.holdings[0].entryPrice, 20);
+ await page.locator('.portfolio-holding-valuation').getByText('-88,369.00 元', { exact: true }).waitFor();
  assert.equal(state.plans[1].draft.profile, 'aggressive');
  await page.screenshot({ path: path.join(output, 'desktop.png'), fullPage: true });
  await page.setViewportSize({ width: 390, height: 844 });
+ await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 2, undefined, { timeout: 3000 });
  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false, 'mobile horizontal overflow');
  await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
  await page.setViewportSize({ width: 1440, height: 1100 });
+ failQuotes = true;
+ await page.getByRole('button', { name: '刷新行情', exact: true }).click();
+ await page.getByText('行情刷新失败，已有价格为上次快照', { exact: true }).waitFor();
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '25.8');
+ failQuotes = false;
  await page.getByRole('button', { name: '添加持仓方案', exact: true }).click();
+ failQuotes = true;
+ await page.getByRole('textbox', { name: '搜索持仓股票' }).fill('600001');
+ await page.getByRole('option', { name: /示例原持仓/ }).click();
+ await page.getByText('未取得添加时的有效价格，请手动填写持仓成本', { exact: true }).waitFor();
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '');
+ assert.equal((await saved()).plans[2].draft.holdings[0].entryPrice, undefined);
+ assert.ok((await page.locator('.portfolio-holding-valuation').innerText()).includes('—'));
+ failQuotes = false;
+ await page.getByRole('button', { name: '刷新行情', exact: true }).click();
+ await page.locator('.portfolio-holding-valuation').getByText('15.00 元', { exact: true }).waitFor();
+ assert.equal(await page.locator('.portfolio-cost-input input').inputValue(), '', 'later quote must not invent an earlier entry price');
  await page.getByRole('button', { name: '删除当前方案', exact: true }).click();
  await page.getByRole('button', { name: '取消', exact: true }).click();
  assert.equal((await saved()).plans.length, 3);
@@ -96,9 +134,9 @@ try {
  assert.deepEqual(submitted, { trader_profile: 'aggressive', horizon: 'short', research_level: 'deep', holdings: [{ symbol: '600002.SH', name: '示例新持仓', weight_percent: 60, cost_price: 25.8 }], force_symbols: [] });
  assert.equal(await page.getByRole('button', { name: '添加持仓方案', exact: true }).isDisabled(), true);
  assert.equal(await plan('方案 1').isDisabled(), true);
- assert.deepEqual((await saved()).plans[0].draft, legacy);
+ assert.deepEqual((await saved()).plans[0].draft, { ...legacy, totalAssets: 500000 });
  assert.deepEqual(errors, []);
- await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, fixture_only: true, workflows: ['legacy migration', 'add empty plan', 'independent holdings and settings', 'rename', 'switch with search reset', 'reload selected plan', 'delete with confirmation', 'mobile layout', 'selected-plan inspection request', 'lock while running'], errors }, null, 2));
+ await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, fixture_only: true, workflows: ['legacy migration', 'add empty plan', 'independent holdings and settings', 'rename', 'switch with search reset', 'reload selected plan', 'delete with confirmation', 'mobile layout', 'selected-plan inspection request', 'lock while running', 'entry price default remains fixed', 'independent asset amounts', 'stable quantity and live profit', 'manual cost override', 'quote failure preserves prior snapshot', 'failed entry quote never becomes zero or a later price'], errors }, null, 2));
  console.log(`Portfolio plan UI checks passed: ${output}`);
 } catch (error) {
  await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true });

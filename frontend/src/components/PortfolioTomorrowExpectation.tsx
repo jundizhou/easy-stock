@@ -97,16 +97,16 @@ export function PortfolioTomorrowExpectation({ config, summaryDate }: Props) {
 	return <>
 		<button type="button" className="portfolio-expectation-trigger" onClick={handlePrimaryAction} disabled={running || starting} title="结合今日复盘和当前持仓生成明日情景预期">{running || starting ? <LoaderCircle className="spin" size={14} /> : job?.report_available ? <CheckCircle2 size={14} /> : <WalletCards size={14} />}{label}</button>
 		{error && <div className="portfolio-expectation-error" role="alert"><CircleAlert size={14} /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="关闭错误"><X size={13} /></button></div>}
-		{setupDraft && <PortfolioExpectationSetupDialog draft={setupDraft} directory={directory} busy={starting} onChange={setSetupDraft} onClose={() => setSetupDraft(null)} onSubmit={() => { try { writePortfolioDraft(setupDraft, setupPlanId); void startExpectation(setupDraft); } catch (cause) { setError(`持仓方案保存失败：${cause instanceof Error ? cause.message : '请重试'}`); } }} />}
+		{setupDraft && <PortfolioExpectationSetupDialog config={config} draft={setupDraft} directory={directory} busy={starting} onChange={setSetupDraft} onClose={() => setSetupDraft(null)} onSubmit={() => { try { writePortfolioDraft(setupDraft, setupPlanId); void startExpectation(setupDraft); } catch (cause) { setError(`持仓方案保存失败：${cause instanceof Error ? cause.message : '请重试'}`); } }} />}
 		{reportOpen && job?.report && <PortfolioExpectationReportDialog report={job.report} partial={job.status === 'partial'} onClose={() => setReportOpen(false)} onRegenerate={() => { setReportOpen(false); void startExpectation(readPortfolioDraft(), true); }} />}
 	</>;
 }
 
-function PortfolioExpectationSetupDialog({ draft, directory, busy, onChange, onClose, onSubmit }: { draft: PortfolioDraft; directory: StockDirectoryEntry[]; busy: boolean; onChange: (draft: PortfolioDraft) => void; onClose: () => void; onSubmit: () => void }) {
+function PortfolioExpectationSetupDialog({ config, draft, directory, busy, onChange, onClose, onSubmit }: { config: BackendConfig | null; draft: PortfolioDraft; directory: StockDirectoryEntry[]; busy: boolean; onChange: (draft: PortfolioDraft) => void; onClose: () => void; onSubmit: () => void }) {
 	return <div className="portfolio-expectation-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 		<section className="portfolio-expectation-setup" role="dialog" aria-modal="true" aria-labelledby="portfolio-expectation-setup-title">
 			<header><div><span><WalletCards size={16} />PORTFOLIO SETUP</span><h2 id="portfolio-expectation-setup-title">配置持仓并生成明日预期</h2><p>使用“持仓 AI 巡检”中选中的方案，保存后同步更新该方案。</p></div><button type="button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header>
-			<PortfolioSetupForm draft={draft} directory={directory} disabled={busy} busy={busy} actionLabel="保存并开始分析" busyLabel="正在启动" actionIcon={<Sparkles size={17} />} onChange={onChange} onSubmit={onSubmit} />
+			<PortfolioSetupForm config={config} draft={draft} directory={directory} disabled={busy} busy={busy} actionLabel="保存并开始分析" busyLabel="正在启动" actionIcon={<Sparkles size={17} />} onChange={onChange} onSubmit={onSubmit} />
 		</section>
 	</div>;
 }

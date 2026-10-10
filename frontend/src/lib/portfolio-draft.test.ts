@@ -29,14 +29,14 @@ describe('saved portfolio plans', () => {
 
 	it('preserves the original holdings and settings while adding a separate empty plan', () => {
 		values.set(portfolioDraftStorageKey, JSON.stringify(legacy));
-		expect(readPortfolioDraft()).toEqual(legacy);
+		expect(readPortfolioDraft()).toEqual({ ...legacy, totalAssets: 500000 });
 		const added = addPortfolioPlan();
 		expect(added.plans[0]).toMatchObject({ name: '方案 1', draft: legacy });
 		expect(activePortfolioPlan(added)).toMatchObject({ name: '方案 2', draft: { profile: 'balanced', horizon: 'swing', researchLevel: 'standard', holdings: [] } });
 		writePortfolioDraft({ profile: 'aggressive', horizon: 'short', researchLevel: 'standard', holdings: [{ symbol: '000858.SZ', name: '五粮液', weight: 20, costPrice: '100' }] });
 		const second = readPortfolioDraft();
 		selectPortfolioPlan(added.plans[0].id);
-		expect(readPortfolioDraft()).toEqual(legacy);
+		expect(readPortfolioDraft()).toEqual({ ...legacy, totalAssets: 500000 });
 		selectPortfolioPlan(added.activeId);
 		expect(readPortfolioDraft()).toEqual(second);
 		expect(readPortfolioPlans().activeId).toBe(added.activeId);
@@ -51,7 +51,7 @@ describe('saved portfolio plans', () => {
 		expect(readPortfolioPlans().activeId).toBe(second);
 		expect(readPortfolioDraft().holdings).toEqual([]);
 		selectPortfolioPlan(original);
-		expect(readPortfolioDraft()).toEqual(legacy);
+		expect(readPortfolioDraft()).toEqual({ ...legacy, totalAssets: 500000 });
 	});
 
 	it('persists names and removes only the chosen plan, keeping at least one', () => {
@@ -63,7 +63,7 @@ describe('saved portfolio plans', () => {
 		expect(() => renamePortfolioPlan(second, ' ')).toThrow('请输入方案名称');
 		removePortfolioPlan(second);
 		expect(readPortfolioPlans().activeId).toBe(first);
-		expect(readPortfolioDraft()).toEqual(legacy);
+		expect(readPortfolioDraft()).toEqual({ ...legacy, totalAssets: 500000 });
 		expect(() => writePortfolioDraft(legacy as PortfolioDraft, second)).toThrow('已被删除');
 		expect(() => removePortfolioPlan(first)).toThrow('至少保留一份');
 	});
@@ -78,9 +78,22 @@ describe('saved portfolio plans', () => {
 	it('recovers the legacy draft from malformed storage and repairs a missing selection', () => {
 		values.set(portfolioDraftStorageKey, JSON.stringify(legacy));
 		values.set(portfolioPlansStorageKey, '{broken');
-		expect(readPortfolioDraft()).toEqual(legacy);
+		expect(readPortfolioDraft()).toEqual({ ...legacy, totalAssets: 500000 });
 		values.set(portfolioPlansStorageKey, JSON.stringify({ activeId: 'missing', plans: [null, { id: 'valid', name: '已保存', draft: legacy }, { id: 'valid', draft: null }] }));
-		expect(readPortfolioPlans()).toEqual({ activeId: 'valid', plans: [{ id: 'valid', name: '已保存', draft: legacy }] });
+		expect(readPortfolioPlans()).toEqual({ activeId: 'valid', plans: [{ id: 'valid', name: '已保存', draft: { ...legacy, totalAssets: 500000 } }] });
+	});
+
+	it('persists independent asset amounts and the original price when costs are cleared', () => {
+		const first = readPortfolioPlans().activeId;
+		const draft: PortfolioDraft = { profile: 'balanced', totalAssets: 800000, holdings: [{ symbol: '600001.SH', name: '示例', weight: 30, costPrice: '', entryPrice: 20, entryPriceTime: '2026-10-10T07:00:00Z' }] };
+		writePortfolioDraft(draft);
+		const second = addPortfolioPlan().activeId;
+		expect(readPortfolioDraft().totalAssets).toBe(500000);
+		selectPortfolioPlan(first);
+		expect(readPortfolioDraft()).toMatchObject(draft);
+		expect(portfolioDraftToHoldings(readPortfolioDraft().holdings)[0].cost_price).toBe(20);
+		selectPortfolioPlan(second);
+		expect(readPortfolioDraft().holdings).toEqual([]);
 	});
 
 	it('reports failed persistence without changing saved plans or notifying consumers', () => {

@@ -5,10 +5,13 @@ export type PortfolioDraftHolding = {
 	name: string;
 	weight: number;
 	costPrice: string;
+	entryPrice?: number;
+	entryPriceTime?: string;
 };
 
 export type PortfolioDraft = {
 	profile: PortfolioTraderProfile;
+	totalAssets?: number;
 	horizon?: 'short' | 'swing' | 'medium';
 	researchLevel?: 'standard' | 'deep';
 	holdings: PortfolioDraftHolding[];
@@ -22,6 +25,7 @@ export const portfolioPlanNameLimit = 40;
 export const portfolioDraftStorageKey = 'easy-stock.portfolio-inspection-draft.v1';
 export const portfolioDraftChangedEvent = 'easy-stock:portfolio-draft-changed';
 export const maxPortfolioHoldings = 10;
+export const defaultPortfolioAssets = 500_000;
 
 export const portfolioProfiles: Array<{ id: PortfolioTraderProfile; label: string; description: string; constraint: string }> = [
 	{ id: 'aggressive', label: '激进', description: '短线机会与弹性优先', constraint: '单票参考上限 45%' },
@@ -108,6 +112,7 @@ function normalizePlanName(value: unknown): string {
 function normalizeDraft(value: unknown): PortfolioDraft {
 	const draft = value && typeof value === 'object' ? value as Partial<PortfolioDraft> : {};
 	return {
+		totalAssets: typeof draft.totalAssets === 'number' && Number.isFinite(draft.totalAssets) && draft.totalAssets > 0 ? draft.totalAssets : defaultPortfolioAssets,
 		profile: portfolioProfiles.some((item) => item.id === draft.profile) ? draft.profile! : 'balanced',
 		horizon: draft.horizon === 'short' || draft.horizon === 'medium' ? draft.horizon : 'swing',
 		researchLevel: draft.researchLevel === 'deep' ? 'deep' : 'standard',
@@ -115,12 +120,17 @@ function normalizeDraft(value: unknown): PortfolioDraft {
 	};
 }
 
+export function portfolioHoldingCost(holding: PortfolioDraftHolding): number | null {
+	const value = holding.costPrice.trim() ? Number(holding.costPrice) : holding.entryPrice;
+	return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 export function portfolioDraftToHoldings(holdings: PortfolioDraftHolding[]): PortfolioHolding[] {
 	return holdings.map((item) => ({
 		symbol: item.symbol,
 		name: item.name,
 		weight_percent: item.weight,
-		...(Number(item.costPrice) > 0 ? { cost_price: Number(item.costPrice) } : {}),
+		...(portfolioHoldingCost(item) !== null ? { cost_price: portfolioHoldingCost(item)! } : {}),
 	}));
 }
 

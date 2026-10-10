@@ -150,7 +150,7 @@ Reports distinguish source statements, third-party opinions, and research infere
 
 Save multiple portfolio plans: click **+** above the setup form to add one, then switch between plans to edit their separate stocks, weights, costs, and research settings. Plans can be renamed or deleted, and changes are saved locally.
 
-Choose an aggressive, balanced, or steady style, set a holding horizon, and add up to 10 stocks. Set weights and optionally costs; the remainder is cash. Inspection reuses **valid AI stock reports from the past 24 hours**, researches missing stocks, and produces a portfolio conclusion. Individual stock research can also be refreshed separately.
+Choose an aggressive, balanced, or steady style, set a holding horizon, and add up to 10 stocks. Total assets default to CNY 500,000 and are editable. Costs default to a valid quote fetched when adding a stock and can be overridden. Whole-share quantities are estimated from assets, weights, and costs; the form shows current prices, market values, and per-stock and aggregate profit/loss. Unallocated funds remain cash. Inspection reuses **valid AI stock reports from the past 24 hours**, researches missing stocks, and produces a portfolio conclusion. Individual stock research can also be refreshed separately.
 
 <details>
 <summary>View portfolio setup: style, horizon, research depth, and weights</summary>
