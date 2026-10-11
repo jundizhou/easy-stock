@@ -7931,3 +7931,42 @@ a:focus-visible {
 .nv-jump-row { margin: 0 22px 10px; }
 .nv-jump { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px dashed var(--accent, #2f7df6); border-radius: 8px; background: transparent; color: var(--accent, #2f7df6); font-size: 12px; font-weight: 650; cursor: pointer; }
 .nv-jump:hover { background: rgba(47,125,246,0.08); }
+
+/* 资讯研判 v2：标签页 + 催化排行 + 下钻 + 筛选 */
+.nv-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.nv-tab { height: 32px; padding: 0 16px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 8px; background: var(--surface, #fff); color: var(--theme-muted, #52779e); font-size: 13px; font-weight: 650; cursor: pointer; }
+.nv-tab.active { color: #fff; background: var(--accent, #2f7df6); border-color: var(--accent, #2f7df6); }
+
+.nv-rank { display: flex; flex-direction: column; gap: 8px; }
+.nv-rank-row { display: grid; grid-template-columns: 36px 1.4fr 64px 60px 110px 1.6fr; align-items: center; gap: 10px; text-align: left; padding: 10px 14px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 10px; background: var(--surface, #fff); cursor: pointer; transition: border-color .15s, background .15s; }
+.nv-rank-row:hover { border-color: var(--accent, #2f7df6); background: rgba(47,125,246,0.04); }
+.nv-rank-no { font-size: 15px; font-weight: 800; color: var(--theme-muted, #52779e); text-align: center; }
+.nv-rank-name { font-size: 14px; font-weight: 700; color: var(--theme-text, #1f2733); }
+.nv-rank-stage { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; text-align: center; }
+.nv-rank-sentiment, .nv-drill-sentiment { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+.nv-rank-heat { font-size: 12px; color: var(--theme-muted, #52779e); }
+.nv-rank-heat b { font-size: 15px; color: var(--accent, #2f7df6); }
+.nv-rank-meta { font-size: 11px; color: var(--theme-muted, #52779e); }
+
+/* 发酵阶段配色 */
+.nv-stage-爆发 { color: var(--red, #c0392b); background: rgba(192,57,43,0.12); }
+.nv-stage-升温 { color: var(--amber, #b8770a); background: rgba(184,119,10,0.12); }
+.nv-stage-持续 { color: var(--accent, #2f7df6); background: rgba(47,125,246,0.12); }
+.nv-stage-萌芽 { color: #52779e; background: rgba(82,119,158,0.12); }
+.nv-stage-退潮 { color: #8a98a6; background: rgba(138,152,166,0.12); }
+/* 情绪配色 */
+.nv-sent-偏多 { color: var(--green, #1e9e57); background: rgba(30,158,87,0.12); }
+.nv-sent-偏空 { color: var(--red, #c0392b); background: rgba(192,57,43,0.12); }
+.nv-sent-中性 { color: #52779e; background: rgba(82,119,158,0.12); }
+
+/* 下钻面板 */
+.nv-drill-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.nv-back { height: 30px; padding: 0 12px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 8px; background: var(--surface, #fff); color: var(--theme-text, #1f2733); font-size: 12px; cursor: pointer; }
+.nv-back:hover { border-color: var(--accent, #2f7df6); color: var(--accent, #2f7df6); }
+.nv-drill-title { font-size: 15px; font-weight: 700; color: var(--theme-text, #1f2733); }
+
+/* 逐条研判筛选条 */
+.nv-controls { display: flex; align-items: center; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
+.nv-check { font-size: 12px; color: var(--theme-text, #1f2733); display: inline-flex; align-items: center; gap: 6px; }
+.nv-check select { height: 26px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 6px; background: var(--surface, #fff); color: var(--theme-text, #1f2733); }
+.nv-count { font-size: 11px; color: var(--theme-muted, #52779e); }

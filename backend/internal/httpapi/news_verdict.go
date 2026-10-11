@@ -94,3 +94,77 @@ func (s *Server) newsVerdict(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+// newsFerment 调用 news_ferment/ferment.py，返回题材发酵（催化）排行榜。
+//
+//	GET /api/v1/news/ferment?window=48&days=2&top=20
+//
+// 与 newsVerdict 共用同一引擎目录（NEWS_FERMENT_DIR）与 Python（PYTHON_CMD）。
+// ferment.py 使用与 verdict.py --json 相同的 load_merged(days) 记录源，因此题材
+// 样本的 uid 必为研判集子集，前端可用 uid 下钻 join 到逐条研判详情。
+// 未配置时返回 503，不阻断其他功能。排行仅供研究观察，不生成交易指令。
+func (s *Server) newsFerment(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	window := 48.0
+	if v := strings.TrimSpace(q.Get("window")); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n >= 6 && n <= 168 {
+			window = n
+		}
+	}
+	days := 2
+	if v := strings.TrimSpace(q.Get("days")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 30 {
+			days = n
+		}
+	}
+	top := 20
+	if v := strings.TrimSpace(q.Get("top")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 50 {
+			top = n
+		}
+	}
+
+	dir := strings.TrimSpace(os.Getenv("NEWS_FERMENT_DIR"))
+	if dir == "" {
+		dir = `C:\quant\news_ferment`
+	}
+	script := filepath.Join(dir, "ferment.py")
+	if _, err := os.Stat(script); err != nil {
+		writeError(w, http.StatusServiceUnavailable,
+			"题材发酵引擎未配置：找不到 "+script+"（设置环境变量 NEWS_FERMENT_DIR 指向 news_ferment 目录）")
+		return
+	}
+	py := strings.TrimSpace(os.Getenv("PYTHON_CMD"))
+	if py == "" {
+		py = "python"
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, py, script, "--json",
+		"--window", strconv.FormatFloat(window, 'f', -1, 64),
+		"--days", strconv.Itoa(days),
+		"--top", strconv.Itoa(top))
+	cmd.Dir = dir
+	// 同 newsVerdict：强制子进程 UTF-8 输出，避免 Windows 管道 cp936 乱码。
+	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1")
+	out, err := cmd.Output()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "题材发酵引擎执行失败："+err.Error())
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		writeError(w, http.StatusBadGateway, "题材发酵引擎输出解析失败："+err.Error())
+		return
+	}
+	payload["engine"] = map[string]any{
+		"configured": true,
+		"script":     script,
+		"window":     window,
+		"days":       days,
+		"top":        top,
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
