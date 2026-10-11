@@ -51,6 +51,7 @@ interface ThemeStat {
 	sentiment: string;
 	bullish: number;
 	bearish: number;
+	trend?: string; // 加速 / 平稳 / 退潮
 	samples: SampleRef[];
 }
 interface VerdictResponse {
@@ -60,7 +61,28 @@ interface VerdictResponse {
 interface FermentResponse {
 	themes: ThemeStat[];
 	window_hours: number;
+	sources?: Record<string, number>;
+	views?: Record<string, ThemeStat[]>;
+	windows?: Record<string, ThemeStat[]>;
 	engine: { configured: boolean; script: string; window: number; days: number; top: number };
+}
+interface ThemeStock {
+	symbol: string;
+	name: string;
+	price: number;
+	change_percent: number;
+	limit_up_streak?: number;
+	main_net_inflow?: number;
+}
+interface ThemeStocksResponse {
+	theme: string;
+	matched: boolean;
+	matched_name?: string;
+	change_percent?: number;
+	limit_up_count?: number;
+	stocks: ThemeStock[];
+	reason?: string;
+	note?: string;
 }
 
 const DIRECTION_CLASS: Record<string, string> = {
@@ -71,8 +93,15 @@ const DIRECTION_CLASS: Record<string, string> = {
 	无法判断: 'v-unknown',
 };
 
-// 强度排序权重（逐条研判按强度排序用）
-const INTENSITY_RANK: Record<string, number> = { 强: 3, 中: 2, 弱: 1 };
+// 强度排序权重（逐条研判按强度排序用；verdict 输出的强度取值为 大/中/小）
+const INTENSITY_RANK: Record<string, number> = { 大: 3, 中: 2, 小: 1 };
+
+const SOURCE_VIEWS: Array<{ key: string; label: string }> = [
+	{ key: 'merged', label: '合并源' },
+	{ key: 'easy-stock', label: '实时(easy-stock)' },
+	{ key: 'quant', label: '历史(quant)' },
+];
+const WINDOW_KEYS = ['6', '24', '48'];
 
 function Dimension({ label, value }: { label: string; value: string }) {
 	return (
@@ -162,23 +191,31 @@ export function NewsVerdictWorkspace({
 }) {
 	const [verdictItems, setVerdictItems] = useState<VerdictItem[]>([]);
 	const [verdictMap, setVerdictMap] = useState<Record<string, VerdictItem>>({});
-	const [themes, setThemes] = useState<ThemeStat[]>([]);
+	const [ferment, setFerment] = useState<FermentResponse | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState('');
 	const [engine, setEngine] = useState<VerdictResponse['engine'] | null>(null);
 
 	const [tab, setTab] = useState<'rank' | 'detail'>('rank');
+	const [sourceView, setSourceView] = useState<string>('merged');
+	const [windowKey, setWindowKey] = useState<string>('48');
 	const [drillTheme, setDrillTheme] = useState<ThemeStat | null>(null);
+	const [themeStocks, setThemeStocks] = useState<ThemeStocksResponse | null>(null);
+	const [stocksLoading, setStocksLoading] = useState(false);
 	const [hideUnknown, setHideUnknown] = useState(true);
 	const [sortBy, setSortBy] = useState<'heat' | 'intensity'>('intensity');
+
+	const headers = useMemo<Record<string, string>>(() => {
+		const h: Record<string, string> = {};
+		if (config?.token) h.Authorization = `Bearer ${config.token}`;
+		return h;
+	}, [config]);
 
 	useEffect(() => {
 		if (!config) return;
 		const controller = new AbortController();
 		setLoading(true);
 		setError('');
-		const headers: Record<string, string> = {};
-		if (config.token) headers.Authorization = `Bearer ${config.token}`;
 		const fet = (path: string) =>
 			fetch(new URL(path, config.backendUrl).toString(), {
 				signal: controller.signal,
@@ -207,7 +244,7 @@ export function NewsVerdictWorkspace({
 				for (const it of items) map[it.uid] = it;
 				setVerdictItems(items);
 				setVerdictMap(map);
-				setThemes(fm.themes ?? []);
+				setFerment(fm);
 				setEngine(vd.engine ?? null);
 			})
 			.catch((e) => {
@@ -215,7 +252,45 @@ export function NewsVerdictWorkspace({
 			})
 			.finally(() => setLoading(false));
 		return () => controller.abort();
-	}, [config, refreshKey]);
+	}, [config, refreshKey, headers]);
+
+	// 下钻题材时拉取「受益个股池」（复用行情侧题材成分）
+	useEffect(() => {
+		if (!config || !drillTheme) {
+			setThemeStocks(null);
+			return;
+		}
+		const controller = new AbortController();
+		setStocksLoading(true);
+		setThemeStocks(null);
+		const url = new URL('/api/v1/news/theme/stocks', config.backendUrl);
+		url.searchParams.set('theme', drillTheme.name);
+		url.searchParams.set('limit', '20');
+		fetch(url.toString(), { signal: controller.signal, headers })
+			.then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+			.then((j: ThemeStocksResponse) => setThemeStocks(j))
+			.catch((e) => {
+				if (e?.name !== 'AbortError') {
+					setThemeStocks({
+						theme: drillTheme.name,
+						matched: false,
+						stocks: [],
+						reason: e?.message || String(e),
+					});
+				}
+			})
+			.finally(() => setStocksLoading(false));
+		return () => controller.abort();
+	}, [config, drillTheme, headers]);
+
+	// 当前视图的排行（源切换 + 时间窗切换）
+	const rankThemes = useMemo<ThemeStat[]>(() => {
+		if (!ferment) return [];
+		if (sourceView === 'merged') {
+			return ferment.windows?.[windowKey] ?? ferment.themes ?? [];
+		}
+		return ferment.views?.[sourceView] ?? [];
+	}, [ferment, sourceView, windowKey]);
 
 	// 逐条研判：筛选 + 排序（提升信噪比）
 	const detailItems = useMemo(() => {
@@ -283,7 +358,7 @@ export function NewsVerdictWorkspace({
 				</div>
 			)}
 
-			{/* 下钻：题材样本明细 */}
+			{/* 下钻：题材样本 + 受益个股池 */}
 			{drillTheme && (
 				<div className="nv-drill">
 					<div className="nv-drill-head">
@@ -293,10 +368,55 @@ export function NewsVerdictWorkspace({
 						<span className="nv-drill-title">
 							{drillTheme.name} · {drillTheme.stage} · 热度 {drillTheme.heat}
 						</span>
+						{drillTheme.trend && (
+							<span className={`nv-trend nv-trend-${drillTheme.trend}`}>
+								{drillTheme.trend}
+							</span>
+						)}
 						<span className={`nv-drill-sentiment nv-sent-${drillTheme.sentiment}`}>
 							{drillTheme.sentiment}
 						</span>
 					</div>
+
+					{/* 受益个股池（复用行情侧题材成分，仅研究观察） */}
+					<div className="nv-stocks-block">
+						<span className="nv-section-label">
+							受益个股池
+							{themeStocks?.matched_name ? ` · 行情侧「${themeStocks.matched_name}」` : ''}
+						</span>
+						{stocksLoading && <div className="nv-muted">个股池加载中…</div>}
+						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length > 0 && (
+							<div className="nv-stocks">
+								{themeStocks.stocks.map((s) => (
+									<span className="nv-stock" key={s.symbol} title={s.symbol}>
+										<b>{s.name}</b>
+										<span className="nv-stock-code">{s.symbol}</span>
+										<span
+											className={
+												s.change_percent >= 0 ? 'nv-stock-up' : 'nv-stock-down'
+											}
+										>
+											{s.change_percent >= 0 ? '+' : ''}
+											{s.change_percent?.toFixed?.(2) ?? s.change_percent}%
+										</span>
+										{s.limit_up_streak ? (
+											<span className="nv-stock-streak">{s.limit_up_streak}板</span>
+										) : null}
+									</span>
+								))}
+							</div>
+						)}
+						{!stocksLoading && themeStocks && !themeStocks.matched && (
+							<div className="nv-muted">
+								未匹配到行情侧题材成分
+								{themeStocks.reason ? `（${themeStocks.reason}）` : ''}
+								——可视为「题材热但暂无明确对应成分」。
+							</div>
+						)}
+						{themeStocks?.note && <div className="nv-muted nv-note">{themeStocks.note}</div>}
+					</div>
+
+					{/* 该题材样本的逐条研判 */}
 					{drillItems.length === 0 ? (
 						<div className="nv-empty">该题材样本暂无逐条研判详情。</div>
 					) : (
@@ -310,31 +430,72 @@ export function NewsVerdictWorkspace({
 			)}
 
 			{/* 主视图：催化排行 */}
-			{!drillTheme && !loading && !error && tab === 'rank' && themes.length > 0 && (
-				<div className="nv-rank">
-					{themes.map((t) => (
-						<button
-							type="button"
-							className="nv-rank-row"
-							key={t.rank}
-							onClick={() => setDrillTheme(t)}
-							title="点击下钻到该题材样本资讯"
-						>
-							<span className="nv-rank-no">{t.rank}</span>
-							<span className="nv-rank-name">{t.name}</span>
-							<span className={`nv-rank-stage nv-stage-${t.stage}`}>{t.stage}</span>
-							<span className={`nv-rank-sentiment nv-sent-${t.sentiment}`}>
-								{t.sentiment}
+			{!drillTheme && !loading && !error && tab === 'rank' && (
+				<>
+					<div className="nv-controls">
+						<label className="nv-check">
+							数据源
+							<select value={sourceView} onChange={(e) => setSourceView(e.target.value)}>
+								{SOURCE_VIEWS.map((s) => (
+									<option key={s.key} value={s.key}>
+										{s.label}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className="nv-check">
+							时间窗
+							<select
+								value={windowKey}
+								disabled={sourceView !== 'merged'}
+								onChange={(e) => setWindowKey(e.target.value)}
+							>
+								{WINDOW_KEYS.map((w) => (
+									<option key={w} value={w}>
+										{w}h
+									</option>
+								))}
+							</select>
+						</label>
+						{ferment?.sources && (
+							<span className="nv-count">
+								源条数：实时 {ferment.sources['easy-stock'] ?? 0} · 历史{' '}
+								{ferment.sources.quant ?? 0} · 合并 {ferment.sources.merged ?? 0}
 							</span>
-							<span className="nv-rank-heat">
-								热度 <b>{t.heat}</b>
-							</span>
-							<span className="nv-rank-meta">
-								{t.count}条 · 增速{t.velocity} · {t.diversity}源
-							</span>
-						</button>
-					))}
-				</div>
+						)}
+					</div>
+					{rankThemes.length === 0 ? (
+						<div className="nv-empty">该视图/时间窗内题材样本不足。</div>
+					) : (
+						<div className="nv-rank">
+							{rankThemes.map((t) => (
+								<button
+									type="button"
+									className="nv-rank-row"
+									key={`${t.rank}-${t.name}`}
+									onClick={() => setDrillTheme(t)}
+									title="点击下钻：受益个股池 + 该题材样本资讯"
+								>
+									<span className="nv-rank-no">{t.rank}</span>
+									<span className="nv-rank-name">{t.name}</span>
+									{t.trend && (
+										<span className={`nv-trend nv-trend-${t.trend}`}>{t.trend}</span>
+									)}
+									<span className={`nv-rank-stage nv-stage-${t.stage}`}>{t.stage}</span>
+									<span className={`nv-rank-sentiment nv-sent-${t.sentiment}`}>
+										{t.sentiment}
+									</span>
+									<span className="nv-rank-heat">
+										热度 <b>{t.heat}</b>
+									</span>
+									<span className="nv-rank-meta">
+										{t.count}条 · 增速{t.velocity} · {t.diversity}源
+									</span>
+								</button>
+							))}
+						</div>
+					)}
+				</>
 			)}
 
 			{/* 逐条研判 */}

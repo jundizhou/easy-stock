@@ -7970,3 +7970,20 @@ a:focus-visible {
 .nv-check { font-size: 12px; color: var(--theme-text, #1f2733); display: inline-flex; align-items: center; gap: 6px; }
 .nv-check select { height: 26px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 6px; background: var(--surface, #fff); color: var(--theme-text, #1f2733); }
 .nv-count { font-size: 11px; color: var(--theme-muted, #52779e); }
+
+/* 跨窗 trend 徽章（加速/平稳/退潮） */
+.nv-trend { font-size: 10px; padding: 1px 6px; border-radius: 6px; line-height: 1.6; white-space: nowrap; }
+.nv-trend-加速 { color: var(--red, #c0392b); background: rgba(192,57,43,0.12); }
+.nv-trend-平稳 { color: #52779e; background: rgba(82,119,158,0.12); }
+.nv-trend-退潮 { color: #8a98a6; background: rgba(138,152,166,0.12); }
+
+/* 题材下钻：受益个股池 */
+.nv-stocks-block { margin: 10px 0 16px; }
+.nv-stocks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.nv-stock { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 8px; background: var(--surface, #fff); font-size: 12px; }
+.nv-stock b { color: var(--theme-text, #1f2733); }
+.nv-stock-code { font-size: 10px; color: var(--theme-muted, #52779e); }
+.nv-stock-up { color: var(--red, #c0392b); }
+.nv-stock-down { color: var(--green, #1e9e57); }
+.nv-stock-streak { font-size: 10px; padding: 0 5px; border-radius: 5px; color: #b8770a; background: rgba(184,119,10,0.14); }
+.nv-note { margin-top: 6px; font-size: 11px; }
