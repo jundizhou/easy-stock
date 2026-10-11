@@ -7986,4 +7986,11 @@ a:focus-visible {
 .nv-stock-up { color: var(--red, #c0392b); }
 .nv-stock-down { color: var(--green, #1e9e57); }
 .nv-stock-streak { font-size: 10px; padding: 0 5px; border-radius: 5px; color: #b8770a; background: rgba(184,119,10,0.14); }
+.nv-stock-role { font-size: 10px; padding: 0 5px; border-radius: 5px; color: var(--theme-blue, #175ea9); background: var(--theme-blue-soft, rgba(23,94,169,0.10)); }
+.nv-stock-nodata { font-size: 10px; color: var(--theme-muted, #52779e); }
+.nv-hints { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.nv-hints-label { font-size: 11px; color: var(--theme-muted, #52779e); }
+.nv-hint { padding: 2px 9px; border: 1px dashed var(--theme-line, #dce2e6); border-radius: 999px; background: transparent; color: var(--theme-blue, #175ea9); font-size: 11px; font-family: inherit; cursor: pointer; }
+.nv-hint:hover { border-style: solid; background: var(--theme-blue-soft, rgba(23,94,169,0.08)); }
+.nv-drill-probe { font-size: 11px; color: var(--theme-muted, #52779e); }
 .nv-note { margin-top: 6px; font-size: 11px; }

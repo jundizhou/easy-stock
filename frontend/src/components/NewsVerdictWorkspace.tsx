@@ -69,18 +69,23 @@ interface FermentResponse {
 interface ThemeStock {
 	symbol: string;
 	name: string;
-	price: number;
+	price?: number;
 	change_percent: number;
 	limit_up_streak?: number;
+	rank_role?: string;
+	rank_score?: number;
 	main_net_inflow?: number;
 }
 interface ThemeStocksResponse {
 	theme: string;
 	matched: boolean;
 	matched_name?: string;
+	match_score?: number;
 	change_percent?: number;
 	limit_up_count?: number;
+	leaders?: string[];
 	stocks: ThemeStock[];
+	hints?: string[];
 	reason?: string;
 	note?: string;
 }
@@ -200,6 +205,7 @@ export function NewsVerdictWorkspace({
 	const [sourceView, setSourceView] = useState<string>('merged');
 	const [windowKey, setWindowKey] = useState<string>('48');
 	const [drillTheme, setDrillTheme] = useState<ThemeStat | null>(null);
+	const [probeTheme, setProbeTheme] = useState('');
 	const [themeStocks, setThemeStocks] = useState<ThemeStocksResponse | null>(null);
 	const [stocksLoading, setStocksLoading] = useState(false);
 	const [hideUnknown, setHideUnknown] = useState(true);
@@ -255,8 +261,10 @@ export function NewsVerdictWorkspace({
 	}, [config, refreshKey, headers]);
 
 	// 下钻题材时拉取「受益个股池」（复用行情侧题材成分）
+	// probeTheme：未命中时用户点「行情侧题材参考」改查的题材名。
 	useEffect(() => {
-		if (!config || !drillTheme) {
+		const target = drillTheme ? probeTheme || drillTheme.name : '';
+		if (!config || !target) {
 			setThemeStocks(null);
 			return;
 		}
@@ -264,7 +272,7 @@ export function NewsVerdictWorkspace({
 		setStocksLoading(true);
 		setThemeStocks(null);
 		const url = new URL('/api/v1/news/theme/stocks', config.backendUrl);
-		url.searchParams.set('theme', drillTheme.name);
+		url.searchParams.set('theme', target);
 		url.searchParams.set('limit', '20');
 		fetch(url.toString(), { signal: controller.signal, headers })
 			.then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -272,7 +280,7 @@ export function NewsVerdictWorkspace({
 			.catch((e) => {
 				if (e?.name !== 'AbortError') {
 					setThemeStocks({
-						theme: drillTheme.name,
+						theme: target,
 						matched: false,
 						stocks: [],
 						reason: e?.message || String(e),
@@ -281,7 +289,16 @@ export function NewsVerdictWorkspace({
 			})
 			.finally(() => setStocksLoading(false));
 		return () => controller.abort();
-	}, [config, drillTheme, headers]);
+	}, [config, drillTheme, probeTheme, headers]);
+
+	const openDrill = (t: ThemeStat) => {
+		setProbeTheme('');
+		setDrillTheme(t);
+	};
+	const closeDrill = () => {
+		setProbeTheme('');
+		setDrillTheme(null);
+	};
 
 	// 当前视图的排行（源切换 + 时间窗切换）
 	const rankThemes = useMemo<ThemeStat[]>(() => {
@@ -362,12 +379,15 @@ export function NewsVerdictWorkspace({
 			{drillTheme && (
 				<div className="nv-drill">
 					<div className="nv-drill-head">
-						<button type="button" className="nv-back" onClick={() => setDrillTheme(null)}>
+						<button type="button" className="nv-back" onClick={closeDrill}>
 							← 返回排行
 						</button>
 						<span className="nv-drill-title">
 							{drillTheme.name} · {drillTheme.stage} · 热度 {drillTheme.heat}
 						</span>
+						{probeTheme && probeTheme !== drillTheme.name && (
+							<span className="nv-drill-probe">个股池改查行情侧「{probeTheme}」</span>
+						)}
 						{drillTheme.trend && (
 							<span className={`nv-trend nv-trend-${drillTheme.trend}`}>
 								{drillTheme.trend}
@@ -387,32 +407,67 @@ export function NewsVerdictWorkspace({
 						{stocksLoading && <div className="nv-muted">个股池加载中…</div>}
 						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length > 0 && (
 							<div className="nv-stocks">
-								{themeStocks.stocks.map((s) => (
-									<span className="nv-stock" key={s.symbol} title={s.symbol}>
-										<b>{s.name}</b>
-										<span className="nv-stock-code">{s.symbol}</span>
-										<span
-											className={
-												s.change_percent >= 0 ? 'nv-stock-up' : 'nv-stock-down'
-											}
-										>
-											{s.change_percent >= 0 ? '+' : ''}
-											{s.change_percent?.toFixed?.(2) ?? s.change_percent}%
+								{themeStocks.stocks.map((s) => {
+									const hasQuote = (s.price ?? 0) > 0 || (s.change_percent ?? 0) !== 0;
+									return (
+										<span className="nv-stock" key={s.symbol} title={s.symbol}>
+											<b>{s.name}</b>
+											<span className="nv-stock-code">{s.symbol}</span>
+											{s.rank_role ? (
+												<span className="nv-stock-role">{s.rank_role}</span>
+											) : null}
+											{hasQuote ? (
+												<span
+													className={
+														s.change_percent >= 0 ? 'nv-stock-up' : 'nv-stock-down'
+													}
+												>
+													{s.change_percent >= 0 ? '+' : ''}
+													{Number(s.change_percent ?? 0).toFixed(2)}%
+												</span>
+											) : (
+												<span className="nv-stock-nodata">行情缺</span>
+											)}
+											{s.limit_up_streak ? (
+												<span className="nv-stock-streak">{s.limit_up_streak}板</span>
+											) : null}
 										</span>
-										{s.limit_up_streak ? (
-											<span className="nv-stock-streak">{s.limit_up_streak}板</span>
-										) : null}
-									</span>
-								))}
+									);
+								})}
+							</div>
+						)}
+						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length === 0 && (
+							<div className="nv-muted">
+								{themeStocks.reason ||
+									`行情侧题材「${themeStocks.matched_name ?? themeStocks.theme}」当前无龙头/涨停池个股数据。`}
 							</div>
 						)}
 						{!stocksLoading && themeStocks && !themeStocks.matched && (
 							<div className="nv-muted">
-								未匹配到行情侧题材成分
+								未匹配到行情侧题材
 								{themeStocks.reason ? `（${themeStocks.reason}）` : ''}
-								——可视为「题材热但暂无明确对应成分」。
+								——该资讯题材属宏观/暂无对应板块时属正常。
 							</div>
 						)}
+						{!stocksLoading &&
+							themeStocks &&
+							!themeStocks.matched &&
+							(themeStocks.hints?.length ?? 0) > 0 && (
+								<div className="nv-hints">
+									<span className="nv-hints-label">行情侧题材参考</span>
+									{themeStocks.hints?.map((h) => (
+										<button
+											type="button"
+											className="nv-hint"
+											key={h}
+											onClick={() => setProbeTheme(h)}
+											title="按该行情侧题材重新查询个股池"
+										>
+											{h}
+										</button>
+									))}
+								</div>
+							)}
 						{themeStocks?.note && <div className="nv-muted nv-note">{themeStocks.note}</div>}
 					</div>
 
@@ -473,7 +528,7 @@ export function NewsVerdictWorkspace({
 									type="button"
 									className="nv-rank-row"
 									key={`${t.rank}-${t.name}`}
-									onClick={() => setDrillTheme(t)}
+									onClick={() => openDrill(t)}
 									title="点击下钻：受益个股池 + 该题材样本资讯"
 								>
 									<span className="nv-rank-no">{t.rank}</span>
