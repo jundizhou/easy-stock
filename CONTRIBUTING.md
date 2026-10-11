@@ -1,5 +1,7 @@
 # 参与贡献
 
+> ⚠️ **版本治理与并行开发铁律（唯一真相分支 `integrate/v1.6.0`、每次改动必记录、动手前必须先识别）见 [VERSION-GOVERNANCE.md](./VERSION-GOVERNANCE.md)。参与任何改动前请先通读。**
+
 ## 开发版本规则
 
 默认所有需求都在开源版开发。开源版远程是 `upstream`（`jundizhou/easy-stock`），默认提交到 `codex/<topic>` 分支并推送到该远程。
