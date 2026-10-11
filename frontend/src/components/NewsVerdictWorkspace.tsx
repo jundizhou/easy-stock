@@ -73,7 +73,10 @@ export function NewsVerdictWorkspace({
 		const controller = new AbortController();
 		setLoading(true);
 		setError('');
-		fetch('/api/v1/news/verdict?days=2&limit=100', { signal: controller.signal })
+		fetch(new URL('/api/v1/news/verdict?days=2&limit=100', config.backendUrl).toString(), {
+			signal: controller.signal,
+			headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
+		})
 			.then((r) => {
 				if (!r.ok) {
 					return r
