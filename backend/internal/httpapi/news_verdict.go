@@ -56,6 +56,9 @@ func (s *Server) newsVerdict(w http.ResponseWriter, r *http.Request) {
 
 	cmd := exec.CommandContext(ctx, py, script, "--json", "--days", strconv.Itoa(days))
 	cmd.Dir = dir
+	// 强制子进程 Python 以 UTF-8 输出：Windows 下管道 stdout 默认走系统
+	// locale（cp936），按 UTF-8 解码会全盘乱码（2026-10-11 实测）。
+	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1")
 	out, err := cmd.Output()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "研判引擎执行失败："+err.Error())
