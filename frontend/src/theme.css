@@ -23,6 +23,8 @@
 	--theme-subtle: var(--subtle);
 	--theme-on-emphasis: #ffffff;
 	--theme-surface: var(--surface);
+	--theme-surface-2: var(--surface-2);
+	--theme-bg: var(--surface-2);
 	--theme-surface-soft: var(--surface-2);
 	--theme-surface-muted: var(--surface-3);
 	--theme-surface-strong: #30363c;
