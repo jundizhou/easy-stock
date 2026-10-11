@@ -22,7 +22,8 @@ export type WorkspaceMode =
 	| 'core2'
 	| 'inflection'
 	| 'resonance'
-	| 'execution';
+	| 'execution'
+	| 'news-verdict';
 
 /** 全部工作区模式。每新增一个板块必须同时登记 hash 映射与渲染面板。 */
 export const WORKSPACE_MODES: readonly WorkspaceMode[] = [
@@ -41,6 +42,7 @@ export const WORKSPACE_MODES: readonly WorkspaceMode[] = [
 	'inflection',
 	'resonance',
 	'execution',
+	'news-verdict',
 ];
 
 /** 无有效 hash（或无法识别）时的落点。 */
@@ -63,6 +65,7 @@ export const WORKSPACE_HASHES: Record<WorkspaceMode, string> = {
 	inflection: '#inflection',
 	resonance: '#resonance',
 	execution: '#execution',
+	'news-verdict': '#news-verdict',
 };
 
 /**

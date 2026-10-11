@@ -26,6 +26,7 @@ const EXPECTED_MODES: readonly WorkspaceMode[] = [
 	'inflection',
 	'resonance',
 	'execution',
+	'news-verdict',
 ];
 
 describe('工作区注册表', () => {

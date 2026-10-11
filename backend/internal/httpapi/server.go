@@ -637,6 +637,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/quotes/kline", s.kline)
 	s.mux.HandleFunc("GET /api/v1/quotes/kline/batch", s.klineBatch)
 	s.mux.HandleFunc("GET /api/v1/market/news", s.news)
+	s.mux.HandleFunc("GET /api/v1/news/verdict", s.newsVerdict)
 	s.mux.HandleFunc("GET /api/v1/market/indexes", s.marketIndexesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/index-series", s.marketIndexSeriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/industries", s.marketIndustriesHandler)

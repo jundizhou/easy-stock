@@ -81,6 +81,7 @@ import { QuantTerminalWorkspace } from './components/QuantTerminalWorkspace';
 import { QuantSignalWorkspace } from './components/QuantSignalWorkspace';
 import { ShannonWorkspace } from './components/ShannonWorkspace';
 import { BoardExplorerWorkspace, type BoardFocus } from './components/BoardExplorerWorkspace';
+import { NewsVerdictWorkspace } from './components/NewsVerdictWorkspace';
 import { logRuntimeEvent } from './lib/runtime-log';
 import { useTheme } from './lib/theme';
 import { useLimitUpWorkspace } from './lib/use-limit-up-workspace';
@@ -150,6 +151,7 @@ export function App() {
 	const [stockAIInitialAnalysis, setStockAIInitialAnalysis] = useState<StockAIAnalysis | null>(null);
 	const [stockAIInitialSymbol, setStockAIInitialSymbol] = useState('');
 	const [aiRefreshKey, setAIRefreshKey] = useState(0);
+	const [newsVerdictRefreshKey, setNewsVerdictRefreshKey] = useState(0);
 	const [marketRefreshKey, setMarketRefreshKey] = useState(0);
 	const [aiPrefill, setAIPrefill] = useState('');
 	const [aiAnalysisID, setAIAnalysisID] = useState<string | undefined>();
@@ -352,6 +354,10 @@ export function App() {
 			setExecutionRefreshKey((current) => current + 1);
 			return;
 		}
+		if (mode === 'news-verdict') {
+			setNewsVerdictRefreshKey((current) => current + 1);
+			return;
+		}
 		void overview.refresh();
 		setThemeRefreshKey(key => key + 1);
 		setBoardsRefreshKey(key => key + 1);
@@ -479,6 +485,7 @@ export function App() {
 					<button type="button" className={workspaceMode === 'stock-ai' ? 'active' : ''} onClick={() => switchWorkspace('stock-ai')} title="个股分析"><BrainCircuit size={18} /><span>个股分析</span></button>
 					<button type="button" className={workspaceMode === 'limit-up' ? 'active' : ''} onClick={() => switchWorkspace('limit-up')} title="短线连板"><Flame size={18} /><span>短线连板</span></button>
 					<button type="button" className={workspaceMode === 'themes' ? 'active' : ''} onClick={() => switchWorkspace('themes')} title="趋势题材"><LayoutDashboard size={18} /><span>趋势题材</span></button>
+					<button type="button" className={workspaceMode === 'news-verdict' ? 'active' : ''} onClick={() => switchWorkspace('news-verdict')} title="资讯研判（利好/利空五维度）"><Newspaper size={18} /><span>资讯研判</span></button>
 					<button type="button" className={workspaceMode === 'market' ? 'active' : ''} onClick={() => switchWorkspace('market')} title="行情总览"><BarChart3 size={18} /><span>行情总览</span></button>
 					<button type="button" className={workspaceMode === 'quant' ? 'active' : ''} onClick={() => switchWorkspace('quant')} title="量化终端"><Server size={18} /><span>量化终端</span></button>
 					<button type="button" className={workspaceMode === 'signals' ? 'active' : ''} onClick={() => switchWorkspace('signals')} title="策略信号"><Gauge size={18} /><span>策略信号</span></button>
@@ -542,6 +549,9 @@ export function App() {
 			<div className="themes-tab-bar" role="tablist" aria-label="趋势题材 / 板块图谱">
 				<button type="button" role="tab" aria-selected={themesTab === 'themes'} className={themesTab === 'themes' ? 'active' : ''} onClick={() => setThemesTab('themes')}>趋势题材</button>
 				<button type="button" role="tab" aria-selected={themesTab === 'boards'} className={themesTab === 'boards' ? 'active' : ''} onClick={() => setThemesTab('boards')}>板块图谱</button>
+			</div>
+			<div className="nv-jump-row">
+				<button type="button" className="nv-jump" onClick={() => switchWorkspace('news-verdict')}>资讯研判 → 利好/利空五维度</button>
 			</div>
 			{themesTab === 'themes' ? (
 			<>
@@ -800,10 +810,11 @@ export function App() {
 			{visitedModes.has('market') && <div className="workspace-pane" hidden={workspaceMode !== 'market'}><MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /></div>}
 			{visitedModes.has('execution') && <div className="workspace-pane" hidden={workspaceMode !== 'execution'}><ExecutionWorkspace config={config} refreshKey={executionRefreshKey} /></div>}
 			{visitedModes.has('ai') && <div className="workspace-pane" hidden={workspaceMode !== 'ai'}><AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} /></div>}
+			{visitedModes.has('news-verdict') && <div className="workspace-pane" hidden={workspaceMode !== 'news-verdict'}><NewsVerdictWorkspace config={config} refreshKey={newsVerdictRefreshKey} /></div>}
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>
-					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'mastery' ? '来源：trading-mastery/游资心法 · 每日缓存 · 同步至 Agent Skill 与本地记忆索引' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '行情与K线：东方财富/新浪 · 涨停与题材：开盘啦/东方财富 · AI只基于结构化证据总结' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : workspaceMode === 'token-usage' ? '真实用量来自模型返回的 usage · 本地估算单独记录，不并入真实总量' : workspaceMode === 'quant' ? 'iframe 直挂 Quant Terminal(8766) · 探活经 Go 网关 /api/v1/quant/*、/api/v1/stockdb/*' : workspaceMode === 'core2' ? '信号：paper_forward periods/period_NN.json（write-once）· 参数锁 state/params_lock.json · 经 Go 网关 /api/v1/strategy/core2/paper 只读' : workspaceMode === 'inflection' ? '快照：当日与前一日涨停梯队 + 盘中高标指标 · 经 /api/v1/strategy/inflections/auto 装配后评估' : workspaceMode === 'resonance' ? '资讯：easy-stock JSONL 归档 + 量化 SQLite · 行情：涨停梯队快照 · 经 /api/v1/strategy/resonance/board 只读' : workspaceMode === 'execution' ? '目标权重：Go 网关 /api/v1/execution/target（读 paper_forward 静态文件）· sim 模拟成交不触达券商 · live 经官方 QMT/Ptrade' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
+					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'mastery' ? '来源：trading-mastery/游资心法 · 每日缓存 · 同步至 Agent Skill 与本地记忆索引' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '行情与K线：东方财富/新浪 · 涨停与题材：开盘啦/东方财富 · AI只基于结构化证据总结' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : workspaceMode === 'token-usage' ? '真实用量来自模型返回的 usage · 本地估算单独记录，不并入真实总量' : workspaceMode === 'quant' ? 'iframe 直挂 Quant Terminal(8766) · 探活经 Go 网关 /api/v1/quant/*、/api/v1/stockdb/*' : workspaceMode === 'core2' ? '信号：paper_forward periods/period_NN.json（write-once）· 参数锁 state/params_lock.json · 经 Go 网关 /api/v1/strategy/core2/paper 只读' : workspaceMode === 'inflection' ? '快照：当日与前一日涨停梯队 + 盘中高标指标 · 经 /api/v1/strategy/inflections/auto 装配后评估' : workspaceMode === 'resonance' ? '资讯：easy-stock JSONL 归档 + 量化 SQLite · 行情：涨停梯队快照 · 经 /api/v1/strategy/resonance/board 只读' : workspaceMode === 'execution' ? '目标权重：Go 网关 /api/v1/execution/target（读 paper_forward 静态文件）· sim 模拟成交不触达券商 · live 经官方 QMT/Ptrade' : workspaceMode === 'news-verdict' ? '研判引擎：news_ferment/verdict.py（仅本机研究机可配置）· 五维度仅供研究观察，不生成交易指令' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
 			</footer>
 			</div>
 			<SettingsDrawer config={config} open={settingsOpen} initialSection={settingsInitialSection} onClose={() => { setSettingsOpen(false); setSettingsInitialSection(undefined); }} onSaved={() => { setSettingsSavedNotice((current) => current + 1); setAIRefreshKey((current) => current + 1); setStockAIRefreshKey((current) => current + 1); }} />
