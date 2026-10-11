@@ -16,8 +16,8 @@ import (
 
 	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/appsettings"
-	"easy-stock/backend/internal/execution"
 	"easy-stock/backend/internal/archive"
+	"easy-stock/backend/internal/execution"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
@@ -54,6 +54,11 @@ type Server struct {
 	stockNewsSearch          StockNewsSearchProvider
 	sectorMap                SectorMapProvider
 	themeOverview            ThemeOverviewProvider
+	themeStockCatalog        ThemeStockCatalogProvider
+	themeCatalogMu           sync.Mutex
+	themeCatalogAt           time.Time
+	themeCatalogNames        []string
+	themeCatalogEntries      []foundation.StockCatalogEntry
 	themeIndex               *themeindex.Service
 	limitUpProvider          LimitUpProvider
 	marketPools              MarketPoolProvider
@@ -233,6 +238,10 @@ func NewServer(config any) *Server {
 			cfg.ThemeOverview = defaultThemeOverview
 		}
 	}
+	if cfg.ThemeStockCatalog == nil {
+		// 资讯题材 → 成分股的宽口径兜底源（复用全市场股票目录的行业/概念归属）。
+		cfg.ThemeStockCatalog = eastMoneyClient
+	}
 	if cfg.Inflection == nil {
 		cfg.Inflection = inflection.NewEngine(inflection.DefaultConfig())
 	}
@@ -375,6 +384,7 @@ func NewServer(config any) *Server {
 		stockNewsSearch:          cfg.StockNews,
 		sectorMap:                cfg.SectorMap,
 		themeOverview:            cfg.ThemeOverview,
+		themeStockCatalog:        cfg.ThemeStockCatalog,
 		limitUpProvider:          cfg.LimitUp,
 		marketPools:              cfg.MarketPools,
 		stockConcepts:            cfg.StockConcept,

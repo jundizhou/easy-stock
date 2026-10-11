@@ -51,6 +51,13 @@ type ThemeRadarFallback interface {
 	ThemeOverviewProvider
 }
 
+// ThemeStockCatalogProvider 提供全市场股票目录（含所属行业/概念 + 行情），
+// 用于把资讯题材按名称映射到成分股（按行业/概念口径反查）。
+// 相比按板块代码拉成分股，这条路复用已缓存的目录快照，且不依赖主行情节点。
+type ThemeStockCatalogProvider interface {
+	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
+}
+
 type LimitUpProvider interface {
 	RecentLimitUps(ctx context.Context, lookbackDays int) ([]foundation.LimitUpEvent, error)
 }
@@ -138,6 +145,7 @@ type Config struct {
 	ThemeOverview            ThemeOverviewProvider
 	ThemeIndex               *themeindex.Service
 	ThemeRadarFallback       ThemeRadarFallback
+	ThemeStockCatalog        ThemeStockCatalogProvider
 	LimitUp                  LimitUpProvider
 	MarketPools              MarketPoolProvider
 	StockConcept             StockConceptProvider

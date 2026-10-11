@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -211,6 +212,38 @@ func (s *Server) newsThemeStocks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	match, ok, score := bestThemeMatch(overviews, theme)
+	var stocks []foundation.BoardStock
+	if ok {
+		stocks = append([]foundation.BoardStock(nil), match.LeaderStocks...)
+		sort.SliceStable(stocks, func(i, j int) bool {
+			if stocks[i].LimitUpStreak != stocks[j].LimitUpStreak {
+				return stocks[i].LimitUpStreak > stocks[j].LimitUpStreak
+			}
+			return stocks[i].ChangePercent > stocks[j].ChangePercent
+		})
+		if len(stocks) > limit {
+			stocks = stocks[:limit]
+		}
+	}
+
+	// L2：行情热点口径很窄（当日涨停题材，通常仅数十个），而资讯题材多为行业/概念，
+	// 覆盖不到。未命中、命中但无龙头、或龙头缺行情（面板会显示「行情缺」）时，
+	// 退回全市场股票目录，按所属行业/概念反查成分股。
+	if !hasQuotedStock(stocks) {
+		if boardStocks, boardName, ok2 := s.matchThemeStocksFromCatalog(ctx, theme, limit); ok2 && len(boardStocks) > 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"theme":        theme,
+				"matched":      true,
+				"matched_name": boardName,
+				"match_source": "eastmoney-catalog",
+				"stocks":       boardStocks,
+				"meta":         meta,
+				"note":         "代表个股来自东方财富「" + boardName + "」行业/概念成分（按涨跌幅排序，共取前 " + strconv.Itoa(len(boardStocks)) + " 只），仅供研究观察，非题材全集，不构成交易建议",
+			})
+			return
+		}
+	}
+
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"theme": theme, "matched": false, "stocks": []any{},
@@ -221,21 +254,12 @@ func (s *Server) newsThemeStocks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stocks := append([]foundation.BoardStock(nil), match.LeaderStocks...)
-	sort.SliceStable(stocks, func(i, j int) bool {
-		if stocks[i].LimitUpStreak != stocks[j].LimitUpStreak {
-			return stocks[i].LimitUpStreak > stocks[j].LimitUpStreak
-		}
-		return stocks[i].ChangePercent > stocks[j].ChangePercent
-	})
-	if len(stocks) > limit {
-		stocks = stocks[:limit]
-	}
 	resp := map[string]any{
 		"theme":          theme,
 		"matched":        true,
 		"matched_id":     match.Theme,
 		"matched_name":   match.Name,
+		"match_source":   "theme-radar",
 		"match_score":    score,
 		"change_percent": match.ChangePercent,
 		"limit_up_count": match.LimitUpCount,
@@ -243,7 +267,7 @@ func (s *Server) newsThemeStocks(w http.ResponseWriter, r *http.Request) {
 		"leaders":        match.Leaders,
 		"stocks":         stocks,
 		"meta":           meta,
-		"note":           "代表个股来自行情侧题材（龙头/涨停池），仅供研究观察，非成分全集，不构成交易建议",
+		"note":           "代表个股来自行情侧热门题材（龙头/涨停池），仅供研究观察，非成分全集，不构成交易建议",
 	}
 	if len(stocks) == 0 {
 		resp["reason"] = "已匹配到行情题材「" + match.Name + "」，但该题材当前没有龙头/涨停池个股数据（行情快照可能不含该题材或已过期）"
@@ -283,10 +307,10 @@ var newsThemeSynonyms = map[string][]string{
 	"电力公用":   {"电力", "电力设备", "公用事业", "电网设备"},
 	"电力":     {"电力", "电力设备", "电网设备", "公用事业"},
 	"电网":     {"电网设备", "电力设备", "特高压"},
-	"有色金属":   {"有色金属", "贵金属", "小金属", "工业金属", "能源金属"},
+	"有色金属":   {"有色金属", "贵金属", "稀有金属", "基本金属", "工业金属", "小金属", "能源金属"},
 	"黄金":     {"贵金属", "有色金属"},
 	"稀土":     {"小金属", "有色金属", "稀土永磁"},
-	"化工":     {"化工", "基础化工", "氟化工", "磷化工", "煤化工", "化学制品"},
+	"化工":     {"化学制品", "基础化工", "化学原料", "氟化工", "磷化工", "煤化工"},
 	"原油市场动态": {"石油石化", "油气开采", "炼化及贸易"},
 	"石油":     {"石油石化", "油气开采"},
 	"煤炭":     {"煤炭", "焦炭", "焦煤"},
@@ -295,9 +319,9 @@ var newsThemeSynonyms = map[string][]string{
 	"地产":     {"房地产开发", "房地产", "房地产服务"},
 	"交通运输":   {"交通运输", "航运港口", "物流", "航空运输", "铁路公路"},
 	"航运期货":   {"航运港口", "港口", "物流"},
-	"传媒游戏":   {"文化传媒", "游戏", "影视院线", "出版", "数字媒体", "广告营销"},
-	"传媒":     {"文化传媒", "数字媒体", "广告营销", "出版", "影视院线"},
-	"游戏":     {"游戏", "文化传媒", "数字媒体"},
+	"传媒游戏":   {"文化传媒", "影视动漫", "平面媒体", "广播电视", "游戏", "影视院线", "出版", "数字媒体", "广告营销", "营销服务"},
+	"传媒":     {"文化传媒", "平面媒体", "广播电视", "影视动漫", "数字媒体", "广告营销", "营销服务", "出版"},
+	"游戏":     {"游戏", "影视动漫", "文化传媒", "数字媒体"},
 	"金融":     {"证券", "银行", "保险", "多元金融"},
 	"券商":     {"证券", "多元金融"},
 	"银行":     {"银行"},
@@ -466,4 +490,235 @@ func themeMatchHints(overviews []foundation.ThemeOverview, theme string, n int) 
 		out = append(out, name)
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// 兜底：资讯题材名 → 全市场股票目录的「行业/概念」归属 → 成分股
+//
+// 行情侧题材雷达（themeOverview）只覆盖当日热门题材（通常仅数十个），而资讯侧
+// 题材多是行业/概念名（军工/通信/半导体/电力公用/地产建筑…），基本覆盖不到。
+// 2026-10-11 实测：App 里题材雷达仅 17 个题材，导致下钻「每个都未匹配」。
+//
+// 这里复用全市场股票目录（eastmoney:stock-selection）——每条带所属行业(Industry)
+// 与概念(Concepts) —— 把资讯题材名匹配到行业/概念名，再按归属反查出成分股。
+// 相比「先取板块目录、再拉板块成分」的路子，这条路只用一份已缓存的快照，且不依赖
+// 主行情节点（push2），在本机 push2 被阻断的环境下依然可用。
+// ---------------------------------------------------------------------------
+
+// boardMatchMinScore 名称匹配阈值：精确命中主题词 1000、精确命中同义词键 800、
+// 同义词包含（重叠≥0.6）560~599；低于 560 视为未命中（避免宏观词硬塞板块）。
+const boardMatchMinScore = 560
+
+// themeCatalogTTL 股票目录快照缓存时长（提供方自身另有 3 分钟缓存）。
+const themeCatalogTTL = 2 * time.Minute
+
+// normalizeBoardName 归一化板块名，并去掉「行业/板块/指数/Ⅱ/Ⅲ」等口径后缀。
+func normalizeBoardName(s string) string {
+	n := normalizeThemeName(s)
+	for _, suffix := range []string{"行业", "板块", "指数", "Ⅱ", "Ⅲ", "Ⅰ", "ⅱ", "ⅲ", "ⅰ"} {
+		n = strings.TrimSuffix(n, strings.ToLower(suffix))
+	}
+	return n
+}
+
+// boardMatchKeys 板块匹配用的键：原题材名 + **仅当同义词键与题材名完全相等时**
+// 展开的同义词值。比 themeMatchKeys 的「双向包含」更严——避免「消费」经
+// 「消费电子」这个键被误展开成「消费电子」的同义词。
+func boardMatchKeys(theme string) []string {
+	keys := []string{theme}
+	t := normalizeThemeName(theme)
+	if t == "" {
+		return keys
+	}
+	for k, values := range newsThemeSynonyms {
+		if normalizeThemeName(k) == t {
+			keys = append(keys, values...)
+		}
+	}
+	return keys
+}
+
+// scoreBoardName 给单个板块/行业/概念名相对资讯题材打分，并返回命中键的下标
+// （0 为题材原词，其后按 newsThemeSynonyms 中的书写顺序，越靠前越优先）。
+func scoreBoardName(name, theme string, keys []string) (int, int) {
+	n := normalizeBoardName(name)
+	if n == "" {
+		return 0, -1
+	}
+	t := normalizeThemeName(theme)
+	best, bestKey := 0, -1
+	if t != "" && n == t {
+		best, bestKey = 1000, 0
+	}
+	for idx, key := range keys {
+		k := normalizeThemeName(key)
+		if k == "" {
+			continue
+		}
+		if n == k {
+			if 800 > best {
+				best, bestKey = 800, idx
+			}
+			continue
+		}
+		// 包含匹配只对长度≥2 的同义词键开放，且要求较高重叠，避免
+		// 「消费 → 消费电子」这类语义漂移的误配（runeOverlapRatio 只比长度，
+		// 必须先做包含判定，否则等长异名词会被误判为完全重叠）。
+		if len([]rune(k)) < 2 {
+			continue
+		}
+		if !strings.Contains(n, k) && !strings.Contains(k, n) {
+			continue
+		}
+		if r := runeOverlapRatio(n, k); r >= 0.6 {
+			if s := 500 + int(100*r); s > best {
+				best, bestKey = s, idx
+			}
+		}
+	}
+	return best, bestKey
+}
+
+// bestBoardMatch 在候选名称集合中取最优匹配：先比得分，再比命中键的优先级
+// （同义词书写顺序），最后比名称长度。
+func bestBoardMatch(names []string, theme string) (string, bool, int) {
+	if normalizeThemeName(theme) == "" {
+		return "", false, 0
+	}
+	keys := boardMatchKeys(theme)
+	best := ""
+	bestScore, bestKey := 0, 1<<30
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		s, keyIdx := scoreBoardName(name, theme, keys)
+		if s <= 0 {
+			continue
+		}
+		better := best == "" || s > bestScore ||
+			(s == bestScore && keyIdx < bestKey) ||
+			(s == bestScore && keyIdx == bestKey && len([]rune(name)) < len([]rune(best)))
+		if better {
+			best, bestScore, bestKey = name, s, keyIdx
+		}
+	}
+	if best == "" || bestScore < boardMatchMinScore {
+		return "", false, bestScore
+	}
+	return best, true, bestScore
+}
+
+// themeCatalogCached 带 TTL 的全市场股票目录快照（含行业/概念名集合）；
+// 刷新失败时退回旧快照。
+func (s *Server) themeCatalogCached(ctx context.Context) ([]string, []foundation.StockCatalogEntry, error) {
+	if s.themeStockCatalog == nil {
+		return nil, nil, errors.New("theme stock catalog provider unavailable")
+	}
+	s.themeCatalogMu.Lock()
+	names, entries, cachedAt := s.themeCatalogNames, s.themeCatalogEntries, s.themeCatalogAt
+	s.themeCatalogMu.Unlock()
+	if len(entries) > 0 && time.Since(cachedAt) < themeCatalogTTL {
+		return names, entries, nil
+	}
+	items, err := s.themeStockCatalog.StockCatalog(ctx)
+	if err != nil {
+		if len(entries) > 0 {
+			return names, entries, nil
+		}
+		return nil, nil, err
+	}
+	names = catalogBoardNames(items)
+	s.themeCatalogMu.Lock()
+	s.themeCatalogNames, s.themeCatalogEntries, s.themeCatalogAt = names, items, time.Now()
+	s.themeCatalogMu.Unlock()
+	return names, items, nil
+}
+
+// catalogBoardNames 汇总目录里出现过的行业名与概念名（去重，保持稳定顺序）。
+func catalogBoardNames(entries []foundation.StockCatalogEntry) []string {
+	seen := map[string]struct{}{}
+	names := make([]string, 0, 512)
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for _, e := range entries {
+		add(e.Industry)
+	}
+	for _, e := range entries {
+		for _, c := range e.Concepts {
+			add(c)
+		}
+	}
+	return names
+}
+
+// catalogConstituents 取归属指定行业/概念的成分股（按涨跌幅降序，截断到 limit）。
+func catalogConstituents(entries []foundation.StockCatalogEntry, boardName string, limit int) []foundation.BoardStock {
+	target := normalizeBoardName(boardName)
+	if target == "" {
+		return nil
+	}
+	stocks := make([]foundation.BoardStock, 0, 32)
+	for _, e := range entries {
+		if normalizeBoardName(e.Industry) == target {
+			stocks = append(stocks, e.BoardStock)
+			continue
+		}
+		for _, c := range e.Concepts {
+			if normalizeBoardName(c) == target {
+				stocks = append(stocks, e.BoardStock)
+				break
+			}
+		}
+	}
+	sort.SliceStable(stocks, func(i, j int) bool {
+		if stocks[i].ChangePercent != stocks[j].ChangePercent {
+			return stocks[i].ChangePercent > stocks[j].ChangePercent
+		}
+		return stocks[i].Amount > stocks[j].Amount
+	})
+	if limit > 0 && len(stocks) > limit {
+		stocks = stocks[:limit]
+	}
+	return stocks
+}
+
+// hasQuotedStock 判断带来的成分股是否带真实行情（否则前端会显示「行情缺」）。
+func hasQuotedStock(stocks []foundation.BoardStock) bool {
+	for _, stock := range stocks {
+		if stock.Price > 0 || stock.ChangePercent != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// matchThemeStocksFromCatalog 兜底：把资讯题材名匹配到目录里的行业/概念并返回成分股。
+func (s *Server) matchThemeStocksFromCatalog(ctx context.Context, theme string, limit int) ([]foundation.BoardStock, string, bool) {
+	if s.themeStockCatalog == nil || normalizeThemeName(theme) == "" {
+		return nil, "", false
+	}
+	names, entries, err := s.themeCatalogCached(ctx)
+	if err != nil || len(names) == 0 {
+		return nil, "", false
+	}
+	boardName, ok, _ := bestBoardMatch(names, theme)
+	if !ok {
+		return nil, "", false
+	}
+	stocks := catalogConstituents(entries, boardName, limit)
+	if len(stocks) == 0 {
+		return nil, boardName, false
+	}
+	return stocks, boardName, true
 }

@@ -80,6 +80,7 @@ interface ThemeStocksResponse {
 	theme: string;
 	matched: boolean;
 	matched_name?: string;
+	match_source?: string;
 	match_score?: number;
 	change_percent?: number;
 	limit_up_count?: number;
@@ -398,11 +399,17 @@ export function NewsVerdictWorkspace({
 						</span>
 					</div>
 
-					{/* 受益个股池（复用行情侧题材成分，仅研究观察） */}
+					{/* 受益个股池（行情侧热门题材龙头池 / 东财板块成分，仅研究观察） */}
 					<div className="nv-stocks-block">
 						<span className="nv-section-label">
 							受益个股池
-							{themeStocks?.matched_name ? ` · 行情侧「${themeStocks.matched_name}」` : ''}
+							{themeStocks?.matched_name
+								? ` · ${
+										themeStocks.match_source === 'eastmoney-catalog'
+											? '东财行业/概念'
+											: '行情侧题材'
+									}「${themeStocks.matched_name}」`
+								: ''}
 						</span>
 						{stocksLoading && <div className="nv-muted">个股池加载中…</div>}
 						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length > 0 && (
@@ -439,7 +446,7 @@ export function NewsVerdictWorkspace({
 						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length === 0 && (
 							<div className="nv-muted">
 								{themeStocks.reason ||
-									`行情侧题材「${themeStocks.matched_name ?? themeStocks.theme}」当前无龙头/涨停池个股数据。`}
+									`「${themeStocks.matched_name ?? themeStocks.theme}」当前无成分股数据。`}
 							</div>
 						)}
 						{!stocksLoading && themeStocks && !themeStocks.matched && (
