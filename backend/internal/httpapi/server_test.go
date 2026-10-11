@@ -510,6 +510,9 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 		DuanxianxiaBaseURL: remote.URL,
 		ThemeRadarFallback: fakeServerRadarFallback{},
 	})
+	// 关闭 server 以释放 theme-radar.db 句柄，否则 t.TempDir() 清理会因
+	// 文件被占用而失败（Windows 上表现为 unlinkat ... being used by another process）。
+	defer func() { _ = server.Close() }()
 	overviewRequest := httptest.NewRequest(http.MethodGet, "/api/v1/themes/overview", nil)
 	overviewRecorder := httptest.NewRecorder()
 	server.ServeHTTP(overviewRecorder, overviewRequest)

@@ -175,7 +175,13 @@ export type ResonanceBoard = {
 	ok?: boolean;
 	board_file?: string;
 	updated_at?: string;
-	pit_audit?: { passed?: boolean; note?: string };
+	pit_audit?: {
+		passed?: boolean;
+		checked_at?: string;
+		trade_date?: string;
+		note?: string;
+		checks?: Array<{ id: string; name: string; ok: boolean; detail: string }>;
+	};
 	payload?: {
 		generated_at?: string;
 		trade_date?: string;
@@ -203,4 +209,163 @@ export type ResonanceBoard = {
 
 export function fetchResonanceBoard(config: BackendConfig, init?: RequestInit): Promise<ResonanceBoard> {
 	return requestJSON<ResonanceBoard>(config, '/api/v1/strategy/resonance/board', init);
+}
+
+// ============ 执行网关（easy-stock 信号 → QMT/Ptrade） ============
+// 与后端 internal/execution 及 /api/v1/execution/* 端点对齐。
+// P0+P1：sim 模式，不接真实下单；live 在后端被护栏守卫拒绝。
+
+export type ExecutionPlanTarget = {
+	code: string;
+	target_weight: number;
+	assumed_price: number;
+	signal_score?: number;
+	notional_cny?: number;
+	shares: number;
+	est_notional: number;
+	action?: string;
+	prefilter?: string;
+	warning?: string;
+};
+
+export type ExecutionTargetPlan = {
+	schema_version?: string;
+	strategy?: string;
+	pit_audit_passed?: boolean;
+	signal_id?: string;
+	signal_date?: unknown;
+	execute_date?: unknown;
+	period?: unknown;
+	role?: unknown;
+	status?: unknown;
+	gross_weight?: number;
+	n_holdings?: number;
+	mode?: string;
+	paper_dir?: string;
+	generated_at?: string;
+	targets?: ExecutionPlanTarget[];
+	warnings?: string[];
+};
+
+export type ExecutionTargetResponse = {
+	ok?: boolean;
+	plan?: ExecutionTargetPlan;
+	error?: string;
+};
+
+export type ExecutionSignalMeta = {
+	period?: unknown;
+	role?: unknown;
+	signal_date?: unknown;
+	execute_date?: unknown;
+	status?: unknown;
+	n_holdings?: unknown;
+	gross_weight?: unknown;
+};
+
+export type ExecutionStatus = {
+	mode?: string;
+	production_enabled?: boolean;
+	kill_switch_engaged?: boolean;
+	pit_whitelist?: string[];
+	strategy_allowed?: string;
+	paper_dir?: string;
+	adapter?: string;
+	adapter_ready?: boolean;
+	latest_signal?: ExecutionSignalMeta | null;
+	audit_path?: string;
+	audit_count?: number;
+	warnings?: string[];
+};
+
+export type ExecutionStatusResponse = {
+	ok?: boolean;
+	status?: ExecutionStatus;
+	error?: string;
+};
+
+export type ExecutionFill = {
+	code: string;
+	side: string;
+	price: number;
+	shares: number;
+	notional: number;
+	order_id?: string;
+	fill_id?: string;
+	filled_at?: string;
+	source?: string;
+	note?: string;
+};
+
+export type ExecutionIntentAck = {
+	accepted?: boolean;
+	mode?: string;
+	intent_id?: string;
+	strategy?: string;
+	signal_id?: string;
+	execute_on?: string;
+	reviewed_at?: string;
+	warnings?: string[];
+	fills?: ExecutionFill[];
+	message?: string;
+};
+
+export type ExecutionIntentResponse = {
+	ok?: boolean;
+	ack?: ExecutionIntentAck;
+	error?: string;
+};
+
+export type ExecutionFillResponse = {
+	ok?: boolean;
+	ack?: { recorded?: boolean; fill_id?: string; recorded_at?: string };
+	error?: string;
+};
+
+export type ExecutionKillResponse = {
+	ok?: boolean;
+	kill_switch_engaged?: boolean;
+	error?: string;
+};
+
+// fetchExecutionTarget 生成 core2 可执行目标权重表（只读预览）。
+export function fetchExecutionTarget(config: BackendConfig, strategy = 'core2', init?: RequestInit): Promise<ExecutionTargetResponse> {
+	const sep = strategy ? `?strategy=${encodeURIComponent(strategy)}` : '';
+	return requestJSON<ExecutionTargetResponse>(config, `/api/v1/execution/target${sep}`, init);
+}
+
+// fetchExecutionStatus 返回网关当前状态（只读）。
+export function fetchExecutionStatus(config: BackendConfig, init?: RequestInit): Promise<ExecutionStatusResponse> {
+	return requestJSON<ExecutionStatusResponse>(config, '/api/v1/execution/status', init);
+}
+
+// postExecutionIntent 受理执行意图（sim 模拟成交 / live 守卫拒绝）。
+export function postExecutionIntent(config: BackendConfig, intent: Record<string, unknown>, init?: RequestInit): Promise<ExecutionIntentResponse> {
+	return requestJSON<ExecutionIntentResponse>(config, '/api/v1/execution/intent', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(intent),
+		...init,
+	});
+}
+
+// postExecutionFill 登记一笔成交。
+export function postExecutionFill(config: BackendConfig, fill: Record<string, unknown>, init?: RequestInit): Promise<ExecutionFillResponse> {
+	return requestJSON<ExecutionFillResponse>(config, '/api/v1/execution/fill', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(fill),
+		...init,
+	});
+}
+
+// postExecutionKillSwitch 拉闸 / 解除拉闸（engaged=true 为拉闸）。
+export function postExecutionKillSwitch(config: BackendConfig, engaged: boolean, init?: RequestInit): Promise<ExecutionKillResponse> {
+	const path = engaged ? '/api/v1/execution/killswitch/engage' : '/api/v1/execution/killswitch/disengage';
+	return requestJSON<ExecutionKillResponse>(config, path, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: '{}',
+		...init,
+	});
 }

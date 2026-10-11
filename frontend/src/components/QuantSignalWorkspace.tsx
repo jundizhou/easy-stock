@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Gauge, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { BackendConfig } from '../lib/backend';
 import {
+	MER_STALE_HINT,
 	deriveOosGate,
+	describeFreshness,
 	fetchQuantTrack,
 	fetchQuantVerdict,
+	nextYearOf,
 	type ClipTrackPayload,
 	type MerVerdict,
 	type OosGate,
@@ -37,12 +40,15 @@ export function QuantSignalWorkspace({ config, refreshKey }: Props) {
 	const [track, setTrack] = useState<ClipTrackPayload | null>(null);
 	const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 	const [error, setError] = useState('');
+	// 就绪后再次刷新保留内容不卸载（避免闪烁），另用独立标志给按钮反馈。
+	const [refreshing, setRefreshing] = useState(false);
 
 	const load = useCallback(() => {
 		if (!config) return;
 		const abort = new AbortController();
 		setState(previous => (previous === 'ready' ? previous : 'loading'));
 		setError('');
+		setRefreshing(true);
 		Promise.all([
 			fetchQuantVerdict(config, { signal: abort.signal }).catch(reason => {
 				logRuntimeEvent('warn', 'quant-signals', { event: 'verdict_unavailable' });
@@ -53,6 +59,7 @@ export function QuantSignalWorkspace({ config, refreshKey }: Props) {
 				return null;
 			}),
 		]).then(([verdictPayload, trackPayload]) => {
+			setRefreshing(false);
 			if (abort.signal.aborted) return;
 			setVerdict(verdictPayload);
 			setTrack(trackPayload);
@@ -70,6 +77,7 @@ export function QuantSignalWorkspace({ config, refreshKey }: Props) {
 
 	const gate: OosGate | null = deriveOosGate(track);
 	const dims = verdict?.dims || [];
+	const freshness = describeFreshness(verdict?.asof);
 	const fwd = (track?.summary?.forward_only || {}) as Record<string, Record<string, Record<string, number>>>;
 
 	return (
@@ -78,12 +86,31 @@ export function QuantSignalWorkspace({ config, refreshKey }: Props) {
 				<div>
 					<h2>MER 策略信号</h2>
 					<p>
-						市场状态 mer/verdict_latest.json（asof {verdict?.asof || '—'}）· 前向轨 clip_n300（write-once）· 来源 /api/v1/quant/proxy → 8766、/api/v1/quant/track
+						市场状态 mer/verdict_latest.json · 前向轨 clip_n300（write-once）· 来源 /api/v1/quant/proxy → 8766、/api/v1/quant/track
 					</p>
 				</div>
-				<button type="button" className="icon-button" onClick={load} aria-label="刷新策略信号"><RefreshCw size={16} aria-hidden="true" /></button>
+				<div className="panel-head-tools">
+					<span
+						className={`freshness-chip ${freshness.level}`}
+						title="按 MER 数据截止日（asof）计算，不是上次点击刷新的时间"
+					>
+						数据截止 {verdict?.asof || '—'} · {freshness.label}
+					</span>
+					<button type="button" className="icon-button" onClick={load} disabled={refreshing || state === 'loading'} aria-label="刷新策略信号">
+						<RefreshCw size={16} className={refreshing ? 'spin' : undefined} aria-hidden="true" />
+					</button>
+				</div>
 			</header>
 
+			{refreshing && (
+				<div className="quant-signal-status" role="status"><LoaderCircle size={16} className="spin" /> 正在读取最新评判…</div>
+			)}
+			{freshness.stale && (
+				<div className="quant-signal-status error" role="alert">
+					<div><strong>数据陈旧：asof {verdict?.asof || '—'}（{freshness.label}）</strong></div>
+					<div>{MER_STALE_HINT}</div>
+				</div>
+			)}
 			{state === 'loading' && <div className="quant-signal-status" role="status"><LoaderCircle size={16} className="spin" /> 加载中…</div>}
 			{state === 'error' && <div className="quant-signal-status error" role="alert">{error || '信号数据不可用'}</div>}
 
@@ -118,6 +145,10 @@ export function QuantSignalWorkspace({ config, refreshKey }: Props) {
 								{verdict.verdict?.headline && <div className="quant-headline">{verdict.verdict.headline}</div>}
 								{verdict.verdict?.coverage && <p className="quant-note">{verdict.verdict.coverage}</p>}
 								{verdict.verdict?.risk && <p className="quant-note">{verdict.verdict.risk}</p>}
+								{verdict.similar?.risk_budget?.note && (
+									<p className="quant-note">风险预算：{verdict.similar.risk_budget.note}{verdict.similar.risk_budget.h60_mdd_mean !== undefined ? ` · 60日回撤均值 ${verdict.similar.risk_budget.h60_mdd_mean.toFixed(1)}%` : ''}{verdict.similar.risk_budget.h60_mdd_worst_p10 !== undefined ? ` · 最差P10 ${verdict.similar.risk_budget.h60_mdd_worst_p10.toFixed(1)}%` : ''}</p>
+								)}
+								<p className="quant-note">状态标签对 20 日收益无预测力（p=0.70），只作状态描述；四维分位只能当逆向 / 估值指标用，不进订单链、不改任何策略参数。</p>
 							</>
 						) : (
 							<div className="quant-signal-status error">{verdict?.error || 'verdict 数据不可用（quant_terminal 8766 或 mer/verdict_latest.json 缺失）'}</div>
@@ -194,7 +225,7 @@ export function QuantSignalWorkspace({ config, refreshKey }: Props) {
 							<div className="quant-oos-timeline" role="img" aria-label="样本可用性时间轴">
 								<div className="quant-oos-seg ok" style={{ width: '34%' }}><span>2018-02 起可用<br />（IS 已用尽）</span></div>
 								<div className="quant-oos-seg bad" style={{ width: '33%' }}><span>受污染 {gate.contaminatedStart}~{gate.contaminatedEnd}<br />永久失去样本外资格</span></div>
-								<div className="quant-oos-seg pending" style={{ width: '33%' }}><span>{gate.contaminatedEnd.slice(0, 4)+1} 前向区间<br />唯一合法验证</span></div>
+								<div className="quant-oos-seg pending" style={{ width: '33%' }}><span>{nextYearOf(gate.contaminatedEnd)} 前向区间<br />唯一合法验证</span></div>
 							</div>
 							<p className="quant-note">依据：governance/ADR-20261001 · backtest_5strategies/oos_gate.py。受污染区间内的任何回测数字只描述过去拟合，不构成样本外证据。</p>
 						</div>

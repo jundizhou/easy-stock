@@ -62,6 +62,13 @@ const config = {
     'xueqiu-browser-bridge.cjs',
     'stockdb-service.cjs',
     'quant-terminal-service.cjs',
+    // main.cjs 在运行时通过 path.join(__dirname, 'assets', 'easy-stock.png') 读取窗口
+    // 图标与 macOS Dock 图标。而 directories.buildResources 指向 desktop/assets，
+    // electron-builder 默认会把 buildResources 整个排除在 app 之外，图标会静默丢失
+    // （fs.existsSync 为假，不报错）。这里按运行时的实际需要精确纳入；
+    // 其余 .icns/.ico/.iconset/.svg 是构建期资源，不进 asar。
+    // desktop/test/packaging-assets.test.cjs 会校验这行与 main.cjs 的引用保持一致。
+    'assets/easy-stock.png',
     'package.json',
     '!dist{,/**/*}',
     '!resources{,/**/*}',
@@ -89,7 +96,10 @@ const config = {
     icon: path.join(desktopRoot, 'assets', 'easy-stock.ico'),
     target: mode === 'dir' ? [{ target: 'dir', arch: [arch] }] : [{ target: 'nsis', arch: [arch] }],
     artifactName: `easy-stock-v${packageManifest.version}-windows-${arch}.\${ext}`,
-    ...(signingCertificate ? {} : { signAndEditExecutable: false }),
+    // 未配置签名证书时，只关掉「文件签名」，保留 resedit 资源编辑 —— exe 的图标、
+    // 产品名/版本/版权元数据与执行级别都靠它写入。若改用更粗的开关把资源编辑一并
+    // 关掉，打包出的 exe 会显示默认 Electron 图标且没有版本信息。
+    ...(signingCertificate ? {} : { signExecutable: false }),
   },
   nsis: {
     oneClick: false,

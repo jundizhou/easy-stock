@@ -147,8 +147,20 @@ func TestSettingsLLMModelsUsesSavedKeyAndNormalizesResults(t *testing.T) {
 	if gotPath != "/v1/models" || gotAuthorization != "Bearer saved-private-key" {
 		t.Fatalf("upstream request path=%q authorization=%q", gotPath, gotAuthorization)
 	}
-	if strings.Index(rec.Body.String(), "a-model") > strings.Index(rec.Body.String(), "z-model") || strings.Count(rec.Body.String(), "a-model") != 1 {
-		t.Fatalf("models were not sorted and deduplicated: %s", rec.Body.String())
+	// 用解析后的模型 ID 列表断言「去重 + 排序」，而不是对整段 JSON 做子串计数：
+	// 每个模型条目还带有 effective_model 等元数据字段，子串计数会被重复命中。
+	var catalog struct {
+		Data llmModelsResult `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &catalog); err != nil {
+		t.Fatalf("decode models: %v", err)
+	}
+	ids := make([]string, 0, len(catalog.Data.Models))
+	for _, model := range catalog.Data.Models {
+		ids = append(ids, model.ID)
+	}
+	if !reflect.DeepEqual(ids, []string{"a-model", "z-model"}) {
+		t.Fatalf("models were not sorted and deduplicated: ids=%v body=%s", ids, rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), "saved-private-key") {
 		t.Fatalf("response leaked API key: %s", rec.Body.String())

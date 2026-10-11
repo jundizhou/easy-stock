@@ -64,19 +64,24 @@ export function ResonanceWorkspace({ config, refreshKey }: Props) {
 	const [board, setBoard] = useState<ResonanceBoard | null>(null);
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
+	// 就绪后再刷新保留内容不卸载（避免闪烁），另用独立标志给按钮反馈。
+	const [refreshing, setRefreshing] = useState(false);
 
 	const load = useCallback(() => {
 		if (!config) return;
 		const abort = new AbortController();
 		setState(previous => (previous === 'ready' ? previous : 'loading'));
 		setError('');
+		setRefreshing(true);
 		fetchResonanceBoard(config, { signal: abort.signal })
 			.then(payload => {
+				setRefreshing(false);
 				if (abort.signal.aborted) return;
 				setBoard(payload);
 				setState('ready');
 			})
 			.catch(reason => {
+				setRefreshing(false);
 				if (abort.signal.aborted) return;
 				logRuntimeEvent('warn', 'resonance', { event: 'board_unavailable' });
 				setError(reason instanceof Error ? reason.message : '双确认看板加载失败');
@@ -106,8 +111,8 @@ export function ResonanceWorkspace({ config, refreshKey }: Props) {
 					<h2>双确认共振</h2>
 					<p>消息热度 × 涨停家数 · 四象限 A/B/C/D · 阈值取当日候选 60 分位</p>
 				</div>
-				<button type="button" className="strategy-action ghost" onClick={() => load()} disabled={state === 'loading'}>
-					<RefreshCw size={14} aria-hidden="true" />刷新
+				<button type="button" className="strategy-action ghost" onClick={() => load()} disabled={refreshing || state === 'loading'}>
+					<RefreshCw size={14} className={refreshing ? 'spin' : undefined} aria-hidden="true" />{refreshing ? '同步中…' : '刷新'}
 				</button>
 			</header>
 
@@ -116,9 +121,22 @@ export function ResonanceWorkspace({ config, refreshKey }: Props) {
 					<ShieldAlert size={16} aria-hidden="true" />
 					<div>
 						<strong>PIT 闸门未通过 · 本页仅供观察</strong>
-						<div>
-							资讯轴 {pit?.news_pit_ok ? '通过' : '未通过'}（新鲜 {text(pit?.available_news)} 条） · 行情轴 {pit?.money_pit_ok ? '通过' : '未通过'}。
-							校准后象限已全部置为「? 数据不足」。
+						{(board?.pit_audit?.checks || []).length > 0 ? (
+							<ul style={{ margin: '6px 0', paddingLeft: 18 }}>
+								{(board!.pit_audit!.checks || []).map(check => (
+									<li key={check.id}>
+										{check.ok ? '✓' : '✗'} {check.name} —— <span style={{ opacity: 0.85 }}>{check.detail}</span>
+									</li>
+								))}
+							</ul>
+						) : (
+							<div>
+								资讯轴 {pit?.news_pit_ok ? '通过' : '未通过'}（新鲜 {text(pit?.available_news)} 条） · 行情轴 {pit?.money_pit_ok ? '通过' : '未通过'}。
+								校准后象限已全部置为「? 数据不足」。
+							</div>
+						)}
+						<div style={{ marginTop: 4 }}>
+							<strong>修复路径</strong>：PIT 只能由盘中持续采集自然达成，无法事后补——保持 App 在交易时段（09:15–15:05）开启并启用「数据归档采集」，行情快照在临近 15:00 抓取；数据齐备后的第一个交易日即可出现 PIT 通过日。
 						</div>
 						<div style={{ marginTop: 4 }}>
 							<strong>不得</strong>用于历史交易绩效评估，<strong>不得</strong>生成实盘交易指令。

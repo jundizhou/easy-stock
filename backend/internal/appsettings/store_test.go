@@ -4,8 +4,27 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// assertPrivatePermissions 校验 settings.json 未被组/其他用户读写。
+//
+// Windows 不实现 POSIX 权限位：os.Chmod 仅切换「只读」开关，os.FileMode.Perm()
+// 对任何可写文件恒为 0666。因此这里在 Windows 上只确认文件未被误设为只读，
+// 在类 Unix 上才严格断言 0600（生产环境实际运行于 Windows，Unix 分支用于 CI/容器）。
+func assertPrivatePermissions(t *testing.T, info os.FileInfo) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		if info.Mode().Perm()&0o200 == 0 {
+			t.Fatalf("settings file unexpectedly read-only on windows: %v", info.Mode())
+		}
+		return
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("settings permissions = %o, want 600", info.Mode().Perm())
+	}
+}
 
 func TestStorePersistsSecretsWithPrivatePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "settings.json")
@@ -25,9 +44,7 @@ func TestStorePersistsSecretsWithPrivatePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat settings: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("settings permissions = %o, want 600", info.Mode().Perm())
-	}
+	assertPrivatePermissions(t, info)
 	reopened, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen settings: %v", err)

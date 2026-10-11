@@ -9,6 +9,7 @@ import {
 	Building2,
 	Calculator,
 	CheckCircle2,
+	ChartCandlestick,
 	ChevronLeft,
 	ChevronRight,
 	CircleAlert,
@@ -44,6 +45,7 @@ import { FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, u
 import {
 	BackendConfig,
 	AppSettings,
+	KLine,
 	LLMProfile,
 	StockAIActionPriceZone,
 	StockAIAnalysis,
@@ -73,6 +75,7 @@ import { isResearchRunning, researchPlanText, type ResearchAnalysisLevel, type R
 import { StockResearchHistory, StockResearchProgress, StockResearchReportView } from './StockResearchReport';
 import { StockResearchSetupDialog, type ResearchSetupOptions } from './StockResearchSetupDialog';
 import { StockResearchTradingLogic } from './StockResearchTradingLogic';
+import { KLineChart } from './KLineChart';
 
 export type StockAIWorkspaceMode = 'analysis' | 'expectation' | 'risk';
 
@@ -205,7 +208,13 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 	useEffect(() => {
 		const job = research.job;
 		if (!job) return;
-		if (job.analysis) setAnalysis(job.analysis);
+		// 轮询返回的 analysis 每次都是新对象；内容未变时保留旧引用，
+		// 避免整个结果子树因对象身份变化而无谓重渲染（表现为闪烁）。
+		if (job.analysis) {
+			const current = analysisRef.current;
+			const next = job.analysis;
+			if (!current || current.analysis_id !== next.analysis_id || current.generated_at !== next.generated_at || current.symbol !== next.symbol) setAnalysis(next);
+		}
 		setState(isResearchRunning(job) ? job.analysis ? 'refining' : 'loading' : job.analysis ? 'ready' : 'error');
 		if (job.status === 'failed' && !job.analysis) setError(job.error || job.message);
 	}, [research.job]);
@@ -330,8 +339,10 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 		lastRefreshKey.current = refreshKey;
 		const currentAnalysis = analysisRef.current;
 		if (!currentAnalysis?.symbol) return;
+		// 上一次研究还在跑时不再叠加新任务：重跑会清空结果面板并重复采集（闪烁 + 后端任务刷屏）。
+		if (research.job && isResearchRunning(research.job)) return;
 		void runAnalysis(currentAnalysis.symbol, currentAnalysis.research_report?.analysis_level || currentAnalysis.research_report?.request.analysis_level || researchLevel);
-	}, [refreshKey, runAnalysis]);
+	}, [refreshKey, runAnalysis, research.job]);
 
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
@@ -461,12 +472,12 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 								<AnalysisExportHeader analysis={analysis} mode={mode} />
 								<AnalysisVerdict analysis={analysis} copied={copied} exporting={exporting} onRefresh={() => requestAnalysis(analysis.symbol)} onExport={() => void exportLongImage()} onCopy={() => void copyPlan()} onAskAI={() => onAskAI(analysis)} onOpenSettings={onOpenSettings} />
 									{analysis.research_report ? <>
-										{mode === 'analysis' && <details className="stock-research-quantitative" open><summary>量化基线与行情数据 · {analysis.scorecard.overall} 分</summary><FullAnalysisView analysis={analysis} /></details>}
+										{mode === 'analysis' && <details className="stock-research-quantitative" open><summary>量化基线与行情数据 · {analysis.scorecard.overall} 分</summary><FullAnalysisView analysis={analysis} config={config} /></details>}
 										{mode === 'analysis' && <StockResearchTradingLogic key={analysis.analysis_id || analysis.research_report.generated_at} report={analysis.research_report} />}
 										<StockResearchReportView analysis={analysis} view={mode === 'analysis' ? 'research' : mode} verification={research.job?.id === analysis.analysis_id ? research.job?.verification : undefined} verifying={research.verifying} onVerify={research.job?.id === analysis.analysis_id ? () => void research.verify() : undefined} />
 										{mode === 'risk' && analysis.research_report.decision.price_plan && <PositionCalculator analysis={analysis} />}
-									</> : analysis.analysis_id ? <section className="stock-research-band"><h3>当前仅有量化快照</h3><p>{analysis.ai?.message || 'AI研究尚未完成'}</p><details className="stock-research-quantitative" open><summary>查看历史量价与资料</summary><FullAnalysisView analysis={analysis} /></details></section> : <>
-										{mode === 'analysis' && <FullAnalysisView analysis={analysis} />}
+									</> : analysis.analysis_id ? <section className="stock-research-band"><h3>当前仅有量化快照</h3><p>{analysis.ai?.message || 'AI研究尚未完成'}</p><details className="stock-research-quantitative" open><summary>查看历史量价与资料</summary><FullAnalysisView analysis={analysis} config={config} /></details></section> : <>
+										{mode === 'analysis' && <FullAnalysisView analysis={analysis} config={config} />}
 										{mode === 'expectation' && <ExpectationView analysis={analysis} />}
 										{mode === 'risk' && <RiskExecutionView analysis={analysis} />}
 									</>}
@@ -759,7 +770,7 @@ function NewListingNotice({ analysis }: { analysis: StockAIAnalysis }) {
 	</section>;
 }
 
-function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
+function FullAnalysisView({ analysis, config }: { analysis: StockAIAnalysis; config: BackendConfig | null }) {
 	const isNewListing = analysis.profile.primary_type === 'new_listing';
 	const theme = normalizeStockAITheme(analysis.theme);
 	const themeSource = stockThemeSourceLabel(theme.source);
@@ -778,6 +789,8 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={isNewListing ? `上市 ${analysis.trend.history_days || analysis.chart.length} 日 · ${analysis.short_term.tradability}` : `近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
 				{analysis.research_report ? <KPICard icon={<Target size={17} />} label="主营背景" value={theme.business || '主业待补充'} detail={themeSource} tone="purple" /> : <KPICard icon={<Target size={17} />} label={theme.is_hot ? '规则热点定位' : '主营背景'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />}
 			</section>
+
+			<StockAIKLinePanel config={config} symbol={analysis.symbol} />
 
 			<div className="stock-ai-analysis-grid">
 				<ScorecardPanel analysis={analysis} />
@@ -836,6 +849,52 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<DataQualityPanel analysis={analysis} />
 			</div>
 		</>
+	);
+}
+
+// 日K线面板：独立缓存（60 秒 TTL）。轮询或来回切股时先展示缓存再静默刷新，避免占位符闪烁。
+const klinePanelCache = new Map<string, { lines: KLine[]; fetchedAt: number }>();
+const KLINE_CACHE_TTL_MS = 60_000;
+const KLINE_CACHE_LIMIT = 24;
+
+function StockAIKLinePanel({ config, symbol }: { config: BackendConfig | null; symbol: string }) {
+	const cachedEntry = klinePanelCache.get(symbol);
+	const [lines, setLines] = useState<KLine[]>(() => cachedEntry?.lines || []);
+	const [state, setState] = useState<'loading' | 'ready' | 'error'>(() => cachedEntry ? 'ready' : 'loading');
+	useEffect(() => {
+		if (!config || !symbol) return;
+		const cached = klinePanelCache.get(symbol);
+		if (cached && Date.now() - cached.fetchedAt < KLINE_CACHE_TTL_MS) {
+			setLines(cached.lines);
+			setState('ready');
+			return;
+		}
+		// 缓存过期：保留旧数据先渲染，后台静默换取新K线，不闪占位符。
+		if (cached) { setLines(cached.lines); setState('ready'); } else { setLines([]); setState('loading'); }
+		const controller = new AbortController();
+		requestJSON<{ data: KLine[] }>(config, `/api/v1/quotes/kline?symbol=${encodeURIComponent(symbol)}&period=day&limit=60`, { signal: controller.signal })
+			.then((payload) => {
+				const data = payload.data || [];
+				if (klinePanelCache.size >= KLINE_CACHE_LIMIT) {
+					const oldest = [...klinePanelCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt)[0];
+					if (oldest) klinePanelCache.delete(oldest[0]);
+				}
+				klinePanelCache.set(symbol, { lines: data, fetchedAt: Date.now() });
+				if (controller.signal.aborted) return;
+				setLines(data);
+				setState(data.length ? 'ready' : 'error');
+			})
+			.catch(() => {
+				if (controller.signal.aborted) return;
+				setState('error');
+			});
+		return () => controller.abort();
+	}, [config, symbol]);
+	return (
+		<section className="stock-ai-panel stock-ai-kline-panel">
+			<header><div><span>日K 线</span><h3>近 60 个交易日量价结构</h3></div><ChartCandlestick size={19} /></header>
+			<KLineChart lines={lines} symbol={symbol} state={state} mode="daily" periodLabel="日K" />
+		</section>
 	);
 }
 

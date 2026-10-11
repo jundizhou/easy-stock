@@ -3,7 +3,7 @@
   "description": "easy-stock AI A-share research desktop application",
   "author": "easy-stock contributors",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "main": "main.cjs",
   "scripts": {
     "predev": "npm --prefix .. run build:backend",
@@ -11,10 +11,14 @@
     "build": "npm run test",
     "test": "node --test test/*.test.cjs",
     "prepare:package": "node scripts/prepare-package.mjs",
+    "sync:artifacts": "node scripts/sync-build-artifacts.mjs",
+    "verify:deploy": "node scripts/verify-deploy-consistency.mjs",
+    "install:local": "node scripts/install-local.mjs",
     "package:mac": "npm run prepare:package && node scripts/electron-builder.mjs mac dir",
     "installer:mac": "npm run release:mac",
     "release:mac": "npm run prepare:package && node scripts/electron-builder.mjs mac release && node scripts/stage-builder-artifacts.mjs mac && node scripts/create-dmg.mjs",
     "package:windows": "npm run prepare:package && node scripts/electron-builder.mjs windows dir",
+    "package:windows:offline": "npm run sync:artifacts && node scripts/electron-builder.mjs windows dir && npm run verify:deploy",
     "release:windows": "npm run prepare:package && node scripts/electron-builder.mjs windows release && node scripts/stage-builder-artifacts.mjs windows && node scripts/create-windows-archive.mjs"
   },
   "devDependencies": {

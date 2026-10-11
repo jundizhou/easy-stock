@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Layers3, LoaderCircle, RefreshCw, Search } from 'lucide-react';
 import { requestJSON, type BackendConfig } from '../lib/backend';
+import { useStockNameMap } from '../lib/stock-directory';
 import {
 	boardsForSymbol,
 	fetchBoards,
@@ -63,6 +64,8 @@ export function BoardExplorerWorkspace({ config, refreshKey, focusBoard, onFocus
 	const [boards, setBoards] = useState<StockDBBoard[]>([]);
 	const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 	const [error, setError] = useState('');
+	// 就绪后再刷新保留内容不卸载（避免闪烁），另用独立标志给按钮反馈。
+	const [refreshing, setRefreshing] = useState(false);
 	const [category, setCategory] = useState('');
 	const [query, setQuery] = useState('');
 	const [selectedCode, setSelectedCode] = useState('');
@@ -75,13 +78,16 @@ export function BoardExplorerWorkspace({ config, refreshKey, focusBoard, onFocus
 		const abort = new AbortController();
 		setState(previous => (previous === 'ready' ? previous : 'loading'));
 		setError('');
+		setRefreshing(true);
 		fetchBoards(config, { signal: abort.signal })
 			.then(payload => {
+				setRefreshing(false);
 				if (abort.signal.aborted) return;
 				setBoards(payload);
 				setState('ready');
 			})
 			.catch((reason) => {
+				setRefreshing(false);
 				if (abort.signal.aborted) return;
 				setError(reason instanceof Error ? reason.message : '板块数据加载失败');
 				setState('error');
@@ -147,6 +153,15 @@ export function BoardExplorerWorkspace({ config, refreshKey, focusBoard, onFocus
 	}, [config, selectedBoard]);
 
 	const quoteBySymbol = useMemo(() => new Map((quotes || []).map(quote => [quote.symbol, quote])), [quotes]);
+	// 股名兜底：行情接口失败 / 只覆盖前 60 只时，用全库名录补齐，成分股不再是一堵代码墙。
+	const nameMap = useStockNameMap(config);
+	// 展示顺序：有行情时按涨跌幅降序（热股置顶），无行情保持库序。
+	const displaySymbols = useMemo(() => {
+		if (!selectedBoard) return [];
+		const symbols = selectedBoard.symbols;
+		if (!quotes || !quotes.length) return symbols;
+		return [...symbols].sort((a, b) => (quoteBySymbol.get(b)?.changePercent ?? -Infinity) - (quoteBySymbol.get(a)?.changePercent ?? -Infinity));
+	}, [selectedBoard, quotes, quoteBySymbol]);
 	// 板块热度：只用 activeBoards 内、已被行情覆盖的成分股聚合（最多取前 60 只与行情请求一致）。
 	const heatByBoard = useMemo(() => {
 		const map = new Map<string, { avgChangePercent: number; upCount: number; downCount: number }>();
@@ -186,7 +201,7 @@ export function BoardExplorerWorkspace({ config, refreshKey, focusBoard, onFocus
 					/>
 					<button type="button" onClick={lookupSymbol}>反查</button>
 				</div>
-				<button type="button" className="icon-button" onClick={load} aria-label="刷新板块数据"><RefreshCw size={16} aria-hidden="true" /></button>
+				<button type="button" className="icon-button" onClick={load} disabled={refreshing} aria-label="刷新板块数据"><RefreshCw size={16} className={refreshing ? 'spin' : undefined} aria-hidden="true" /></button>
 			</header>
 
 			{symbolMatches && (
@@ -256,18 +271,19 @@ export function BoardExplorerWorkspace({ config, refreshKey, focusBoard, onFocus
 									<span className="board-count">{selectedBoard.symbols.length} 只成分</span>
 								</header>
 								<div className="board-symbols">
-									{selectedBoard.symbols.map(symbol => {
+									{displaySymbols.map(symbol => {
 										const quote = quoteBySymbol.get(symbol);
+										const name = (quote && quote.name) || nameMap.get(symbol) || '';
 										return (
 											<button
 												type="button"
 												className="board-symbol"
 												key={symbol}
-												title={quote ? `${quote.name} ${quote.price} ${formatChangePercent(quote.changePercent)}` : symbol}
+												title={quote ? `${name || symbol} ${quote.price} ${formatChangePercent(quote.changePercent)}` : name ? `${name} ${symbol}` : symbol}
 												onClick={(event) => { event.stopPropagation(); onOpenStock?.(symbol); }}
 											>
 												<span className="board-symbol-code">{symbol}</span>
-												{quote && <span className="board-symbol-name">{quote.name || '--'}</span>}
+												{name && <span className="board-symbol-name">{name}</span>}
 												{quote && <span className={`board-symbol-change ${quote.changePercent >= 0 ? 'up' : 'down'}`}>{formatChangePercent(quote.changePercent)}</span>}
 											</button>
 										);

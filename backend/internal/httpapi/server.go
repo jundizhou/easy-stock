@@ -16,6 +16,7 @@ import (
 
 	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/execution"
 	"easy-stock/backend/internal/archive"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
@@ -111,6 +112,7 @@ type Server struct {
 	startupError          error
 	logger                *log.Logger
 	tokenUsage            *tokenUsageStore
+	executionGateway      *execution.Gateway
 }
 
 func NewServer(config any) *Server {
@@ -420,6 +422,10 @@ func NewServer(config any) *Server {
 		startupError:             errors.Join(startupErrors...),
 		logger:                   cfg.Logger,
 		tokenUsage:               tokenUsage,
+		executionGateway: execution.NewGateway(execution.GatewayConfig{
+			ProductionEnabled: productionEnabledFromEnv(),
+			Logger:            cfg.Logger,
+		}),
 	}
 	if kaipanlaService != nil {
 		s.themeRadarStore = kaipanlaService.Store()
@@ -745,6 +751,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/auto", s.inflectionAutoHandler)
 	s.mux.HandleFunc("GET /api/v1/strategy/core2/paper", s.core2PaperHandler)
 	s.mux.HandleFunc("GET /api/v1/strategy/resonance/board", s.resonanceBoardHandler)
+
+	// ---- 执行网关（easy-stock 信号 → QMT/Ptrade；P0+P1 sim 模式，不接真实下单）----
+	s.mux.HandleFunc("GET /api/v1/execution/target", s.executionTargetHandler)
+	s.mux.HandleFunc("GET /api/v1/execution/status", s.executionStatusHandler)
+	s.mux.HandleFunc("POST /api/v1/execution/intent", s.executionIntentHandler)
+	s.mux.HandleFunc("POST /api/v1/execution/fill", s.executionFillHandler)
+	s.mux.HandleFunc("POST /api/v1/execution/killswitch/engage", s.executionKillEngageHandler)
+	s.mux.HandleFunc("POST /api/v1/execution/killswitch/disengage", s.executionKillDisengageHandler)
 	s.mux.HandleFunc("POST /api/v1/strategy/shannon/scan", s.shannonScan)
 	s.mux.HandleFunc("POST /api/v1/strategy/shannon/analyze", s.shannonAnalyze)
 	s.mux.HandleFunc("GET /api/v1/strategy/shannon/boards", s.shannonBoards)

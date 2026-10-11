@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, LoaderCircle, RefreshCw, Target } from 'lucide-react';
 import type { BackendConfig } from '../lib/backend';
 import { fetchCore2Paper, type Core2Paper } from '../lib/strategy-boards';
+import { useStockNameMap } from '../lib/stock-directory';
+import { fetchSymbolsBoards, type SymbolBoardRef } from '../lib/sidecars';
 import { logRuntimeEvent } from '../lib/runtime-log';
 
 type Props = {
@@ -42,19 +44,27 @@ export function Core2Workspace({ config, refreshKey }: Props) {
 	const [paper, setPaper] = useState<Core2Paper | null>(null);
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
+	// 就绪后再刷新保留内容不卸载（避免闪烁），另用独立标志给按钮反馈。
+	const [refreshing, setRefreshing] = useState(false);
+	const names = useStockNameMap(config);
+	// 持仓板块归属（stockdb 批量反查，后端进程级索引 O(1)）；仅最新一期 10 只，失败静默降级。
+	const [boards, setBoards] = useState<Record<string, SymbolBoardRef[]>>({});
 
 	const load = useCallback(() => {
 		if (!config) return;
 		const abort = new AbortController();
 		setState(previous => (previous === 'ready' ? previous : 'loading'));
 		setError('');
+		setRefreshing(true);
 		fetchCore2Paper(config, { signal: abort.signal })
 			.then(payload => {
+				setRefreshing(false);
 				if (abort.signal.aborted) return;
 				setPaper(payload);
 				setState('ready');
 			})
 			.catch(reason => {
+				setRefreshing(false);
 				if (abort.signal.aborted) return;
 				logRuntimeEvent('warn', 'core2', { event: 'paper_unavailable' });
 				setError(reason instanceof Error ? reason.message : 'core2 前向记录加载失败');
@@ -67,6 +77,27 @@ export function Core2Workspace({ config, refreshKey }: Props) {
 		const cleanup = load();
 		return cleanup;
 	}, [load, refreshKey]);
+
+	const latestHoldings = paper?.latest?.holdings;
+	const holdingCodes = useMemo(
+		() => (Array.isArray(latestHoldings) ? latestHoldings!.map(holding => holding.code).filter(Boolean) : []),
+		[latestHoldings],
+	);
+	const holdingKey = holdingCodes.join(',');
+	useEffect(() => {
+		if (!config || !holdingKey) return;
+		let cancelled = false;
+		fetchSymbolsBoards(config, holdingKey.split(','), 6)
+			.then(payload => { if (!cancelled) setBoards(payload); })
+			.catch(() => { if (!cancelled) setBoards({}); });
+		return () => { cancelled = true; };
+	}, [config, holdingKey]);
+
+	const boardsFor = useCallback((code: string): string => {
+		const refs = boards[code];
+		if (!refs || !refs.length) return '';
+		return refs.slice(0, 3).map(ref => ref.name).join(' · ');
+	}, [boards]);
 
 	if (!config) return <div className="strategy-empty"><Target size={22} /><span>等待后端配置…</span></div>;
 
@@ -82,8 +113,8 @@ export function Core2Workspace({ config, refreshKey }: Props) {
 					<h2>core2 中线量化</h2>
 					<p>沪深主板 · rev20 反转 + amihud 非流动性双因子 · 20 个交易日定期换仓</p>
 				</div>
-				<button type="button" className="strategy-action ghost" onClick={() => load()} disabled={state === 'loading'}>
-					<RefreshCw size={14} aria-hidden="true" />刷新
+				<button type="button" className="strategy-action ghost" onClick={() => load()} disabled={refreshing || state === 'loading'}>
+					<RefreshCw size={14} className={refreshing ? 'spin' : undefined} aria-hidden="true" />{refreshing ? '同步中…' : '刷新'}
 				</button>
 			</header>
 
@@ -135,27 +166,31 @@ export function Core2Workspace({ config, refreshKey }: Props) {
 							<table className="strategy-table">
 								<thead>
 									<tr>
-										<th>#</th><th>代码</th><th>信号分</th><th>目标权重</th><th>假设成交价</th><th>价格基准</th>
+										<th>#</th><th>代码</th><th>名称</th><th>所属板块</th><th>信号分</th><th>目标权重</th><th>假设成交价</th>
 									</tr>
 								</thead>
 								<tbody>
-									{holdings.map((holding, index) => (
-										<tr key={`${holding.code}-${index}`}>
-											<td>{index + 1}</td>
-											<td>{text(holding.code)}</td>
-											<td>{holding.signal_score !== undefined ? holding.signal_score.toFixed(3) : '—'}</td>
-											<td>{holding.target_weight !== undefined ? `${(holding.target_weight * 100).toFixed(1)}%` : '—'}</td>
-											<td>{holding.assumed_price !== undefined ? holding.assumed_price.toFixed(2) : '—'}</td>
-											<td>{text(holding.price_basis)}</td>
-										</tr>
-									))}
+									{holdings.map((holding, index) => {
+										const code = holding.code || '';
+										return (
+											<tr key={`${code}-${index}`}>
+												<td>{index + 1}</td>
+												<td>{code || '—'}</td>
+												<td style={{ whiteSpace: 'nowrap' }}>{code ? names.get(code) || '—' : '—'}</td>
+												<td style={{ whiteSpace: 'normal' }}>{code ? boardsFor(code) || '—' : '—'}</td>
+												<td>{holding.signal_score !== undefined ? holding.signal_score.toFixed(3) : '—'}</td>
+												<td>{holding.target_weight !== undefined ? `${(holding.target_weight * 100).toFixed(1)}%` : '—'}</td>
+												<td>{holding.assumed_price !== undefined ? holding.assumed_price.toFixed(2) : '—'}</td>
+											</tr>
+										);
+									})}
 								</tbody>
 							</table>
 						</div>
 					) : (
 						<p className="strategy-card-note">该期无持仓明细。</p>
 					)}
-					<p className="strategy-sub">价格基准 ASSUMED_T_CLOSE = 以信号日收盘价假设成交，实盘按 T+1 开盘价执行。</p>
+					<p className="strategy-sub">价格基准 ASSUMED_T_CLOSE = 以信号日收盘价假设成交（后复权口径），实盘按 T+1 开盘价执行 · 板块归属来自 Free-StockDB，仅供参考。</p>
 				</div>
 			)}
 

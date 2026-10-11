@@ -173,6 +173,12 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npm run release:windows
 
+      # 唯一版本门禁：打包资源 ↔ 打包产物必须逐字节一致（防止「新壳旧核」）
+      - name: Verify single-version consistency
+        env:
+          A_STOCK_DEPLOY_CI: "1"
+        run: npm --workspace desktop run verify:deploy
+
       - name: Verify Hermes inside the Windows installer
         shell: pwsh
         run: |

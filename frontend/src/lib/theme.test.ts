@@ -68,9 +68,18 @@ describe('appearance preference', () => {
 		const definitions = new Set([...dark.matchAll(/(--theme-[\w-]+):/g)].map(match => match[1]));
 		for (const path of ['../styles.css', '../components/stock-research.css']) {
 			const css = readFileSync(new URL(path, import.meta.url), 'utf8');
+			const locals = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1]));
 			for (const match of css.matchAll(/var\((--theme-[\w-]+)([^)]*)\)/g)) {
 				expect(definitions.has(match[1]), match[1]).toBe(true);
-				expect(match[2]).toMatch(/^,\s*(#|rgb|white|black)/);
+				// 回退值允许两种形式：显式字面色（# / rgb / white / black），或迁移期
+				// 的「回落旧变量」写法 var(--theme-X, var(--Y))。后者必须指向一个真实
+				// 定义过的变量（主题 token 或本文件的根变量），否则视为无效回退。
+				const fallbackVar = match[2].match(/^,\s*var\((--[\w-]+)/);
+				if (fallbackVar) {
+					expect(definitions.has(fallbackVar[1]) || locals.has(fallbackVar[1]), fallbackVar[1]).toBe(true);
+				} else {
+					expect(match[2]).toMatch(/^,\s*(#|rgb|white|black)/);
+				}
 			}
 		}
 	});

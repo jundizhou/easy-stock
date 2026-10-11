@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, LoaderCircle, RefreshCw, Waves } from 'lucide-react';
 import type { BackendConfig } from '../lib/backend';
 import {
@@ -115,10 +115,11 @@ function SignalCard({ title, signal }: { title: string; signal?: InflectionSigna
  * 与盘中高标指标自动装配快照后调用引擎，前端不传任何参数。
  * 引擎 V1 只做单快照评估：不下单、不回测、不生成交易指令。
  */
-export function InflectionWorkspace({ config }: Props) {
+export function InflectionWorkspace({ config, refreshKey }: Props) {
 	const [response, setResponse] = useState<InflectionAutoResponse | null>(null);
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
+	const evaluatedRef = useRef(false);
 
 	const run = useCallback(() => {
 		if (!config) return;
@@ -126,6 +127,7 @@ export function InflectionWorkspace({ config }: Props) {
 		setError('');
 		fetchInflectionAuto(config)
 			.then(payload => {
+				evaluatedRef.current = true;
 				setResponse(payload);
 				setState('ready');
 			})
@@ -135,6 +137,12 @@ export function InflectionWorkspace({ config }: Props) {
 				setState('error');
 			});
 	}, [config]);
+
+	// 首次进入仍需手动点击评估（POST 会装配当日快照）；已评估过则随 refreshKey 自动重评。
+	useEffect(() => {
+		if (!evaluatedRef.current) return;
+		run();
+	}, [refreshKey, run]);
 
 	if (!config) return <div className="strategy-empty"><Waves size={22} /><span>等待后端配置…</span></div>;
 
