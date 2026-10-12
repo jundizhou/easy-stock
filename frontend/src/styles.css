@@ -7956,19 +7956,35 @@ a:focus-visible {
 .nv-tab:hover { color: var(--theme-text, #1f2733); }
 .nv-tab.active { color: var(--accent, #2f7df6); background: var(--surface, #fff); box-shadow: 0 1px 4px rgba(20,40,70,0.12); }
 
-/* 催化排行：前三名左侧强调条 + 排名徽章 + 热度迷你条 */
+/* 催化排行：前三名左侧强调条 + 排名徽章（金/银/铜）+ 热度分档迷你条 + 多空构成条 */
 .nv-rank { display: flex; flex-direction: column; gap: 8px; }
 .nv-rank-row { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 14px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 10px; background: var(--surface, #fff); cursor: pointer; font-family: inherit; transition: border-color .15s, box-shadow .15s, transform .15s; }
 .nv-rank-row:hover { border-color: var(--accent, #2f7df6); box-shadow: 0 2px 10px rgba(20,40,70,0.08); transform: translateY(-1px); }
 .nv-rank-top { border-left: 3px solid var(--accent, #2f7df6); background: linear-gradient(90deg, rgba(47,125,246,0.05), transparent 45%); }
 .nv-rank-no { flex: none; width: 30px; height: 30px; line-height: 30px; text-align: center; font-size: 13px; font-weight: 800; border-radius: 8px; color: var(--theme-muted, #52779e); background: var(--theme-bg, #f5f7f9); }
-.nv-rank-no-top { color: #fff; background: var(--accent, #2f7df6); box-shadow: 0 1px 4px rgba(47,125,246,0.35); }
+/* 前三名金/银/铜徽章（替代统一蓝，排名层次一眼可辨） */
+.nv-rank-no-top { color: #fff; box-shadow: 0 1px 4px rgba(20,40,70,0.18); }
+.nv-rank-no-1 { background: linear-gradient(135deg, #f7c948, #d9941a); }
+.nv-rank-no-2 { background: linear-gradient(135deg, #bac5d6, #8b99ae); }
+.nv-rank-no-3 { background: linear-gradient(135deg, #e3a877, #b9743e); }
 .nv-rank-name { flex: none; min-width: 96px; font-size: 14.5px; font-weight: 700; color: var(--theme-text, #1f2733); }
 .nv-rank-stage { flex: none; width: 50px; text-align: center; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .nv-rank-sentiment { flex: none; width: 50px; text-align: center; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 .nv-rank-heat { flex: none; width: 76px; display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--theme-muted, #52779e); }
 .nv-rank-heat b { font-size: 13px; color: var(--accent, #2f7df6); }
+/* 热度分档配色：炽热(≥75) 红 / 温热(60-74) 琥珀 / 温和(<60) 蓝（compound 选择器压过 .nv-rank-heat b / .nv-drill-heat b） */
+.nv-rank-heat.nv-heat-hot b, .nv-drill-heat.nv-heat-hot b { color: var(--red, #c0392b); }
+.nv-rank-heat.nv-heat-warm b, .nv-drill-heat.nv-heat-warm b { color: var(--amber, #b8770a); }
+.nv-rank-heat.nv-heat-mild b, .nv-drill-heat.nv-heat-mild b { color: var(--accent, #2f7df6); }
 .nv-heat-bar { display: block; height: 3px; border-radius: 999px; background: linear-gradient(90deg, var(--accent, #2f7df6), rgba(47,125,246,0.20)); }
+.nv-heat-hot .nv-heat-bar { background: linear-gradient(90deg, var(--red, #c0392b), rgba(192,57,43,0.20)); }
+.nv-heat-warm .nv-heat-bar { background: linear-gradient(90deg, var(--amber, #b8770a), rgba(184,119,10,0.20)); }
+.nv-heat-mild .nv-heat-bar { background: linear-gradient(90deg, var(--accent, #2f7df6), rgba(47,125,246,0.20)); }
+/* 多空构成迷你条：题材样本情绪拆分（多=绿 / 空=红，与行内情绪徽章同口径） */
+.nv-rank-bullbear { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: var(--theme-muted, #52779e); }
+.nv-bb-bar { position: relative; display: block; width: 44px; height: 5px; border-radius: 999px; background: rgba(192,57,43,0.28); overflow: hidden; }
+.nv-bb-bull { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--green, #1e9e57); }
+.nv-bb-text { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .nv-rank-meta { flex: 1; text-align: right; font-size: 11px; color: var(--theme-muted, #52779e); }
 
 /* 发酵阶段配色 */
@@ -7998,8 +8014,9 @@ a:focus-visible {
 .nv-check select { height: 26px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 6px; background: var(--surface, #fff); color: var(--theme-text, #1f2733); font-family: inherit; }
 .nv-count { font-size: 11px; color: var(--theme-muted, #52779e); margin-left: auto; }
 
-/* 跨窗 trend 徽章（加速/平稳/退潮） */
+/* 跨窗 trend 徽章（加速/平稳/退潮，带方向箭头） */
 .nv-trend { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 6px; line-height: 1.6; white-space: nowrap; }
+.nv-trend-arrow { font-style: normal; font-weight: 800; margin-right: 2px; }
 .nv-trend-加速 { color: var(--red, #c0392b); background: rgba(192,57,43,0.12); }
 .nv-trend-平稳 { color: #52779e; background: rgba(82,119,158,0.12); }
 .nv-trend-退潮 { color: #8a98a6; background: rgba(138,152,166,0.12); }

@@ -104,6 +104,17 @@ function formatBoardNames(name: string): string {
 	return `${parts.slice(0, 3).join(' / ')} 等 ${parts.length} 组`;
 }
 
+// 热度分档：≥75 炽热 / 60-74 温热 / <60 温和。热度分设计为 0-100 量级，
+// 分档只驱动展示层配色（热度条 + 分数），不改排序与任何口径。
+function heatTier(heat: number): 'hot' | 'warm' | 'mild' {
+	if (heat >= 75) return 'hot';
+	if (heat >= 60) return 'warm';
+	return 'mild';
+}
+
+// 跨窗趋势箭头：加速↑ / 平稳→ / 退潮↓，扫读时不用逐字读。
+const TREND_ARROW: Record<string, string> = { 加速: '↑', 平稳: '→', 退潮: '↓' };
+
 // 单个个股 chip（分组/平铺共用）：名称 + 代码 + 角色 + 涨跌幅/行情缺 + 连板。
 function renderStockChip(s: ThemeStock) {
 	const hasQuote = (s.price ?? 0) > 0 || (s.change_percent ?? 0) !== 0;
@@ -346,12 +357,6 @@ export function NewsVerdictWorkspace({
 		return ferment.views?.[sourceView] ?? [];
 	}, [ferment, sourceView, windowKey]);
 
-	// 热度条比例基准（取当前视图最大热度，至少 1 防除零）
-	const maxHeat = useMemo(
-		() => Math.max(1, ...rankThemes.map((t) => t.heat)),
-		[rankThemes],
-	);
-
 	// 逐条研判：筛选 + 排序（提升信噪比）
 	const detailItems = useMemo(() => {
 		let list = verdictItems;
@@ -427,17 +432,18 @@ export function NewsVerdictWorkspace({
 						← 返回排行
 					</button>
 					<span className="nv-drill-title">{drillTheme.name}</span>
-					<span className="nv-drill-heat">
-						热度 <b>{drillTheme.heat}</b>
+				<span className={`nv-drill-heat nv-heat-${heatTier(drillTheme.heat)}`}>
+					热度 <b>{drillTheme.heat}</b>
+				</span>
+				<span className={`nv-rank-stage nv-stage-${drillTheme.stage}`}>
+					{drillTheme.stage}
+				</span>
+				{drillTheme.trend && (
+					<span className={`nv-trend nv-trend-${drillTheme.trend}`}>
+						<i className="nv-trend-arrow">{TREND_ARROW[drillTheme.trend] ?? ''}</i>
+						{drillTheme.trend}
 					</span>
-					<span className={`nv-rank-stage nv-stage-${drillTheme.stage}`}>
-						{drillTheme.stage}
-					</span>
-					{drillTheme.trend && (
-						<span className={`nv-trend nv-trend-${drillTheme.trend}`}>
-							{drillTheme.trend}
-						</span>
-					)}
+				)}
 					<span className={`nv-rank-sentiment nv-sent-${drillTheme.sentiment}`}>
 						{drillTheme.sentiment}
 					</span>
@@ -582,24 +588,43 @@ export function NewsVerdictWorkspace({
 								onClick={() => openDrill(t)}
 								title="点击下钻：受益个股池 + 该题材样本资讯"
 							>
-								<span className={`nv-rank-no${t.rank <= 3 ? ' nv-rank-no-top' : ''}`}>
+								<span className={`nv-rank-no${t.rank <= 3 ? ` nv-rank-no-top nv-rank-no-${t.rank}` : ''}`}>
 									{t.rank}
 								</span>
 								<span className="nv-rank-name">{t.name}</span>
 								{t.trend && (
-									<span className={`nv-trend nv-trend-${t.trend}`}>{t.trend}</span>
+									<span className={`nv-trend nv-trend-${t.trend}`}>
+										<i className="nv-trend-arrow">{TREND_ARROW[t.trend] ?? ''}</i>
+										{t.trend}
+									</span>
 								)}
 								<span className={`nv-rank-stage nv-stage-${t.stage}`}>{t.stage}</span>
 								<span className={`nv-rank-sentiment nv-sent-${t.sentiment}`}>
 									{t.sentiment}
 								</span>
-								<span className="nv-rank-heat">
+								<span className={`nv-rank-heat nv-heat-${heatTier(t.heat)}`}>
 									热度 <b>{t.heat}</b>
 									<i
 										className="nv-heat-bar"
-										style={{ width: `${Math.round((t.heat / maxHeat) * 100)}%` }}
+										style={{ width: `${Math.min(100, Math.max(0, t.heat))}%` }}
 									/>
 								</span>
+								{t.bullish + t.bearish > 0 && (
+									<span
+										className="nv-rank-bullbear"
+										title={`样本情绪拆分：看多 ${t.bullish} · 看空 ${t.bearish}`}
+									>
+										<i className="nv-bb-bar">
+											<i
+												className="nv-bb-bull"
+												style={{
+													width: `${Math.round((t.bullish / (t.bullish + t.bearish)) * 100)}%`,
+												}}
+											/>
+										</i>
+										<span className="nv-bb-text">多{t.bullish} · 空{t.bearish}</span>
+									</span>
+								)}
 								<span className="nv-rank-meta">
 									{t.count}条 · 增速{t.velocity} · {t.diversity}源
 								</span>
