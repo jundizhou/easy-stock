@@ -7980,6 +7980,11 @@ a:focus-visible {
 /* 题材下钻：受益个股池 */
 .nv-stocks-block { margin: 10px 0 16px; }
 .nv-stocks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.nv-stock-groups { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.nv-stock-group { border-left: 2px solid var(--theme-blue-soft, rgba(23,94,169,0.25)); padding-left: 10px; }
+.nv-stock-group-title { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--theme-text, #1f2733); }
+.nv-stock-group-title i { font-style: normal; font-size: 10px; font-weight: 400; color: var(--theme-muted, #52779e); }
+.nv-stock-group .nv-stocks { margin-top: 4px; }
 .nv-stock { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--theme-line, #dce2e6); border-radius: 8px; background: var(--surface, #fff); font-size: 12px; }
 .nv-stock b { color: var(--theme-text, #1f2733); }
 .nv-stock-code { font-size: 10px; color: var(--theme-muted, #52779e); }

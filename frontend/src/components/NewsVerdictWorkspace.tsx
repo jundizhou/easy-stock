@@ -76,6 +76,11 @@ interface ThemeStock {
 	rank_score?: number;
 	main_net_inflow?: number;
 }
+interface ThemeStockGroup {
+	board: string;
+	count: number;
+	stocks: ThemeStock[];
+}
 interface ThemeStocksResponse {
 	theme: string;
 	matched: boolean;
@@ -86,9 +91,33 @@ interface ThemeStocksResponse {
 	limit_up_count?: number;
 	leaders?: string[];
 	stocks: ThemeStock[];
+	groups?: ThemeStockGroup[];
 	hints?: string[];
 	reason?: string;
 	note?: string;
+}
+
+// 单个个股 chip（分组/平铺共用）：名称 + 代码 + 角色 + 涨跌幅/行情缺 + 连板。
+function renderStockChip(s: ThemeStock) {
+	const hasQuote = (s.price ?? 0) > 0 || (s.change_percent ?? 0) !== 0;
+	return (
+		<span className="nv-stock" key={s.symbol} title={s.symbol}>
+			<b>{s.name}</b>
+			<span className="nv-stock-code">{s.symbol}</span>
+			{s.rank_role ? <span className="nv-stock-role">{s.rank_role}</span> : null}
+			{hasQuote ? (
+				<span className={s.change_percent >= 0 ? 'nv-stock-up' : 'nv-stock-down'}>
+					{s.change_percent >= 0 ? '+' : ''}
+					{Number(s.change_percent ?? 0).toFixed(2)}%
+				</span>
+			) : (
+				<span className="nv-stock-nodata">行情缺</span>
+			)}
+			{s.limit_up_streak ? (
+				<span className="nv-stock-streak">{s.limit_up_streak}板</span>
+			) : null}
+		</span>
+	);
 }
 
 const DIRECTION_CLASS: Record<string, string> = {
@@ -413,35 +442,26 @@ export function NewsVerdictWorkspace({
 						</span>
 						{stocksLoading && <div className="nv-muted">个股池加载中…</div>}
 						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length > 0 && (
-							<div className="nv-stocks">
-								{themeStocks.stocks.map((s) => {
-									const hasQuote = (s.price ?? 0) > 0 || (s.change_percent ?? 0) !== 0;
-									return (
-										<span className="nv-stock" key={s.symbol} title={s.symbol}>
-											<b>{s.name}</b>
-											<span className="nv-stock-code">{s.symbol}</span>
-											{s.rank_role ? (
-												<span className="nv-stock-role">{s.rank_role}</span>
-											) : null}
-											{hasQuote ? (
-												<span
-													className={
-														s.change_percent >= 0 ? 'nv-stock-up' : 'nv-stock-down'
-													}
-												>
-													{s.change_percent >= 0 ? '+' : ''}
-													{Number(s.change_percent ?? 0).toFixed(2)}%
-												</span>
-											) : (
-												<span className="nv-stock-nodata">行情缺</span>
-											)}
-											{s.limit_up_streak ? (
-												<span className="nv-stock-streak">{s.limit_up_streak}板</span>
-											) : null}
-										</span>
-									);
-								})}
-							</div>
+							themeStocks.groups && themeStocks.groups.length > 0 ? (
+								// 宽题材按细分板块组展示（AI算力 → 算力/CPO/光通信/数据中心/AI芯片…）
+								<div className="nv-stock-groups">
+									{themeStocks.groups.map((g) => (
+										<div className="nv-stock-group" key={g.board}>
+											<span className="nv-stock-group-title">
+												{g.board}
+												<i>{g.count} 只</i>
+											</span>
+											<div className="nv-stocks">
+												{g.stocks.map((s) => renderStockChip(s))}
+											</div>
+										</div>
+									))}
+								</div>
+							) : (
+								<div className="nv-stocks">
+									{themeStocks.stocks.map((s) => renderStockChip(s))}
+								</div>
+							)
 						)}
 						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length === 0 && (
 							<div className="nv-muted">

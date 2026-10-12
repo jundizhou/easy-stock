@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -399,5 +400,134 @@ func TestThemeCatalogCachedAcrossRequests(t *testing.T) {
 	}
 	if catalog.calls != 1 {
 		t.Fatalf("expected stock catalog fetched once (cached), got %d", catalog.calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 宽题材按细分板块组下钻（2026-10-12：用户反馈「分类太泛」）
+// ---------------------------------------------------------------------------
+
+func newsCatalogGroupsSample() []foundation.StockCatalogEntry {
+	return []foundation.StockCatalogEntry{
+		{BoardStock: foundation.BoardStock{Symbol: "300308.SZ", Name: "中际旭创", Price: 100.0, ChangePercent: 5.0, Amount: 20e8}, Industry: "通信设备", Concepts: []string{"CPO概念", "光通信模块"}},
+		{BoardStock: foundation.BoardStock{Symbol: "300502.SZ", Name: "新易盛", Price: 80.0, ChangePercent: 4.0, Amount: 15e8}, Industry: "通信设备", Concepts: []string{"CPO概念"}},
+		{BoardStock: foundation.BoardStock{Symbol: "300394.SZ", Name: "天孚通信", Price: 60.0, ChangePercent: 3.0, Amount: 8e8}, Industry: "通信设备", Concepts: []string{"光通信模块", "算力概念"}},
+		{BoardStock: foundation.BoardStock{Symbol: "000938.SZ", Name: "紫光股份", Price: 25.0, ChangePercent: 2.0, Amount: 12e8}, Industry: "计算机硬件", Concepts: []string{"算力概念", "数据中心"}},
+		{BoardStock: foundation.BoardStock{Symbol: "603019.SH", Name: "中科曙光", Price: 50.0, ChangePercent: 1.5, Amount: 10e8}, Industry: "计算机硬件", Concepts: []string{"算力概念", "数据中心"}},
+		{BoardStock: foundation.BoardStock{Symbol: "688981.SH", Name: "中芯国际", Price: 88.0, ChangePercent: -1.2, Amount: 30e8}, Industry: "半导体", Concepts: []string{"AI芯片", "芯片"}},
+		{BoardStock: foundation.BoardStock{Symbol: "603501.SH", Name: "韦尔股份", Price: 110.0, ChangePercent: 0.5, Amount: 9e8}, Industry: "半导体", Concepts: []string{"AI芯片"}},
+		// 风险警示股必须被剔出成分池（涨得再猛也不该当「受益个股」展示）。
+		{BoardStock: foundation.BoardStock{Symbol: "600080.SH", Name: "*ST金花", Price: 1.5, ChangePercent: 5.0, Amount: 1e7}, Concepts: []string{"算力概念"}},
+		{BoardStock: foundation.BoardStock{Symbol: "600090.SH", Name: "ST济堂", Price: 2.0, ChangePercent: 4.9, Amount: 1e7}, Concepts: []string{"数据中心"}},
+	}
+}
+
+// 宽题材应查到细分板块组；未配置的题材返回 nil（走单板块逻辑）。
+func TestThemeBoardGroupsFor(t *testing.T) {
+	if got := themeBoardGroupsFor("AI算力"); len(got) == 0 || got[0] != "算力概念" {
+		t.Fatalf("AI算力 should map to 算力概念 first, got %v", got)
+	}
+	if got := themeBoardGroupsFor("ai 算力"); len(got) == 0 || got[0] != "算力概念" {
+		t.Fatalf("normalized lookup failed, got %v", got)
+	}
+	if got := themeBoardGroupsFor("美联储"); got != nil {
+		t.Fatalf("宏观词不应有细分组, got %v", got)
+	}
+}
+
+// ST/*ST 必须被 catalogConstituents 剔除。
+func TestCatalogConstituentsDropsRiskWarningStocks(t *testing.T) {
+	stocks := catalogConstituents(newsCatalogGroupsSample(), "算力概念", 20)
+	for _, s := range stocks {
+		if isRiskWarningStock(s.Name) {
+			t.Fatalf("risk-warning stock %q leaked into pool", s.Name)
+		}
+	}
+	if len(stocks) != 3 {
+		t.Fatalf("expected 3 non-ST constituents of 算力概念, got %d (%+v)", len(stocks), stocks)
+	}
+}
+
+// 宽题材下钻应按细分板块组分组返回，且组内无 ST、组名顺序与配置一致。
+func TestNewsThemeStocksGroupsBySubBoard(t *testing.T) {
+	s := &Server{
+		themeOverview:     fakeNewsThemeProvider{items: newsThemeSampleOverviews()},
+		themeStockCatalog: &fakeStockCatalog{entries: newsCatalogGroupsSample()},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/news/theme/stocks?theme=AI%E7%AE%97%E5%8A%9B", nil)
+	s.newsThemeStocks(rec, req)
+
+	var resp struct {
+		Matched     bool                    `json:"matched"`
+		MatchedName string                  `json:"matched_name"`
+		MatchSource string                  `json:"match_source"`
+		Groups      []ThemeStockGroup       `json:"groups"`
+		Stocks      []foundation.BoardStock `json:"stocks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Matched || resp.MatchSource != "eastmoney-catalog" {
+		t.Fatalf("expected catalog groups, got %+v", resp)
+	}
+	// 组序必须与 newsThemeBoardGroups["AI算力"] 配置顺序一致（成分非空的组）。
+	wantOrder := []string{"算力概念", "CPO概念", "光通信模块", "数据中心", "AI芯片", "通信设备"}
+	gotOrder := make([]string, 0, len(resp.Groups))
+	for _, g := range resp.Groups {
+		gotOrder = append(gotOrder, g.Board)
+		for _, st := range g.Stocks {
+			if isRiskWarningStock(st.Name) {
+				t.Fatalf("group %q contains risk-warning stock %q", g.Board, st.Name)
+			}
+		}
+		if g.Count != len(g.Stocks) {
+			t.Fatalf("group %q count mismatch: %d vs %d", g.Board, g.Count, len(g.Stocks))
+		}
+	}
+	if strings.Join(gotOrder, "|") != strings.Join(wantOrder, "|") {
+		t.Fatalf("group order = %v, want %v", gotOrder, wantOrder)
+	}
+	// 汇总 stocks 需按代码去重（中际旭创同属 CPO概念 与 光通信模块，只应出现一次）。
+	seen := map[string]int{}
+	for _, st := range resp.Stocks {
+		seen[st.Symbol]++
+	}
+	for sym, n := range seen {
+		if n > 1 {
+			t.Fatalf("symbol %q appears %d times in merged stocks", sym, n)
+		}
+	}
+	if len(resp.Stocks) != len(seen) {
+		t.Fatalf("merged stocks not deduped: %d entries, %d unique", len(resp.Stocks), len(seen))
+	}
+}
+
+// 无细分组配置的题材仍走原单板块反查（不因新逻辑损失覆盖）。
+func TestNewsThemeStocksWithoutGroupsFallsBackToSingleBoard(t *testing.T) {
+	s := &Server{
+		themeOverview:     fakeNewsThemeProvider{items: newsThemeSampleOverviews()},
+		themeStockCatalog: &fakeStockCatalog{entries: newsCatalogSample()},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/news/theme/stocks?theme=%E5%8D%8A%E5%AF%BC%E4%BD%93", nil) // 半导体无细分组外的单板块路径
+	s.newsThemeStocks(rec, req)
+
+	var resp struct {
+		Matched     bool                    `json:"matched"`
+		MatchSource string                  `json:"match_source"`
+		Groups      []ThemeStockGroup       `json:"groups"`
+		Stocks      []foundation.BoardStock `json:"stocks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// 半导体配了细分组，但样本目录里只有「半导体」行业本身有成分（半导体概念/AI芯片等缺失），
+	// 分组至少应包含「半导体」组。
+	if !resp.Matched || resp.MatchSource != "eastmoney-catalog" || len(resp.Groups) == 0 {
+		t.Fatalf("expected groups or single-board fallback, got %+v", resp)
+	}
+	if resp.Groups[0].Board != "半导体" {
+		t.Fatalf("expected first group 半导体, got %q", resp.Groups[0].Board)
 	}
 }
