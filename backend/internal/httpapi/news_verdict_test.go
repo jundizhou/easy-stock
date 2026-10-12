@@ -301,6 +301,90 @@ func TestNewsThemeStocksPrefersCatalogWhenRadarLacksQuotes(t *testing.T) {
 	}
 }
 
+// 目录兜底里的板块名必须对齐东方财富真实口径（此前写的「石油石化/证券」
+// 在目录里根本不存在，导致原油/券商类题材漏配）。
+func newsCatalogRealNamesSample() []foundation.StockCatalogEntry {
+	return []foundation.StockCatalogEntry{
+		{BoardStock: foundation.BoardStock{Symbol: "600276.SH", Name: "恒瑞医药", Price: 45.0, ChangePercent: 2.4}, Industry: "化学制药", Concepts: []string{"生物医药"}},
+		{BoardStock: foundation.BoardStock{Symbol: "300122.SZ", Name: "智飞生物", Price: 30.0, ChangePercent: 1.1}, Industry: "生物医药"},
+		{BoardStock: foundation.BoardStock{Symbol: "600030.SH", Name: "中信证券", Price: 22.0, ChangePercent: 0.6}, Industry: "非银行金融", Concepts: []string{"证券"}},
+		{BoardStock: foundation.BoardStock{Symbol: "601857.SH", Name: "中国石油", Price: 8.0, ChangePercent: 0.3}, Industry: "石油天然气", Concepts: []string{"油气资源"}},
+		{BoardStock: foundation.BoardStock{Symbol: "600028.SH", Name: "中国石化", Price: 6.5, ChangePercent: 0.2}, Industry: "石油天然气"},
+	}
+}
+
+func TestBestBoardMatchUsesRealEastmoneyNames(t *testing.T) {
+	names := catalogBoardNames(newsCatalogRealNamesSample())
+	cases := map[string]string{
+		"券商":     "非银行金融",
+		"券商策略":   "非银行金融",
+		"原油市场动态": "石油天然气",
+		"石油":     "石油天然气",
+		"医药生物":   "生物医药",
+	}
+	for news, want := range cases {
+		got, ok, score := bestBoardMatch(names, news)
+		if !ok {
+			t.Fatalf("theme %q: expected board %q, got no match", news, want)
+		}
+		if got != want {
+			t.Fatalf("theme %q: expected %q, got %q (score %d)", news, want, got, score)
+		}
+	}
+}
+
+// 资讯原词对不上板块、但行情侧已命中某题材时，应退一步用行情侧题材名反查目录，
+// 避免「matched=true 但个股池为空」（用户实测「医药生物」即此情形）。
+func TestNewsThemeStocksRetriesCatalogWithRadarMatchedName(t *testing.T) {
+	s := &Server{
+		themeOverview:     fakeNewsThemeProvider{items: []foundation.ThemeOverview{{Theme: "kpl:mil", Name: "军工"}}},
+		themeStockCatalog: &fakeStockCatalog{entries: newsCatalogSample()},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/news/theme/stocks?theme=%E5%86%9B%E5%B7%A5%E8%A3%85%E5%A4%87", nil) // 军工装备
+	s.newsThemeStocks(rec, req)
+
+	var resp struct {
+		Matched     bool                    `json:"matched"`
+		MatchedName string                  `json:"matched_name"`
+		MatchSource string                  `json:"match_source"`
+		Stocks      []foundation.BoardStock `json:"stocks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Matched || resp.MatchSource != "eastmoney-catalog" || resp.MatchedName != "军工" || len(resp.Stocks) != 2 {
+		t.Fatalf("expected catalog via radar name fallback, got %+v", resp)
+	}
+}
+
+// 行情侧命中但个股池过薄（带行情 < themeRadarMinQuoted）时，改用目录的更全成分。
+func TestNewsThemeStocksPrefersCatalogWhenRadarPoolThin(t *testing.T) {
+	s := &Server{
+		themeOverview: fakeNewsThemeProvider{items: []foundation.ThemeOverview{{
+			Theme: "kpl:air", Name: "航空",
+			LeaderStocks: []foundation.BoardStock{{Symbol: "600029.SH", Name: "南方航空", Price: 7.0, ChangePercent: 1.0}},
+		}}},
+		themeStockCatalog: &fakeStockCatalog{entries: newsCatalogSample()},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/news/theme/stocks?theme=%E8%88%AA%E7%A9%BA", nil) // 航空
+	s.newsThemeStocks(rec, req)
+
+	var resp struct {
+		Matched     bool                    `json:"matched"`
+		MatchedName string                  `json:"matched_name"`
+		MatchSource string                  `json:"match_source"`
+		Stocks      []foundation.BoardStock `json:"stocks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Matched || resp.MatchSource != "eastmoney-catalog" || resp.MatchedName != "航空装备" || len(resp.Stocks) != 2 {
+		t.Fatalf("expected catalog when radar pool is thin, got %+v", resp)
+	}
+}
+
 // 股票目录应按 TTL 缓存，避免每次下钻都全量拉取 5000+ 行。
 func TestThemeCatalogCachedAcrossRequests(t *testing.T) {
 	catalog := &fakeStockCatalog{entries: newsCatalogSample()}

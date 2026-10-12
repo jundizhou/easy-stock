@@ -227,10 +227,22 @@ func (s *Server) newsThemeStocks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// L2：行情热点口径很窄（当日涨停题材，通常仅数十个），而资讯题材多为行业/概念，
-	// 覆盖不到。未命中、命中但无龙头、或龙头缺行情（面板会显示「行情缺」）时，
-	// 退回全市场股票目录，按所属行业/概念反查成分股。
-	if !hasQuotedStock(stocks) {
-		if boardStocks, boardName, ok2 := s.matchThemeStocksFromCatalog(ctx, theme, limit); ok2 && len(boardStocks) > 0 {
+	// 覆盖不到；且热门题材的龙头股常缺行情（面板会显示「行情缺」），或仅有 1~2 只，
+	// 对「受益个股池」而言过薄。故当行情侧命中池不足 themeRadarMinQuoted 只
+	//（含未命中/无龙头/缺行情/过薄）时，退回全市场股票目录，按所属行业/概念反查成分股。
+	// 反查先用资讯原词，再退一步用行情侧命中的题材名（其口径更贴近板块名）。
+	if countQuotedStocks(stocks) < themeRadarMinQuoted {
+		candidates := []string{theme}
+		if ok {
+			if name := strings.TrimSpace(match.Name); name != "" && normalizeThemeName(name) != normalizeThemeName(theme) {
+				candidates = append(candidates, name)
+			}
+		}
+		for _, candidate := range candidates {
+			boardStocks, boardName, ok2 := s.matchThemeStocksFromCatalog(ctx, candidate, limit)
+			if !ok2 || len(boardStocks) == 0 {
+				continue
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"theme":        theme,
 				"matched":      true,
@@ -311,8 +323,10 @@ var newsThemeSynonyms = map[string][]string{
 	"黄金":     {"贵金属", "有色金属"},
 	"稀土":     {"小金属", "有色金属", "稀土永磁"},
 	"化工":     {"化学制品", "基础化工", "化学原料", "氟化工", "磷化工", "煤化工"},
-	"原油市场动态": {"石油石化", "油气开采", "炼化及贸易"},
-	"石油":     {"石油石化", "油气开采"},
+	"原油市场动态": {"石油天然气", "油气资源", "油气设服"},
+	"原油":     {"石油天然气", "油气资源"},
+	"石油":     {"石油天然气", "油气资源", "石油石化"},
+	"石化":     {"石油天然气", "化学制品"},
 	"煤炭":     {"煤炭", "焦炭", "焦煤"},
 	"钢铁":     {"钢铁", "普钢", "特钢"},
 	"地产建筑":   {"房地产开发", "建筑装饰", "房地产", "水泥", "工程建设"},
@@ -323,11 +337,14 @@ var newsThemeSynonyms = map[string][]string{
 	"传媒":     {"文化传媒", "平面媒体", "广播电视", "影视动漫", "数字媒体", "广告营销", "营销服务", "出版"},
 	"游戏":     {"游戏", "影视动漫", "文化传媒", "数字媒体"},
 	"金融":     {"证券", "银行", "保险", "多元金融"},
-	"券商":     {"证券", "多元金融"},
+	"券商":     {"非银行金融", "证券", "多元金融"},
+	"券商策略":   {"非银行金融", "证券", "多元金融"},
+	"证券":     {"非银行金融"},
 	"银行":     {"银行"},
 	"保险":     {"保险"},
-	"医药":     {"医药", "化学制药", "中药", "生物制品", "医疗器械", "医疗服务"},
-	"医疗":     {"医疗器械", "医疗服务", "医药", "生物制品"},
+	"医药":     {"医药", "化学制药", "中药生产", "中药概念", "生物医药", "医疗器械", "医疗服务", "医药商业"},
+	"医药生物":   {"生物医药", "化学制药", "中药生产", "医疗器械", "医疗服务", "医药商业"},
+	"医疗":     {"医疗器械", "医疗服务", "医药", "生物医药"},
 	"消费":     {"食品饮料", "白酒", "零售", "家电", "商业百货"},
 	"白酒":     {"白酒", "食品饮料"},
 	"食品":     {"食品饮料", "农产品加工"},
@@ -512,6 +529,10 @@ const boardMatchMinScore = 560
 // themeCatalogTTL 股票目录快照缓存时长（提供方自身另有 3 分钟缓存）。
 const themeCatalogTTL = 2 * time.Minute
 
+// themeRadarMinQuoted 行情侧命中池的最小可用规模：带行情的成分股少于该值时，
+// 视为「过薄」，改用全市场股票目录的行业/概念成分（避免个股池只有 1~2 只）。
+const themeRadarMinQuoted = 3
+
 // normalizeBoardName 归一化板块名，并去掉「行业/板块/指数/Ⅱ/Ⅲ」等口径后缀。
 func normalizeBoardName(s string) string {
 	n := normalizeThemeName(s)
@@ -693,14 +714,16 @@ func catalogConstituents(entries []foundation.StockCatalogEntry, boardName strin
 	return stocks
 }
 
-// hasQuotedStock 判断带来的成分股是否带真实行情（否则前端会显示「行情缺」）。
-func hasQuotedStock(stocks []foundation.BoardStock) bool {
+// countQuotedStocks 统计带真实行情的成分股数量（Price>0 或涨跌幅非 0）；缺行情的
+// 记录会让前端显示「行情缺」，不计入。
+func countQuotedStocks(stocks []foundation.BoardStock) int {
+	n := 0
 	for _, stock := range stocks {
 		if stock.Price > 0 || stock.ChangePercent != 0 {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // matchThemeStocksFromCatalog 兜底：把资讯题材名匹配到目录里的行业/概念并返回成分股。
