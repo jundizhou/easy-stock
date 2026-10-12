@@ -97,6 +97,13 @@ interface ThemeStocksResponse {
 	note?: string;
 }
 
+// 板块名过长（多细分领域）时截断为「前3 / 等 N 组」，hover 看全量。
+function formatBoardNames(name: string): string {
+	const parts = name.split(/\s*\/\s*/).filter(Boolean);
+	if (parts.length <= 3) return name;
+	return `${parts.slice(0, 3).join(' / ')} 等 ${parts.length} 组`;
+}
+
 // 单个个股 chip（分组/平铺共用）：名称 + 代码 + 角色 + 涨跌幅/行情缺 + 连板。
 function renderStockChip(s: ThemeStock) {
 	const hasQuote = (s.price ?? 0) > 0 || (s.change_percent ?? 0) !== 0;
@@ -150,7 +157,7 @@ function Dimension({ label, value }: { label: string; value: string }) {
 function VerdictCard({ item }: { item: VerdictItem }) {
 	const v = item.verdict;
 	return (
-		<article className="nv-card" key={item.uid}>
+		<article className={`nv-card nv-card-${v.direction}`} key={item.uid}>
 			<header className="nv-card-head">
 				<span className={`nv-direction ${DIRECTION_CLASS[v.direction] ?? 'v-unknown'}`}>
 					{v.direction}
@@ -339,6 +346,12 @@ export function NewsVerdictWorkspace({
 		return ferment.views?.[sourceView] ?? [];
 	}, [ferment, sourceView, windowKey]);
 
+	// 热度条比例基准（取当前视图最大热度，至少 1 防除零）
+	const maxHeat = useMemo(
+		() => Math.max(1, ...rankThemes.map((t) => t.heat)),
+		[rankThemes],
+	);
+
 	// 逐条研判：筛选 + 排序（提升信噪比）
 	const detailItems = useMemo(() => {
 		let list = verdictItems;
@@ -364,17 +377,18 @@ export function NewsVerdictWorkspace({
 	return (
 		<section className="news-verdict-workspace">
 			<div className="nv-header">
-				<h2>资讯研判 · 利好/利空五维度</h2>
-				<p className="nv-subtitle">
-					事实 → 对象 → 传导链 → 预期差 → 分周期结论 → 验证。仅研究观察，
-					<strong>不生成交易指令</strong>。
+				<div className="nv-header-top">
+					<h2>资讯研判 · 利好/利空五维度</h2>
 					{engine && (
 						<span className="nv-engine">
-							{' '}
 							{engine.llm_used ? 'AI 抽取：真实 LLM' : 'AI 抽取：规则弱实现'} ·{' '}
 							{engine.configured ? '引擎已配置' : '引擎未配置'}
 						</span>
 					)}
+				</div>
+				<p className="nv-subtitle">
+					事实 → 对象 → 传导链 → 预期差 → 分周期结论 → 验证。仅研究观察，
+					<strong>不生成交易指令</strong>。
 				</p>
 			</div>
 
@@ -408,37 +422,47 @@ export function NewsVerdictWorkspace({
 			{/* 下钻：题材样本 + 受益个股池 */}
 			{drillTheme && (
 				<div className="nv-drill">
-					<div className="nv-drill-head">
-						<button type="button" className="nv-back" onClick={closeDrill}>
-							← 返回排行
-						</button>
-						<span className="nv-drill-title">
-							{drillTheme.name} · {drillTheme.stage} · 热度 {drillTheme.heat}
+				<div className="nv-drill-head">
+					<button type="button" className="nv-back" onClick={closeDrill}>
+						← 返回排行
+					</button>
+					<span className="nv-drill-title">{drillTheme.name}</span>
+					<span className="nv-drill-heat">
+						热度 <b>{drillTheme.heat}</b>
+					</span>
+					<span className={`nv-rank-stage nv-stage-${drillTheme.stage}`}>
+						{drillTheme.stage}
+					</span>
+					{drillTheme.trend && (
+						<span className={`nv-trend nv-trend-${drillTheme.trend}`}>
+							{drillTheme.trend}
 						</span>
-						{probeTheme && probeTheme !== drillTheme.name && (
-							<span className="nv-drill-probe">个股池改查行情侧「{probeTheme}」</span>
-						)}
-						{drillTheme.trend && (
-							<span className={`nv-trend nv-trend-${drillTheme.trend}`}>
-								{drillTheme.trend}
-							</span>
-						)}
-						<span className={`nv-drill-sentiment nv-sent-${drillTheme.sentiment}`}>
-							{drillTheme.sentiment}
-						</span>
-					</div>
+					)}
+					<span className={`nv-rank-sentiment nv-sent-${drillTheme.sentiment}`}>
+						{drillTheme.sentiment}
+					</span>
+					{probeTheme && probeTheme !== drillTheme.name && (
+						<span className="nv-drill-probe">个股池改查行情侧「{probeTheme}」</span>
+					)}
+				</div>
 
 					{/* 受益个股池（行情侧热门题材龙头池 / 东财板块成分，仅研究观察） */}
 					<div className="nv-stocks-block">
 						<span className="nv-section-label">
 							受益个股池
-							{themeStocks?.matched_name
-								? ` · ${
-										themeStocks.match_source === 'eastmoney-catalog'
-											? '东财行业/概念'
-											: '行情侧题材'
-									}「${themeStocks.matched_name}」`
-								: ''}
+							{themeStocks?.matched_name ? (
+								<span
+									className={`nv-match-src nv-match-src-${
+										themeStocks.match_source === 'eastmoney-catalog' ? 'catalog' : 'radar'
+									}`}
+									title={themeStocks.matched_name}
+								>
+									{themeStocks.match_source === 'eastmoney-catalog'
+										? '东财行业/概念'
+										: '行情侧题材'}
+									「{formatBoardNames(themeStocks.matched_name)}」
+								</span>
+							) : null}
 						</span>
 						{stocksLoading && <div className="nv-muted">个股池加载中…</div>}
 						{!stocksLoading && themeStocks && themeStocks.matched && themeStocks.stocks.length > 0 && (
@@ -549,33 +573,39 @@ export function NewsVerdictWorkspace({
 					{rankThemes.length === 0 ? (
 						<div className="nv-empty">该视图/时间窗内题材样本不足。</div>
 					) : (
-						<div className="nv-rank">
-							{rankThemes.map((t) => (
-								<button
-									type="button"
-									className="nv-rank-row"
-									key={`${t.rank}-${t.name}`}
-									onClick={() => openDrill(t)}
-									title="点击下钻：受益个股池 + 该题材样本资讯"
-								>
-									<span className="nv-rank-no">{t.rank}</span>
-									<span className="nv-rank-name">{t.name}</span>
-									{t.trend && (
-										<span className={`nv-trend nv-trend-${t.trend}`}>{t.trend}</span>
-									)}
-									<span className={`nv-rank-stage nv-stage-${t.stage}`}>{t.stage}</span>
-									<span className={`nv-rank-sentiment nv-sent-${t.sentiment}`}>
-										{t.sentiment}
-									</span>
-									<span className="nv-rank-heat">
-										热度 <b>{t.heat}</b>
-									</span>
-									<span className="nv-rank-meta">
-										{t.count}条 · 增速{t.velocity} · {t.diversity}源
-									</span>
-								</button>
-							))}
-						</div>
+					<div className="nv-rank">
+						{rankThemes.map((t) => (
+							<button
+								type="button"
+								className={`nv-rank-row${t.rank <= 3 ? ' nv-rank-top' : ''}`}
+								key={`${t.rank}-${t.name}`}
+								onClick={() => openDrill(t)}
+								title="点击下钻：受益个股池 + 该题材样本资讯"
+							>
+								<span className={`nv-rank-no${t.rank <= 3 ? ' nv-rank-no-top' : ''}`}>
+									{t.rank}
+								</span>
+								<span className="nv-rank-name">{t.name}</span>
+								{t.trend && (
+									<span className={`nv-trend nv-trend-${t.trend}`}>{t.trend}</span>
+								)}
+								<span className={`nv-rank-stage nv-stage-${t.stage}`}>{t.stage}</span>
+								<span className={`nv-rank-sentiment nv-sent-${t.sentiment}`}>
+									{t.sentiment}
+								</span>
+								<span className="nv-rank-heat">
+									热度 <b>{t.heat}</b>
+									<i
+										className="nv-heat-bar"
+										style={{ width: `${Math.round((t.heat / maxHeat) * 100)}%` }}
+									/>
+								</span>
+								<span className="nv-rank-meta">
+									{t.count}条 · 增速{t.velocity} · {t.diversity}源
+								</span>
+							</button>
+						))}
+					</div>
 					)}
 				</>
 			)}
