@@ -76,7 +76,7 @@ func checkRefs(job Job, refs []pi.EvidenceRef) error {
 	if len(refs) == 0 {
 		return errors.New("缺少证据引用")
 	}
-	report := pi.OptimizationUnionReport(job.Source.Request, job.Results)
+	report := pi.OptimizationUnionReport(job.Source.Request, job.Results, job.SnapshotAt)
 	normalized := append([]pi.EvidenceRef(nil), refs...)
 	for i, ref := range refs {
 		if ref.Fact != "" {
@@ -317,10 +317,10 @@ func frozenGroups(groups []pi.RiskGroup, holdings []pi.Holding) []pi.RiskGroup {
 	return out
 }
 func measureImprovements(job Job, target []pi.Holding) []Improvement {
-	before := pi.OptimizationReport(job.Source.Request, job.Results)
+	before := pi.OptimizationReport(job.Source.Request, job.Results, job.SnapshotAt)
 	req := job.Source.Request
 	req.Holdings = target
-	after := pi.OptimizationReport(req, job.Results)
+	after := pi.OptimizationReport(req, job.Results, job.SnapshotAt)
 	out := []Improvement{}
 	add := func(issue, key string, b, a float64) {
 		if a < b {

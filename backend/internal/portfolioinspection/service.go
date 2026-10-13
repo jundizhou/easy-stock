@@ -105,7 +105,7 @@ func (s *Service) start(ctx context.Context, request Request, previous *Job, sch
 		return Job{}, ErrJobRunning
 	}
 	now := time.Now().UTC()
-	job := Job{ID: newID(), Status: "running", Stage: "resolving_reports", Request: normalized, Results: make([]HoldingResult, len(normalized.Holdings)), TotalStocks: len(normalized.Holdings), Message: "正在查找24小时内个股AI报告，仅补齐缺失股票", StartedAt: now, UpdatedAt: now}
+	job := Job{ID: newID(), Status: "running", Stage: "resolving_reports", Request: normalized, Results: make([]HoldingResult, len(normalized.Holdings)), TotalStocks: len(normalized.Holdings), Message: "正在查找24小时内标的AI报告，仅补齐缺失标的", StartedAt: now, UpdatedAt: now}
 	for i, h := range normalized.Holdings {
 		job.Results[i] = HoldingResult{Holding: h, Status: "queued"}
 	}
@@ -303,7 +303,7 @@ func (s *Service) run(ctx context.Context, job Job) {
 					}
 					result = HoldingResult{Holding: base.Holding, Analysis: &analysis, AnalysisID: analysis.AnalysisID, ResearchOrigin: "new", Status: "succeeded"}
 					if !validHoldingResearch(result) && err == nil {
-						err = errors.New("个股AI研究未成功，量化快照不算成功报告")
+						err = errors.New("标的AI研究未成功，量化快照不算成功报告")
 					}
 				}
 				send(event{index: index, result: result, done: true, err: err})
@@ -327,7 +327,7 @@ func (s *Service) run(ctx context.Context, job Job) {
 			for i := range job.Results {
 				if !validHoldingResearch(job.Results[i]) {
 					job.Results[i].Status = "failed"
-					job.Results[i].Error = "组合等待已结束，已启动的个股研究仍可独立完成"
+					job.Results[i].Error = "组合等待已结束，已启动的标的研究仍可独立完成"
 				}
 			}
 			s.finishPartial(&job, ctx.Err())
@@ -347,7 +347,7 @@ func (s *Service) run(ctx context.Context, job Job) {
 					r.Error = item.err.Error()
 				} else if !validHoldingResearch(r) {
 					r.Status = "failed"
-					r.Error = "个股AI报告未通过完整性检查"
+					r.Error = "标的AI报告未通过完整性检查"
 				} else {
 					r.Status = "succeeded"
 				}
@@ -373,7 +373,7 @@ func (s *Service) run(ctx context.Context, job Job) {
 	}
 	s.refreshQuotes(ctx, &job)
 	if succeededCount(job.Results) != len(job.Results) {
-		s.finishPartial(&job, errors.New("部分个股AI研究未完成，请补齐失败个股；已有成功报告已保留"))
+		s.finishPartial(&job, errors.New("部分标的AI研究未完成，请补齐失败标的；已有成功报告已保留"))
 		return
 	}
 	updateResearchCounts(&job)
@@ -383,19 +383,19 @@ func (s *Service) run(ctx context.Context, job Job) {
 	job.CurrentSymbols = nil
 	job.CoveragePercent = metrics.AIResearchCoveragePercent
 	job.AggregationStartedAt = time.Now().UTC()
-	job.Message = "个股AI报告已就绪，正在综合评分和评估组合风险"
+	job.Message = "标的AI报告已就绪，正在综合评分和评估组合风险"
 	s.persist(job)
 	if s.logger != nil {
 		s.logger.Printf("level=info event=portfolio_aggregation_start feature=portfolio-inspection job_id=%q reused=%d new=%d shared=%d", job.ID, job.ReusedStocks, job.NewStocks, job.SharedStocks)
 	}
-	conclusion, err := s.scorePortfolio(ctx, job.Request, job.Results, metrics, rules)
+	conclusion, err := s.scorePortfolio(ctx, job.Request, job.Results, metrics, rules, job.AggregationStartedAt)
 	job.AggregationDurationMS = time.Since(job.AggregationStartedAt).Milliseconds()
 	if err != nil {
 		s.finishPartial(&job, err)
 		return
 	}
 	now := time.Now().UTC()
-	job.Report = &Report{ID: job.ID, PromptVersion: PromptVersion, AlgorithmVersion: AlgorithmVersion, Profile: rules, Holdings: job.Results, Metrics: metrics, Conclusion: conclusion, GeneratedAt: now, Request: job.Request, Facts: portfolioFacts(job.Request, job.Results, metrics), Model: agent.BoundModel(ctx)}
+	job.Report = &Report{ID: job.ID, PromptVersion: PromptVersion, AlgorithmVersion: AlgorithmVersion, Profile: rules, Holdings: job.Results, Metrics: metrics, Conclusion: conclusion, GeneratedAt: now, EvaluatedAt: job.AggregationStartedAt, Request: job.Request, Facts: portfolioFactsAt(job.Request, job.Results, metrics, job.AggregationStartedAt), Model: agent.BoundModel(ctx)}
 	job.ReportAvailable = true
 	job.Status = "succeeded"
 	job.Stage = "completed"
@@ -475,7 +475,7 @@ func (s *Service) finishPartial(job *Job, err error) {
 	rules, _ := RulesFor(job.Request.TraderProfile)
 	metrics := metricsForReport(job.Request, job.Results, rules)
 	// Do not publish old rule-based actions or zero-risk scores as completed AI output.
-	conclusion := AIReport{Source: "incomplete", RiskLevel: "待评估", StyleMatch: "待评估", ExecutiveSummary: fmt.Sprintf("已完成%d/%d只个股AI研究，覆盖%.1f%%持仓。组合评估尚未完成，已有报告已保留，可恢复任务。", succeededCount(job.Results), len(job.Results), metrics.AIResearchCoveragePercent), PrimaryRisks: []string{}, ConcentrationFinding: []string{}, Holdings: []HoldingConclusion{}, AdjustmentOrder: []string{}, Scenarios: []Scenario{}, NextChecklist: []string{}, DataLimitations: []string{err.Error()}}
+	conclusion := AIReport{Source: "incomplete", RiskLevel: "待评估", StyleMatch: "待评估", ExecutiveSummary: fmt.Sprintf("已完成%d/%d只标的AI研究，覆盖%.1f%%持仓。组合评估尚未完成，已有报告已保留，可恢复任务。", succeededCount(job.Results), len(job.Results), metrics.AIResearchCoveragePercent), PrimaryRisks: []string{}, ConcentrationFinding: []string{}, Holdings: []HoldingConclusion{}, AdjustmentOrder: []string{}, Scenarios: []Scenario{}, NextChecklist: []string{}, DataLimitations: []string{err.Error()}}
 	for _, r := range job.Results {
 		if !validHoldingResearch(r) {
 			conclusion.DataLimitations = append(conclusion.DataLimitations, r.Holding.Symbol+"："+r.Error)
@@ -492,7 +492,7 @@ func (s *Service) finishPartial(job *Job, err error) {
 	job.ReportAvailable = true
 	job.CurrentSymbols = nil
 	job.CoveragePercent = metrics.AIResearchCoveragePercent
-	job.Message = "已有个股报告已保存，可恢复缺失研究或重试组合评估"
+	job.Message = "已有标的报告已保存，可恢复缺失研究或重试组合评估"
 	job.Error = err.Error()
 	updateResearchCounts(job)
 	s.persist(*job)
@@ -520,7 +520,7 @@ func normalizeRequest(request Request) (Request, error) {
 		request.ResearchLevel = stockanalysis.ResearchLevelStandard
 	}
 	if !oneOf(string(request.ResearchLevel), "standard", "deep") {
-		return Request{}, errors.New("补齐个股研究请选择标准或深度")
+		return Request{}, errors.New("补齐标的研究请选择标准或深度")
 	}
 	request.PortfolioPlanID = strings.TrimSpace(request.PortfolioPlanID)
 	request.PortfolioPlanName = strings.TrimSpace(request.PortfolioPlanName)

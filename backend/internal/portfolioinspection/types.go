@@ -9,8 +9,8 @@ import (
 
 const (
 	MaxHoldings        = 10
-	PromptVersion      = "portfolio-inspection-v7"
-	AlgorithmVersion   = "portfolio-ai-score-v4"
+	PromptVersion      = "portfolio-inspection-v8"
+	AlgorithmVersion   = "portfolio-ai-score-v5"
 	MinimumAICoverage  = 70
 	DefaultConcurrency = 2
 )
@@ -135,6 +135,7 @@ type Scenario struct {
 }
 
 type AIReport struct {
+	ETFScoring           *ETFScoreSummary             `json:"etf_scoring,omitempty"`
 	TotalScore           *int                         `json:"total_score,omitempty"`
 	ScoreAvailable       bool                         `json:"score_available"`
 	Dimensions           []ScoreDimension             `json:"dimensions,omitempty"`
@@ -159,6 +160,7 @@ type AIReport struct {
 }
 
 type Report struct {
+	EvaluatedAt      time.Time       `json:"evaluated_at,omitempty"`
 	ID               string          `json:"id"`
 	PromptVersion    string          `json:"prompt_version"`
 	AlgorithmVersion string          `json:"algorithm_version,omitempty"`

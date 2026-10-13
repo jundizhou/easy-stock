@@ -85,7 +85,7 @@ func proposalPrompt(job Job) (string, error) {
 			baseline, _, _ := weights(job.Baseline, false)
 			data["initial_baseline"] = baseline
 		}
-		data["original_configuration"] = modelConfiguration(pi.OptimizationReport(job.Source.Request, job.Results), nil)
+		data["original_configuration"] = modelConfiguration(pi.OptimizationReport(job.Source.Request, job.Results, job.SnapshotAt), nil)
 		limits := []any{}
 		eligibility := map[string]Eligibility{}
 		for _, e := range job.Eligibility {

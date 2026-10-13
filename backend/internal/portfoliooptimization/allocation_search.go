@@ -69,7 +69,7 @@ func buildQualityAllocationModel(job Job, alt Alternative, investmentValidated b
 	for _, e := range job.Eligibility {
 		elig[e.Symbol] = e
 	}
-	facts := pi.OptimizationUnionReport(job.Source.Request, job.Results).Facts
+	facts := pi.OptimizationUnionReport(job.Source.Request, job.Results, job.SnapshotAt).Facts
 	number := func(key string) (float64, bool) {
 		f := facts[key]
 		v, ok := f.Value.(float64)

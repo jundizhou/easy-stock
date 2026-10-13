@@ -614,9 +614,9 @@ func (s *Service) executeFrozen(ctx context.Context, job *Job) error {
 				plan.Checks = Check(job.Baseline, plan.Target)
 				plan.Improvements = measureImprovements(*job, plan.Target)
 				req := job.Source.Request
-				plan.Original = pi.OptimizationReport(req, job.Results)
+				plan.Original = pi.OptimizationReport(req, job.Results, job.SnapshotAt)
 				req.Holdings = plan.Target
-				plan.Proposed = pi.OptimizationReport(req, job.Results)
+				plan.Proposed = pi.OptimizationReport(req, job.Results, job.SnapshotAt)
 				if equalWeights(job.Source.Request.Holdings, plan.Target) {
 					plan.Status = "unchanged"
 					plan.Error = "未生成仓位变化，独立复评未执行"
@@ -1114,7 +1114,7 @@ func (s *Service) prepare(ctx context.Context, job *Job) error {
 	}
 	job.SnapshotAt = time.Now().UTC()
 	job.LatestTradeDate = LatestSession(job.SnapshotAt)
-	job.UnionFacts = pi.OptimizationUnionReport(job.Source.Request, job.Results).Facts
+	job.UnionFacts = pi.OptimizationUnionReport(job.Source.Request, job.Results, job.SnapshotAt).Facts
 	return s.save(job)
 }
 func hasResult(rs []pi.HoldingResult, s string) bool {

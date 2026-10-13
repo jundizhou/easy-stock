@@ -32,9 +32,9 @@ func NotificationMarkdown(job Job) string {
 		status = "未完成（以下为已生成结果）"
 	}
 	field("巡检状态", status)
-	field("个股研究", fmt.Sprintf("完成 %d/%d 只 · 复用 %d 份 · 新研究 %d 份 · 共享 %d 份", job.CompletedStocks, job.TotalStocks, job.ReusedStocks, job.NewStocks, job.SharedStocks))
+	field("标的研究", fmt.Sprintf("完成 %d/%d 只 · 复用 %d 份 · 新研究 %d 份 · 共享 %d 份", job.CompletedStocks, job.TotalStocks, job.ReusedStocks, job.NewStocks, job.SharedStocks))
 	if job.Report == nil {
-		b.WriteString("组合报告尚未生成，已有个股报告已保留，请在应用中继续研究或重试组合评估。\n")
+		b.WriteString("组合报告尚未生成，已有标的报告已保留，请在应用中继续研究或重试组合评估。\n")
 		return b.String()
 	}
 	r := job.Report
@@ -57,7 +57,11 @@ func NotificationMarkdown(job Job) string {
 	field("判断置信度", ai.ConfidenceLevel)
 	field("置信度说明", ai.ConfidenceReason)
 	if r.AlgorithmVersion == AlgorithmVersion {
-		b.WriteString("评分只评价股票组合，总仓位与现金比例不加扣分；集中度按股票内部配比衡量。\n\n")
+		if ETFPolicyFor(r.Holdings) != "" {
+			b.WriteString("评分评价股票与ETF组合，总仓位与现金比例不加扣分；内部配比按全部证券持仓衡量。ETF分散增益和有效溢价扣分由程序计算。\n\n")
+		} else {
+			b.WriteString("评分只评价股票组合，总仓位与现金比例不加扣分；集中度按股票内部配比衡量。\n\n")
+		}
 	}
 	if len(ai.Dimensions) > 0 {
 		heading("四维评分")
@@ -75,9 +79,21 @@ func NotificationMarkdown(job Job) string {
 		}
 		list("维度限制", d.Limitations)
 	}
+	if e := ai.ETFScoring; e != nil {
+		heading("ETF风险评分调整")
+		field("风险维度", fmt.Sprintf("基础 %d → 最终 %d；分散增益 +%.2f，溢价扣分 -%.2f（按证券持仓配比）", e.BaseRiskScore, e.FinalRiskScore, e.DiversificationBonus, e.PremiumPenalty))
+		field("评估时点", e.EvaluatedAt.In(scheduleZone).Format("2006-01-02 15:04")+"（北京时间）")
+		for _, a := range e.Adjustments {
+			value := a.PremiumReason
+			if a.PremiumEligible && a.PremiumPercent != nil {
+				value = fmt.Sprintf("参考溢价%.2f%%；观察%s；%s", *a.PremiumPercent, a.ObservedAt.In(scheduleZone).Format("01-02 15:04"), a.PremiumReason)
+			}
+			field(a.Symbol, fmt.Sprintf("占证券持仓%.2f%%；分散增益+%.2f，溢价扣分-%.2f；%s", a.WeightPercent, a.BonusContribution, a.PenaltyContribution, value))
+		}
+	}
 	list("处理顺序", ai.AdjustmentOrder)
 	list("主要风险", ai.PrimaryRisks)
-	heading("逐股持仓判断")
+	heading("逐标的持仓判断")
 	holdings := r.Holdings
 	if len(holdings) == 0 {
 		holdings = job.Results
@@ -112,7 +128,7 @@ func NotificationMarkdown(job Job) string {
 			field("确认条件", c.Confirmation)
 			field("失效条件", c.Invalidation)
 		} else {
-			field("判断", "组合逐股判断尚未生成，请在应用中查看已完成的个股研究")
+			field("判断", "组合逐标的判断尚未生成，请在应用中查看已完成的标的研究")
 		}
 	}
 	list("组合结构与联动", ai.ConcentrationFinding)

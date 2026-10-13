@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"easy-stock/backend/internal/review"
 )
 
 func buildExpectationPrompt(summary review.DailySummary, request Request, results []HoldingResult, metrics Metrics, rules ProfileRules) (string, error) {
 	stocks := make([]any, 0, len(results))
+	evaluatedAt := time.Now().UTC()
 	failed := make([]string, 0)
 	for _, result := range results {
 		if result.Status != "succeeded" || result.Analysis == nil {
@@ -18,7 +20,16 @@ func buildExpectationPrompt(summary review.DailySummary, request Request, result
 		}
 		analysis := result.Analysis
 		if isETF(analysis) {
-			stocks = append(stocks, map[string]any{"symbol": analysis.Symbol, "name": analysis.Name, "weight_percent": result.Holding.Weight, "cost_price": result.Holding.CostPrice, "instrument_type": "etf", "etf": analysis.ETF.PortfolioFacts(), "ai_research": compactResearch(analysis), "ai_status": analysis.AI.Status, "current_quote": analysis.Quote})
+			quote := &analysis.Quote
+			if result.CurrentQuote != nil {
+				quote = result.CurrentQuote
+			}
+			research := compactResearch(analysis)
+			if research != nil {
+				bounded := boundedSynthesis(*research)
+				research = &bounded
+			}
+			stocks = append(stocks, map[string]any{"symbol": analysis.Symbol, "name": analysis.Name, "weight_percent": result.Holding.Weight, "cost_price": result.Holding.CostPrice, "instrument_type": "etf", "etf": analysis.ETF.PortfolioFacts(), "ai_research": research, "ai_status": analysis.AI.Status, "current_quote": quote})
 			continue
 		}
 		price := analysis.Quote.Price
@@ -57,6 +68,9 @@ func buildExpectationPrompt(summary review.DailySummary, request Request, result
 		"prompt_version": ExpectationPromptVersion, "daily_review": reviewPayload, "trader_profile": rules,
 		"portfolio_metrics": metrics, "holdings": stocks, "failed_holdings": failed, "cash_percent": 100 - metrics.TotalPositionPercent,
 		"deterministic_summary": map[string]any{"health_score": metrics.HealthScore, "health_score_available": metrics.HealthScoreAvailable, "stock_score_coverage_percent": metrics.StockScoreCoveragePercent, "risk_level": riskLevelForMetrics(metrics, rules), "style_match": styleMatchLabel(metrics.StyleMatchScore)},
+	}
+	if ETFPolicyFor(results) != "" {
+		payload["etf_facts"] = etfPortfolioFactsAt(results, metrics, evaluatedAt)
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -176,7 +190,7 @@ func localExpectationScenarios(summary review.DailySummary, results []HoldingRes
 	return defaults
 }
 
-func normalizeExpectationConclusion(report *ExpectationConclusion, request Request) error {
+func normalizeExpectationConclusion(report *ExpectationConclusion, request Request, researchResults ...[]HoldingResult) error {
 	if strings.TrimSpace(report.Headline) == "" || strings.TrimSpace(report.PortfolioBias) == "" {
 		return fmt.Errorf("持仓明日预期缺少必要结论")
 	}
@@ -216,6 +230,37 @@ func normalizeExpectationConclusion(report *ExpectationConclusion, request Reque
 	for _, key := range []string{"strong", "base", "weak"} {
 		if !scenarioKeys[key] {
 			return fmt.Errorf("持仓明日预期缺少%s情景", key)
+		}
+	}
+	if len(researchResults) > 0 {
+		for _, r := range researchResults[0] {
+			if !isETF(r.Analysis) {
+				continue
+			}
+			check := func(text string) error { return validateHoldingPriceDirectives(HoldingConclusion{Action: text}, r) }
+			for _, holding := range report.Holdings {
+				if holding.Symbol == r.Holding.Symbol {
+					for _, text := range []string{holding.BeforeTrigger, holding.PositiveTrigger, holding.NegativeTrigger, holding.Invalidation} {
+						if err := check(text); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			for _, scenario := range report.Scenarios {
+				if etfActionApplies(scenario.TotalPositionResponse, r) {
+					if err := check(scenario.TotalPositionResponse); err != nil {
+						return err
+					}
+				}
+				for _, holding := range scenario.HoldingResponses {
+					if holding.Symbol == r.Holding.Symbol {
+						if err := check(holding.Action); err != nil {
+							return err
+						}
+					}
+				}
+			}
 		}
 	}
 	return nil

@@ -2,6 +2,7 @@ package etfanalysis
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"easy-stock/backend/internal/foundation"
@@ -119,7 +120,57 @@ func AssessExecution(p foundation.ETFProfile, e foundation.ETFExecution, now tim
 
 // Portfolio summary includes only dated fund facts and keeps stock financials out.
 func (a Analysis) PortfolioFacts() map[string]any {
-	return map[string]any{"instrument_type": "etf", "asset_class": a.Profile.AssetClass, "cross_border": a.Profile.CrossBorder, "tracking_target": a.Profile.TrackingTarget, "holdings_summary": a.holdingsSummary(), "execution": map[string]any{"comparable": a.Execution.Comparable, "quote_at": a.Execution.Snapshot.QuoteAt, "iopv_at": a.Execution.Snapshot.IOPVAt, "spread_percent": a.Execution.SpreadPercent, "premium_percent": a.Execution.PremiumPercent}, "execution_blockers": a.ExecutionBlockers, "limitations": a.Limitations}
+	return map[string]any{"instrument_type": "etf", "asset_class": a.Profile.AssetClass, "cross_border": a.Profile.CrossBorder, "tracking_target": a.Profile.TrackingTarget, "direction": a.PortfolioDirection(), "premium_announcements": a.PortfolioPremiumAnnouncements(), "holdings_summary": a.holdingsSummary(), "execution": map[string]any{"comparable": a.Execution.Comparable, "quote_at": a.Execution.Snapshot.QuoteAt, "iopv_at": a.Execution.Snapshot.IOPVAt, "spread_percent": a.Execution.SpreadPercent, "premium_percent": a.Execution.PremiumPercent, "observation_premium_percent": a.Execution.ObservationPremiumPercent, "observation_basis": a.Execution.ObservationBasis}, "execution_blockers": a.ExecutionBlockers, "limitations": a.Limitations}
+}
+
+// Titles remain labelled as titles. An announcement is evidence for a dated
+// qualitative assessment, never a manufactured current premium percentage.
+func (a Analysis) PortfolioPremiumAnnouncements() []map[string]any {
+	result := []map[string]any{}
+	for _, notice := range a.Announcements {
+		if notice.Symbol != a.Profile.Symbol || notice.PublishedAt.IsZero() || notice.Meta.Stale || notice.Meta.CarryForward || !strings.Contains(notice.Title+notice.Content, "溢价") {
+			continue
+		}
+		text := []rune(notice.Content)
+		index := strings.Index(string(text), "溢价")
+		start := 0
+		if index >= 0 {
+			start = max(0, len([]rune(string(text)[:index]))-100)
+		}
+		end := min(len(text), start+600)
+		result = append(result, map[string]any{"title": notice.Title, "published_at": notice.PublishedAt, "url": notice.URL, "excerpt": string(text[start:end]), "content_status": notice.ContentStatus})
+		if len(result) == 4 {
+			break
+		}
+	}
+	return result
+}
+
+// Keep the frozen direction evidence, without bars or unbounded news bodies.
+// Copies prevent portfolio prompts from modifying the canonical ETF report.
+func (a Analysis) PortfolioDirection() *DirectionAnalysis {
+	if a.Direction == nil {
+		return nil
+	}
+	d := *a.Direction
+	if d.Technical != nil {
+		t := *d.Technical
+		t.Bars = nil
+		d.Technical = &t
+	}
+	d.News = append([]DirectionNews(nil), d.News[:min(len(d.News), 6)]...)
+	bounded := func(s string, n int) string {
+		r := []rune(s)
+		if len(r) > n {
+			return string(r[:n]) + "…"
+		}
+		return s
+	}
+	for i := range d.News {
+		d.News[i].Item.Title = bounded(d.News[i].Item.Title, 160)
+		d.News[i].Item.Content = bounded(d.News[i].Item.Content, 400)
+	}
+	return &d
 }
 
 func (a Analysis) holdingsSummary() []any {

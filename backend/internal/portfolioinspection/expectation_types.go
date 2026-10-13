@@ -2,7 +2,7 @@ package portfolioinspection
 
 import "time"
 
-const ExpectationPromptVersion = "portfolio-tomorrow-expectation-v1"
+const ExpectationPromptVersion = "portfolio-tomorrow-expectation-v2"
 
 type ExpectationRequest struct {
 	SummaryDate   string        `json:"summary_date"`

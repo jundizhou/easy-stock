@@ -185,3 +185,10 @@
 .portfolio-recovery button { margin:0 0 0 auto; }
 
 .portfolio-scoring-scope { margin:0; padding:12px 16px; border:1px solid var(--line); border-radius:10px; color:var(--muted); font-size:13px; line-height:1.8; }
+.portfolio-etf-scoring { margin-block: 18px; }
+.portfolio-etf-adjustments { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 14px; }
+.portfolio-etf-adjustments article { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; overflow-wrap: anywhere; }
+.portfolio-etf-adjustments .premium-warning { border-color: #d97706; }
+.portfolio-etf-summary { margin-block: 12px; padding-top: 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.portfolio-etf-summary details { margin-block: 8px; }
+.portfolio-etf-premium.danger { color: #d97706; font-weight: 600; }

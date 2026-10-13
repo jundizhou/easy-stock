@@ -1083,6 +1083,17 @@ export type PortfolioScoreDimension = {
  adjustments: Array<{ risk_id: string; reason: string; points: number }>;
  evidence_refs: PortfolioEvidenceRef[]; limitations: string[];
 };
+export type PortfolioETFScoring = {
+ rule_version: string; evaluated_at: string; base_risk_score: number; final_risk_score: number;
+ diversification_bonus: number; premium_penalty: number; minimum_risk_level?: string;
+ reversion_loss_percent?: number; reversion_coverage_percent: number;
+ adjustments: Array<{
+  symbol: string; weight_percent: number; diversification_bonus: number; diversification_reason: string;
+  premium_percent?: number; premium_penalty: number; premium_eligible: boolean; premium_basis: string; premium_reason: string;
+  observed_at?: string; iopv_at?: string; bonus_contribution: number; penalty_contribution: number;
+  reversion_loss_percent?: number; evidence_refs: PortfolioEvidenceRef[];
+ }>;
+};
 export type PortfolioHoldingResult = {
 	holding: PortfolioHolding;
 	status: 'queued' | 'running' | 'succeeded' | 'failed' | string;
@@ -1128,6 +1139,7 @@ export type PortfolioMetrics = {
 };
 
 export type PortfolioAIReport = {
+ etf_scoring?: PortfolioETFScoring;
  explanation_details?: Record<string, { evidence_refs?: PortfolioEvidenceRef[]; symbols?: string[] }>;
  total_score?: number;
  score_available?: boolean;
@@ -1161,6 +1173,7 @@ export type PortfolioAIReport = {
 };
 
 export type PortfolioInspectionReport = {
+ evaluated_at?: string;
  request?: PortfolioResearchRequest;
  facts?: Record<string, PortfolioFact>;
  model?: string;

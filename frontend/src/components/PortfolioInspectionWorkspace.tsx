@@ -158,7 +158,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 				if (!active || viewRef.current !== viewKey) return;
 				rememberJob(payload.data);
 				if (payload.data.status === 'succeeded') setNotice('持仓 AI 分析已完成，组合评分与报告已保存');
-				if (payload.data.status === 'partial') setNotice(payload.data.results.every((r) => r.status === 'succeeded') ? '个股报告已保存，组合评估尚未完成，可重试组合评估' : '部分个股研究未完成，已有报告已保存，可补齐失败个股');
+				if (payload.data.status === 'partial') setNotice(payload.data.results.every((r) => r.status === 'succeeded') ? '标的报告已保存，组合评估尚未完成，可重试组合评估' : '部分标的研究未完成，已有报告已保存，可补齐失败标的');
 			} catch {
 				// Reopening this workspace recovers the persisted task state.
 			}
@@ -207,12 +207,12 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
   if (!config || !job || applyingRef.current) return;
   if (!job.request.portfolio_plan_id) { setError('请先将这份历史记录绑定到持仓方案'); return; }
   setStarting(true); setError('');
-  try { const payload = await requestJSON<{ data: PortfolioInspectionJob }>(config, `/api/v1/portfolio-inspections/${job.id}/resume`, { method: 'POST' }); if (viewRef.current !== viewKey) return; rememberJob(payload.data); setNotice('正在恢复任务，已成功个股报告继续复用'); }
+  try { const payload = await requestJSON<{ data: PortfolioInspectionJob }>(config, `/api/v1/portfolio-inspections/${job.id}/resume`, { method: 'POST' }); if (viewRef.current !== viewKey) return; rememberJob(payload.data); setNotice('正在恢复任务，已成功标的报告继续复用'); }
   catch (cause) { setError(cause instanceof Error ? cause.message : '恢复失败'); } finally { setStarting(false); }
  };
 	const cancelInspection = async () => {
   if (!config || !job) return; setStarting(true);
-  try { await requestJSON(config, `/api/v1/portfolio-inspections/${job.id}/cancel`, { method: 'POST' }); setNotice('已停止组合任务，共享个股研究可继续完成'); }
+  try { await requestJSON(config, `/api/v1/portfolio-inspections/${job.id}/cancel`, { method: 'POST' }); setNotice('已停止组合任务，共享标的研究可继续完成'); }
   catch (cause) { setError(cause instanceof Error ? cause.message : '停止失败'); } finally { setStarting(false); }
  };
 
@@ -282,7 +282,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 			</>}
 
 			{job?.status === 'running' && <><InspectionProgress job={job} /><button type="button" className="portfolio-task-action" disabled={starting} onClick={() => void cancelInspection()}>停止持仓分析</button></>}
-			{job?.resume_available && !running && <div className="portfolio-report-warning portfolio-recovery"><CircleAlert size={16} /><span>{job.error || '上次任务未完成，已有报告已保存'}</span><button type="button" disabled={starting} onClick={() => void resumeInspection()}>{job.results.every((r) => r.status === 'succeeded') ? '重试组合评估' : '补齐失败个股'}</button></div>}
+			{job?.resume_available && !running && <div className="portfolio-report-warning portfolio-recovery"><CircleAlert size={16} /><span>{job.error || '上次任务未完成，已有报告已保存'}</span><button type="button" disabled={starting} onClick={() => void resumeInspection()}>{job.results.every((r) => r.status === 'succeeded') ? '重试组合评估' : '补齐失败标的'}</button></div>}
    {job?.report && job.status !== 'running' && (['portfolio-ai-score-v3', portfolioScoringVersion].includes(job.report.algorithm_version || '')
     ? <PortfolioAIReportView report={job.report} afterSummary={optimization} busy={starting || applying} onOptimize={job.status === 'succeeded' && job.report.algorithm_version === portfolioScoringVersion && job.report.conclusion.score_available ? () => setOptimizationSignal((n) => n+1) : undefined} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} onRefresh={(symbol) => void startInspection([symbol], sourceRequest)} />
     : <PortfolioReportView report={job.report} afterSummary={optimization} status={job.status} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} />)}
@@ -343,7 +343,7 @@ function PortfolioReportView({ report, status, onNew, onOpenStockAnalysis, after
 		<section className="portfolio-holding-report" aria-label="逐股巡检"><header><div><span>个股观察</span><h3>逐股巡检</h3></div><small>按组合风险贡献排序</small></header><div className="portfolio-holding-cards">
 			{conclusion.holdings.map((item) => {
 				const stockAnalysis = analyses.get(item.symbol) || analyses.get(item.symbol.split('.')[0]);
-				return <ResearchPanel key={item.symbol} label={item.symbol} title={names.get(item.symbol) || item.symbol} icon={WalletCards} className="portfolio-holding-card" action={stockAnalysis && <button type="button" onClick={() => onOpenStockAnalysis(stockAnalysis)} aria-label={`查看${stockAnalysis.name}个股分析报告`} title="查看已生成的个股分析报告"><ExternalLink size={14} />查看个股报告</button>}>
+				return <ResearchPanel key={item.symbol} label={item.symbol} title={names.get(item.symbol) || item.symbol} icon={WalletCards} className="portfolio-holding-card" action={stockAnalysis && <button type="button" onClick={() => onOpenStockAnalysis(stockAnalysis)} aria-label={`查看${stockAnalysis.name}个股分析报告`} title="查看已生成的个股分析报告"><ExternalLink size={14} />查看标的报告</button>}>
 					<div className="portfolio-holding-meta"><span className={`portfolio-priority ${priorityTone(item.action_priority)}`}>{item.action_priority}</span><span>{item.portfolio_role}</span><span>风险贡献 {item.risk_contribution.toFixed(1)}%</span></div>
 					<p>{item.conclusion}</p>
 					<div className="portfolio-holding-conditions"><div><strong>动作</strong><p>{item.action}</p></div><div><strong>确认条件</strong><p>{item.confirmation}</p></div><div className="invalidation"><strong>失效条件</strong><p>{item.invalidation}</p></div></div>

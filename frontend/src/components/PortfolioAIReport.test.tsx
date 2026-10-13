@@ -4,6 +4,7 @@ import { PortfolioAIReportView, portfolioDate } from './PortfolioAIReport';
 import type { PortfolioInspectionReport } from '../lib/backend';
 import { etfFixture } from '../test-utils/etf-fixture';
 import { portfolioScoringVersion } from '../lib/portfolio-optimization';
+import { etfDirectionFixture } from '../test-utils/etf-fixture';
 
 const report = {
  id: 'fixture', algorithm_version: 'portfolio-ai-score-v3', profile: { label: '均衡' }, request: { horizon: 'swing' }, generated_at: '2026-10-04T06:00:00Z',
@@ -50,6 +51,22 @@ describe('portfolio AI report', () => {
   const text=markup(value);expect(text).toContain('股票与 ETF 组合');expect(text).toContain('查看原研究报告');expect(text).not.toContain('NaN');
  });
  it('does not present unset timestamps as real report dates', () => { expect(portfolioDate('0001-01-01T00:00:00Z')).toBe('时间未知'); });
+ it('shows ETF risk adjustments and premium timing without changing historical reports', () => {
+  const a = etfFixture();
+  const etf = { holding: {symbol:a.symbol,name:a.name,weight_percent:50}, status:'succeeded', analysis:a, analysis_id:'etf-report' };
+  const value = { ...report, algorithm_version:portfolioScoringVersion, holdings:[etf], conclusion:{...report.conclusion,etf_scoring:{rule_version:'portfolio-etf-risk-v1',evaluated_at:'2026-10-13T08:00:00Z',base_risk_score:72,final_risk_score:60,diversification_bonus:8,premium_penalty:20,minimum_risk_level:'中',reversion_loss_percent:4.76,reversion_coverage_percent:100,adjustments:[{symbol:a.symbol,weight_percent:100,diversification_bonus:8,diversification_reason:'宽基分散个别公司风险',premium_percent:5,premium_penalty:20,premium_eligible:true,premium_basis:'dated_observation',premium_reason:'仅供盘后研究',observed_at:'2026-10-13T07:01:00Z',iopv_at:'2026-10-13T07:01:00Z',bonus_contribution:8,penalty_contribution:20,evidence_refs:[]}]}} } as PortfolioInspectionReport;
+  const text = markup(value);
+  expect(text).toContain('分散增益与溢价风险'); expect(text).toContain('基础 72 → 最终 60');
+  expect(text).toContain('参考溢价 5.00%'); expect(text).toContain('盘后观察'); expect(text).toContain('中风险');
+  expect(text).toContain('不是预期损失'); expect(text).toContain('原报告未采集方向事实');
+  expect(markup()).not.toContain('分散增益与溢价风险');
+ });
+ it('displays ETF technical and news judgments with their original references', () => {
+  const a = etfDirectionFixture();
+  const text = markup({...report,holdings:[{holding:{symbol:a.symbol,name:a.name,weight_percent:60},status:'succeeded',analysis:a,analysis_id:'fixture'}]});
+  expect(text).toContain('原研究技术面、消息面与引用'); expect(text).toContain('底层方向'); expect(text).toContain('产品适配');
+  expect(text).not.toContain('原报告未采集方向事实');
+ });
  it('shows retained evidence for normalized explanation objects and dimension limitations', () => {
   const value = { ...report, conclusion: { ...report.conclusion, primary_risks: ['共同驱动需核验'], explanation_details: { 'primary_risks[0]': { symbols: ['600519.SH'], evidence_refs: [{ fact: '600519.SH.pnl_percent' }] }, 'dimensions.holding_logic.limitations[0]': { evidence_refs: [{ fact: '600519.SH.pnl_percent' }] } }, dimensions: [{ ...report.conclusion.dimensions![0], limitations: ['成本证据缺口'] }] } };
   const text = markup(value);

@@ -263,7 +263,7 @@ func TestInvalidScoringKeepsDiagnosticOutOfProductSummary(t *testing.T) {
 	defer store.Close()
 	service := NewService(store, &scoreGateway{content: scoreContent(t, raw)}, nil, log.New(&diagnostics, "", 0))
 	rules, _ := RulesFor(req.TraderProfile)
-	_, err := service.scorePortfolio(context.Background(), req, results, metrics, rules)
+	_, err := service.scorePortfolio(context.Background(), req, results, metrics, rules, time.Now().UTC())
 	if err == nil || !strings.Contains(err.Error(), "请重试组合评估") || strings.Contains(err.Error(), "unexpected") || !strings.Contains(diagnostics.String(), "unexpected") {
 		t.Fatalf("bad diagnostic boundary: %v %s", err, diagnostics.String())
 	}

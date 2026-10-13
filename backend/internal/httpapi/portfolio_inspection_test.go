@@ -79,7 +79,7 @@ func TestPortfolioInspectionReusesReportsAndReturnsIndependentAIScore(t *testing
 	if done.Request.PortfolioPlanID != "plan-a" || r.Request.PortfolioPlanName != "长线组合" {
 		t.Fatalf("lost plan metadata: %+v", done)
 	}
-	if r.AlgorithmVersion != "portfolio-ai-score-v4" || r.Metrics.StopLossCoveragePercent != 0 || !r.Conclusion.ScoreAvailable || *r.Conclusion.TotalScore != 71 || r.Conclusion.RiskLevel != "高" || r.Holdings[0].ResearchOrigin != "reused" || calls.Load() != 1 {
+	if r.AlgorithmVersion != "portfolio-ai-score-v5" || r.Metrics.StopLossCoveragePercent != 0 || !r.Conclusion.ScoreAvailable || *r.Conclusion.TotalScore != 71 || r.Conclusion.RiskLevel != "高" || r.Holdings[0].ResearchOrigin != "reused" || calls.Load() != 1 {
 		t.Fatalf("incorrect report %+v calls=%d", r, calls.Load())
 	}
 	// Changing holdings inputs only generates a new portfolio conclusion, not stock research.

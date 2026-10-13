@@ -41,7 +41,7 @@ func groupRiskChecks(job Job, target []pi.Holding) []RiskCheck {
 	if proposal == nil {
 		return nil
 	}
-	facts := pi.OptimizationUnionReport(job.Source.Request, job.Results).Facts
+	facts := pi.OptimizationUnionReport(job.Source.Request, job.Results, job.SnapshotAt).Facts
 	rules, _ := pi.RulesFor(job.Source.Request.TraderProfile)
 	before := frozenGroups(proposal.RiskGroups, job.Source.Request.Holdings)
 	after := frozenGroups(proposal.RiskGroups, target)

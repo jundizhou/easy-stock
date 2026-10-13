@@ -233,7 +233,7 @@ func (s *ExpectationService) run(job ExpectationJob, summary review.DailySummary
 			aiErr = fmt.Errorf("持仓明日预期AI分析失败: %w", err)
 		} else if err := decodeJSONObject(response.Content, &conclusion); err != nil {
 			aiErr = fmt.Errorf("持仓明日预期AI未返回有效JSON: %w", err)
-		} else if err := normalizeExpectationConclusion(&conclusion, request); err != nil {
+		} else if err := normalizeExpectationConclusion(&conclusion, request, job.Results); err != nil {
 			aiErr = err
 		} else {
 			conclusion.Source = "hermes-ai"

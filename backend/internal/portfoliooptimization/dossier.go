@@ -1,6 +1,7 @@
 package portfoliooptimization
 
 import (
+	"easy-stock/backend/internal/etfanalysis"
 	pi "easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/stockanalysis"
 	"encoding/json"
@@ -10,7 +11,7 @@ import (
 	"strings"
 )
 
-const ModelPromptVersion = "portfolio-optimization-prompts-v35"
+const ModelPromptVersion = "portfolio-optimization-prompts-v36"
 const MaxModelPromptBytes = 64 * 1024
 
 // Stage sizes below are compression targets, not model context limits. Rich
@@ -104,7 +105,20 @@ func stockDossier(r pi.HoldingResult, detail int) map[string]any {
 	}
 	d["instrument_type"] = r.Analysis.InstrumentType
 	if r.Analysis.InstrumentType == "etf" && r.Analysis.ETF != nil {
-		d["etf"] = r.Analysis.ETF.PortfolioFacts()
+		fund := r.Analysis.ETF.PortfolioFacts()
+		if rr.ETFJudgments != nil {
+			judgments := map[string]any{}
+			for _, item := range []struct {
+				key   string
+				value *etfanalysis.Judgment
+			}{{"technical", rr.ETFJudgments.Technical}, {"news", rr.ETFJudgments.News}, {"underlying", &rr.ETFJudgments.Underlying}, {"product", &rr.ETFJudgments.Product}, {"entry", &rr.ETFJudgments.Entry}} {
+				if item.value != nil {
+					judgments[item.key] = map[string]any{"status": item.value.Status, "text": shortText(item.value.Text, max(detail, 100)), "source_ids": refs(item.value.SourceIDs)}
+				}
+			}
+			fund["judgments"] = judgments
+		}
+		d["etf"] = fund
 	}
 	d["counter"] = counter
 	support := []dossierClaim{}
@@ -295,7 +309,7 @@ func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]a
 		stocks = append(stocks, row)
 	}
 	// All successful candidate facts remain available for investment comparisons.
-	facts := pi.OptimizationUnionReport(job.Source.Request, results).Facts
+	facts := pi.OptimizationUnionReport(job.Source.Request, results, job.SnapshotAt).Facts
 	table := stockFactTable(facts, results)
 	if detail <= 0 {
 		compactCorrelationTable(table, results)
@@ -374,9 +388,6 @@ func compactStockDossier(r pi.HoldingResult) map[string]any {
 		counter[i].Text = shortText(counter[i].Text, 24)
 	}
 	d["instrument_type"] = r.Analysis.InstrumentType
-	if r.Analysis.InstrumentType == "etf" && r.Analysis.ETF != nil {
-		d["etf"] = r.Analysis.ETF.PortfolioFacts()
-	}
 	d["counter"] = counter
 	// Keep driver identity and status; the main explanation is in the thesis.
 	if drivers, ok := d["drivers"].([]dossierDriver); ok {

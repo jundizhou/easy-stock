@@ -12,7 +12,11 @@ import (
 
 // Optimization uses the inspection rubric and validators, with one frozen union
 // of research and quotes. These helpers do not run a second stock analysis.
-func OptimizationReport(request Request, union []HoldingResult) Report {
+func OptimizationReport(request Request, union []HoldingResult, evaluationTimes ...time.Time) Report {
+	evaluatedAt := time.Now().UTC()
+	if len(evaluationTimes) > 0 && !evaluationTimes[0].IsZero() {
+		evaluatedAt = evaluationTimes[0]
+	}
 	rules, _ := RulesFor(request.TraderProfile)
 	results := make([]HoldingResult, 0, len(request.Holdings))
 	for _, h := range request.Holdings {
@@ -25,17 +29,17 @@ func OptimizationReport(request Request, union []HoldingResult) Report {
 		}
 	}
 	metrics := metricsForReport(request, results, rules)
-	return Report{Request: request, Profile: rules, Holdings: results, Metrics: metrics, Facts: portfolioFacts(request, results, metrics), AlgorithmVersion: AlgorithmVersion}
+	return Report{Request: request, Profile: rules, Holdings: results, Metrics: metrics, Facts: portfolioFactsAt(request, results, metrics, evaluatedAt), AlgorithmVersion: AlgorithmVersion, EvaluatedAt: evaluatedAt}
 }
 func OptimizationScoringPrompt(r Report) (string, error) {
-	return buildScoringPrompt(r.Request, r.Holdings, r.Metrics, r.Profile)
+	return buildScoringPromptAt(r.Request, r.Holdings, r.Metrics, r.Profile, reportEvaluationTime(r))
 }
 func DecodeOptimizationScore(data json.RawMessage, r Report) (AIReport, error) {
 	score, err := decodeScoringReport(string(data))
 	if err != nil {
 		return score, err
 	}
-	err = validateScoringReport(&score, r.Request, r.Holdings, r.Metrics)
+	err = validateScoringReportFactsAt(&score, r.Request, r.Holdings, r.Metrics, true, nil, reportEvaluationTime(r))
 	return score, err
 }
 
@@ -81,7 +85,7 @@ func DecodeOptimizationComparisonScore(data json.RawMessage, r Report) (AIReport
 			score.Holdings = append(score.Holdings, HoldingConclusion{Symbol: h.Holding.Symbol, Conclusion: conclusion, ActionPriority: "观察", Action: fmt.Sprintf("组合目标仓位%d%%；依原研究条件核验，尚未成交", h.Holding.Weight), Confirmation: strings.Join(confirm, "；"), Invalidation: strings.Join(invalid, "；")})
 		}
 	}
-	err = validateScoringReportFacts(&score, r.Request, r.Holdings, r.Metrics, false, optimizationRiskFacts(r))
+	err = validateScoringReportFactsAt(&score, r.Request, r.Holdings, r.Metrics, false, optimizationRiskFacts(r), reportEvaluationTime(r))
 	return score, err
 }
 
@@ -89,7 +93,7 @@ func DecodeOptimizationComparisonScore(data json.RawMessage, r Report) (AIReport
 // Resolve only that side's existing available facts; the opposite side and
 // invented paths remain invalid. Scores and evidence values are unchanged.
 func DecodeNamedOptimizationComparisonScore(data json.RawMessage, r Report, label string) (AIReport, error) {
-	known := portfolioFacts(r.Request, r.Holdings, r.Metrics)
+	known := portfolioFactsAt(r.Request, r.Holdings, r.Metrics, reportEvaluationTime(r))
 	for key, f := range optimizationRiskFacts(r) {
 		known[key] = f
 	}
@@ -195,7 +199,7 @@ func optimizationRiskFacts(r Report) map[string]Fact {
 }
 
 func OptimizationComparisonFacts(r Report) map[string]Fact {
-	facts := portfolioFacts(r.Request, r.Holdings, r.Metrics)
+	facts := portfolioFactsAt(r.Request, r.Holdings, r.Metrics, reportEvaluationTime(r))
 	for key, f := range optimizationRiskFacts(r) {
 		facts[key] = f
 	}
@@ -362,6 +366,9 @@ func ValidateOptimizationInvestmentAction(h HoldingConclusion, r HoldingResult) 
 	if !validHoldingResearch(r) {
 		return fmt.Errorf("个股研究未完成")
 	}
+	if err := validateETFActionText(h.Action, r); err != nil {
+		return err
+	}
 	rr := r.Analysis.ResearchReport
 	sources := map[string]bool{}
 	for _, s := range rr.Sources {
@@ -384,7 +391,7 @@ func ValidateOptimizationInvestmentAction(h HoldingConclusion, r HoldingResult) 
 
 // Zero-weight candidates contribute research/quote/correlation facts to the
 // shared dossier, without pretending they are already held.
-func OptimizationUnionReport(request Request, union []HoldingResult) Report {
+func OptimizationUnionReport(request Request, union []HoldingResult, evaluationTimes ...time.Time) Report {
 	weights := map[string]Holding{}
 	for _, h := range request.Holdings {
 		weights[h.Symbol] = h
@@ -397,5 +404,15 @@ func OptimizationUnionReport(request Request, union []HoldingResult) Report {
 		}
 		request.Holdings = append(request.Holdings, h)
 	}
-	return OptimizationReport(request, union)
+	return OptimizationReport(request, union, evaluationTimes...)
+}
+
+func reportEvaluationTime(r Report) time.Time {
+	if !r.EvaluatedAt.IsZero() {
+		return r.EvaluatedAt
+	}
+	if !r.GeneratedAt.IsZero() {
+		return r.GeneratedAt
+	}
+	return time.Now().UTC()
 }

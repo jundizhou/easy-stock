@@ -73,7 +73,7 @@ func TestBuildExpectationPromptPinsEvidenceRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"portfolio-tomorrow-expectation-v1", "作者观点只能作为情景证据", "strong、base、weak三个情景必须齐全", `"market_regime":"震荡分化"`} {
+	for _, expected := range []string{ExpectationPromptVersion, "作者观点只能作为情景证据", "strong、base、weak三个情景必须齐全", `"market_regime":"震荡分化"`} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt missing %q", expected)
 		}
