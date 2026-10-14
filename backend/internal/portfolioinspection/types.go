@@ -9,7 +9,7 @@ import (
 
 const (
 	MaxHoldings        = 10
-	PromptVersion      = "portfolio-inspection-v8"
+	PromptVersion      = "portfolio-inspection-v9"
 	AlgorithmVersion   = "portfolio-ai-score-v5"
 	MinimumAICoverage  = 70
 	DefaultConcurrency = 2
@@ -118,6 +118,7 @@ type Metrics struct {
 }
 
 type HoldingConclusion struct {
+	ActionID         string  `json:"action_id,omitempty"`
 	Symbol           string  `json:"symbol"`
 	PortfolioRole    string  `json:"portfolio_role"`
 	RiskContribution float64 `json:"risk_contribution"`
@@ -129,12 +130,16 @@ type HoldingConclusion struct {
 }
 
 type Scenario struct {
-	Name            string `json:"name"`
-	Condition       string `json:"condition"`
-	PortfolioAction string `json:"portfolio_action"`
+	ActionIDs       []string `json:"action_ids,omitempty"`
+	Name            string   `json:"name"`
+	Condition       string   `json:"condition"`
+	PortfolioAction string   `json:"portfolio_action"`
 }
 
 type AIReport struct {
+	ContractVersion      string                       `json:"contract_version,omitempty"`
+	AdjustmentActionIDs  []string                     `json:"adjustment_action_ids,omitempty"`
+	Actions              []ScoringAction              `json:"actions,omitempty"`
 	ETFScoring           *ETFScoreSummary             `json:"etf_scoring,omitempty"`
 	TotalScore           *int                         `json:"total_score,omitempty"`
 	ScoreAvailable       bool                         `json:"score_available"`
@@ -175,6 +180,8 @@ type Report struct {
 }
 
 type Job struct {
+	ValidationIssues      []ScoringIssue  `json:"validation_issues,omitempty"`
+	ScoringAttempts       int             `json:"scoring_attempts,omitempty"`
 	ScheduleID            string          `json:"schedule_id,omitempty"`
 	NotificationChannels  []string        `json:"notification_channels,omitempty"`
 	ID                    string          `json:"id"`
@@ -203,9 +210,10 @@ type Job struct {
 }
 
 type EvidenceRef struct {
-	ReportID string `json:"report_id,omitempty"`
-	SourceID string `json:"source_id,omitempty"`
-	Fact     string `json:"fact,omitempty"`
+	EvidenceID string `json:"evidence_id,omitempty"`
+	ReportID   string `json:"report_id,omitempty"`
+	SourceID   string `json:"source_id,omitempty"`
+	Fact       string `json:"fact,omitempty"`
 }
 
 // ExplanationDetail preserves evidence from structured model list items while

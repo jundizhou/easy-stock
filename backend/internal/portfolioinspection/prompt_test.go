@@ -71,8 +71,74 @@ func TestInspectionReadsEarningsBodyOmittedByOldResearch(t *testing.T) {
 			t.Fatal("scorer cannot correct stale disclosure limitation", text)
 		}
 	}
+	_, _, _, scored := scoreFixture()
+	scored.Dimensions[0].EvidenceRefs = []EvidenceRef{{ReportID: results[0].AnalysisID, SourceID: notice.ID}}
+	scored.RiskGroups = []RiskGroup{{Name: "披露验证", Symbols: []string{results[0].Holding.Symbol}, Reason: "最新公告与原报告一起核对", EvidenceRefs: scored.Dimensions[0].EvidenceRefs}}
+	if err := validateScoringReportFactsAt(&scored, req, results, metrics, true, nil, rr.CutoffAt); err != nil {
+		t.Fatal("real earnings source in prompt rejected by validator", err)
+	}
 	after, _ := json.Marshal(rr)
 	if string(before) != string(after) {
 		t.Fatal("scoring rewrote historical counterclaim")
+	}
+}
+
+func TestScoringSourceMembershipMatchesPromptAndRejectsUnexposedSources(t *testing.T) {
+	for _, ref := range []string{"latest", "old", "future", "title", "unrelated", "invented", "wrong_report"} {
+		t.Run(ref, func(t *testing.T) {
+			req, results, metrics, report := scoreFixture()
+			rules, _ := RulesFor(req.TraderProfile)
+			rr := results[0].Analysis.ResearchReport
+			rr.CutoffAt = time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC)
+			for _, id := range []string{"latest", "old", "future", "title", "unrelated"} {
+				source := stockanalysis.NewResearchSource("announcement", "前三季度业绩预告", "预计归母净利润增长，未经审计。", "fixture", "https://example.com/"+id, rr.CutoffAt.Add(-time.Hour), rr.CutoffAt)
+				source.ID = id
+				switch id {
+				case "old":
+					source.PublishedAt = rr.CutoffAt.Add(-48 * time.Hour)
+				case "future":
+					source.PublishedAt = rr.CutoffAt.Add(time.Hour)
+				case "title":
+					source.ContentStatus = "title_only"
+				case "unrelated":
+					source.Title = "临时股东会公告"
+				}
+				rr.Sources = append(rr.Sources, source)
+			}
+			before, _ := json.Marshal(rr)
+			prompt, err := buildScoringPromptAt(req, results, metrics, rules, rr.CutoffAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, payload, _ := strings.Cut(prompt, "[组合证据JSON]\n")
+			var input struct {
+				Holdings []struct {
+					Sources []struct{ ID string } `json:"sources"`
+				} `json:"holdings"`
+			}
+			if err := json.Unmarshal([]byte(payload), &input); err != nil {
+				t.Fatal(err)
+			}
+			provided := map[string]bool{}
+			for _, s := range input.Holdings[0].Sources {
+				provided[s.ID] = true
+			}
+			if !provided["latest"] || provided["old"] || provided["future"] || provided["title"] || provided["unrelated"] {
+				t.Fatal("changed evidence cutoff/selection", provided)
+			}
+			id, reportID := ref, results[0].AnalysisID
+			if ref == "wrong_report" {
+				id, reportID = "latest", "other-report"
+			}
+			report.Dimensions[0].EvidenceRefs = []EvidenceRef{{ReportID: reportID, SourceID: id}}
+			err = validateScoringReportFactsAt(&report, req, results, metrics, true, nil, rr.CutoffAt)
+			if (err == nil) != (ref == "latest") {
+				t.Fatal("prompt/source whitelist mismatch", ref, err)
+			}
+			after, _ := json.Marshal(rr)
+			if string(before) != string(after) {
+				t.Fatal("source selection mutated frozen research")
+			}
+		})
 	}
 }

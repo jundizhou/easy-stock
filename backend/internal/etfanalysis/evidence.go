@@ -79,6 +79,23 @@ func (a *Analysis) Enrich(holdings []foundation.ETFHoldings, notices []foundatio
 	a.Limitations = append(a.Limitations, a.Execution.Limitations...)
 	a.evidenceLimitations = append([]string(nil), a.Limitations[baseLimitations:]...)
 }
+
+// PlanningBlockers uses frozen product and price facts. Live quote freshness and
+// trading permissions are execution prerequisites, not reasons to erase a plan.
+func (a Analysis) PlanningBlockers() []string {
+	blockers := []string{}
+	if len(a.Bars) < 20 {
+		blockers = append(blockers, "完整价格日线不足20日")
+	}
+	switch a.Profile.AssetClass {
+	case "money":
+		blockers = append(blockers, "货币ETF仅研究收益与流动性，不生成价格突破计划")
+	case "equity", "bond", "commodity":
+	default:
+		blockers = append(blockers, "底层资产分类未核实")
+	}
+	return blockers
+}
 func AssessExecution(p foundation.ETFProfile, e foundation.ETFExecution, now time.Time) ExecutionAssessment {
 	a := ExecutionAssessment{Snapshot: e, Limitations: []string{}, TradingRule: "未取得逐产品规则原文；不推定T+0、涨跌幅上限或最小申赎单位", SubscriptionStatus: "未核实；二级市场报价与一级市场申赎状态独立"}
 	valid := func(v *float64) bool { return v != nil && *v > 0 && !math.IsNaN(*v) && !math.IsInf(*v, 0) }

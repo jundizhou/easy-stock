@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -19,6 +21,7 @@ var explanationListLimits = []struct {
 // Only normalize narrative lists at the model boundary. Scores, holdings, facts
 // and references still go through their ordinary strict decoding and validation.
 func decodeScoringReport(content string) (AIReport, error) {
+	var issues scoringIssues
 	var raw map[string]json.RawMessage
 	if err := decodeJSONObject(content, &raw); err != nil {
 		return AIReport{}, err
@@ -26,7 +29,7 @@ func decodeScoringReport(content string) (AIReport, error) {
 	details := map[string]ExplanationDetail{}
 	if value, ok := raw["explanation_details"]; ok {
 		if err := decodeStrict(value, &details); err != nil {
-			return AIReport{}, fmt.Errorf("explanation_details: %w", err)
+			issues.collect("format", "explanation_details", err)
 		}
 		if details == nil {
 			details = map[string]ExplanationDetail{}
@@ -36,7 +39,9 @@ func decodeScoringReport(content string) (AIReport, error) {
 		if value, ok := raw[list.field]; ok {
 			normalized, err := normalizeExplanationList(value, list.field, details)
 			if err != nil {
-				return AIReport{}, err
+				issues.collect("format", list.field, err)
+				delete(raw, list.field)
+				continue
 			}
 			raw[list.field] = normalized
 		}
@@ -44,21 +49,27 @@ func decodeScoringReport(content string) (AIReport, error) {
 	if value, ok := raw["dimensions"]; ok {
 		var dimensions []map[string]json.RawMessage
 		if err := json.Unmarshal(value, &dimensions); err != nil {
+			dimensions = nil
 			// The four canonical keys also unambiguously identify a keyed object.
 			// Normalize container shape only, preserving every value and citation.
 			var keyed map[string]map[string]json.RawMessage
 			if json.Unmarshal(value, &keyed) != nil || len(keyed) != len(scoreRubric) {
-				return AIReport{}, fmt.Errorf("dimensions: %w", err)
+				issues.collect("format", "dimensions", err)
 			}
 			for _, rubric := range scoreRubric {
 				d, exists := keyed[rubric.Key]
 				if !exists {
-					return AIReport{}, errors.New("评分对象缺少规范维度")
+					issues.add("format", "dimensions."+rubric.Key, "评分对象缺少规范维度")
+					continue
+				}
+				if d == nil {
+					issues.add("format", "dimensions."+rubric.Key, "评分维度必须是非空对象")
+					continue
 				}
 				if rawKey, exists := d["key"]; exists {
 					var key string
 					if json.Unmarshal(rawKey, &key) != nil || key != rubric.Key {
-						return AIReport{}, errors.New("评分对象key与维度名称冲突")
+						issues.add("format", "dimensions."+rubric.Key, "评分对象key与维度名称冲突")
 					}
 				} else {
 					d["key"], _ = json.Marshal(rubric.Key)
@@ -69,12 +80,14 @@ func decodeScoringReport(content string) (AIReport, error) {
 		for _, d := range dimensions {
 			var key string
 			if err := json.Unmarshal(d["key"], &key); err != nil {
-				return AIReport{}, fmt.Errorf("dimensions.key: %w", err)
+				issues.collect("format", "dimensions.key", err)
 			}
 			if value, ok := d["limitations"]; ok {
 				normalized, err := normalizeExplanationList(value, "dimensions."+key+".limitations", details)
 				if err != nil {
-					return AIReport{}, err
+					issues.collect("format", "dimensions."+key+".limitations", err)
+					delete(d, "limitations")
+					continue
 				}
 				d["limitations"] = normalized
 			}
@@ -82,13 +95,17 @@ func decodeScoringReport(content string) (AIReport, error) {
 		raw["dimensions"], _ = json.Marshal(dimensions)
 	}
 	raw["explanation_details"], _ = json.Marshal(details)
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return AIReport{}, err
-	}
 	var report AIReport
-	err = json.Unmarshal(data, &report)
-	return report, err
+	// Decode independent top-level fields even if one has the wrong shape.
+	// Partial values are used only to collect diagnostics, never published.
+	value := reflect.ValueOf(&report).Elem()
+	for i := 0; i < value.NumField(); i++ {
+		key := strings.Split(value.Type().Field(i).Tag.Get("json"), ",")[0]
+		if data, ok := raw[key]; ok {
+			issues.collect("format", key, json.Unmarshal(data, value.Field(i).Addr().Interface()))
+		}
+	}
+	return report, issues.err()
 }
 
 func normalizeExplanationList(value json.RawMessage, field string, details map[string]ExplanationDetail) (json.RawMessage, error) {
@@ -191,44 +208,46 @@ func decodeStrict(value []byte, target any) error {
 }
 
 func validateExplanationDetails(report *AIReport, weights map[string]int, checkRefs func([]EvidenceRef) error) error {
+	var issues scoringIssues
 	paths := map[string]bool{}
-	addPaths := func(field string, items []string, limit int) error {
+	addPaths := func(field string, items []string, limit int) {
 		if len(items) > limit {
-			return fmt.Errorf("%s最多%d条说明", field, limit)
+			issues.add("shape", field, fmt.Sprintf("%s最多%d条说明", field, limit))
 		}
 		for i, text := range items {
 			if strings.TrimSpace(text) == "" {
-				return fmt.Errorf("%s[%d]说明不能为空", field, i)
+				issues.add("shape", fmt.Sprintf("%s[%d]", field, i), "说明不能为空")
 			}
 			paths[fmt.Sprintf("%s[%d]", field, i)] = true
 		}
-		return nil
 	}
 	lists := [][]string{report.PrimaryRisks, report.ConcentrationFinding, report.AdjustmentOrder, report.NextChecklist, report.DataLimitations}
 	for i, list := range explanationListLimits {
-		if err := addPaths(list.field, lists[i], list.limit); err != nil {
-			return err
-		}
+		addPaths(list.field, lists[i], list.limit)
 	}
 	for _, d := range report.Dimensions {
-		if err := addPaths("dimensions."+d.Key+".limitations", d.Limitations, 10); err != nil {
-			return err
-		}
+		addPaths("dimensions."+d.Key+".limitations", d.Limitations, 10)
 	}
-	for path, detail := range report.ExplanationDetails {
+	keys := make([]string, 0, len(report.ExplanationDetails))
+	for path := range report.ExplanationDetails {
+		keys = append(keys, path)
+	}
+	sort.Strings(keys)
+	for _, path := range keys {
+		detail := report.ExplanationDetails[path]
 		if !paths[path] {
-			return fmt.Errorf("说明引用位置%s不存在", path)
+			issues.add("shape", path, fmt.Sprintf("说明引用位置%s不存在", path))
 		}
 		if len(detail.EvidenceRefs) > 0 {
 			if err := checkRefs(detail.EvidenceRefs); err != nil {
-				return fmt.Errorf("%s: %w", path, err)
+				issues.collect("evidence", path, err)
 			}
 		}
 		for _, symbol := range detail.Symbols {
 			if _, ok := weights[symbol]; !ok {
-				return fmt.Errorf("%s涉及的股票%s不在持仓中", path, symbol)
+				issues.add("holding", path, fmt.Sprintf("%s涉及的股票%s不在持仓中", path, symbol))
 			}
 		}
 	}
-	return nil
+	return issues.err()
 }

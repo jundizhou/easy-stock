@@ -1,4 +1,5 @@
 import { portfolioScoringVersion } from '../lib/portfolio-optimization';
+import { PortfolioValidationIssues } from './PortfolioValidationIssues';
 import {
 	Activity,
 	CheckCircle2,
@@ -283,6 +284,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 
 			{job?.status === 'running' && <><InspectionProgress job={job} /><button type="button" className="portfolio-task-action" disabled={starting} onClick={() => void cancelInspection()}>停止持仓分析</button></>}
 			{job?.resume_available && !running && <div className="portfolio-report-warning portfolio-recovery"><CircleAlert size={16} /><span>{job.error || '上次任务未完成，已有报告已保存'}</span><button type="button" disabled={starting} onClick={() => void resumeInspection()}>{job.results.every((r) => r.status === 'succeeded') ? '重试组合评估' : '补齐失败标的'}</button></div>}
+			{job?.resume_available && !running && <PortfolioValidationIssues issues={job.validation_issues} />}
    {job?.report && job.status !== 'running' && (['portfolio-ai-score-v3', portfolioScoringVersion].includes(job.report.algorithm_version || '')
     ? <PortfolioAIReportView report={job.report} afterSummary={optimization} busy={starting || applying} onOptimize={job.status === 'succeeded' && job.report.algorithm_version === portfolioScoringVersion && job.report.conclusion.score_available ? () => setOptimizationSignal((n) => n+1) : undefined} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} onRefresh={(symbol) => void startInspection([symbol], sourceRequest)} />
     : <PortfolioReportView report={job.report} afterSummary={optimization} status={job.status} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} />)}

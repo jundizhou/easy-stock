@@ -3,6 +3,7 @@ package portfolioinspection
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/agent"
-	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/stockanalysis"
@@ -117,7 +117,7 @@ func (s *Service) start(ctx context.Context, request Request, previous *Job, sch
 			if i >= len(job.Results) {
 				break
 			}
-			if validHoldingResearch(old) {
+			if validHoldingResearch(old) && (old.ReportCompletedAt.IsZero() || now.Sub(old.ReportCompletedAt) <= 24*time.Hour) {
 				old.ResearchOrigin = "reused"
 				job.Results[i] = old
 				job.CompletedStocks++
@@ -245,13 +245,8 @@ func (s *Service) run(ctx context.Context, job Job) {
 	}
 	ctx = bound
 	defer release()
-	responseWait := time.Duration(0)
-	if llm, ok := agent.BoundLLM(ctx); ok {
-		responseWait = time.Duration(appsettings.NormalizeLLMResponseTimeoutSeconds(llm.ResponseTimeoutSeconds)) * time.Second
-	}
-	effort, _ := agent.BoundReasoningEffort(ctx)
-	researchBudget := stockanalysis.ResearchBudgetFor(stockanalysis.ResearchRequest{AnalysisLevel: job.Request.ResearchLevel}, responseWait, effort)
-	budget := time.Duration((len(job.Results)+DefaultConcurrency-1)/DefaultConcurrency)*researchBudget.TotalTimeout() + AggregationTimeout + 2*time.Minute
+	aggregation := aggregationBudgetFromContext(ctx)
+	budget := inspectionTimeout(job.Request, len(job.Results), s.concurrency, aggregation)
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	type event struct {
@@ -386,9 +381,28 @@ func (s *Service) run(ctx context.Context, job Job) {
 	job.Message = "标的AI报告已就绪，正在综合评分和评估组合风险"
 	s.persist(job)
 	if s.logger != nil {
-		s.logger.Printf("level=info event=portfolio_aggregation_start feature=portfolio-inspection job_id=%q reused=%d new=%d shared=%d", job.ID, job.ReusedStocks, job.NewStocks, job.SharedStocks)
+		s.logger.Printf("level=info event=portfolio_aggregation_start feature=portfolio-inspection job_id=%q reused=%d new=%d shared=%d reasoning_effort=%q response_timeout_seconds=%d stage_timeout_seconds=%d total_timeout_seconds=%d", job.ID, job.ReusedStocks, job.NewStocks, job.SharedStocks, aggregation.ReasoningEffort, int(aggregation.ResponseTimeout.Seconds()), int(aggregation.StageTimeout.Seconds()), int(aggregation.TotalTimeout().Seconds()))
 	}
-	conclusion, err := s.scorePortfolio(ctx, job.Request, job.Results, metrics, rules, job.AggregationStartedAt)
+	var seed *scoringAttempt
+	if job.ResumedFrom != "" {
+		seed, err = s.store.lastScoringAttempt(ctx, job.ResumedFrom)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			s.finishPartial(&job, err)
+			return
+		}
+	}
+	conclusion, err := s.scorePortfolioWithAudit(ctx, job.Request, job.Results, metrics, rules, job.AggregationStartedAt, seed, func(attempt scoringAttempt) error {
+		// Persist diagnostics even if cancellation arrives with the response.
+		saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.store.saveScoringAttempt(saveCtx, job.ID, attempt); err != nil {
+			return err
+		}
+		job.ValidationIssues = append([]ScoringIssue(nil), attempt.Issues...)
+		job.ScoringAttempts = attempt.Number
+		s.persist(job)
+		return nil
+	})
 	job.AggregationDurationMS = time.Since(job.AggregationStartedAt).Milliseconds()
 	if err != nil {
 		s.finishPartial(&job, err)

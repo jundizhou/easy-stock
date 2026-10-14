@@ -79,9 +79,11 @@ func TestPromptProgressIdleTimeoutPreservesPartialOutput(t *testing.T) {
 printf '%s\n' '{"method":"message.delta","params":{"text":"{\"part\":"}}'
 sleep 0.6
 `)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Allow process startup under a full suite; this test exercises the idle
+	// timeout after partial output, not the time to launch the fixture.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := r.PromptWithOptions(ctx, "test", PromptOptions{FirstResponseTimeout: time.Second, IdleTimeout: 150 * time.Millisecond})
+	result, err := r.PromptWithOptions(ctx, "test", PromptOptions{FirstResponseTimeout: 3 * time.Second, IdleTimeout: 150 * time.Millisecond})
 	var timeout *PromptTimeoutError
 	if !errors.As(err, &timeout) || timeout.Kind != "idle" || result.Content != `{"part":` || result.Progress.TextBytes == 0 || result.Progress.ReasoningBytes == 0 || !strings.Contains(err.Error(), "已接收正文") {
 		t.Fatalf("partial output discarded: %+v %v", result, err)

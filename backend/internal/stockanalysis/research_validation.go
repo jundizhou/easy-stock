@@ -247,6 +247,7 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 	decision := &result.Decision
 	originalStatus := decision.Status
 	decision.Blockers = nil // These are computed by validation, never trusted from the model.
+	decision.ExecutionPrerequisites = nil
 	switch decision.Status {
 	case "observe", "conditional", "no_plan":
 	default:

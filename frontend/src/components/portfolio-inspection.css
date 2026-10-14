@@ -192,3 +192,8 @@
 .portfolio-etf-summary { margin-block: 12px; padding-top: 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .portfolio-etf-summary details { margin-block: 8px; }
 .portfolio-etf-premium.danger { color: #d97706; font-weight: 600; }
+.portfolio-validation-issues { margin: 12px 0; padding: 14px 18px; border: 1px solid var(--line); border-radius: 12px; overflow-wrap: anywhere; }
+.portfolio-validation-issues summary { cursor: pointer; font-weight: 600; }
+.portfolio-validation-issues p { margin: 12px 0; }
+.portfolio-validation-issues li { margin: 10px 0; }
+.portfolio-validation-issues small { display: block; opacity: .7; margin-top: 4px; }

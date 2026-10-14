@@ -16,6 +16,51 @@ import (
 
 const validPortfolioScoreJSON = `{"risk_level":"高","risk_reason":"集中持仓需要管理","style_match":"部分偏离","executive_summary":"逻辑仍需确认，组合集中风险较高。","confidence_level":"中","confidence_reason":"证据有限，原研究周期不同","dimensions":[{"key":"holding_logic","score":70,"reason":"有限证据","evidence_refs":[{"report_id":"reuse-http","source_id":"s1"}]},{"key":"portfolio_structure","score":71,"reason":"集中风险","evidence_refs":[{"fact":"equity_max_single_percent"}]},{"key":"risk_capacity","score":72,"reason":"退出条件需确认","evidence_refs":[{"fact":"stop_loss_coverage_percent"}]},{"key":"strategy_fit","score":73,"reason":"持有周期差异","evidence_refs":[{"fact":"profile.scoring_description"}]}],"holdings":[{"symbol":"600519.SH","portfolio_role":"观察","conclusion":"持有逻辑待验证","action_priority":"观察","action":"等待验证","confirmation":"趋势延续","invalidation":"趋势破坏"}],"scenarios":[{"name":"震荡分化","condition":"趋势走弱","portfolio_action":"复核持有逻辑"}],"adjustment_order":["先核实趋势"],"primary_risks":[],"concentration_findings":[],"next_checklist":[],"data_limitations":[]}`
 
+func portfolioScoreForPrompt(t *testing.T, prompt string) string {
+	t.Helper()
+	_, payload, ok := strings.Cut(prompt, "[组合证据JSON]\n")
+	if !ok {
+		t.Fatal("missing scoring payload")
+	}
+	var input struct {
+		Version  string `json:"contract_version"`
+		Evidence []struct {
+			ID  string                          `json:"evidence_id"`
+			Ref portfolioinspection.EvidenceRef `json:"reference"`
+		} `json:"evidence_catalog"`
+		Actions []portfolioinspection.ScoringAction `json:"action_catalog"`
+	}
+	if err := json.NewDecoder(strings.NewReader(payload)).Decode(&input); err != nil {
+		t.Fatal(err)
+	}
+	var report portfolioinspection.AIReport
+	_ = json.Unmarshal([]byte(validPortfolioScoreJSON), &report)
+	report.ContractVersion = input.Version
+	for i := range report.Dimensions {
+		for j, ref := range report.Dimensions[i].EvidenceRefs {
+			for _, e := range input.Evidence {
+				if ref == e.Ref {
+					report.Dimensions[i].EvidenceRefs[j] = portfolioinspection.EvidenceRef{EvidenceID: e.ID}
+				}
+			}
+		}
+	}
+	for _, a := range input.Actions {
+		if a.Symbol == "600519.SH" && a.Kind == "observe" {
+			report.Holdings[0].ActionID = a.ID
+			report.Holdings[0].Action = ""
+			report.Holdings[0].Confirmation = ""
+			report.Holdings[0].Invalidation = ""
+			report.AdjustmentOrder = nil
+			report.AdjustmentActionIDs = []string{a.ID}
+			report.Scenarios[0].PortfolioAction = ""
+			report.Scenarios[0].ActionIDs = []string{a.ID}
+		}
+	}
+	data, _ := json.Marshal(report)
+	return string(data)
+}
+
 func seedPortfolioResearch(t *testing.T, s *Server) {
 	t.Helper()
 	now := time.Now().UTC().Add(-time.Hour)
@@ -61,7 +106,7 @@ func TestPortfolioInspectionReusesReportsAndReturnsIndependentAIScore(t *testing
 		if !strings.Contains(prompt, "组合AI评估器") {
 			t.Error("stock analysis unnecessarily ran")
 		}
-		return agent.PromptResult{Content: validPortfolioScoreJSON}, nil
+		return agent.PromptResult{Content: portfolioScoreForPrompt(t, prompt)}, nil
 	}
 	server := NewServer(Config{Realtime: stockAnalysisRealtime{}, ReviewDBPath: ":memory:", PortfolioDBPath: ":memory:", SettingsPath: "", AgentGateway: gateway})
 	t.Cleanup(func() { server.Close() })

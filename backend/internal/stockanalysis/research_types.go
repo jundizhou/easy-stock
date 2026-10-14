@@ -135,14 +135,15 @@ type AnchoredPricePlan struct {
 }
 
 type ResearchDecision struct {
-	Status           string             `json:"status"`
-	Mode             string             `json:"mode"`
-	Horizon          string             `json:"horizon"`
-	NewPosition      string             `json:"new_position"`
-	ExistingPosition string             `json:"existing_position"`
-	Reason           string             `json:"reason"`
-	PricePlan        *AnchoredPricePlan `json:"price_plan,omitempty"`
-	Blockers         []string           `json:"blockers,omitempty"`
+	Status                 string             `json:"status"`
+	Mode                   string             `json:"mode"`
+	Horizon                string             `json:"horizon"`
+	NewPosition            string             `json:"new_position"`
+	ExistingPosition       string             `json:"existing_position"`
+	Reason                 string             `json:"reason"`
+	PricePlan              *AnchoredPricePlan `json:"price_plan,omitempty"`
+	Blockers               []string           `json:"blockers,omitempty"`
+	ExecutionPrerequisites []string           `json:"execution_prerequisites,omitempty"`
 }
 
 type ResearchSynthesis struct {

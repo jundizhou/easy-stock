@@ -41,7 +41,7 @@ func TestNamedDimensionsAreLosslessAndRejectAmbiguousKeys(t *testing.T) {
 	if !reflect.DeepEqual(decoded.Dimensions, expected.Dimensions) || *decoded.TotalScore != *expected.TotalScore {
 		t.Fatal("container normalization changed scores or references", decoded.Dimensions)
 	}
-	for _, mode := range []string{"missing", "unknown", "conflicting"} {
+	for _, mode := range []string{"missing", "unknown", "conflicting", "null_dimension"} {
 		t.Run(mode, func(t *testing.T) {
 			var changed map[string]any
 			_ = json.Unmarshal([]byte(scoreContent(t, raw)), &changed)
@@ -54,6 +54,8 @@ func TestNamedDimensionsAreLosslessAndRejectAmbiguousKeys(t *testing.T) {
 				delete(dims, "holding_logic")
 			case "conflicting":
 				dims["holding_logic"].(map[string]any)["key"] = "risk_capacity"
+			case "null_dimension":
+				dims["holding_logic"] = nil
 			}
 			if _, err := decodeScoringReport(scoreContent(t, changed)); err == nil {
 				t.Fatal("ambiguous dimension keys accepted")

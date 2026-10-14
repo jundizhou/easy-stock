@@ -70,7 +70,7 @@ func TestPromptUsesResearchAndBoundsInputWithoutMutatingReports(t *testing.T) {
 	if err != nil || len(prompt) > 25000 {
 		t.Fatalf("oversized prompt %d %v", len(prompt), err)
 	}
-	if strings.Contains(prompt, "deterministic_summary") || !strings.Contains(prompt, "不得调用工具") || !strings.Contains(prompt, "\"source_id\":\"来源编号\"") {
+	if strings.Contains(prompt, "deterministic_summary") || !strings.Contains(prompt, "不得调用工具") || !strings.Contains(prompt, "\"evidence_id\":\"ev-目录编号\"") || !strings.Contains(prompt, "action_catalog") {
 		t.Fatal("bad scoring prompt")
 	}
 	if results[0].Analysis.ResearchReport.Thesis.Text != before {
@@ -85,12 +85,12 @@ type scoreGateway struct {
 }
 
 func (g *scoreGateway) Status() agent.Status { return agent.Status{Available: true, Configured: true} }
-func (g *scoreGateway) Prompt(context.Context, string) (agent.PromptResult, error) {
+func (g *scoreGateway) Prompt(_ context.Context, prompt string) (agent.PromptResult, error) {
 	g.calls.Add(1)
 	if g.fail.Load() {
 		return agent.PromptResult{}, errors.New("test provider timeout")
 	}
-	return agent.PromptResult{Content: g.content}, nil
+	return agent.PromptResult{Content: fixtureModelScoringResponse(g.content, prompt)}, nil
 }
 func (g *scoreGateway) Warmup(context.Context) error { return nil }
 

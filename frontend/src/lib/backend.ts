@@ -1139,6 +1139,9 @@ export type PortfolioMetrics = {
 };
 
 export type PortfolioAIReport = {
+ contract_version?: string;
+ adjustment_action_ids?: string[];
+ actions?: Array<{ action_id: string; symbol: string; report_id: string; kind: string; condition_ids?: string[]; anchor_ids?: string[]; execution_prerequisites?: string[]; execution_status: string; text: string; confirmation: string; invalidation: string }>;
  etf_scoring?: PortfolioETFScoring;
  explanation_details?: Record<string, { evidence_refs?: PortfolioEvidenceRef[]; symbols?: string[] }>;
  total_score?: number;
@@ -1155,6 +1158,7 @@ export type PortfolioAIReport = {
 	primary_risks: string[];
 	concentration_findings: string[];
 	holdings: Array<{
+		action_id?: string;
 		symbol: string;
 		portfolio_role: string;
 		risk_contribution: number;
@@ -1165,7 +1169,7 @@ export type PortfolioAIReport = {
 		invalidation: string;
 	}>;
 	adjustment_order: string[];
-	scenarios: Array<{ name: string; condition: string; portfolio_action: string }>;
+	scenarios: Array<{ name: string; condition: string; portfolio_action: string; action_ids?: string[] }>;
 	next_checklist: string[];
 	data_limitations: string[];
 	confidence: number;
@@ -1188,6 +1192,8 @@ export type PortfolioInspectionReport = {
 };
 
 export type PortfolioInspectionJob = {
+ validation_issues?: Array<{ code: string; path: string; message: string }>;
+ scoring_attempts?: number;
  schedule_id?: string;
  resumed_from?: string;
  resume_available?: boolean;
