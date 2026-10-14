@@ -19,7 +19,7 @@ const MaxCandidateResearch = 6
 const MaxScreeningStocks = 80
 const MaxScreeningIndustries = 16
 const ScreeningTimeout = 3 * time.Minute
-const TotalTimeout = 24 * time.Minute
+const TotalTimeout = 40 * time.Minute
 const ModelTimeout = 8 * time.Minute
 
 type Request struct {
