@@ -198,6 +198,35 @@ func (s *Store) Get(ctx context.Context, id string) (Job, error) {
 	return job, nil
 }
 
+// deleteJob removes only this inspection and its private scoring attempts.
+// Schedules retain their last-run metadata; optimization/research snapshots are independent.
+func (s *Store) deleteJob(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM portfolio_inspection_jobs WHERE id=? AND status <> 'running'`, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM portfolio_inspection_jobs WHERE id=?`, id).Scan(&status); err != nil {
+			return err
+		}
+		return ErrDeleteRunning
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM portfolio_scoring_attempts WHERE job_id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // An omitted planID lists all records; an empty planID lists legacy unbound records.
 func (s *Store) List(ctx context.Context, limit int, planID ...string) ([]Job, error) {
 	if limit <= 0 || limit > 30 {

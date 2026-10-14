@@ -233,6 +233,7 @@ AI 为每个维度输出整数分数、判断理由、主要加扣分项和证�
 - 创建持仓分析：`POST /api/v1/portfolio-inspections`，支持 `horizon`、`research_level` 和仅针对指定持仓的 `force_symbols`。
 - 恢复分析：`POST /api/v1/portfolio-inspections/{id}/resume`，保留成功报告，只补失败股票；个股完整时只重试组合评估。
 - 停止组合分析：`POST /api/v1/portfolio-inspections/{id}/cancel`，不取消共享个股研究。
+- 删除巡检记录：`DELETE /api/v1/portfolio-inspections/{id}`，成功返回 204，不存在返回 404，运行中返回 409。事务内删除该记录和私有评分缓存；保留持仓方案、定时配置与最近执行信息、共享标的研究、独立优化快照。列表逐条确认删除，删除当前记录后收起报告，旧轮询结果不得恢复已删除项。
 - 报告版本：`portfolio-inspection-v3`，评分版本：`portfolio-ai-score-v3`。
 - 新行情仅作独立事实快照。价格条件比较明确标记为报价参考，不能把盘中报价当作收盘条件确认；语义条件保留未核验状态。
 - 浏览器验收：`scripts/verify-portfolio-ai-ui.mjs`，使用明确标注的 UI TEST FIXTURE，验证四维评分、来源展开、独立止损预算、手机布局、指定单股重新研究、任务共享进度、停止和恢复；不会调用模型。

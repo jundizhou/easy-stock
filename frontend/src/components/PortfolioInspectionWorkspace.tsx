@@ -3,7 +3,6 @@ import { PortfolioValidationIssues } from './PortfolioValidationIssues';
 import {
 	Activity,
 	CheckCircle2,
-	ChevronRight,
 	CircleAlert,
 	Clock3,
 	ExternalLink,
@@ -23,6 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
 	BackendConfig,
+	BackendRequestError,
 	PortfolioHolding,
 	PortfolioInspectionJob,
 	PortfolioInspectionReport,
@@ -37,6 +37,7 @@ import { activePortfolioPlan, addPortfolioPlan, portfolioDraftChangedEvent, port
 import { applyPortfolioOptimization } from '../lib/apply-portfolio-optimization';
 import { PortfolioSchedulePanel } from './PortfolioSchedulePanel';
 import { PortfolioPlanPicker } from './PortfolioPlanPicker';
+import { PortfolioInspectionHistoryItem } from './PortfolioInspectionHistoryItem';
 import { PortfolioSetupForm } from './PortfolioSetupForm';
 import { ResearchPanel } from './StockResearchReport';
 import { PortfolioAIReportView, originLabel } from './PortfolioAIReport';
@@ -60,6 +61,13 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedDirectory);
 	const [history, setHistory] = useState<PortfolioInspectionJob[]>([]);
 	const [job, setJob] = useState<PortfolioInspectionJob | null>(null);
+	const jobRef = useRef(job);
+	jobRef.current = job;
+	const [confirmDeleteID, setConfirmDeleteID] = useState('');
+	const [deletingID, setDeletingID] = useState('');
+	const deletingRef = useRef('');
+	// Ignore responses from list/poll requests that started before a deletion.
+	const deletedIDs = useRef(new Set<string>());
 	const [historyScope, setHistoryScope] = useState<'current' | 'all' | 'unbound'>('current');
 	const [applying, setApplying] = useState(false);
 	const applyingRef = useRef(false);
@@ -77,6 +85,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 
 	const totalWeight = useMemo(() => draft.holdings.reduce((total, item) => total + item.weight, 0), [draft.holdings]);
 	const running = job?.status === 'running';
+	const mutationBusy = starting || applying || Boolean(deletingID);
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -85,6 +94,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		setNotice('');
 		setAppliedPlanId('');
 		setOptimizationSignal(0);
+		setConfirmDeleteID('');
 		setError('');
 		if (!config) { setLoading(false); return; }
 		setLoading(true);
@@ -92,9 +102,10 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		const loadHistory = () => requestJSON<{ data: PortfolioInspectionJob[] }>(config, `/api/v1/portfolio-inspections?limit=12${filter}`, { signal: controller.signal })
 			.then(({ data }) => {
 				if (controller.signal.aborted) return;
-				setHistory(data || []);
-				const active = data?.find((item) => item.status === 'running');
-				setJob((current) => current ? data?.find((item) => item.id === current.id) || current : active || null);
+				const visible = (data || []).filter((item) => !deletedIDs.current.has(item.id));
+				setHistory(visible);
+				const active = visible.find((item) => item.status === 'running');
+				setJob((current) => current && !deletedIDs.current.has(current.id) ? visible.find((item) => item.id === current.id) || current : active || null);
 			})
 			.catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '持仓巡检数据加载失败'); })
 			.finally(() => { if (!controller.signal.aborted) setLoading(false); });
@@ -115,7 +126,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	}, [config, refreshKey]);
 
 	const rememberJob = (next: PortfolioInspectionJob) => {
-		if (viewRef.current !== viewKey) return;
+		if (viewRef.current !== viewKey || deletedIDs.current.has(next.id)) return;
 		setJob(next);
 		setHistory((current) => {
 			const rest = current.filter((item) => item.id !== next.id);
@@ -138,7 +149,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	}, []);
 
 	const changePlan = (update: () => PortfolioPlans, showSetup = false) => {
-		if (starting || running || applyingRef.current) return false;
+		if (starting || running || applyingRef.current || deletingRef.current) return false;
 		try {
 			setPlans(update());
 			setError('');
@@ -170,7 +181,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	}, [config, job?.id, job?.status, viewKey]);
 
 	const deletePlan = async () => {
-  if (!config || starting || running || applyingRef.current || removing) return false;
+  if (!config || starting || running || applyingRef.current || removing || deletingRef.current) return false;
   setRemoving(true); setError('');
   try {
    await requestJSON(config, `/api/v1/portfolio-schedules/${encodeURIComponent(activePlan.id)}`, { method: 'DELETE' });
@@ -179,8 +190,32 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
   finally { setRemoving(false); }
  };
 
+	const deleteInspection = async (item: PortfolioInspectionJob) => {
+		if (!config || item.status === 'running' || starting || applyingRef.current || deletingRef.current) return;
+		deletingRef.current = item.id;
+		setDeletingID(item.id); setError(''); setNotice('');
+		try {
+			try {
+				await requestJSON(config, `/api/v1/portfolio-inspections/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+			} catch (cause) {
+				// Another window or a previously lost response may have already removed it.
+				if (!(cause instanceof BackendRequestError && cause.status === 404)) throw cause;
+			}
+			deletedIDs.current.add(item.id);
+			setHistory((current) => current.filter((entry) => entry.id !== item.id));
+			setJob((current) => current?.id === item.id ? null : current);
+			if (jobRef.current?.id === item.id) { setAppliedPlanId(''); setOptimizationSignal(0); }
+			if (viewRef.current === viewKey) { setConfirmDeleteID(''); setNotice('巡检记录已删除'); }
+		} catch (cause) {
+			if (viewRef.current === viewKey) setError(cause instanceof Error ? cause.message : '删除巡检记录失败，请重试');
+		} finally {
+			deletingRef.current = '';
+			setDeletingID('');
+		}
+	};
+
  const startInspection = async (forceSymbols: string[] = [], existing?: PortfolioResearchRequest) => {
-		if (!config || starting || applyingRef.current || (!existing && (draft.holdings.length === 0 || totalWeight > 100))) return;
+		if (!config || starting || applyingRef.current || deletingRef.current || (!existing && (draft.holdings.length === 0 || totalWeight > 100))) return;
 		if (existing && !existing.portfolio_plan_id) { setError('请先将这份历史记录绑定到持仓方案'); return; }
 		setStarting(true);
 		setError('');
@@ -205,7 +240,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	};
 
  const resumeInspection = async () => {
-  if (!config || !job || applyingRef.current) return;
+  if (!config || !job || applyingRef.current || deletingRef.current) return;
   if (!job.request.portfolio_plan_id) { setError('请先将这份历史记录绑定到持仓方案'); return; }
   setStarting(true); setError('');
   try { const payload = await requestJSON<{ data: PortfolioInspectionJob }>(config, `/api/v1/portfolio-inspections/${job.id}/resume`, { method: 'POST' }); if (viewRef.current !== viewKey) return; rememberJob(payload.data); setNotice('正在恢复任务，已成功标的报告继续复用'); }
@@ -218,7 +253,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
  };
 
 	const bindLegacy = async () => {
-		if (!config || !job || starting || running) return;
+		if (!config || !job || starting || running || deletingRef.current) return;
 		setStarting(true); setError('');
 		try {
 			const { data } = await requestJSON<{ data: PortfolioInspectionJob }>(config, `/api/v1/portfolio-inspections/${encodeURIComponent(job.id)}/bind-plan`, {
@@ -234,7 +269,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 
 	const originalPlan = plans.plans.find((plan) => plan.id === job?.request.portfolio_plan_id);
 	const applyToOriginal = async (holdings: PortfolioHolding[]) => {
-		if (!config || !job || applyingRef.current || starting) return;
+		if (!config || !job || applyingRef.current || starting || deletingRef.current) return;
 		const planId = job.request.portfolio_plan_id || '';
 		applyingRef.current = true; setApplying(true); setError(''); setNotice(''); setAppliedPlanId('');
 		const controller = new AbortController();
@@ -252,41 +287,40 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	const optimization = job?.report && job.status !== 'running' ? <PortfolioOptimizationWorkspace key={job.id} config={config} sourceId={job.id} canStart={job.status === 'succeeded' && job.report.algorithm_version === portfolioScoringVersion && Boolean(job.report.conclusion.score_available)} startSignal={optimizationSignal} onOpenStockAnalysis={onOpenStockAnalysis}
 		onApply={(request) => void startInspection([], { ...request, portfolio_plan_id: sourceRequest?.portfolio_plan_id, portfolio_plan_name: sourceRequest?.portfolio_plan_name })}
 		onApplyToPlan={originalPlan ? (holdings) => void applyToOriginal(holdings) : undefined} originalPlanName={originalPlan?.name} applyingToPlan={applying}
-		onRefreshSource={() => void startInspection([], sourceRequest)} applyBusy={starting || applying || Boolean(running)} /> : null;
+		onRefreshSource={() => void startInspection([], sourceRequest)} applyBusy={mutationBusy || Boolean(running)} /> : null;
 
 	return <div className="portfolio-inspection-workspace">
 		<aside className="portfolio-history stock-ai-panel" aria-label="巡检历史">
 			<header><History size={16} /><div><strong>巡检记录</strong><small>{historyScope === 'current' ? activePlan.name : historyScope === 'all' ? '全部方案' : '历史未绑定'}</small></div></header>
-			<select className="portfolio-history-scope" aria-label="巡检记录范围" value={historyScope} disabled={starting || applying || Boolean(running)} onChange={(event) => setHistoryScope(event.target.value as typeof historyScope)}><option value="current">当前方案</option><option value="all">全部记录</option><option value="unbound">未绑定记录</option></select>
+			<select className="portfolio-history-scope" aria-label="巡检记录范围" value={historyScope} disabled={mutationBusy || Boolean(running)} onChange={(event) => setHistoryScope(event.target.value as typeof historyScope)}><option value="current">当前方案</option><option value="all">全部记录</option><option value="unbound">未绑定记录</option></select>
 			<div>
 				{loading && <span className="portfolio-history-empty"><LoaderCircle className="spin" size={17} />正在读取</span>}
 				{!loading && history.length === 0 && <span className="portfolio-history-empty">暂无报告</span>}
-				{history.map((item) => <button type="button" className={job?.id === item.id ? 'active' : ''} disabled={starting || applying} onClick={() => setJob(item)} key={item.id}>
-					<span>{item.status === 'running' ? <LoaderCircle className="spin" size={14} /> : item.status === 'succeeded' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}</span>
-					<div><strong>{item.schedule_id ? '定时 · ' : ''}{item.request.holdings.length} 只持仓 · {profileLabel(item.request.trader_profile)}</strong><small>{historyScope !== 'current' && `${plans.plans.find((plan) => plan.id === item.request.portfolio_plan_id)?.name || item.request.portfolio_plan_name || '未绑定方案'} · `}{formatDate(item.updated_at || item.started_at)}</small></div>
-					<ChevronRight size={14} />
-				</button>)}
+				{history.map((item) => <PortfolioInspectionHistoryItem key={item.id} item={item} selected={job?.id === item.id} disabled={mutationBusy} deleting={deletingID === item.id} confirming={confirmDeleteID === item.id}
+					title={`${item.schedule_id ? '定时 · ' : ''}${item.request.holdings.length} 只持仓 · ${profileLabel(item.request.trader_profile)}`}
+					detail={`${historyScope !== 'current' ? `${plans.plans.find((plan) => plan.id === item.request.portfolio_plan_id)?.name || item.request.portfolio_plan_name || '未绑定方案'} · ` : ''}${formatDate(item.updated_at || item.started_at)}`}
+					onSelect={() => { setJob(item); setConfirmDeleteID(''); }} onRequestDelete={() => setConfirmDeleteID(item.id)} onCancelDelete={() => setConfirmDeleteID('')} onConfirmDelete={() => void deleteInspection(item)} />)}
 			</div>
 		</aside>
 
 		<section className="portfolio-inspection-main">
-			<PortfolioPlanPicker key={activePlan.id} state={plans} disabled={starting || applying || removing || savingSchedule || Boolean(running)} onSelect={(id) => changePlan(() => selectPortfolioPlan(id), true)} onAdd={() => changePlan(addPortfolioPlan, true)} onRename={(name) => changePlan(() => renamePortfolioPlan(activePlan.id, name))} onRemove={deletePlan} />
-   <PortfolioSchedulePanel key={`schedule:${activePlan.id}`} config={config} plan={activePlan} disabled={starting || applying || removing} onBusyChange={setSavingSchedule} onOpenSettings={onOpenNotificationSettings} />
+			<PortfolioPlanPicker key={activePlan.id} state={plans} disabled={mutationBusy || removing || savingSchedule || Boolean(running)} onSelect={(id) => changePlan(() => selectPortfolioPlan(id), true)} onAdd={() => changePlan(addPortfolioPlan, true)} onRename={(name) => changePlan(() => renamePortfolioPlan(activePlan.id, name))} onRemove={deletePlan} />
+   <PortfolioSchedulePanel key={`schedule:${activePlan.id}`} config={config} plan={activePlan} disabled={mutationBusy || removing} onBusyChange={setSavingSchedule} onOpenSettings={onOpenNotificationSettings} />
 			{notice && <div className="portfolio-notice" role="status"><CheckCircle2 size={16} /><span>{notice}</span>{appliedPlanId && <button type="button" onClick={() => changePlan(() => selectPortfolioPlan(appliedPlanId), true)}>查看持仓方案</button>}</div>}
 			{error && <div className="portfolio-error" role="alert"><CircleAlert size={16} /><span>{error}</span>{error.includes('模型') && <button type="button" onClick={onOpenSettings}>配置模型</button>}</div>}
 
-			{job && <div className="portfolio-record-binding"><span>所属方案：{originalPlan?.name || (job.request.portfolio_plan_id ? `${job.request.portfolio_plan_name || '原方案'}（已删除）` : '未绑定')}</span>{!job.request.portfolio_plan_id && <button type="button" disabled={starting || Boolean(running)} onClick={() => void bindLegacy()}>绑定到「{activePlan.name}」</button>}</div>}
+			{job && <div className="portfolio-record-binding"><span>所属方案：{originalPlan?.name || (job.request.portfolio_plan_id ? `${job.request.portfolio_plan_name || '原方案'}（已删除）` : '未绑定')}</span>{!job.request.portfolio_plan_id && <button type="button" disabled={mutationBusy || Boolean(running)} onClick={() => void bindLegacy()}>绑定到「{activePlan.name}」</button>}</div>}
 
 			{(!job?.report || job.status === 'running') && <>
 				<header className="stock-ai-search-hero portfolio-setup-hero"><div><span>持仓 AI 巡检</span><h2>配置持仓，检查组合风险</h2><p>选择交易风格，填写持仓占比与成本后开始巡检。</p></div><WalletCards size={32} aria-hidden="true" /></header>
-				<PortfolioSetupForm config={config} key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={starting || applying || Boolean(running)} busy={starting || applying || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={() => void startInspection()} />
+				<PortfolioSetupForm config={config} key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={mutationBusy || Boolean(running)} busy={mutationBusy || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={() => void startInspection()} />
 			</>}
 
 			{job?.status === 'running' && <><InspectionProgress job={job} /><button type="button" className="portfolio-task-action" disabled={starting} onClick={() => void cancelInspection()}>停止持仓分析</button></>}
-			{job?.resume_available && !running && <div className="portfolio-report-warning portfolio-recovery"><CircleAlert size={16} /><span>{job.error || '上次任务未完成，已有报告已保存'}</span><button type="button" disabled={starting} onClick={() => void resumeInspection()}>{job.results.every((r) => r.status === 'succeeded') ? '重试组合评估' : '补齐失败标的'}</button></div>}
+			{job?.resume_available && !running && <div className="portfolio-report-warning portfolio-recovery"><CircleAlert size={16} /><span>{job.error || '上次任务未完成，已有报告已保存'}</span><button type="button" disabled={mutationBusy} onClick={() => void resumeInspection()}>{job.results.every((r) => r.status === 'succeeded') ? '重试组合评估' : '补齐失败标的'}</button></div>}
 			{job?.resume_available && !running && <PortfolioValidationIssues issues={job.validation_issues} />}
    {job?.report && job.status !== 'running' && (['portfolio-ai-score-v3', portfolioScoringVersion].includes(job.report.algorithm_version || '')
-    ? <PortfolioAIReportView report={job.report} afterSummary={optimization} busy={starting || applying} onOptimize={job.status === 'succeeded' && job.report.algorithm_version === portfolioScoringVersion && job.report.conclusion.score_available ? () => setOptimizationSignal((n) => n+1) : undefined} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} onRefresh={(symbol) => void startInspection([symbol], sourceRequest)} />
+    ? <PortfolioAIReportView report={job.report} afterSummary={optimization} busy={mutationBusy} onOptimize={job.status === 'succeeded' && job.report.algorithm_version === portfolioScoringVersion && job.report.conclusion.score_available ? () => setOptimizationSignal((n) => n+1) : undefined} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} onRefresh={(symbol) => void startInspection([symbol], sourceRequest)} />
     : <PortfolioReportView report={job.report} afterSummary={optimization} status={job.status} onNew={() => setJob(null)} onOpenStockAnalysis={onOpenStockAnalysis} />)}
 
 		</section>

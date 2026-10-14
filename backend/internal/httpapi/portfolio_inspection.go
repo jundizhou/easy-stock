@@ -126,6 +126,25 @@ func (s *Server) portfolioInspectionResume(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"data": job})
 }
+func (s *Server) portfolioInspectionDelete(w http.ResponseWriter, r *http.Request) {
+	if s.portfolioInspection == nil {
+		writeError(w, http.StatusServiceUnavailable, "持仓巡检服务不可用")
+		return
+	}
+	if err := s.portfolioInspection.Delete(r.Context(), r.PathValue("id")); err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			status = http.StatusNotFound
+		case errors.Is(err, portfolioinspection.ErrDeleteRunning):
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) portfolioInspectionCancel(w http.ResponseWriter, r *http.Request) {
 	if !s.portfolioInspection.Cancel(r.PathValue("id")) {
 		writeError(w, http.StatusConflict, "持仓任务已结束")

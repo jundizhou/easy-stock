@@ -658,6 +658,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections", s.portfolioInspectionList)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections", s.portfolioInspectionCreate)
 	s.mux.HandleFunc("GET /api/v1/portfolio-inspections/{id}", s.portfolioInspectionGet)
+	s.mux.HandleFunc("DELETE /api/v1/portfolio-inspections/{id}", s.portfolioInspectionDelete)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections/{id}/resume", s.portfolioInspectionResume)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections/{id}/bind-plan", s.portfolioInspectionBindPlan)
 	s.mux.HandleFunc("POST /api/v1/portfolio-inspections/{id}/cancel", s.portfolioInspectionCancel)

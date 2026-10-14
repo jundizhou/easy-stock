@@ -22,6 +22,7 @@ import (
 )
 
 var ErrJobRunning = errors.New("已有持仓巡检正在运行，请等待完成后再开始新的巡检")
+var ErrDeleteRunning = errors.New("巡检仍在运行，请先停止并等待结束后再删除")
 
 type StockAnalyzer func(context.Context, string) (stockanalysis.Analysis, error)
 type HoldingAnalyzer func(context.Context, Holding) (stockanalysis.Analysis, error)
@@ -189,6 +190,20 @@ func (s *Service) List(ctx context.Context, limit int, planID ...string) ([]Job,
 		jobs[i] = decorateJob(jobs[i])
 	}
 	return jobs, err
+}
+
+// Delete serializes with binding and rejects workers until their final writes finish.
+func (s *Service) Delete(ctx context.Context, id string) error {
+	if s == nil || s.store == nil {
+		return errors.New("持仓巡检服务不可用")
+	}
+	id = strings.TrimSpace(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runningID == id && id != "" {
+		return ErrDeleteRunning
+	}
+	return s.store.deleteJob(ctx, id)
 }
 
 // BindPlan associates a legacy record with a local plan without changing its

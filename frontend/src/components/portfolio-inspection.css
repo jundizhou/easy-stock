@@ -50,10 +50,22 @@
 .portfolio-record-binding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .portfolio-record-binding button, .portfolio-notice button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface, #fff); color: var(--theme-blue, #2476d2); cursor: pointer; }
 .portfolio-record-binding button:disabled { opacity: .5; cursor: default; }
-.portfolio-inspection-workspace .portfolio-history > div > button { min-height: 64px; padding: 12px; }
-.portfolio-inspection-workspace .portfolio-history > div > button.active { background: var(--theme-blue-soft, #eaf3ff); }
-.portfolio-inspection-workspace .portfolio-history > div > button strong { font-size: 13px; }
-.portfolio-inspection-workspace .portfolio-history > div > button small,
+.portfolio-history-item { display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; min-width: 0; border-bottom: 1px solid var(--line-soft); }
+.portfolio-history-item.active { background: var(--theme-blue-soft, #eaf3ff); }
+.portfolio-history-select { display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 7px; min-width: 0; min-height: 64px; padding: 12px 4px 12px 12px; border: 0; background: transparent; color: var(--muted); text-align: left; cursor: pointer; }
+.portfolio-history-select > div { display: grid; min-width: 0; gap: 3px; }
+.portfolio-history-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; }
+.portfolio-history-select small { color: var(--muted); }
+.portfolio-history-delete { display: grid; place-items: center; width: 28px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.portfolio-history-delete:hover:not(:disabled) { color: var(--theme-red, #c4313b); background: var(--theme-red-soft, #fff0f1); }
+.portfolio-history-select:hover:not(:disabled) { color: var(--theme-blue, #2476d2); }
+.portfolio-history-item button:disabled { opacity: .45; cursor: not-allowed; }
+.portfolio-history-confirm { grid-column: 1 / -1; padding: 0 12px 12px; font-size: 12px; line-height: 1.7; }
+.portfolio-history-confirm p { margin: 0 0 8px; }
+.portfolio-history-confirm > div { display: flex; gap: 8px; }
+.portfolio-history-confirm button { padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface, #fff); color: var(--text); cursor: pointer; }
+.portfolio-history-confirm button:first-child { color: var(--theme-red, #c4313b); }
+.portfolio-history-select small,
 .portfolio-inspection-workspace .portfolio-history-empty { font-size: 12px; }
 .portfolio-inspection-workspace .portfolio-notice,
 .portfolio-inspection-workspace .portfolio-error,
