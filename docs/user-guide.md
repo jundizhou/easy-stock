@@ -30,6 +30,7 @@ MiniMax、智谱 GLM、通义千问、硅基流动等也可以使用。前往对
 | --- | --- | --- |
 | DeepSeek | `https://api.deepseek.com` | `deepseek-v4-pro`（或更快的 `deepseek-v4-flash`） |
 | Kimi（月之暗面） | `https://api.moonshot.cn/v1` | 点击「获取模型」选择 |
+| A2Agent（OpenAI 兼容接口） | `https://a2agent.me/v1` | 从 [A2Agent 模型列表](https://a2agent.me/pricing) 复制可用模型 ID |
 
 接口协议选择 `Chat Completions`，粘贴 API Key，然后点击「**保存并测试连接**」。看到「Hermes 模型连接可用」即配置成功。
 
