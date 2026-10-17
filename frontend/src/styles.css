@@ -1537,9 +1537,10 @@ a:focus-visible {
 
 .stock-table {
 	width: 100%;
-	min-width: 900px;
+	min-width: 0;
 	border-collapse: collapse;
-	table-layout: fixed;
+	/* 列宽按内容动态自适应：等宽会把「身份/股票」这类长文本挤成省略号 */
+	table-layout: auto;
 	font-size: var(--fs-body);
 }
 
@@ -1567,8 +1568,10 @@ a:focus-visible {
 	text-align: left;
 }
 
-/* 8 列等宽平均分布：身份 / 股票 / 阶段 / 领导力 / 可交易 / 近5日 / 当日 / 所属细分 */
-.stock-table th { width: 12.5%; }
+/* 列宽交给浏览器按内容分配：身份/股票等长文本列自动获得更多空间，数值列保持紧凑 */
+.stock-table th {
+	min-width: 0;
+}
 
 .stock-table tbody tr {
 	cursor: pointer;
@@ -2548,9 +2551,6 @@ a:focus-visible {
 	.stock-table td:nth-child(8) {
 		display: none;
 	}
-
-	/* 该区间隐藏「所属细分」后剩 7 列，同样平均分布 */
-	.stock-table th { width: 14.2857%; }
 }
 
 @media (max-width: 1120px) {
@@ -7215,10 +7215,10 @@ a:focus-visible {
 .market-futures-bars article { display: grid; grid-template-columns: 45px minmax(100px, 1fr) minmax(100px, 1fr) 104px; align-items: center; gap: 12px; color: var(--theme-muted, #748398); font-size: var(--fs-body); }
 .market-futures-bars time { color: var(--theme-subtle, #8b97a5); font-family: var(--font-num); font-size: var(--fs-caption); }
 .market-futures-bars article > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.market-futures-bars article i { display: block; height: 9px; min-width: 2px; border-radius: 2px; }
+.market-futures-bars article i { display: block; flex: 0 1 auto; height: 9px; min-width: 2px; border-radius: 2px; }
 .market-futures-bars article i.long { background: var(--theme-blue-solid, #2476d2); }
 .market-futures-bars article i.short { background: var(--theme-green-solid, #269b76); }
-.market-futures-bars article span { overflow: hidden; font-family: var(--font-num); font-size: var(--fs-body); text-overflow: ellipsis; white-space: nowrap; }
+.market-futures-bars article span { flex: 0 0 auto; font-family: var(--font-num); font-size: var(--fs-body); white-space: nowrap; }
 .market-futures-bars article > strong { text-align: right; font-family: var(--font-num); font-size: var(--fs-body); }
 .market-futures-panel > footer { padding: 8px 16px 12px; border-top: 1px solid var(--line-soft); color: var(--theme-subtle, #8b97a5); font-size: var(--fs-desc); line-height: var(--lh-body); }
 .market-flow-summary.market-futures-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }

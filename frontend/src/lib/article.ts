@@ -5,7 +5,9 @@ const HAN = '\u4e00-\u9fff';
 const HAN_SPACE = new RegExp(`(?<=[${HAN}]) (?=(?!答[:：])[${HAN}])`, 'g');
 
 // 公告/研报常见的小标题起点：一、／（二）／1、。
-const SECTION_START = /(?=(?:[一二三四五六七八九十]{1,3}、|（[一二三四五六七八九十\d]{1,3}）|\d{1,2}、))/;
+// 编号必须落在行首、空格或句读标点之后；否则「约3.54、9.34、8.32—9.32亿元」
+// 「下降2.41、1.48、3.09个百分点」这类数字顿号串会被当成编号，正文在小数点后被切碎。
+const SECTION_START = /(?<=^|[ \u3000。；！？：，])(?=(?:[一二三四五六七八九十]{1,3}、|（[一二三四五六七八九十\d]{1,3}）|\d{1,2}、))/;
 
 export function formatArticleParagraphs(text: string): string[] {
 	const normalized = text

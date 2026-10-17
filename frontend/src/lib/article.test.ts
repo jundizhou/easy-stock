@@ -25,6 +25,23 @@ describe('formatArticleParagraphs', () => {
 		]);
 	});
 
+	it('数字里的顿号不会被当成编号：约3.54、9.34、8.32—9.32亿元', () => {
+		const text = '单季度看，2026Q1—Q3公司分别实现归母净利润约3.54、9.34、8.32—9.32亿元，第三季度单季利润继续处于高位。';
+		expect(formatArticleParagraphs(text)).toEqual([text]);
+	});
+
+	it('句中的数字顿号串不切段，句末的编号小标题仍然切段', () => {
+		const text = '分别较上年同期下降2.41、1.48、3.09个百分点。2、盈利能力改善';
+		expect(formatArticleParagraphs(text)).toEqual([
+			'分别较上年同期下降2.41、1.48、3.09个百分点。',
+			'2、盈利能力改善',
+		]);
+	});
+
+	it('紧跟汉字的数字顿号串不切段：增长1、2个百分点', () => {
+		expect(formatArticleParagraphs('订单同比增长1、2个百分点后企稳。')).toEqual(['订单同比增长1、2个百分点后企稳。']);
+	});
+
 	it('空正文返回空数组', () => {
 		expect(formatArticleParagraphs('   ')).toEqual([]);
 	});
