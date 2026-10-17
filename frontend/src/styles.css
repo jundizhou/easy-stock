@@ -6403,7 +6403,7 @@ a:focus-visible {
 .stock-ai-kpi > div { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-body); }
 .stock-ai-kpi > strong { align-self: end; display: flex; align-items: baseline; gap: 4px; min-width: 0; overflow: hidden; font-family: var(--font-num); font-size: var(--fs-metric); font-weight: 700; line-height: var(--lh-metric); text-overflow: ellipsis; white-space: nowrap; }
 .stock-ai-kpi > strong .kpi-unit { flex: none; font-family: var(--font-ui); font-size: var(--fs-subtitle); font-weight: 600; }
-.stock-ai-kpi > small { overflow: hidden; color: var(--muted); font-size: var(--fs-desc); text-overflow: ellipsis; white-space: nowrap; }
+.stock-ai-kpi > small { color: var(--muted); font-size: var(--fs-desc); line-height: var(--lh-body); overflow-wrap: anywhere; white-space: normal; }
 .stock-ai-kpi.blue { color: var(--theme-blue, #2476d2); }
 .stock-ai-kpi.amber { color: var(--theme-amber, #a96a08); }
 .stock-ai-kpi.purple { color: var(--theme-purple, #7651c9); }
@@ -7059,7 +7059,7 @@ a:focus-visible {
 .market-overview-nav button.active { border-color: var(--theme-blue-line, #bfd3e8); background: var(--theme-surface, #ffffff); color: var(--theme-blue, #2476d2); box-shadow: 0 5px 14px var(--theme-shadow, rgba(39, 89, 139, .08)); }
 .market-overview-nav button > span { display: grid; gap: 2px; min-width: 0; }
 .market-overview-nav button strong { color: var(--theme-text, #34465b); font-size: var(--fs-body); }
-.market-overview-nav button small { overflow: hidden; color: var(--theme-subtle, #8a96a5); font-size: var(--fs-desc); text-overflow: ellipsis; white-space: nowrap; }
+.market-overview-nav button small { color: var(--theme-subtle, #8a96a5); font-size: var(--fs-desc); line-height: var(--lh-snug); overflow-wrap: anywhere; white-space: normal; }
 .market-overview-nav button em { padding: 2px 4px; border-radius: 999px; background: var(--theme-surface-soft, #edf1f5); color: var(--theme-subtle, #8a96a5); font-size: var(--fs-desc); font-style: normal; white-space: nowrap; }
 .market-overview-nav button.active em { background: var(--theme-blue-soft, #e9f3ff); color: var(--theme-blue, #4f7da9); }
 
