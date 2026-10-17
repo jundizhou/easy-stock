@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('aStock', {
   getBackendConfig: () => ipcRenderer.invoke('backend-config'),
+  setTitleBarTheme: (dark) => ipcRenderer.invoke('window-titlebar-theme', dark),
 	getRuntimeLogStatus: () => ipcRenderer.invoke('runtime-log-status'),
 	openRuntimeLogs: () => ipcRenderer.invoke('runtime-open-logs'),
 	logRuntimeEvent: (entry) => ipcRenderer.invoke('runtime-log', entry),

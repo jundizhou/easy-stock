@@ -29,8 +29,8 @@ function mountLoginCompleteControl() {
         backdrop-filter: blur(12px);
       }
       .copy { display: grid; flex: 1 1 190px; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-      strong { font-size: 13px; line-height: 1.2; }
-      small { color: #77879a; font-size: 13px; line-height: 1.35; }
+      strong { font-size: 12px; line-height: 1.2; }
+      small { color: #77879a; font-size: 11px; line-height: 1.35; }
       button {
         min-width: 128px;
         min-height: 40px;

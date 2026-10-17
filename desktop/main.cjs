@@ -187,6 +187,7 @@ async function createWindow() {
     minHeight: 680,
 		title: 'easy-stock · AI A股投研工作台 · 仅限个人非商业使用',
 		...(fs.existsSync(windowIcon) ? { icon: windowIcon } : {}),
+    ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#ffffff', symbolColor: '#3a4a5c', height: 40 } } : {}),
     backgroundColor: '#f4f5f7',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -195,6 +196,11 @@ async function createWindow() {
       webviewTag: true,
     },
   });
+  if (process.platform === 'win32') {
+    window.webContents.on('dom-ready', () => {
+      window.webContents.executeJavaScript("document.documentElement.classList.add('desktop-titlebar-overlay')").catch(() => {});
+    });
+  }
   window.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     let allowed = false;
     try {
@@ -414,6 +420,12 @@ function agentBrowserBinaryName() {
 }
 
 ipcMain.handle('backend-config', () => backendConfig);
+ipcMain.handle('window-titlebar-theme', (event, dark) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || process.platform !== 'win32') return false;
+  win.setTitleBarOverlay({ color: dark ? '#151719' : '#ffffff', symbolColor: dark ? '#e6edf5' : '#3a4a5c', height: 40 });
+  return true;
+});
 ipcMain.handle('runtime-log-status', () => ({
 	available: true,
 	directory: runtimeLogDirectory,
