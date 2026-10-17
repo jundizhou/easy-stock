@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"easy-stock/backend/internal/agent"
 )
 
 var ErrResearchBusy = errors.New("研究任务已达并发上限，请稍后再试")
@@ -106,6 +108,13 @@ func (s *ResearchService) startLocked(ctx context.Context, request ResearchReque
 		job.Message = "继续已保存的研究阶段"
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
+	trace := agent.CallTraceFromContext(ctx)
+	if trace.RootJobID == "" {
+		trace.RootJobID = job.ID
+	}
+	trace.SharedTaskID = job.ID
+	trace.ExecutionID = fmt.Sprintf("%s-%d", job.ID, time.Now().UnixNano())
+	runCtx = agent.WithCallTrace(runCtx, trace)
 	budget := ResearchBudgetFor(request, 0, "")
 	release := func() {}
 	if s.prepare != nil {

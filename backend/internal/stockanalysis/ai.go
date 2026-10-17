@@ -709,7 +709,8 @@ func promptJSONObjectWithOptions[T any](ctx context.Context, prompter agent.Prom
 	var firstDecodeErr error
 	for attempt := 1; attempt <= options.maxAttempts; attempt++ {
 		startedAt := time.Now()
-		result, callErr := agent.PromptUsingOptions(ctx, prompter, attemptPrompt, agent.PromptOptions{
+		callCtx := agent.WithCallTrace(ctx, agent.CallTrace{NodeID: label, AttemptID: fmt.Sprint(attempt), ProtocolVersion: ResearchPromptVersion})
+		result, callErr := agent.PromptUsingOptions(callCtx, prompter, attemptPrompt, agent.PromptOptions{
 			Sandbox: true, AutoApprove: true, DisableTools: options.disableTools,
 		})
 		diagnostic := promptJSONAttempt{

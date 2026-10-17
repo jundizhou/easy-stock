@@ -70,12 +70,23 @@ func TestScoringContractPreservesMixedPortfolioAndPremiumScores(t *testing.T) {
 func fixtureModelScoringResponse(content, prompt string) string {
 	_, payload, ok := strings.Cut(prompt, "[组合证据JSON]\n")
 	if !ok {
-		return content
+		_, repairPayload, repairing := strings.Cut(prompt, "[局部修复JSON]\n")
+		if !repairing {
+			return content
+		}
+		var repair struct {
+			Input json.RawMessage `json:"evidence"`
+		}
+		if json.Unmarshal([]byte(repairPayload), &repair) != nil {
+			return content
+		}
+		payload = string(repair.Input)
 	}
 	var catalog scoringCatalog
 	if json.NewDecoder(strings.NewReader(payload)).Decode(&catalog) != nil {
 		return content
 	}
+
 	report, err := decodeScoringReport(content)
 	if err != nil || report.ContractVersion != "" {
 		return content

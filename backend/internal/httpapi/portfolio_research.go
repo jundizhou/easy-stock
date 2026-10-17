@@ -24,6 +24,9 @@ func (s *Server) resolvePortfolioResearch(ctx context.Context, holding portfolio
 		return result, err
 	}
 	result.AnalysisID = job.ID
+	finishWait := s.tokenUsage.researchDependency(ctx, job.ID, origin)
+	var waitErr error
+	defer func() { finishWait(waitErr) }()
 	result.ResearchOrigin = origin
 	result.ResearchStartedAt = job.StartedAt
 	started := time.Now()
@@ -36,11 +39,13 @@ func (s *Server) resolvePortfolioResearch(ctx context.Context, holding portfolio
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			waitErr = ctx.Err()
 			return result, ctx.Err()
 		case <-timer.C:
 		}
 		job, err = s.stockResearchStore.Get(ctx, job.ID)
 		if err != nil {
+			waitErr = err
 			return result, err
 		}
 	}
@@ -52,7 +57,8 @@ func (s *Server) resolvePortfolioResearch(ctx context.Context, holding portfolio
 		result.ResearchCutoffAt = job.Analysis.ResearchReport.CutoffAt
 	}
 	if !stockanalysis.SuccessfulInstrumentResearch(job) {
-		return result, fmt.Errorf("%s 标的AI研究未成功：%s；量化快照不算AI报告", holding.Symbol, firstPortfolioMessage(job.Error, job.Message))
+		waitErr = fmt.Errorf("%s 标的AI研究未成功：%s；量化快照不算AI报告", holding.Symbol, firstPortfolioMessage(job.Error, job.Message))
+		return result, waitErr
 	}
 	result.Status = "succeeded"
 	return result, nil

@@ -97,7 +97,7 @@ func (g *scoringReplayGateway) Prompt(_ context.Context, prompt string) (agent.P
 	if i >= len(g.responses) {
 		return agent.PromptResult{}, fmt.Errorf("unexpected replay call %d", i+1)
 	}
-	return agent.PromptResult{Content: string(g.responses[i])}, nil
+	return agent.PromptResult{Content: fixtureRepairResponse(string(g.responses[i]), prompt)}, nil
 }
 
 // Optional offline replay of private frozen inputs and saved model JSON. This

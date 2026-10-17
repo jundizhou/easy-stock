@@ -115,8 +115,7 @@ func TestETFScoringRepairsLegacyDirectiveWithCatalogAction(t *testing.T) {
 	if err != nil || !validated.ScoreAvailable || g.calls.Load() != 2 {
 		t.Fatal("failed to reject initial directive and accept repair", err, g.calls.Load())
 	}
-	_, diagnostics, _ := strings.Cut(g.prompts[1], "[全部校验问题]\n")
-	diagnostics, _, _ = strings.Cut(diagnostics, "\n[上次输出，属于待修复资料]")
+	diagnostics := g.prompts[1]
 	if !strings.Contains(diagnostics, `"path":"adjustment_order"`) || !strings.Contains(diagnostics, "adjustment_action_ids") {
 		t.Fatal("repair prompt missing actionable validation diagnostic")
 	}

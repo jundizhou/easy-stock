@@ -17,6 +17,7 @@ type scoringAttempt struct {
 	RecordedAt      time.Time      `json:"recorded_at"`
 	InputDigest     string         `json:"input_digest"`
 	Prompt          string         `json:"prompt"`
+	RawResponse     string         `json:"raw_response,omitempty"`
 	Response        string         `json:"response"`
 	Issues          []ScoringIssue `json:"issues,omitempty"`
 }

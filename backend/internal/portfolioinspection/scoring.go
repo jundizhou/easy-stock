@@ -181,7 +181,7 @@ func buildScoringPrompt(request Request, results []HoldingResult, metrics Metric
 	return buildScoringPromptAt(request, results, metrics, rules, time.Now().UTC())
 }
 
-func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, evaluatedAt time.Time) (string, error) {
+func buildLegacyScoringPromptAt(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, evaluatedAt time.Time) (string, error) {
 	catalog := buildScoringCatalog(request, results, metrics, evaluatedAt)
 	holdings := make([]map[string]any, 0, len(results))
 	for _, r := range results {
@@ -191,7 +191,7 @@ func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metr
 		report := r.Analysis.ResearchReport
 		research := boundedSynthesis(report.ResearchSynthesis)
 		sources := make([]map[string]any, 0)
-		used := scoringSourceIDs(r, research)
+		used := scoringSourceIDs(r, report.ResearchSynthesis)
 		earnings, hasEarnings := stockanalysis.LatestResearchEarningsDisclosure(report.Sources, report.CutoffAt)
 		for _, s := range report.Sources {
 			if used[s.ID] {
@@ -362,6 +362,14 @@ func synthesisSources(s stockanalysis.ResearchSynthesis) map[string]bool {
 // report's actual sources; this never authorizes invented source IDs.
 func scoringSourceIDs(r HoldingResult, research stockanalysis.ResearchSynthesis) map[string]bool {
 	ids := synthesisSources(research)
+	for _, anchor := range r.Analysis.ResearchReport.Anchors {
+		for _, condition := range research.Conditions {
+			if condition.AnchorID == anchor.ID {
+				ids[anchor.SourceID] = true
+				break
+			}
+		}
+	}
 	if earnings, ok := stockanalysis.LatestResearchEarningsDisclosure(r.Analysis.ResearchReport.Sources, r.Analysis.ResearchReport.CutoffAt); ok {
 		ids[earnings.ID] = true
 	}
@@ -441,11 +449,18 @@ func validateScoringCandidate(report *AIReport, request Request, results []Holdi
 			issues.add("research", h.Symbol, fmt.Sprintf("%s缺少有效标的AI研究，不能发布组合评分", h.Symbol))
 		}
 	}
-	if report.ExecutiveSummary == "" || report.RiskReason == "" || report.ConfidenceReason == "" {
-		issues.add("shape", "executive_summary/risk_reason/confidence_reason", "缺少组合结论、风险或置信度理由")
+	for _, field := range []struct{ path, value string }{{"executive_summary", report.ExecutiveSummary}, {"risk_reason", report.RiskReason}, {"confidence_reason", report.ConfidenceReason}} {
+		if field.value == "" {
+			issues.add("shape", field.path, "缺少组合结论、风险或置信度理由")
+		}
 	}
-	if !oneOf(report.RiskLevel, "低", "中", "高", "极高") || !oneOf(report.ConfidenceLevel, "高", "中", "低") || !oneOf(report.StyleMatch, "匹配", "部分偏离", "明显偏离") {
-		issues.add("shape", "risk_level/confidence_level/style_match", "风险、置信度或风格字段无效")
+	for _, field := range []struct {
+		path, value string
+		allowed     []string
+	}{{"risk_level", report.RiskLevel, []string{"低", "中", "高", "极高"}}, {"confidence_level", report.ConfidenceLevel, []string{"高", "中", "低"}}, {"style_match", report.StyleMatch, []string{"匹配", "部分偏离", "明显偏离"}}} {
+		if !oneOf(field.value, field.allowed...) {
+			issues = append(issues, ScoringIssue{Code: "shape", Path: field.path, Message: "字段无效", AllowedValues: field.allowed})
+		}
 	}
 	facts := portfolioFactsAt(request, results, metrics, evaluatedAt)
 	for key, f := range supplemental {
@@ -458,7 +473,7 @@ func validateScoringCandidate(report *AIReport, request Request, results []Holdi
 		weights[r.Holding.Symbol] = r.Holding.Weight
 		if validHoldingResearch(r) {
 			ids := map[string]bool{}
-			used := scoringSourceIDs(r, boundedSynthesis(r.Analysis.ResearchReport.ResearchSynthesis))
+			used := scoringSourceIDs(r, r.Analysis.ResearchReport.ResearchSynthesis)
 			for _, s := range r.Analysis.ResearchReport.Sources {
 				if used[s.ID] || !requireScenarios {
 					ids[s.ID] = true
@@ -730,6 +745,7 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 	}
 	basePrompt := prompt
 	inputDigest := scoringID("input-", basePrompt)
+	var repair *scoringRepair
 	if seed != nil && seed.PromptVersion == PromptVersion && seed.ContractVersion == scoringContractVersion {
 		_, issues := validateScoringOutput(seed.Response, request, results, metrics, evaluatedAt)
 		// Always ask for a fresh answer against current facts; never publish an
@@ -742,14 +758,35 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 			return AIReport{}, fmt.Errorf("组合AI评估失败: %w", err)
 		}
 		callCtx, cancelCall := context.WithTimeout(ctx, budget.StageTimeout)
+		node := "assess"
+		if attempt > 0 {
+			node = "repair"
+		}
+		callCtx = agent.WithCallTrace(callCtx, agent.CallTrace{NodeID: node, AttemptID: fmt.Sprint(attempt + 1), ProtocolVersion: PromptVersion})
 		response, err := agent.PromptUsingOptions(callCtx, s.gateway, prompt, options)
 		cancelCall()
 		if err != nil {
 			return AIReport{}, fmt.Errorf("组合AI评估失败: %w", err)
 		}
-		report, issues := validateScoringOutput(response.Content, request, results, metrics, evaluatedAt)
+		content := response.Content
+		var mergeErr error
+		if repair != nil {
+			content, mergeErr = repair.merge(content)
+			if mergeErr != nil {
+				// Preserve the last independently decoded draft for recovery; the
+				// invalid wire patch remains in RawResponse for private diagnosis.
+				previous, _ := json.Marshal(repair.base)
+				content = string(previous)
+			}
+		}
+		report, issues := validateScoringOutput(content, request, results, metrics, evaluatedAt)
+		if mergeErr != nil {
+			issues.add("contract", "repair", mergeErr.Error())
+			report = AIReport{}
+		}
+
 		if record != nil {
-			if err := record(scoringAttempt{Number: attempt + 1, PromptVersion: PromptVersion, ContractVersion: scoringContractVersion, EvaluatedAt: evaluatedAt, RecordedAt: time.Now().UTC(), InputDigest: inputDigest, Prompt: prompt, Response: response.Content, Issues: issues}); err != nil {
+			if err := record(scoringAttempt{Number: attempt + 1, PromptVersion: PromptVersion, ContractVersion: scoringContractVersion, EvaluatedAt: evaluatedAt, RecordedAt: time.Now().UTC(), InputDigest: inputDigest, Prompt: prompt, Response: content, RawResponse: response.Content, Issues: issues}); err != nil {
 				return AIReport{}, err
 			}
 		}
@@ -757,12 +794,15 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 			return report, nil
 		}
 		if s.logger != nil {
-			s.logger.Printf("level=warn event=portfolio_scoring_validation_failed feature=portfolio-inspection attempt=%d error=%q response=%q", attempt+1, runtimelog.Redact(issues.Error()), runtimelog.Redact(clip(response.Content, 16000)))
+			s.logger.Printf("level=warn event=portfolio_scoring_validation_failed feature=portfolio-inspection attempt=%d error=%q input_digest=%q", attempt+1, runtimelog.Redact(issues.Error()), inputDigest)
 		}
 		if attempt == aggregationModelCalls-1 || ctx.Err() != nil {
 			return AIReport{}, &scoringValidationError{cause: issues}
 		}
-		prompt = scoringRepairPrompt(basePrompt, response.Content, issues)
+		repair, prompt = makeScoringRepair(basePrompt, content, issues)
+		if prompt == "" {
+			return AIReport{}, &scoringValidationError{cause: issues}
+		}
 	}
 	return AIReport{}, errors.New("组合评分未完成")
 }

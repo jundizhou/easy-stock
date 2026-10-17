@@ -41,6 +41,20 @@ func TestIndependentImprovementUsesNetDirectionsNotFundingPairs(t *testing.T) {
 	if _, err := ApplyRequest(j); err != nil {
 		t.Fatal("valid independent comparison cannot be applied", err)
 	}
+	status := resultStatus(j)
+	if !status.Viewable || !status.Applicable {
+		t.Fatal("current accepted result hidden", status)
+	}
+	historical := j
+	historical.ModelPromptVersion = "portfolio-optimization-prompts-v35"
+	status = resultStatus(historical)
+	if !status.Viewable || status.Applicable || len(status.Reasons) == 0 {
+		t.Fatal("historical visibility conflated with application", status)
+	}
+	historical.SelectedPlan = nil
+	if resultStatus(historical).Viewable {
+		t.Fatal("missing selected plan marked viewable")
+	}
 	for _, bad := range []string{"reversed", "unchanged", "unavailable", "score_only", "neither"} {
 		t.Run(bad, func(t *testing.T) {
 			raw, _ := json.Marshal(p)

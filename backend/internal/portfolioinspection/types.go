@@ -9,7 +9,7 @@ import (
 
 const (
 	MaxHoldings        = 10
-	PromptVersion      = "portfolio-inspection-v9"
+	PromptVersion      = "portfolio-inspection-v10"
 	AlgorithmVersion   = "portfolio-ai-score-v5"
 	MinimumAICoverage  = 70
 	DefaultConcurrency = 2
@@ -180,6 +180,7 @@ type Report struct {
 }
 
 type Job struct {
+	UsageRootJobID        string          `json:"usage_root_job_id,omitempty"`
 	ValidationIssues      []ScoringIssue  `json:"validation_issues,omitempty"`
 	ScoringAttempts       int             `json:"scoring_attempts,omitempty"`
 	ScheduleID            string          `json:"schedule_id,omitempty"`

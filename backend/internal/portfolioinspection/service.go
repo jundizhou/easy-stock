@@ -107,11 +107,13 @@ func (s *Service) start(ctx context.Context, request Request, previous *Job, sch
 	}
 	now := time.Now().UTC()
 	job := Job{ID: newID(), Status: "running", Stage: "resolving_reports", Request: normalized, Results: make([]HoldingResult, len(normalized.Holdings)), TotalStocks: len(normalized.Holdings), Message: "正在查找24小时内标的AI报告，仅补齐缺失标的", StartedAt: now, UpdatedAt: now}
+	job.UsageRootJobID = job.ID
 	for i, h := range normalized.Holdings {
 		job.Results[i] = HoldingResult{Holding: h, Status: "queued"}
 	}
 	if previous != nil {
 		job.ResumedFrom = previous.ID
+		job.UsageRootJobID = firstNonEmpty(previous.UsageRootJobID, previous.ID)
 		job.ScheduleID = previous.ScheduleID
 		job.NotificationChannels = append([]string{}, previous.NotificationChannels...)
 		for i, old := range previous.Results {
@@ -240,6 +242,8 @@ func (s *Service) BindPlan(ctx context.Context, id, planID, planName string) (Jo
 }
 
 func (s *Service) run(ctx context.Context, job Job) {
+	ctx = agent.WithUsageModule(ctx, "portfolio-inspection")
+	ctx = agent.WithCallTrace(ctx, agent.CallTrace{RootJobID: firstNonEmpty(job.UsageRootJobID, job.ID), ExecutionID: fmt.Sprintf("%s-%d", job.ID, time.Now().UnixNano())})
 	started := time.Now()
 	defer s.wg.Done()
 	defer func() {

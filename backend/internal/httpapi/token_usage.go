@@ -34,6 +34,7 @@ type tokenUsageStore struct {
 	path    string
 	Version int               `json:"version"`
 	Entries []tokenUsageEntry `json:"entries"`
+	calls   map[string]tokenCall
 }
 type tokenUsageRequest struct {
 	Runtime    string `json:"runtime,omitempty"`
@@ -72,6 +73,7 @@ func newTokenUsageStore(settingsPath string) *tokenUsageStore {
 			}
 		}
 	}
+	s.loadCalls()
 	return s
 }
 func (s *tokenUsageStore) add(req tokenUsageRequest) {
@@ -134,7 +136,9 @@ func newTokenUsageGateway(gateway agent.Gateway, store *tokenUsageStore) agent.G
 }
 
 func (g *tokenUsageGateway) Prompt(ctx context.Context, prompt string) (agent.PromptResult, error) {
+	call := g.beginCall(ctx, prompt, "")
 	result, err := g.Gateway.Prompt(ctx, prompt)
+	g.finishCall(call, prompt, result, err)
 	g.record(ctx, prompt, result, err)
 	return result, err
 }
@@ -146,7 +150,9 @@ func (g *tokenUsageGateway) PromptWithOptions(ctx context.Context, prompt string
 	if !ok {
 		return g.Prompt(ctx, prompt)
 	}
+	call := g.beginCall(ctx, prompt, options.ReasoningEffortCap)
 	result, err := prompter.PromptWithOptions(ctx, prompt, options)
+	g.finishCall(call, prompt, result, err)
 	g.record(ctx, prompt, result, err)
 	return result, err
 }
@@ -156,7 +162,9 @@ func (g *tokenUsageGateway) PromptWithBrowserState(ctx context.Context, prompt, 
 	if !ok {
 		return agent.PromptResult{}, fmt.Errorf("Hermes 不支持浏览器登录态提示词")
 	}
+	call := g.beginCall(ctx, prompt, "")
 	result, err := prompter.PromptWithBrowserState(ctx, prompt, statePath)
+	g.finishCall(call, prompt, result, err)
 	g.record(ctx, prompt, result, err)
 	return result, err
 }
