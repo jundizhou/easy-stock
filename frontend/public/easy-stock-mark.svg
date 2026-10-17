@@ -42,31 +42,33 @@
   <rect x="82" y="82" width="860" height="860" rx="202" fill="url(#grid)"/>
   <rect x="70" y="70" width="884" height="884" rx="212" fill="none" stroke="#D9F7FF" stroke-opacity=".13" stroke-width="5"/>
 
-  <g filter="url(#cyanGlow)">
-    <path d="M752 653c-47 83-135 132-239 122-132-12-231-119-231-253 0-145 108-257 252-265 135-8 248 87 260 222H330"
-      fill="none" stroke="url(#letter)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
+  <g transform="translate(512 512) scale(1.12) translate(-512 -512)">
+    <g filter="url(#cyanGlow)">
+      <path d="M752 653c-47 83-135 132-239 122-132-12-231-119-231-253 0-145 108-257 252-265 135-8 248 87 260 222H330"
+        fill="none" stroke="url(#letter)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
 
-  <g fill="#E6FCFF" stroke="#102F46" stroke-width="13">
-    <circle cx="282" cy="522" r="25"/>
-    <circle cx="534" cy="257" r="22"/>
-    <circle cx="752" cy="653" r="22"/>
-  </g>
+    <g fill="#E6FCFF" stroke="#102F46" stroke-width="13">
+      <circle cx="282" cy="522" r="25"/>
+      <circle cx="534" cy="257" r="22"/>
+      <circle cx="752" cy="653" r="22"/>
+    </g>
 
-  <g filter="url(#warmGlow)">
-    <path d="M402 669 501 570l91 53 166-190" fill="none" stroke="url(#market)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="m692 434 79-15-15 79" fill="none" stroke="#FFB547" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
+    <g filter="url(#warmGlow)">
+      <path d="M402 669 501 570l91 53 166-190" fill="none" stroke="url(#market)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="m692 434 79-15-15 79" fill="none" stroke="#FFB547" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
 
-  <g fill="#FF8C56">
-    <circle cx="402" cy="669" r="18"/>
-    <circle cx="501" cy="570" r="18"/>
-    <circle cx="592" cy="623" r="18"/>
-  </g>
+    <g fill="#FF8C56">
+      <circle cx="402" cy="669" r="18"/>
+      <circle cx="501" cy="570" r="18"/>
+      <circle cx="592" cy="623" r="18"/>
+    </g>
 
-  <g transform="translate(774 249)" fill="#F5F1FF">
-    <path d="M0-58c8 37 21 50 58 58-37 8-50 21-58 58-8-37-21-50-58-58 37-8 50-21 58-58Z"/>
-    <circle cx="-76" cy="-62" r="13" fill="#39D5F2"/>
-    <circle cx="70" cy="67" r="10" fill="#A98CFF"/>
+    <g transform="translate(774 249)" fill="#F5F1FF">
+      <path d="M0-58c8 37 21 50 58 58-37 8-50 21-58 58-8-37-21-50-58-58 37-8 50-21 58-58Z"/>
+      <circle cx="-76" cy="-62" r="13" fill="#39D5F2"/>
+      <circle cx="70" cy="67" r="10" fill="#A98CFF"/>
+    </g>
   </g>
 </svg>
