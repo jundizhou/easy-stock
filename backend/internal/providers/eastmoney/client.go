@@ -29,6 +29,9 @@ type Client struct {
 	indexSearchBaseURL  string
 	thsBaseURL          string
 	httpClient          *http.Client
+	// fallbackHTTPClient 与 httpClient 的区别只有地址族（强制 IPv4），
+	// 用于首个地址族被对端重置时换一条路重试。
+	fallbackHTTPClient  *http.Client
 	poolMu              sync.Mutex
 	limitUpDays         map[string]*limitUpDayFlight
 	catalogCacheMu      sync.RWMutex
@@ -117,14 +120,27 @@ func WithHTTPClient(httpClient *http.Client) Option {
 	return func(c *Client) {
 		if httpClient != nil {
 			c.httpClient = httpClient
+			c.fallbackHTTPClient = httpClient
 		}
 	}
 }
 
-// newHTTPClient 返回东财请求使用的客户端。部分接口（如 np-cnotice-stock.eastmoney.com 公告正文）
-// 同时发布了 AAAA 记录，某些网络到其 IPv6 入口的连接会被对端直接重置；这种“建连成功后被重置”
-// 的情况 Happy Eyeballs 不会回退，所以这里优先用 IPv4，只有 IPv4 完全不可用时才退回系统默认拨号。
+// newHTTPClient 返回东财请求使用的客户端，地址族跟随系统选择。
+//
+// 这里以前强制走 IPv4（因为某些网络到 np-cnotice-stock.eastmoney.com 的 IPv6 入口会被对端重置）。
+// 但反过来同样存在：IPv4 入口被重置、IPv6 正常（本机即如此，公告正文因此整批失败）。
+// 这种“建连成功后才被重置”不会触发 Happy Eyeballs 回退，所以改成跟随系统选择，
+// 失败后由 getJSONWithRetry 换一个地址族的客户端再试一次。
 func newHTTPClient() *http.Client {
+	return newHTTPClientWithNetwork("")
+}
+
+// newIPv4HTTPClient 是固定走 IPv4 的备用客户端，仅用于换地址族重试。
+func newIPv4HTTPClient() *http.Client {
+	return newHTTPClientWithNetwork("tcp4")
+}
+
+func newHTTPClientWithNetwork(network string) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	return &http.Client{
 		Timeout: 15 * time.Second,
@@ -135,11 +151,13 @@ func newHTTPClient() *http.Client {
 			MaxIdleConnsPerHost: 16,
 			IdleConnTimeout:     90 * time.Second,
 			TLSHandshakeTimeout: 10 * time.Second,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				if conn, err := dialer.DialContext(ctx, "tcp4", addr); err == nil {
-					return conn, nil
+			DialContext: func(ctx context.Context, dialNetwork, addr string) (net.Conn, error) {
+				if network != "" {
+					if conn, err := dialer.DialContext(ctx, network, addr); err == nil {
+						return conn, nil
+					}
 				}
-				return dialer.DialContext(ctx, network, addr)
+				return dialer.DialContext(ctx, dialNetwork, addr)
 			},
 		},
 	}
@@ -159,6 +177,7 @@ func NewClient(opts ...Option) *Client {
 		newsSearchBaseURL:   "https://search-api-web.eastmoney.com",
 		thsBaseURL:          "https://data.10jqka.com.cn",
 		httpClient:          newHTTPClient(),
+		fallbackHTTPClient:  newIPv4HTTPClient(),
 		thsBillboardPages:   make(map[string]thsBillboardPage),
 	}
 	for _, opt := range opts {
@@ -242,7 +261,13 @@ func (c *Client) getJSONWithRetry(ctx context.Context, requestURL string, target
 		if attempt > 0 {
 			time.Sleep(150 * time.Millisecond)
 		}
-		err := c.getJSON(ctx, requestURL, target)
+		client := c.httpClient
+		// 第一次失败后换地址族再试：东财部分域名只有一个地址族可达，
+		// 而“建连成功后被对端重置”不会让系统自己回退到另一个地址族。
+		if attempt == 1 && c.fallbackHTTPClient != nil {
+			client = c.fallbackHTTPClient
+		}
+		err := c.getJSONWithClient(ctx, client, requestURL, target)
 		if err == nil {
 			return nil
 		}
@@ -255,13 +280,17 @@ func (c *Client) getJSONWithRetry(ctx context.Context, requestURL string, target
 }
 
 func (c *Client) getJSON(ctx context.Context, requestURL string, target any) error {
+	return c.getJSONWithClient(ctx, c.httpClient, requestURL, target)
+}
+
+func (c *Client) getJSONWithClient(ctx context.Context, client *http.Client, requestURL string, target any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 easy-stock/0.1")
 	req.Header.Set("Referer", "https://quote.eastmoney.com/")
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -277,7 +306,12 @@ func isTransient(err error) bool {
 	return strings.Contains(msg, "eof") ||
 		strings.Contains(msg, "timeout") ||
 		strings.Contains(msg, "temporary") ||
-		strings.Contains(msg, "http status 5")
+		strings.Contains(msg, "http status 5") ||
+		// 对端重置连接：Windows "forcibly closed"、Unix "connection reset"、
+		// HTTP/2 的 RST_STREAM（stream error ... INTERNAL_ERROR）。
+		strings.Contains(msg, "reset") ||
+		strings.Contains(msg, "forcibly closed") ||
+		strings.Contains(msg, "stream error")
 }
 
 func eastMoneyPeriod(period string) string {
