@@ -13,7 +13,7 @@
 .stock-research-option-field > p[role=alert] { margin:0; color:var(--theme-red, #c64646); font-size: var(--fs-body); }
 .stock-research-progress { display:flex; gap:8px; align-items:center; min-height:40px; background:var(--theme-surface-soft, #edf4ef); color:var(--theme-text, #285d43); padding:8px 12px; font-size: var(--fs-body); border-left:3px solid var(--theme-green-line, #398b60); }
 .stock-research-progress-message { flex:1; min-width:0; overflow-wrap:anywhere; }
-.stock-research-progress-elapsed { flex:0 0 auto; color:inherit; font-size: var(--fs-subtitle); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.stock-research-progress-elapsed { flex:0 0 auto; color:inherit; font-size: var(--fs-body); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .stock-research-progress button { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--theme-line, #c9d5cd); border-radius:4px; background:var(--theme-surface, white); }
 .stock-research-progress button.stock-research-resume { display:flex; gap:4px; width:auto; padding:0 12px; flex-shrink:0; white-space:nowrap; }
 .stock-research-progress.degraded,.stock-research-progress.failed,.stock-research-progress.interrupted,.stock-research-progress.cancelled { background:var(--theme-amber-soft, #f7f1e7); border-color:var(--theme-amber-line, #ad852e); color:var(--theme-amber, #756020); }
