@@ -1839,7 +1839,7 @@ a:focus-visible {
 
 .quote-block strong {
 	font-family: var(--font-num);
-	font-size: var(--fs-metric);
+	font-size: var(--fs-title);
 }
 
 .quote-block span {
