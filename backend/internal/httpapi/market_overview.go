@@ -319,6 +319,75 @@ func (s *Server) marketReportsHandler(w http.ResponseWriter, r *http.Request, ki
 	})
 }
 
+// marketAnnouncementContentHandler 按需返回某条公告的正文：列表里个别公告正文抓取失败时，展开那条再补齐。
+func (s *Server) marketAnnouncementContentHandler(w http.ResponseWriter, r *http.Request) {
+	provider, ok := s.marketOverview.(MarketAnnouncementContentProvider)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "announcement body provider is unavailable")
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" || len(id) > 48 {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	content, _, err := loadMarketOverview(ctx, s.marketSnapshots, "announcement-content:"+id, func(loadCtx context.Context) (string, foundation.SourceMeta, error) {
+		body, loadErr := provider.MarketAnnouncementContent(loadCtx, id)
+		if loadErr != nil {
+			return "", foundation.SourceMeta{}, loadErr
+		}
+		trimmed := strings.TrimSpace(body)
+		if trimmed == "" {
+			return "", foundation.SourceMeta{}, fmt.Errorf("公告正文暂不可用")
+		}
+		if runes := []rune(trimmed); len(runes) > 8_000 {
+			trimmed = string(runes[:8_000]) + "…"
+		}
+		return trimmed, foundation.SourceMeta{Source: "eastmoney:announcement", SourceURL: "https://data.eastmoney.com/notices/detail/" + id + ".html", FetchedAt: time.Now()}, nil
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	detail := foundation.MarketResearchDetail{Kind: "announcement", ID: id, Content: content}
+	writeJSON(w, http.StatusOK, map[string]any{"data": detail, "meta": detail.Meta})
+}
+
+// marketReportContentHandler 按需返回某篇研报的正文，用于列表内展开阅读，避免跳转外部页面。
+func (s *Server) marketReportContentHandler(w http.ResponseWriter, r *http.Request) {
+	provider, ok := s.marketOverview.(MarketReportContentProvider)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "report body provider is unavailable")
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
+	if kind == "" {
+		kind = "stock"
+	}
+	if kind != "stock" && kind != "industry" {
+		writeError(w, http.StatusBadRequest, "kind must be stock or industry")
+		return
+	}
+	infoCode := strings.TrimSpace(r.URL.Query().Get("id"))
+	if infoCode == "" || len(infoCode) > 48 {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	detail, _, err := loadMarketOverview(ctx, s.marketSnapshots, fmt.Sprintf("report-content:%s:%s", kind, infoCode), func(loadCtx context.Context) (foundation.MarketResearchDetail, foundation.SourceMeta, error) {
+		value, loadErr := provider.MarketReportContent(loadCtx, kind, infoCode)
+		return value, value.Meta, loadErr
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": detail, "meta": detail.Meta})
+}
+
 func marketOverviewList[T any](s *Server, w http.ResponseWriter, r *http.Request, key string, loader func(context.Context) (T, foundation.SourceMeta, error)) {
 	if s.marketOverview == nil {
 		writeError(w, http.StatusServiceUnavailable, "market overview provider is unavailable")

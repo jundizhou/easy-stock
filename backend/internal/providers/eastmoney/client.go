@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -120,6 +121,30 @@ func WithHTTPClient(httpClient *http.Client) Option {
 	}
 }
 
+// newHTTPClient 返回东财请求使用的客户端。部分接口（如 np-cnotice-stock.eastmoney.com 公告正文）
+// 同时发布了 AAAA 记录，某些网络到其 IPv6 入口的连接会被对端直接重置；这种“建连成功后被重置”
+// 的情况 Happy Eyeballs 不会回退，所以这里优先用 IPv4，只有 IPv4 完全不可用时才退回系统默认拨号。
+func newHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			Proxy:               http.ProxyFromEnvironment,
+			ForceAttemptHTTP2:   true,
+			MaxIdleConns:        64,
+			MaxIdleConnsPerHost: 16,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if conn, err := dialer.DialContext(ctx, "tcp4", addr); err == nil {
+					return conn, nil
+				}
+				return dialer.DialContext(ctx, network, addr)
+			},
+		},
+	}
+}
+
 func NewClient(opts ...Option) *Client {
 	c := &Client{
 		baseURL:             "https://push2his.eastmoney.com",
@@ -133,7 +158,7 @@ func NewClient(opts ...Option) *Client {
 		reportBaseURL:       "https://reportapi.eastmoney.com",
 		newsSearchBaseURL:   "https://search-api-web.eastmoney.com",
 		thsBaseURL:          "https://data.10jqka.com.cn",
-		httpClient:          &http.Client{Timeout: 15 * time.Second},
+		httpClient:          newHTTPClient(),
 		thsBillboardPages:   make(map[string]thsBillboardPage),
 	}
 	for _, opt := range opts {

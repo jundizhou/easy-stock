@@ -616,6 +616,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/research/announcements", s.marketAnnouncementsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/institution-reports", s.marketInstitutionReportsHandler)
 	s.mux.HandleFunc("GET /api/v1/research/industries", s.marketIndustryResearchHandler)
+	s.mux.HandleFunc("GET /api/v1/research/report-content", s.marketReportContentHandler)
+	s.mux.HandleFunc("GET /api/v1/research/announcement-content", s.marketAnnouncementContentHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/overview", s.themeOverviewHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/index", s.themeIndexHandler)
 	s.mux.HandleFunc("GET /api/v1/themes/screen", s.themeScreenHandler)

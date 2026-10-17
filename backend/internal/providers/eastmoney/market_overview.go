@@ -3,6 +3,8 @@ package eastmoney
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/foundation"
+	xhtml "golang.org/x/net/html"
 )
 
 type marketIndexDefinition struct {
@@ -736,6 +739,179 @@ func truncateAnnouncementContent(value string, limit int) string {
 		return value
 	}
 	return string([]rune(value)[:limit]) + "…"
+}
+
+func truncateReportContent(value string, limit int) string {
+	lines := make([]string, 0, 24)
+	for _, line := range strings.Split(value, "\n") {
+		if text := normalizeHTMLText(line); text != "" {
+			lines = append(lines, text)
+		}
+	}
+	joined := strings.Join(lines, "\n")
+	if limit <= 0 || len([]rune(joined)) <= limit {
+		return joined
+	}
+	return string([]rune(joined)[:limit]) + "…"
+}
+
+// MarketReportContent 按需读取研报正文：列表接口不返回正文，只有正文页面带有 #ctx-content 节点。
+func (c *Client) MarketReportContent(ctx context.Context, kind string, infoCode string) (foundation.MarketResearchDetail, error) {
+	infoCode = strings.TrimSpace(infoCode)
+	if !validReportInfoCode(infoCode) {
+		return foundation.MarketResearchDetail{}, fmt.Errorf("invalid report id")
+	}
+	normalizedKind := "stock"
+	if strings.EqualFold(strings.TrimSpace(kind), "industry") {
+		normalizedKind = "industry"
+	}
+	base := strings.TrimRight(c.dataBaseURL, "/")
+	pageURL := fmt.Sprintf("%s/report/info/%s.html", base, infoCode)
+	if normalizedKind == "industry" {
+		pageURL = fmt.Sprintf("%s/report/zw_industry.jshtml?infocode=%s", base, url.QueryEscape(infoCode))
+	}
+	started := time.Now()
+	document, err := c.fetchReportDocument(ctx, pageURL)
+	if err != nil {
+		return foundation.MarketResearchDetail{}, err
+	}
+	content := extractReportBody(document)
+	if content == "" {
+		return foundation.MarketResearchDetail{}, fmt.Errorf("研报正文暂不可用")
+	}
+	return foundation.MarketResearchDetail{
+		Kind: normalizedKind, ID: infoCode, Content: truncateReportContent(content, 8_000), URL: pageURL,
+		Meta: foundation.SourceMeta{Source: "eastmoney:report", SourceURL: pageURL, FetchedAt: time.Now(), LatencyMS: time.Since(started).Milliseconds()},
+	}, nil
+}
+
+func (c *Client) fetchReportDocument(ctx context.Context, pageURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 easy-stock/0.1")
+	req.Header.Set("Referer", "https://data.eastmoney.com/report/")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("eastmoney report page http status %d", resp.StatusCode)
+	}
+	const maxBytes = 4 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(body) > maxBytes {
+		return "", fmt.Errorf("eastmoney report page too large")
+	}
+	return string(body), nil
+}
+
+func validReportInfoCode(value string) bool {
+	if value == "" || len(value) > 48 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// extractReportBody 解析研报正文页面，取 #ctx-content 下的段落文本。
+func extractReportBody(document string) string {
+	if strings.TrimSpace(document) == "" {
+		return ""
+	}
+	root, err := xhtml.Parse(strings.NewReader(document))
+	if err != nil {
+		return ""
+	}
+	target := findHTMLNode(root, func(node *xhtml.Node) bool {
+		return htmlAttribute(node, "id") == "ctx-content" || hasHTMLClass(node, "ctx-content")
+	})
+	if target == nil {
+		return ""
+	}
+	paragraphs := make([]string, 0, 16)
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && (node.Data == "p" || node.Data == "div" || node.Data == "li") {
+			if text := normalizeHTMLText(nodeText(node)); text != "" {
+				paragraphs = append(paragraphs, text)
+			}
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	for child := target.FirstChild; child != nil; child = child.NextSibling {
+		walk(child)
+	}
+	if len(paragraphs) == 0 {
+		return normalizeHTMLText(nodeText(target))
+	}
+	return strings.Join(paragraphs, "\n")
+}
+
+func findHTMLNode(node *xhtml.Node, match func(*xhtml.Node) bool) *xhtml.Node {
+	if node.Type == xhtml.ElementNode && match(node) {
+		return node
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if found := findHTMLNode(child, match); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func htmlAttribute(node *xhtml.Node, key string) string {
+	if node == nil {
+		return ""
+	}
+	for _, attr := range node.Attr {
+		if attr.Key == key {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+// hasHTMLClass 有的研报正文容器只有 class="ctx-content"，没有 id，所以两种写法都要认。
+func hasHTMLClass(node *xhtml.Node, class string) bool {
+	for _, value := range strings.Fields(htmlAttribute(node, "class")) {
+		if value == class {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeText(node *xhtml.Node) string {
+	if node == nil {
+		return ""
+	}
+	if node.Type == xhtml.TextNode {
+		return node.Data
+	}
+	var builder strings.Builder
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		builder.WriteString(nodeText(child))
+	}
+	return builder.String()
+}
+
+func normalizeHTMLText(value string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(value, "\u00a0", " ")), " ")
 }
 
 func (c *Client) MarketReports(ctx context.Context, kind string, query string, symbol string, industry string, limit int) ([]foundation.MarketResearchItem, foundation.SourceMeta, error) {

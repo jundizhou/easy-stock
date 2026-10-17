@@ -93,6 +93,10 @@ type MarketAnnouncementContentProvider interface {
 	MarketAnnouncementContent(ctx context.Context, id string) (string, error)
 }
 
+type MarketReportContentProvider interface {
+	MarketReportContent(ctx context.Context, kind string, infoCode string) (foundation.MarketResearchDetail, error)
+}
+
 type StockDirectoryProvider interface {
 	StockCatalog(ctx context.Context) ([]foundation.StockCatalogEntry, error)
 }

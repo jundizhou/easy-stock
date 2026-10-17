@@ -80,6 +80,15 @@ func (p *fakeMarketOverviewProvider) MarketReports(_ context.Context, kind strin
 	return []foundation.MarketResearchItem{{Kind: kind, ID: "R1", Title: "研报", Meta: meta}}, meta, err
 }
 
+func (p *fakeMarketOverviewProvider) MarketAnnouncementContent(context.Context, string) (string, error) {
+	return "公告正文样本", nil
+}
+
+func (p *fakeMarketOverviewProvider) MarketReportContent(_ context.Context, kind string, infoCode string) (foundation.MarketResearchDetail, error) {
+	meta, err := p.source()
+	return foundation.MarketResearchDetail{Kind: kind, ID: infoCode, Content: "研报正文样本", Meta: meta}, err
+}
+
 func TestMarketOverviewRoutesReturnStructuredData(t *testing.T) {
 	server := NewServer(Config{MarketOverview: &fakeMarketOverviewProvider{}})
 	tests := []struct {
@@ -96,6 +105,8 @@ func TestMarketOverviewRoutesReturnStructuredData(t *testing.T) {
 		{"/api/v1/research/announcements?q=公告", "announcement"},
 		{"/api/v1/research/institution-reports?q=研报", "stock"},
 		{"/api/v1/research/industries?industry=电子", "industry"},
+		{"/api/v1/research/report-content?kind=stock&id=R1", "研报正文样本"},
+		{"/api/v1/research/announcement-content?id=A1", "公告正文样本"},
 	}
 	for _, test := range tests {
 		req := httptest.NewRequest(http.MethodGet, test.path, nil)
