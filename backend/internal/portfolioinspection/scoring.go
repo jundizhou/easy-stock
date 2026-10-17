@@ -18,6 +18,10 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 )
 
+// Keep the prompt and validation enum in sync. Priorities are model judgments,
+// not aliases for action kinds or permissions to execute trades.
+var scoringActionPriorities = []string{"观察", "保持", "优先处理"}
+
 var scoreRubric = []struct {
 	Key, Label string
 	Weight     int
@@ -220,6 +224,7 @@ func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metr
 每个维度必须有reason、adjustments（risk_id/reason/points，正加负扣）、evidence_refs和limitations。引用只返回{"evidence_id":"从evidence_catalog选择的编号"}，目录reference用于识别事实含义和来源归属，不得自行返回或拼接report_id/source_id/fact。每个维度至少一条引用。不编造引用。高分结构评价与大仓位集中等事实有冲突时，解释集中风险被怎样控制，不得称充分分散。不得引用总仓位、现金或总资产仓位事实作为维度评分依据。
 风险等级独立于总分，risk_reason必须解释低/中/高/极高；置信度为高/中/低，confidence_reason交代证据质量、覆盖、时效、周期差异和缺口。数据不足降低置信度，不能虚构事实。score不表示胜率或收益预测。
 每只真实持仓都必须出现在holdings，股票使用规范代码；条件化行动优先级考虑仓位和研究风险。risk_contribution不用填写，由后端保留量化代理值供历史兼容。风险组的symbols只含真实持仓，仓位由程序计算。
+holdings[].action_priority只能为` + strings.Join(scoringActionPriorities, "/") + `，必须使用原值，不写“持有观察”“优先复核”等近义词。优先级与action_id分开选择；优先处理表示复核/处理优先级，不代表立即交易。
 动作只能选择action_catalog中属于对应标的的action_id。holdings仅返回action_id，不写action/confirmation/invalidation；处理顺序返回adjustment_action_ids，不写adjustment_order；scenarios返回action_ids，不写portfolio_action。后端统一生成动作文字和原研究执行前提。每个情景可选择不同动作，但同一情景/处理顺序中每个标的最多一个动作。目录没有合法交易计划时选择观察、持有观察或重新评估，不另造动作。conditional_*永远是待核验计划，不代表条件已触发或可立即成交。condition只描述市场观察，不替代动作自身条件，也不解除执行限制。不返回actions，其为后端生成字段。结论/风险/理由用于解释研究，不在自由文字中另下交易指令。
 输出类型约束：primary_risks、concentration_findings、next_checklist、data_limitations，以及每个维度的limitations，均为纯字符串数组（无内容用[]）。每条直接写完整文字，不返回title/reason等嵌套对象；相关引用放入维度或风险组的evidence_refs。limitations每维度最多10条。所有score和points使用整数，不用字符串；evidence_refs是对象数组。
 严格输出一个JSON对象，最多8条主要风险、8条结构发现、10条调整/检查/缺口、3个情景、6个风险组。示例结构（分数和理由必须按事实重写）：
@@ -554,8 +559,16 @@ func validateScoringCandidate(report *AIReport, request Request, results []Holdi
 			issues.add("holding", fmt.Sprintf("holdings[%d].symbol", i), "逐股判断股票不存在或重复")
 		}
 		seen[h.Symbol] = true
-		if h.Conclusion == "" || h.Action == "" || h.Confirmation == "" || h.Invalidation == "" || !oneOf(h.ActionPriority, "观察", "保持", "优先处理") {
+		if h.Conclusion == "" || h.Action == "" || h.Confirmation == "" || h.Invalidation == "" {
 			issues.add("action", fmt.Sprintf("holdings[%d]", i), "逐股动作缺少必要条件")
+		}
+		if !oneOf(h.ActionPriority, scoringActionPriorities...) && len(issues) < 64 {
+			issues = append(issues, ScoringIssue{
+				Code:          "action",
+				Path:          fmt.Sprintf("holdings[%d].action_priority", i),
+				Message:       fmt.Sprintf("动作优先级 %q 无效，仅允许：%s；请依据组合判断选择合法值", h.ActionPriority, strings.Join(scoringActionPriorities, "、")),
+				AllowedValues: append([]string(nil), scoringActionPriorities...),
+			})
 		}
 		for _, r := range results {
 			if r.Holding.Symbol == h.Symbol && !structured {
