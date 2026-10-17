@@ -511,7 +511,6 @@ export function App() {
 				<aside className="theme-rail">
 					<div className="rail-heading">
 						<div className="rail-heading-copy">
-							<span>近期主线</span>
 							<strong>{rankedThemes.some(item => !item.provisional) ? `按${themeStrengthWindow === 'daily' ? '当日' : '5日'}强度排序` : '基础题材 · 来源顺序'}</strong>
 							<div className="strength-window-toggle" role="group" aria-label="趋势强度周期">
 								<button type="button" title="按题材成分股实时涨跌计算，最多每10分钟更新一次" className={themeStrengthWindow === 'daily' ? 'active' : ''} aria-pressed={themeStrengthWindow === 'daily'} onClick={() => setThemeStrengthWindow('daily')}>当日强度</button>
@@ -551,7 +550,6 @@ export function App() {
 					<header className="theme-hero">
 						<div className="theme-title-row">
 							<div>
-								<div className="eyebrow">当前主线</div>
 								<h2>{sectorMap?.name || activeOverview?.name || '加载题材中'}</h2>
 								<p>{isTrendOverview
 									? activeOverview?.leaders?.length ? `核心标的：${activeOverview.leaders.join(' · ')}` : '等待主线共振证据'
@@ -590,11 +588,13 @@ export function App() {
 								<h3>主线个股梯队</h3>
 								<p>综合多日高度、启动时序、持续性、关注度、主线影响代理和分歧承接。</p>
 							</div>
-							<div className={`history-status ${historyState}`}>
-								<History size={14} aria-hidden="true" />
-								<span>{historyStatusLabel(historyState, historyReadyCount, historySymbols.length)}</span>
-								{historyErrorSymbols.size > 0 && <button type="button" onClick={history.retry}>重试失败项</button>}
-							</div>
+							{historyState === 'ready' && historyErrorSymbols.size === 0 ? null : (
+								<div className={`history-status ${historyState}`}>
+									<History size={14} aria-hidden="true" />
+									<span>{historyStatusLabel(historyState, historyReadyCount, historySymbols.length)}</span>
+									{historyErrorSymbols.size > 0 && <button type="button" onClick={history.retry}>重试失败项</button>}
+								</div>
+							)}
 						</div>
 						<div className="stock-controls">
 							<label><span>涨跌幅制度</span><select value={stockLane} onChange={(event) => { setStockLane(event.target.value as ThemeScreenLane); setStockPage(1); }}><option value="all">全部</option><option value="10cm">10cm</option><option value="20cm">20cm</option><option value="30cm">30cm</option></select></label>
@@ -654,7 +654,6 @@ export function App() {
 					<section className="detail-panel chart-panel">
 						<div className="detail-heading">
 							<div>
-								<span>个股日 K</span>
 								<h3>{selectedStock?.name || '选择个股'}</h3>
 								<small>{selectedStock?.symbol || '--'}</small>
 							</div>
