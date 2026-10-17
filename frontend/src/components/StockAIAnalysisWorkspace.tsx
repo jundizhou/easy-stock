@@ -9,6 +9,7 @@ import {
 	Building2,
 	Calculator,
 	CheckCircle2,
+	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	CircleAlert,
@@ -69,6 +70,7 @@ import {
 	searchStockDirectory,
 	signedPercent,
 } from '../lib/stock-analysis';
+import { formatArticleParagraphs, isIndentedParagraph } from '../lib/article';
 import { useStockResearch } from '../lib/use-stock-research';
 import { isResearchRunning, researchPlanText, type ResearchAnalysisLevel, type ResearchRequest } from '../lib/stock-research';
 import { StockResearchHistory, StockResearchProgress, StockResearchReportView } from './StockResearchReport';
@@ -903,7 +905,8 @@ function ResearchPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	</section>;
 }
 
-function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; title: string; item?: StockAINewsAnalysis; icon: ReactNode }) {
+export function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; title: string; item?: StockAINewsAnalysis; icon: ReactNode }) {
+	const [expandedNews, setExpandedNews] = useState('');
 	return <section className="stock-ai-panel stock-ai-news-panel">
 		<header><div><span>{eyebrow}</span><h3>{title}</h3></div>{icon}</header>
 		{item ? <>
@@ -916,10 +919,22 @@ function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; ti
 				<div className="positive"><strong><Sparkles size={13} />潜在催化</strong>{item.catalysts?.length ? <ul>{item.catalysts.map((value) => <li key={value}>{value}</li>)}</ul> : <small>暂无可验证的明确催化</small>}</div>
 				<div className="negative"><strong><ShieldAlert size={13} />风险信号</strong>{item.risks?.length ? <ul>{item.risks.map((value) => <li key={value}>{value}</li>)}</ul> : <small>暂无突出风险关键词</small>}</div>
 			</div>
-			{item.articles?.length ? <div className="stock-ai-news-list">{item.articles.map((article, index) => <article key={article.id || article.url || `${article.title}-${index}`}>
-				<div><header><span>{formatNewsSource(article.meta?.source)}</span><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time></header><strong>{article.title}</strong>{article.content && article.content !== article.title && <small>{article.content}</small>}</div>
-				{article.url && <a href={article.url} target="_blank" rel="noreferrer" title="查看新闻原文"><ExternalLink size={14} /></a>}
-			</article>)}</div> : <div className="stock-ai-news-empty">暂无匹配新闻，当前不对新闻催化作额外加分。</div>}
+			{item.articles?.length ? <div className="stock-ai-news-list">{item.articles.map((article, index) => {
+				const key = article.id || article.url || `${article.title}-${index}`;
+				const open = expandedNews === key;
+				const detail = article.content && article.content !== article.title ? article.content : article.title;
+				return <article className={open ? 'expanded' : ''} key={key}>
+					<button type="button" className="stock-ai-news-head" aria-expanded={open} onClick={() => setExpandedNews(open ? '' : key)}>
+						<span className="stock-ai-news-head-main"><header><span>{formatNewsSource(article.meta?.source)}</span><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time></header><strong>{article.title}</strong>{!open && article.content && article.content !== article.title && <small>{article.content}</small>}</span>
+						<ChevronDown size={14} aria-hidden="true" />
+					</button>
+					{open && <div className="stock-ai-news-detail">
+						<div className="stock-ai-news-body">{formatArticleParagraphs(detail).map((paragraph, index) => <p className={isIndentedParagraph(paragraph, index) ? 'indent' : undefined} key={index}>{paragraph}</p>)}</div>
+						{article.tags?.length ? <div className="stock-ai-news-tags">{article.tags.map((tag) => <span key={tag}>{tag}</span>)}</div> : null}
+						<div className="stock-ai-news-detail-foot"><span>{formatNewsSource(article.meta?.source)} · {article.published_at ? formatShortDate(article.published_at) : '--'}</span>{article.url && <a href={article.url} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" />查看原文</a>}</div>
+					</div>}
+				</article>;
+			})}</div> : <div className="stock-ai-news-empty">暂无匹配新闻，当前不对新闻催化作额外加分。</div>}
 			<footer>新闻与公告仅作信息参考，需结合事件落地和价格反应验证，不构成买卖建议。</footer>
 		</> : <div className="stock-ai-panel-empty">旧版分析记录未包含新闻数据，请重新分析后查看</div>}
 	</section>;
