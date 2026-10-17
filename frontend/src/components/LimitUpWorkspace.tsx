@@ -192,8 +192,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 		<section className="limit-up-workspace">
 			<header className="limit-up-hero">
 				<div>
-					<div className="eyebrow"><Flame size={15} aria-hidden="true" />SHORT-TERM LIMIT-UP STRUCTURE</div>
-					<h2>短线连板</h2>
+					<div className="eyebrow">SHORT-TERM LIMIT-UP STRUCTURE</div>
 					<p>{data?.current.trade_date || '等待涨停池'} · {data?.session_status || '加载中'} · {current.sourceSummary} · 结构统计默认剔除 ST</p>
 				</div>
 				<div className="limit-up-actions">
@@ -448,7 +447,8 @@ function formatSignedPercent(value: number) {
 }
 
 function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNode; label: string; value: string | number; detail: string; tone: string }) {
-	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
+	const unit = typeof value === 'string' ? value.match(/^(.*?)([亿万手板只])$/) : null;
+	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{unit ? <>{unit[1]}<span className="num-unit">{unit[2]}</span></> : value}</strong><small>{detail}</small></article>;
 }
 
 function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { aiEntries: LadderThemeEntries; levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {

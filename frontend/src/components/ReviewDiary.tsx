@@ -463,21 +463,19 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 			{summaryWindow && <SummaryWindowDialog value={summaryWindow} onChange={setSummaryWindow} onClose={() => setSummaryWindow(null)} onConfirm={confirmSummaryWindow} submitting={summarizingDaily} />}
 			<header className="review-hero">
 				<div>
-					<div className="eyebrow"><BookOpen size={15} aria-hidden="true" />TRADER REVIEW JOURNAL</div>
-					<h2>大V复盘日记</h2>
+					<div className="eyebrow">TRADER REVIEW JOURNAL</div>
 					<p>先看跨作者结论，再下钻到单个作者与原文证据。</p>
 				</div>
 				<div className="review-hero-actions">
-					<button type="button" className="daily-summary-cta" disabled={summarizingDaily || loadingSummaryWindow} onClick={() => void openSummaryWindow()}>
-						<span className="daily-summary-cta-icon">{summarizingDaily || loadingSummaryWindow || dailySummaryRunning ? <RefreshCw className="spin" size={21} /> : <BrainCircuit size={21} />}</span>
-						<span><strong>{summarizingDaily ? '正在提交后台任务…' : loadingSummaryWindow ? '正在计算默认交易时段…' : dailySummaryRunning ? `AI复盘生成中 ${dailySummaryJob?.completed_authors || 0}/${dailySummaryJob?.total_authors || '—'}` : dailySummary ? '重新生成综合复盘' : '生成今日综合复盘'}</strong><small>{dailySummaryRunning ? dailySummaryJob?.message || '预计需要几分钟，可稍后回来查看' : '先选择文章时间窗口，再开始 AI 总结'}</small></span>
-						<Sparkles size={17} />
-					</button>
-					{reviewView === 'library' && <form className="review-import" onSubmit={submitImport}>
+					<form className="review-import" onSubmit={submitImport}>
 						<FileInput size={16} aria-hidden="true" />
 						<input value={importURL} onChange={(event) => setImportURL(event.target.value)} placeholder="粘贴具体的微信文章链接，或雪球/淘股吧文章链接" aria-label="文章链接" />
 						<button type="submit" disabled={importing || !importURL.trim()}>{importing ? <RefreshCw className="spin" size={15} /> : <span>导入文章</span>}</button>
-					</form>}
+					</form>
+					<button type="button" className="daily-summary-cta" disabled={summarizingDaily || loadingSummaryWindow} onClick={() => void openSummaryWindow()}>
+						<span className="daily-summary-cta-icon">{summarizingDaily || loadingSummaryWindow || dailySummaryRunning ? <RefreshCw className="spin" size={17} /> : <BrainCircuit size={17} />}</span>
+						<span><strong>{summarizingDaily ? '正在提交后台任务…' : loadingSummaryWindow ? '正在计算默认交易时段…' : dailySummaryRunning ? `AI复盘生成中 ${dailySummaryJob?.completed_authors || 0}/${dailySummaryJob?.total_authors || '—'}` : dailySummary ? '重新生成综合复盘' : '生成今日综合复盘'}</strong><small>{dailySummaryRunning ? dailySummaryJob?.message || '预计需要几分钟，可稍后回来查看' : '先选择文章时间窗口，再开始 AI 总结'}</small></span>
+					</button>
 				</div>
 			</header>
 
@@ -509,12 +507,14 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} authors />)}
 
 			{reviewView === 'library' && <>
-				<nav className="review-source-tabs" aria-label="复盘内容平台">
-					{sourceTabs.map((tab) => {
-						const status = sourceMap.get(tab.id);
-						return <button type="button" className={activeSource === tab.id ? 'active' : ''} onClick={() => { setActiveSource(tab.id); setActiveAuthor('all'); }} key={tab.id}><span>{tab.name}</span>{status && <i className={`source-dot ${status.status}`} title={status.message} />}</button>;
-					})}
-				</nav>
+				<div className="review-source-row">
+					<nav className="review-source-tabs" aria-label="复盘内容平台">
+						{sourceTabs.map((tab) => {
+							const status = sourceMap.get(tab.id);
+							return <button type="button" className={activeSource === tab.id ? 'active' : ''} onClick={() => { setActiveSource(tab.id); setActiveAuthor('all'); }} key={tab.id}><span>{tab.name}</span>{status && <i className={`source-dot ${status.status}`} title={status.message} />}</button>;
+						})}
+					</nav>
+				</div>
 
 				<details className="review-automation" open={!subscriptions.length}>
 					<summary><span><RadioTower size={16} /><strong>自动订阅与每日同步</strong><small>{subscriptions.length ? `${subscriptions.length} 个主页 · 后台定时检查` : '添加大V主页后，系统会每天自动获取新文章'}</small></span><button type="button" disabled={!subscriptions.length || !!syncing} onClick={(event) => { event.preventDefault(); void syncSubscriptions(); }}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></summary>

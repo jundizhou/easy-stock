@@ -1,6 +1,5 @@
 import {
 	AlertTriangle,
-	BookMarked,
 	Bot,
 	BrainCircuit,
 	CheckCircle2,
@@ -103,8 +102,7 @@ export function TradingMastery({ config, refreshKey, onAskAI }: Props) {
 		<section className="mastery-workspace">
 			<header className="mastery-hero">
 				<div className="mastery-hero-copy">
-					<span><BookMarked size={15} />TRADING MASTERY</span>
-					<h2>游资心法库</h2>
+					<span>TRADING MASTERY</span>
 					<p>按人物阅读交易理念、情绪周期、龙头战法、仓位与执行经验；原始资料每日缓存一次。</p>
 				</div>
 				<div className="mastery-hero-status">

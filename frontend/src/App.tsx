@@ -13,7 +13,6 @@ import {
 	Flame,
 	Gauge,
 	History,
-	Layers3,
 	LayoutDashboard,
 	LoaderCircle,
 	Moon,
@@ -82,6 +81,19 @@ import { ThemeIndexPanel } from './components/ThemeIndexPanel';
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage';
 
+// 顶部栏标题图标按页面语义区分：每个工作台用自己的图标与色调，替代原来所有页面一样的应用 LOGO。
+const workspaceTopbarMarks: Record<WorkspaceMode, { tone: 'blue' | 'green' | 'red' | 'amber' | 'purple'; icon: React.ReactNode }> = {
+	themes: { tone: 'blue', icon: <LayoutDashboard size={21} aria-hidden="true" /> },
+	'limit-up': { tone: 'red', icon: <Flame size={21} aria-hidden="true" /> },
+	reviews: { tone: 'amber', icon: <BookOpen size={21} aria-hidden="true" /> },
+	'stock-ai': { tone: 'purple', icon: <BrainCircuit size={21} aria-hidden="true" /> },
+	'portfolio-inspection': { tone: 'green', icon: <WalletCards size={21} aria-hidden="true" /> },
+	market: { tone: 'blue', icon: <BarChart3 size={21} aria-hidden="true" /> },
+	mastery: { tone: 'purple', icon: <BookMarked size={21} aria-hidden="true" /> },
+	ai: { tone: 'blue', icon: <Bot size={21} aria-hidden="true" /> },
+	'token-usage': { tone: 'amber', icon: <Gauge size={21} aria-hidden="true" /> },
+};
+
 const emptyStockPagination = (): ThemeScreenPagination => ({
 	page: 1,
 	page_size: 20,
@@ -104,7 +116,8 @@ export function App() {
 		return 'themes';
 	});
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
-	const [topbarExpanded, setTopbarExpanded] = useState(true);
+	// 顶部栏全局默认收起，只在需要看标题、数据源与刷新入口时手动展开。
+	const [topbarExpanded, setTopbarExpanded] = useState(false);
 	const [config, setConfig] = useState<BackendConfig | null>(null);
 	const [themeStrengthWindow, setThemeStrengthWindow] = useState<ThemeStrengthWindow>('daily');
 	const [activeTheme, setActiveTheme] = useState('');
@@ -404,9 +417,11 @@ export function App() {
 		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Agent 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '24 小时报告复用 · 组合 AI 评分 · 后台任务' : workspaceMode === 'ai' ? '本机 Agent AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : workspaceMode === 'token-usage' ? '模型输入、输出与功能模块消耗' : themeSourceStatus + ' · ' + streamStatus;
 	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '股票 / ETF AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : workspaceMode === 'token-usage' ? 'Token 统计' : 'AI 对话';
 	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Agent 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '股票与场内 ETF 研究、证据对照与条件核验工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : workspaceMode === 'token-usage' ? '按日、按月和功能模块查看模型 Token 消耗' : '';
+	const topbarMark = workspaceTopbarMarks[workspaceMode];
 
 	return (
 		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${workspaceMode === 'ai' ? 'workspace-ai' : ''}`}>
+			<div className="desktop-titlebar" aria-hidden="true" />
 			<aside className="app-sidebar" aria-label="功能导航">
 				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>{sidebarExpanded && <div className="sidebar-brand-name"><strong>easy-stock</strong><span>AI STOCK LAB</span></div>}<SidebarUpdateNotice onOpenUpdates={() => { setSettingsInitialSection('updates'); setSettingsOpen(true); }} /></div>
 				<nav>
@@ -426,8 +441,8 @@ export function App() {
 				</div>
 			</aside>
 			<div className="app-shell">
-			{workspaceMode !== 'ai' && <div className={`workspace-topbar ${workspaceMode !== 'stock-ai' ? `collapsible ${topbarExpanded ? 'expanded' : ''}` : ''}`}>
-				{workspaceMode !== 'stock-ai' && <button
+			{workspaceMode !== 'ai' && <div className={`workspace-topbar collapsible ${topbarExpanded ? 'expanded' : ''}`}>
+				<button
 					type="button"
 					className="topbar-toggle"
 					onClick={() => setTopbarExpanded((value) => !value)}
@@ -435,10 +450,10 @@ export function App() {
 					aria-controls="workspace-topbar-content"
 					aria-label={topbarExpanded ? '收起顶部栏' : '展开顶部栏'}
 					title={topbarExpanded ? '收起顶部栏' : '展开顶部栏'}
-				><ChevronDown size={16} aria-hidden="true" /></button>}
-			<header id="workspace-topbar-content" className="topbar" hidden={workspaceMode !== 'stock-ai' && !topbarExpanded}>
+				><ChevronDown size={16} aria-hidden="true" /></button>
+			<header id="workspace-topbar-content" className="topbar" hidden={!topbarExpanded}>
 				<div className="brand-block">
-					<div className="brand-mark"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>
+					<div className={`brand-mark ${topbarMark.tone}`}>{topbarMark.icon}</div>
 					<div>
 						<h1>{topbarTitle}</h1>
 						{topbarDescription && <p>{topbarDescription}</p>}
@@ -536,7 +551,7 @@ export function App() {
 					<header className="theme-hero">
 						<div className="theme-title-row">
 							<div>
-								<div className="eyebrow"><Layers3 size={15} aria-hidden="true" />当前主线</div>
+								<div className="eyebrow">当前主线</div>
 								<h2>{sectorMap?.name || activeOverview?.name || '加载题材中'}</h2>
 								<p>{isTrendOverview
 									? activeOverview?.leaders?.length ? `核心标的：${activeOverview.leaders.join(' · ')}` : '等待主线共振证据'

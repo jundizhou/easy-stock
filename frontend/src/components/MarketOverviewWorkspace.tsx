@@ -6,9 +6,10 @@ import {
 	Building2,
 	ChartCandlestick,
 	ChartSpline,
-	ChevronRight,
+	ChevronDown,
 	Clock3,
 	Database,
+	ExternalLink,
 	FileSearch,
 	Landmark,
 	LoaderCircle,
@@ -34,12 +35,14 @@ import type {
 	MarketFuturesPositionSeries,
 	MarketFuturesMembers,
 	MarketFuturesConsensus,
+	MarketResearchDetail,
 	MarketResearchItem,
 	NewsItem,
 	SourceHealth,
 	SourceMeta,
 	ThemeOverview,
 } from '../lib/backend';
+import { formatArticleParagraphs, isIndentedParagraph } from '../lib/article';
 import { requestJSON } from '../lib/backend';
 import { formatFuturesOpeningHands } from '../lib/futures-position';
 import {
@@ -54,6 +57,7 @@ import {
 import {
 	BillboardView,
 	type BillboardDetailEntry,
+	type ResearchDetailEntry,
 	CoreIndexView,
 	FundFlowView,
 	IndustryMomentumView,
@@ -111,6 +115,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	const [futuresConsensus, setFuturesConsensus] = useState<MarketFuturesConsensus | null>(null);
 	const [billboard, setBillboard] = useState<MarketBillboardItem[]>([]);
 	const [billboardDetails, setBillboardDetails] = useState<Record<string, BillboardDetailEntry>>({});
+	const [researchDetails, setResearchDetails] = useState<Record<string, ResearchDetailEntry>>({});
 	const [tradeDate, setTradeDate] = useState('');
 	const [research, setResearch] = useState<MarketResearchItem[]>([]);
 	const [searchDraft, setSearchDraft] = useState('');
@@ -243,6 +248,23 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		}
 	}, [config, requestBillboardDetail]);
 
+	const loadResearchDetail = useCallback(async (item: MarketResearchItem) => {
+		if (!config) return;
+		const key = `${item.kind}-${item.id}`;
+		setResearchDetails((current) => ({ ...current, [key]: { state: 'loading' } }));
+		const isAnnouncement = item.kind === 'announcement';
+		try {
+			const path = isAnnouncement
+				? `/api/v1/research/announcement-content?id=${encodeURIComponent(item.id)}`
+				: `/api/v1/research/report-content?kind=${item.kind === 'industry' ? 'industry' : 'stock'}&id=${encodeURIComponent(item.id)}`;
+			const payload = await requestJSON<{ data: MarketResearchDetail; meta: SourceMeta }>(config, path);
+			setResearchDetails((current) => ({ ...current, [key]: { state: 'ready', detail: payload.data } }));
+		} catch (error) {
+			console.warn('research detail failed', error);
+			setResearchDetails((current) => ({ ...current, [key]: { state: 'error', error: isAnnouncement ? '公告正文暂不可用，请稍后重试' : '研报正文暂不可用，请稍后重试' } }));
+		}
+	}, [config]);
+
 	useEffect(() => {
 		if (activeView === 'pulse') void loadPulse();
 		else void loadModule();
@@ -355,8 +377,8 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		<div className="market-overview-main">
 			<header className="market-overview-hero">
 				<div><span>{marketOverviewGroups.find((group) => group.modules.some((module) => module.id === activeView))?.name}</span><h2>{activeModule.name}</h2><p>{activeModule.description}</p></div>
-				{activeView === 'futures-position' && <div className="market-futures-headline-stat" role="status"><span>当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : formatFuturesOpeningHands(futuresConsensus?.top20_net_long_change ?? null, true)}</strong><small>+ 多单 · − 空单 · 全部合约 · 前20会员{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus && moduleState !== 'loading' ? ' · 共识数据不可用' : ''}</small></div>}
-				{activeView === 'futures-position' && <div className="market-futures-headline-stat market-futures-citic-stat" role="status"><span>中信当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : formatFuturesOpeningHands(futuresConsensus?.citic_net_long_change ?? null, true)}</strong><small>+ 多单 · − 空单 · 中信期货(代客) · 全部合约{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus ? ' · 共识数据不可用' : ''}</small></div>}
+				{activeView === 'futures-position' && <div className="market-futures-headline-stat" role="status"><span>当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : <FuturesHandsValue text={formatFuturesOpeningHands(futuresConsensus?.top20_net_long_change ?? null, true)} />}</strong><small>+ 多单 · − 空单 · 全部合约 · 前20会员{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus && moduleState !== 'loading' ? ' · 共识数据不可用' : ''}</small></div>}
+				{activeView === 'futures-position' && <div className="market-futures-headline-stat market-futures-citic-stat" role="status"><span>中信当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : <FuturesHandsValue text={formatFuturesOpeningHands(futuresConsensus?.citic_net_long_change ?? null, true)} />}</strong><small>+ 多单 · − 空单 · 中信期货(代客) · 全部合约{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus ? ' · 共识数据不可用' : ''}</small></div>}
 				<div><button type="button" className="market-ai-button" onClick={() => void askAI()} disabled={!hasEvidence || aiPreparing}>{aiPreparing ? <LoaderCircle className="spin" size={16} /> : <Bot size={16} />}{aiPreparing ? '正在聚合席位与连板证据' : '交给 AI 解读'}</button><button type="button" className="market-refresh-button" onClick={refresh} disabled={(activeView === 'pulse' ? pulseState : moduleState) === 'loading'}>{(activeView === 'pulse' ? pulseState : moduleState) === 'loading' ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
 			</header>
 
@@ -367,7 +389,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				{activeView === 'margin-balance' && <MarginBalanceView items={margins} limit={marginLimit} onLimit={setMarginLimit} meta={moduleMeta} />}
 				{activeView === 'futures-position' && <FuturesPositionView series={futuresPosition} members={futuresMembers} consensus={futuresConsensus} variety={futuresVariety} onVariety={setFuturesVariety} meta={moduleMeta} />}
 				{activeView === 'billboard' && <BillboardView items={billboard} tradeDate={tradeDate} onTradeDate={setTradeDate} meta={moduleMeta} details={billboardDetails} onLoadDetail={loadBillboardDetail} />}
-				{isResearchView(activeView) && <ResearchView kind={researchKind(activeView)} items={research} queryDraft={searchDraft} onQueryDraft={setSearchDraft} onSearch={submitResearch} category={announcementCategory} onCategory={setAnnouncementCategory} meta={moduleMeta} />}
+				{isResearchView(activeView) && <ResearchView kind={researchKind(activeView)} items={research} queryDraft={searchDraft} onQueryDraft={setSearchDraft} onSearch={submitResearch} category={announcementCategory} onCategory={setAnnouncementCategory} meta={moduleMeta} details={researchDetails} onLoadDetail={loadResearchDetail} />}
 			</ModuleState>}
 		</div>
 	</section>;
@@ -386,8 +408,16 @@ function uniqueBillboardItems(items: MarketBillboardItem[], limit: number) {
 	}).slice(0, limit);
 }
 
+function newsSourceName(source?: string) {
+	const normalized = (source || '').toLowerCase();
+	if (normalized === 'cls') return '财联社';
+	if (normalized === 'eastmoney') return '东方财富';
+	return source || '未知来源';
+}
+
 function PulseView({ news, themes, themeMeta, sources, state, error, lastUpdated }: { news: NewsItem[]; themes: ThemeOverview[]; themeMeta: SourceMeta | null; sources: SourceHealth[]; state: LoadState; error: string; lastUpdated: string }) {
 	const healthySources = sources.filter((source) => source.ok).length;
+	const [expandedNews, setExpandedNews] = useState('');
 	return <div className="market-pulse-view">
 		<section className="market-pulse-metrics">
 			<Metric icon={<Newspaper size={17} />} label="快讯样本" value={state === 'loading' ? '--' : String(news.length)} detail="财联社最新快讯" />
@@ -396,10 +426,23 @@ function PulseView({ news, themes, themeMeta, sources, state, error, lastUpdated
 			<Metric icon={<Clock3 size={17} />} label="最近刷新" value={lastUpdated ? formatTime(lastUpdated) : '--'} detail={themeMeta?.stale ? '题材数据已标记陈旧' : '本机聚合时间'} />
 		</section>
 		{error && <div className="market-partial-warning"><AlertTriangle size={15} /><span>{error}。已展示其余可用数据。</span></div>}
-		<div className="market-pulse-grid">
-			<section className="market-pulse-panel market-news-panel"><header><div><span>LIVE FEED</span><h3>盘面快讯</h3></div><em>{news[0]?.meta?.source || 'CLS'}</em></header><div className="market-news-feed">{news.map((item, index) => {
-				const content = <><time>{formatTime(item.published_at)}</time><span><strong>{item.title}</strong>{item.content && item.content !== item.title && <small>{item.content}</small>}</span><ChevronRight size={14} /></>;
-				return item.url ? <a href={item.url} target="_blank" rel="noreferrer" key={item.id || `${item.title}-${index}`}>{content}</a> : <article key={item.id || `${item.title}-${index}`}>{content}</article>;
+		<div className={`market-pulse-grid ${expandedNews ? 'has-expanded-news' : ''}`}>
+			<section className="market-pulse-panel market-news-panel"><header><div><span>LIVE FEED</span><h3>盘面快讯</h3></div><em>{news[0]?.meta?.source || 'CLS'}</em></header><div className={`market-news-feed ${expandedNews ? 'expanded' : ''}`}>{news.map((item, index) => {
+				const key = item.id || `${item.title}-${index}`;
+				const open = expandedNews === key;
+				const detail = item.content && item.content !== item.title ? item.content : item.title;
+				return <article className={open ? 'expanded' : ''} key={key}>
+					<button type="button" className="market-news-head" aria-expanded={open} onClick={() => setExpandedNews(open ? '' : key)}>
+						<time>{formatTime(item.published_at)}</time>
+						<span><strong>{item.title}</strong>{!open && item.content && item.content !== item.title && <small>{item.content}</small>}</span>
+						<ChevronDown size={14} aria-hidden="true" />
+					</button>
+					{open && <div className="market-news-detail">
+						<div className="market-news-body">{formatArticleParagraphs(detail).map((paragraph, index) => <p className={isIndentedParagraph(paragraph, index) ? 'indent' : undefined} key={index}>{paragraph}</p>)}</div>
+						{item.tags?.length ? <div className="market-news-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div> : null}
+						<div className="market-news-detail-foot"><span>{newsSourceName(item.meta?.source)} · {formatTime(item.published_at)}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" />查看原文</a>}</div>
+					</div>}
+				</article>;
 			})}{state === 'loading' && <LoadingRows />}{state !== 'loading' && !news.length && <EmptyPanel title="暂无市场快讯" detail="刷新后重试，或检查财联社数据源状态。" />}</div></section>
 			<section className="market-pulse-panel market-theme-panel"><header><div><span>THEME SIGNALS</span><h3>题材强度</h3></div><em>{themeMeta?.source || '等待来源'}</em></header><div className="market-theme-ranking">{themes.slice(0, 12).map((theme, index) => <article key={theme.theme}><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{theme.name}</strong><small>{theme.leaders?.slice(0, 2).join(' · ') || theme.top_node || '等待核心标的'}</small></div><em className={toneClass(theme.change_percent)}>{formatPercent(theme.change_percent)}</em></article>)}{state === 'loading' && <LoadingRows compact />}{state !== 'loading' && !themes.length && <EmptyPanel title="暂无题材快照" detail="当前仍可查看市场快讯，题材数据恢复后会自动补齐。" />}</div></section>
 		</div>
@@ -472,4 +515,10 @@ function formatPercent(value: number) {
 
 function toneClass(value: number) {
 	return value > 0 ? 'up' : value < 0 ? 'down' : 'flat';
+}
+
+/** 期指多空单数值：单位「手」单独降档，避免和数字同尺寸。 */
+function FuturesHandsValue({ text }: { text: string }) {
+	const parts = text.match(/^([-+]?[\d.,]+)(\s*手)$/);
+	return parts ? <>{parts[1]}<span className="metric-unit">手</span></> : <>{text}</>;
 }

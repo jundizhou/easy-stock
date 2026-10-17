@@ -28,10 +28,12 @@ import type {
 	MarketFuturesPositionSeries,
 	MarketFuturesMembers,
 	MarketFuturesConsensus,
+	MarketResearchDetail,
 	MarketResearchItem,
 	SourceMeta,
 } from '../../lib/backend';
 import { classifyBillboardSeat } from '../../lib/billboard';
+import { formatArticleParagraphs, isIndentedParagraph } from '../../lib/article';
 import { formatFuturesOpeningHands } from '../../lib/futures-position';
 
 type DataState = 'idle' | 'loading' | 'ready' | 'error';
@@ -43,6 +45,12 @@ const FUTURES_VARIETY_NAMES: Record<string, string> = { IF: '沪深300', IH: '�
 export type BillboardDetailEntry = {
 	state: DataState;
 	detail?: MarketBillboardDetail;
+	error?: string;
+};
+
+export type ResearchDetailEntry = {
+	state: DataState;
+	detail?: MarketResearchDetail;
 	error?: string;
 };
 
@@ -129,7 +137,7 @@ export function IndustryMomentumView({ items, meta }: { items: MarketIndustryMom
 			<em className={availableTone(item.five_day_change_percent, hasField(meta, 'five_day_change_percent'))}>{formatAvailable(item.five_day_change_percent, hasField(meta, 'five_day_change_percent'), formatPercent)}</em>
 			<em className={availableTone(item.twenty_day_change_percent, hasField(meta, 'twenty_day_change_percent'))}>{formatAvailable(item.twenty_day_change_percent, hasField(meta, 'twenty_day_change_percent'), formatPercent)}</em>
 			<span>{breadthAvailable ? `${item.rising_count} / ${item.falling_count}` : '--'}</span>
-			<strong className={availableTone(item.main_net_inflow, flowAvailable)}>{formatAvailable(item.main_net_inflow, flowAvailable, formatMoney)}</strong>
+			<strong className={availableTone(item.main_net_inflow, flowAvailable)}>{formatAvailable(item.main_net_inflow, flowAvailable, moneyCell)}</strong>
 		</article>)}</div> : <EmptyData title="没有匹配行业" detail="调整搜索条件或刷新行情。" />}
 	</div>;
 }
@@ -231,7 +239,7 @@ export function FuturesPositionView({ series, members, consensus, variety, onVar
 				<div className="market-futures-bars">{rows.slice(-30).map((row) => <article key={row.trade_date}><time>{formatMonthDay(row.trade_date)}</time><div><i className="long" style={{ width: `${Math.max(1, Math.abs(row.long_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.long_position)}</span></div><div><i className="short" style={{ width: `${Math.max(1, Math.abs(row.short_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.short_position)}</span></div><strong className={toneClass(row.net_position)}>{formatFuturesHands(row.net_position)}</strong></article>)}</div>
 				<footer>共识统计采用 {consensus?.trade_date || latest.trade_date} 全部合约前20会员多空单口径（+ 多单，− 空单）；此处图表为主力合约持仓趋势参考。结算价 {latest.settle_price == null ? '--' : latest.settle_price.toFixed(2)} · 现货指数 {latest.index_close == null ? '--' : latest.index_close.toFixed(2)} · 基差 {latest.basis == null ? '--' : latest.basis.toFixed(2)}。</footer>
 			</section>
-			{members?.members?.length ? <section className="market-futures-members"><SourceNotice meta={memberMeta} /><header><div><span>TOP 20 MEMBERS</span><h3>{members.trade_date} 会员多空明细</h3></div><small>中金所成交持仓排名 · 主力合约参考</small></header><div className="market-data-table"><header><span>排名</span><span>持买单会员</span><span>多单 / 增减</span><span>持卖单会员</span><span>空单 / 增减</span></header>{members.members.map((member) => <article key={`${member.contract}-${member.rank}`}><span>{member.rank}</span><strong>{member.long_name || '--'}</strong><span>{formatFuturesHands(member.long_position)} / {formatFuturesChangeShort(member.long_change)}</span><strong>{member.short_name || '--'}</strong><span>{formatFuturesHands(member.short_position)} / {formatFuturesChangeShort(member.short_change)}</span></article>)}</div></section> : null}
+			{members?.members?.length ? <section className="market-futures-members"><SourceNotice meta={memberMeta} /><header><div><span>TOP 20 MEMBERS</span><h3>{members.trade_date} 会员多空明细</h3></div><small>中金所成交持仓排名 · 主力合约参考</small></header><div className="market-data-table members"><header><span>排名</span><span>持买单会员</span><span>多单 / 增减</span><span>持卖单会员</span><span>空单 / 增减</span></header>{members.members.map((member) => <article key={`${member.contract}-${member.rank}`}><span>{member.rank}</span><strong>{member.long_name || '--'}</strong><span>{formatFuturesHands(member.long_position)} / {formatFuturesChangeShort(member.long_change)}</span><strong>{member.short_name || '--'}</strong><span>{formatFuturesHands(member.short_position)} / {formatFuturesChangeShort(member.short_change)}</span></article>)}</div></section> : null}
 		</> : <EmptyData title="暂无机构多空单" detail="期指持仓通常在交易日盘后更新，请稍后刷新。" />}
 	</div>;
 }
@@ -325,9 +333,9 @@ function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: S
 			<FlowIdentity item={item} index={index} />
 			<strong>{formatAvailable(item.price, hasField(meta, 'price'), formatPrice)}</strong>
 			<em className={availableTone(item.change_percent, hasField(meta, 'change_percent'))}>{formatAvailable(item.change_percent, hasField(meta, 'change_percent'), formatPercent)}</em>
-			<span className={availableTone(item.inflow, hasField(meta, 'inflow'))}>{formatAvailable(item.inflow, hasField(meta, 'inflow'), formatMoney)}</span>
-			<span className={availableTone(-item.outflow, hasField(meta, 'outflow'))}>{formatAvailable(item.outflow, hasField(meta, 'outflow'), formatMoney)}</span>
-			<strong className={availableTone(netValue, netValueAvailable)}>{formatAvailable(netValue, netValueAvailable, formatMoney)}</strong>
+			<span className={availableTone(item.inflow, hasField(meta, 'inflow'))}>{formatAvailable(item.inflow, hasField(meta, 'inflow'), moneyCell)}</span>
+			<span className={availableTone(-item.outflow, hasField(meta, 'outflow'))}>{formatAvailable(item.outflow, hasField(meta, 'outflow'), moneyCell)}</span>
+			<strong className={availableTone(netValue, netValueAvailable)}>{formatAvailable(netValue, netValueAvailable, moneyCell)}</strong>
 			<em className={availableTone(item.net_inflow_ratio, hasField(meta, 'net_inflow_ratio'))}>{formatAvailable(item.net_inflow_ratio, hasField(meta, 'net_inflow_ratio'), formatPercent)}</em>
 			<span className="market-flow-leader">{hasField(meta, 'leader_name') ? <><strong>{item.leader_name || '--'}</strong><small>{item.leader_symbol || ''}{item.leader_name ? ` · ${formatPercent(item.leader_change_percent)}` : ''}</small></> : <small>--</small>}</span>
 		</article>;
@@ -352,11 +360,11 @@ function StockFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: So
 		<FlowIdentity item={item} index={index} />
 		<strong>{formatAvailable(item.price, hasField(meta, 'price'), formatPrice)}</strong>
 		<em className={availableTone(item.change_percent, hasField(meta, 'change_percent'))}>{formatAvailable(item.change_percent, hasField(meta, 'change_percent'), formatPercent)}</em>
-		<strong className={availableTone(item.net_inflow, hasField(meta, 'net_inflow'))}>{formatAvailable(item.net_inflow, hasField(meta, 'net_inflow'), formatMoney)}</strong>
+		<strong className={availableTone(item.net_inflow, hasField(meta, 'net_inflow'))}>{formatAvailable(item.net_inflow, hasField(meta, 'net_inflow'), moneyCell)}</strong>
 		<em className={availableTone(item.net_inflow_ratio, hasField(meta, 'net_inflow_ratio'))}>{formatAvailable(item.net_inflow_ratio, hasField(meta, 'net_inflow_ratio'), formatPercent)}</em>
-		<strong className={availableTone(item.main_net_inflow, hasField(meta, 'main_net_inflow'))}>{formatAvailable(item.main_net_inflow, hasField(meta, 'main_net_inflow'), formatMoney)}</strong>
+		<strong className={availableTone(item.main_net_inflow, hasField(meta, 'main_net_inflow'))}>{formatAvailable(item.main_net_inflow, hasField(meta, 'main_net_inflow'), moneyCell)}</strong>
 		<em className={availableTone(item.main_net_inflow_ratio, hasField(meta, 'main_net_inflow_ratio'))}>{formatAvailable(item.main_net_inflow_ratio, hasField(meta, 'main_net_inflow_ratio'), formatPercent)}</em>
-		<strong className={availableTone(item.retail_net_inflow, hasField(meta, 'retail_net_inflow'))}>{formatAvailable(item.retail_net_inflow, hasField(meta, 'retail_net_inflow'), formatMoney)}</strong>
+		<strong className={availableTone(item.retail_net_inflow, hasField(meta, 'retail_net_inflow'))}>{formatAvailable(item.retail_net_inflow, hasField(meta, 'retail_net_inflow'), moneyCell)}</strong>
 		<em className={availableTone(item.retail_net_inflow_ratio, hasField(meta, 'retail_net_inflow_ratio'))}>{formatAvailable(item.retail_net_inflow_ratio, hasField(meta, 'retail_net_inflow_ratio'), formatPercent)}</em>
 	</article>)}</div>;
 }
@@ -405,7 +413,7 @@ export function BillboardView({ items, tradeDate, onTradeDate, meta, details, on
 			return <article className={expanded ? 'expanded' : ''} key={key}>
 				<header className="market-billboard-card-header"><span><strong>{item.name}</strong><small>{item.symbol} · {item.trade_date}</small></span><em className={toneClass(item.change_percent)}>{formatPercent(item.change_percent)}</em></header>
 				<p>{item.reason || '未提供上榜原因'}</p>{item.summary && <blockquote>{item.summary}</blockquote>}
-				<footer><span>买入 <strong>{formatMoney(item.buy_amount)}</strong></span><span>卖出 <strong>{formatMoney(item.sell_amount)}</strong></span><span>净额 <strong className={toneClass(item.net_amount)}>{formatMoney(item.net_amount)}</strong></span><span>机构买方 <strong>{item.institution_buyers}</strong></span><span>换手 <strong>{formatPercent(item.turnover_rate)}</strong></span></footer>
+				<footer><span>买入 <strong>{moneyCell(item.buy_amount)}</strong></span><span>卖出 <strong>{moneyCell(item.sell_amount)}</strong></span><span>净额 <strong className={toneClass(item.net_amount)}>{moneyCell(item.net_amount)}</strong></span><span>机构买方 <strong>{item.institution_buyers}</strong></span><span>换手 <strong>{formatPercent(item.turnover_rate)}</strong></span></footer>
 				<button type="button" className="market-billboard-toggle" aria-expanded={expanded} aria-controls={detailID} onClick={() => toggleDetail(item)}><ChevronDown size={14} />{expanded ? '收起买卖五席' : '查看买一至买五 / 卖一至卖五'}</button>
 				{expanded && <div className="market-billboard-detail" id={detailID}>
 					{detailEntry?.state === 'loading' && <div className="market-billboard-detail-state"><LoaderCircle className="spin" size={17} /><span>正在读取完整买卖五席</span></div>}
@@ -433,22 +441,27 @@ function BillboardSeatPanel({ title, prefix, seats }: { title: string; prefix: '
 				<span className="market-seat-name"><i>{prefix}{rank}</i><span><strong title={seat?.name || '数据源未提供'}>{seat?.name || '数据源未提供'}</strong>{label && <small className={`market-seat-label ${label.kind}`} title={label.note}>{label.label}</small>}</span></span>
 				<SeatAmount amount={seat?.buy_amount} ratio={seat?.buy_ratio} />
 				<SeatAmount amount={seat?.sell_amount} ratio={seat?.sell_ratio} />
-				<strong className={seat ? toneClass(seat.net_amount) : 'flat'}>{seat ? formatMoney(seat.net_amount) : '--'}</strong>
+				<strong className={seat ? (seat.net_amount === 0 ? 'zero' : toneClass(seat.net_amount)) : 'zero'}>{seat ? moneyCell(seat.net_amount) : '--'}</strong>
 			</article>;
 		})}
 	</section>;
 }
 
 function SeatAmount({ amount, ratio }: { amount?: number; ratio?: number }) {
-	if (amount === undefined) return <span className="market-seat-amount"><strong>--</strong></span>;
-	return <span className="market-seat-amount"><strong>{formatMoney(amount)}</strong>{ratio !== undefined && ratio !== 0 && <small>{formatPercent(ratio)}</small>}</span>;
+	if (amount === undefined) return <span className="market-seat-amount"><strong className="zero">--</strong></span>;
+	return <span className="market-seat-amount"><strong className={amount === 0 ? 'zero' : ''}>{moneyCell(amount)}</strong>{amount !== 0 && ratio !== undefined && ratio !== 0 && <small>{formatShare(ratio)}</small>}</span>;
+}
+
+function formatShare(value: number) {
+	if (!Number.isFinite(value)) return '--';
+	return `${value.toFixed(2)}%`;
 }
 
 function billboardDetailKey(item: MarketBillboardItem) {
 	return `${item.trade_date}|${item.symbol}|${item.reason}`;
 }
 
-export function ResearchView({ items, kind, queryDraft, onQueryDraft, onSearch, category, onCategory, meta }: {
+export function ResearchView({ items, kind, queryDraft, onQueryDraft, onSearch, category, onCategory, meta, details, onLoadDetail }: {
 	items: MarketResearchItem[];
 	kind: 'announcement' | 'stock' | 'industry';
 	queryDraft: string;
@@ -457,16 +470,82 @@ export function ResearchView({ items, kind, queryDraft, onQueryDraft, onSearch, 
 	category: string;
 	onCategory: (value: string) => void;
 	meta: SourceMeta | null;
+	details: Record<string, ResearchDetailEntry>;
+	onLoadDetail: (item: MarketResearchItem) => void;
 }) {
+	const [openKey, setOpenKey] = useState('');
+	useEffect(() => setOpenKey(''), [items, kind]);
+	const toggle = (item: MarketResearchItem) => {
+		const key = researchDetailKey(item);
+		const expanding = openKey !== key;
+		setOpenKey(expanding ? key : '');
+		if (expanding && !(item.content || '').trim()) onLoadDetail(item);
+	};
 	return <div className="market-data-view">
 		<SourceNotice meta={meta} />
 		<form className="market-filter-bar" onSubmit={(event) => { event.preventDefault(); onSearch(); }}><label><Search size={14} /><input aria-label="搜索研究信号" value={queryDraft} onChange={(event) => onQueryDraft(event.target.value)} placeholder={kind === 'announcement' ? '搜索公告标题或输入股票关键词' : '搜索公司、行业、机构或观点'} /></label>{kind === 'announcement' && <select aria-label="公告分类" value={category} onChange={(event) => onCategory(event.target.value)}><option value="all">全部公告</option><option value="重大">重大事项</option><option value="业绩">业绩公告</option><option value="融资">融资公告</option><option value="风险">风险提示</option></select>}<button type="submit"><Search size={14} />检索</button></form>
-		{items.length ? <div className="market-research-list">{items.map((item) => <article key={`${item.kind}-${item.id}`}>
-			<div className="market-research-icon">{kind === 'announcement' ? <FileText size={18} /> : kind === 'stock' ? <Building2 size={18} /> : <TrendingUp size={18} />}</div>
-			<div><header><span>{item.category || (kind === 'stock' ? '个股研报' : kind === 'industry' ? '行业研报' : '公告')}</span><time>{formatDateTime(item.published_at)}</time></header><h3>{item.title}</h3><p>{[item.stock_name || item.symbol, item.industry_name, item.organization, item.researchers].filter(Boolean).join(' · ') || '市场研究信号'}</p><footer>{item.rating && <span>评级 <strong>{item.rating}</strong>{item.previous_rating && ` / 前值 ${item.previous_rating}`}</span>}{(item.target_low || item.target_high) && <span>目标价 <strong>{formatTarget(item.target_low, item.target_high)}</strong></span>}{item.eps ? <span>预测 EPS <strong>{item.eps.toFixed(2)}</strong></span> : null}{item.pe ? <span>预测 PE <strong>{item.pe.toFixed(1)}</strong></span> : null}</footer></div>
-			{item.url && <a href={item.url} target="_blank" rel="noreferrer" title="查看原文"><ExternalLink size={16} /></a>}
-		</article>)}</div> : <EmptyData title="暂无匹配研究信号" detail="调整关键词或公告分类后重新检索。" />}
+		{items.length ? <div className="market-research-list">{items.map((item, index) => {
+			const key = researchDetailKey(item);
+			const open = openKey === key;
+			const entry = details[key];
+			const body = (item.content || '').trim() || (entry?.detail?.content || '').trim();
+			const detailID = `market-research-detail-${index}`;
+			const stockName = (item.stock_name || '').trim();
+			const stockCode = (item.symbol || '').trim();
+			const industryName = (item.industry_name || '').trim();
+			const hasStock = Boolean(stockName || stockCode);
+			// 标的名做成徽标，其余（行业/机构/研究员）退成普通说明文字，让“是哪只票”一眼可见。
+			const chip = hasStock ? { label: stockName || stockCode, code: stockName ? stockCode : '', tone: 'stock' } : industryName ? { label: industryName, code: '', tone: 'industry' } : null;
+			const subjectRest = [hasStock ? industryName : '', item.organization, item.researchers].map((value) => (value || '').trim()).filter(Boolean).join(' · ');
+			return <article className={open ? 'expanded' : ''} key={key}>
+				<button type="button" className="market-research-head" aria-expanded={open} aria-controls={detailID} onClick={() => toggle(item)}>
+					<span className="market-research-icon">{kind === 'announcement' ? <FileText size={18} /> : kind === 'stock' ? <Building2 size={18} /> : <TrendingUp size={18} />}</span>
+					<span className="market-research-headline">
+						<span className="market-research-meta"><span className="market-research-tag">{item.category || (kind === 'stock' ? '个股研报' : kind === 'industry' ? '行业研报' : '公告')}</span><time>{formatDateTime(item.published_at)}</time></span>
+						<strong className="market-research-title">{item.title}</strong>
+						<small className="market-research-subject">{chip ? <span className={`market-research-chip ${chip.tone}`}>{chip.label}{chip.code ? <em>{chip.code}</em> : null}</span> : null}<span className="market-research-subject-text">{subjectRest || (chip ? '' : '市场研究信号')}</span></small>
+						<span className="market-research-stats">{item.rating && <span>评级 <strong>{item.rating}</strong>{item.previous_rating && ` / 前值 ${item.previous_rating}`}</span>}{(item.target_low || item.target_high) && <span>目标价 <strong>{formatTarget(item.target_low, item.target_high)}</strong></span>}{item.eps ? <span>预测 EPS <strong>{item.eps.toFixed(2)}</strong></span> : null}{item.pe ? <span>预测 PE <strong>{item.pe.toFixed(1)}</strong></span> : null}</span>
+					</span>
+					<ChevronDown size={16} className="market-research-chevron" aria-hidden="true" />
+				</button>
+				{open && <div className="market-research-detail" id={detailID}>
+					{body ? <div className="market-research-body">{formatArticleParagraphs(body).map((paragraph, index) => <p className={isIndentedParagraph(paragraph, index) ? 'indent' : undefined} key={index}>{paragraph}</p>)}</div> : null}
+					{!body && entry?.state === 'loading' && <div className="market-research-detail-state"><LoaderCircle className="spin" size={15} /><span>{kind === 'announcement' ? '正在读取公告正文' : '正在读取研报正文'}</span></div>}
+					{!body && entry?.state === 'error' && <div className="market-research-detail-state error"><AlertTriangle size={15} /><span>{entry.error || '正文加载失败'}</span><button type="button" onClick={() => onLoadDetail(item)}>重试</button></div>}
+					<div className="market-research-fields-panel"><span className="market-research-fields-caption">关键指标</span><dl className="market-research-fields">{researchDetailFields(item).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={fieldValueClass(label)}>{value}</dd></div>)}</dl></div>
+					<div className="market-research-detail-foot"><span>{kind === 'announcement' ? '交易所公告' : '东方财富研报'} · {formatDateTime(item.published_at)}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" />查看原文</a>}</div>
+				</div>}
+			</article>;
+		})}</div> : <EmptyData title="暂无匹配研究信号" detail="调整关键词或公告分类后重新检索。" />}
 	</div>;
+}
+
+function researchDetailKey(item: MarketResearchItem) {
+	return `${item.kind}-${item.id}`;
+}
+
+const NUMERIC_FIELD_LABELS = new Set(['目标价', '预测 EPS', '预测 PE', '评级变动']);
+
+// 关键指标里给评级、数值分别加不同强调：数值走等宽数字，评级走胶囊。
+function fieldValueClass(label: string) {
+	if (label === '评级') return 'rating';
+	return NUMERIC_FIELD_LABELS.has(label) ? 'num' : undefined;
+}
+
+function researchDetailFields(item: MarketResearchItem): Array<[string, string]> {
+	const fields: Array<[string, string]> = [];
+	const subject = [item.stock_name, item.symbol].filter(Boolean).join(' ');
+	if (subject) fields.push(['标的', subject]);
+	if (item.industry_name) fields.push(['行业', item.industry_name]);
+	if (item.organization) fields.push(['机构', item.organization]);
+	if (item.researchers) fields.push(['研究员', item.researchers]);
+	if (item.rating) fields.push(['评级', item.previous_rating ? `${item.rating}（前值 ${item.previous_rating}）` : item.rating]);
+	if (item.rating_change) fields.push(['评级变动', item.rating_change]);
+	if (item.target_low || item.target_high) fields.push(['目标价', formatTarget(item.target_low, item.target_high)]);
+	if (item.eps) fields.push(['预测 EPS', item.eps.toFixed(2)]);
+	if (item.pe) fields.push(['预测 PE', item.pe.toFixed(1)]);
+	if (item.category) fields.push(['分类', item.category]);
+	return fields;
 }
 
 function MarketFilter({ query, onQuery, children }: { query: string; onQuery: (value: string) => void; children?: React.ReactNode }) {
@@ -474,7 +553,10 @@ function MarketFilter({ query, onQuery, children }: { query: string; onQuery: (v
 }
 
 function SummaryMetric({ icon, label, value, detail, tone = '' }: { icon: React.ReactNode; label: string; value: string; detail: string; tone?: string }) {
-	return <article><i>{icon}</i><span><small>{label}</small><strong className={tone}>{value}</strong><em>{detail}</em></span></article>;
+	const amount = value.match(/^([-+]?[\d.,]+%?)(.*)$/);
+	const hasDigits = /\d/.test(value);
+	const className = [tone, hasDigits ? '' : 'is-text'].filter(Boolean).join(' ');
+	return <article><i>{icon}</i><span><small>{label}</small><strong className={className}>{amount && amount[2] ? <>{amount[1]}<span className="metric-unit">{amount[2]}</span></> : value}</strong><em>{detail}</em></span></article>;
 }
 
 function MiniStat({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
@@ -557,9 +639,10 @@ function formatPercent(value: number) {
 function formatMoney(value: number) {
 	if (!Number.isFinite(value)) return '--';
 	const absolute = Math.abs(value);
+	if (absolute === 0) return '0.00亿';
 	if (absolute >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}亿`;
 	if (absolute >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
-	return value.toFixed(0);
+	return value.toLocaleString('zh-CN');
 }
 
 function formatFuturesHands(value: number) {
@@ -594,7 +677,16 @@ function hasField(meta: SourceMeta | null, field: string) {
 	return !meta?.available_fields?.length || meta.available_fields.includes(field);
 }
 
-function formatAvailable(value: number, available: boolean, formatter: (value: number) => string) {
+function Amount({ text }: { text: string }) {
+	const unit = text.match(/^(.*?)([亿万手])$/);
+	return unit ? <>{unit[1]}<span className="num-unit">{unit[2]}</span></> : <>{text}</>;
+}
+
+function moneyCell(value: number) {
+	return <Amount text={formatMoney(value)} />;
+}
+
+function formatAvailable(value: number, available: boolean, formatter: (value: number) => React.ReactNode) {
 	return available ? formatter(value) : '--';
 }
 
