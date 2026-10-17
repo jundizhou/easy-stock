@@ -165,7 +165,9 @@
 .portfolio-research-options label { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:13px; }
 .portfolio-research-options select { border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); padding:8px 12px; }
 .portfolio-research-options p { flex-basis:100%; margin:0; font-size:12px; color:var(--muted); }
-.portfolio-score-dimensions { align-items:start; }
+.portfolio-score-dimensions { align-items:stretch; }
+.portfolio-score-dimensions > .stock-ai-kpi { display:flex; flex-direction:column; }
+.portfolio-score-dimensions > .stock-ai-kpi > p { flex:1; }
 .portfolio-score-dimensions .stock-ai-kpi p { font-size:13px; line-height:1.7; color:var(--muted); }
 .portfolio-score-dimensions details { border-top:1px solid var(--line); padding-top:10px; margin-top:12px; }
 .portfolio-score-dimensions summary, .portfolio-research-baseline > summary { cursor:pointer; font-weight:600; font-size:13px; }
