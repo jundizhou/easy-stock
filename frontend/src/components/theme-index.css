@@ -1,5 +1,5 @@
 .theme-index-panel { grid-column: 1 / -1; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 20px; min-width: 0; }
-.theme-index-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.theme-index-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .theme-index-heading > div > span { font-size: var(--fs-body); color: var(--muted); }
 .theme-index-heading h3 { margin: 4px 0; font-size: var(--fs-subtitle); }
 .theme-index-heading small { color: var(--muted); font-size: var(--fs-desc); }
@@ -13,4 +13,6 @@
 .theme-index-panel .kline-chart { min-width: 0; }
 .theme-index-panel .kline-chart-legend { flex-wrap: wrap; justify-content: center; padding: 0; font-size: var(--fs-caption); }
 .theme-index-panel .kline-chart-placeholder { min-height: 240px; margin: 12px 0; }
-@media (max-width: 768px) { .theme-index-panel { padding: 16px 12px; } .theme-index-heading { flex-direction: column; } .theme-index-controls { width: 100%; justify-content: space-between; } }
+/* 提示行贴底时留白会和上边距对不齐：收掉它的下外边距，由面板内边距统一收口。 */
+.theme-index-panel > .load-notice:last-child { margin-bottom: 0; }
+@media (max-width: 768px) { .theme-index-panel { padding: 16px 12px; } .theme-index-heading { flex-direction: column; align-items: stretch; } .theme-index-controls { width: 100%; justify-content: space-between; } }

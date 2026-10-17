@@ -42,6 +42,28 @@ describe('formatArticleParagraphs', () => {
 		expect(formatArticleParagraphs('订单同比增长1、2个百分点后企稳。')).toEqual(['订单同比增长1、2个百分点后企稳。']);
 	});
 
+	it('字间空格清理不会吃掉小标题的分段依据', () => {
+		const text = '投资者关系总监 蔡清源先生 一、公司经营情况说明 公司前三季度实现营业收入 740.44 亿元。';
+		expect(formatArticleParagraphs(text)).toEqual([
+			'投资者关系总监蔡清源先生',
+			'一、公司经营情况说明公司前三季度实现营业收入 740.44 亿元。',
+		]);
+	});
+
+	it('超过 400 字的长段按句读折行，避免公告名单成一整块', () => {
+		const text = '某某证券资管 张三；'.repeat(80);
+		const paragraphs = formatArticleParagraphs(text);
+		expect(paragraphs.length).toBeGreaterThan(1);
+		expect(paragraphs.every((paragraph) => paragraph.length <= 400)).toBe(true);
+		expect(paragraphs.join('').length).toBe(720);
+	});
+
+	it('未超过 400 字的段落保持原样', () => {
+		const text = '营收保持较快增长，毛利率同比提升。'.repeat(15);
+		expect(text.length).toBeLessThanOrEqual(400);
+		expect(formatArticleParagraphs(text)).toEqual([text]);
+	});
+
 	it('空正文返回空数组', () => {
 		expect(formatArticleParagraphs('   ')).toEqual([]);
 	});
