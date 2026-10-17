@@ -1,8 +1,6 @@
 import type { PortfolioInspectionReport } from './backend';
 
 export const portfolioScoringVersion = 'portfolio-ai-score-v5';
-export const portfolioOptimizationVersion = 'portfolio-optimization-v23';
-export const portfolioOptimizationPromptVersion = 'portfolio-optimization-prompts-v35';
 export const targetPortfolioOptimizationScore = 70;
 export const minimumPortfolioOptimizationScore = 65;
 

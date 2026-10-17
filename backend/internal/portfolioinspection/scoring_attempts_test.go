@@ -30,7 +30,7 @@ func (g *recoveringScoringGateway) Prompt(_ context.Context, prompt string) (age
 		data, _ := json.Marshal(r)
 		content = string(data)
 	}
-	return agent.PromptResult{Content: content}, nil
+	return agent.PromptResult{Content: fixtureRepairResponse(content, prompt)}, nil
 }
 
 func TestScoringFailurePersistsPrivateTraceAndResumesWithAllErrors(t *testing.T) {
@@ -88,6 +88,9 @@ func TestScoringFailurePersistsPrivateTraceAndResumesWithAllErrors(t *testing.T)
 		t.Fatal(err)
 	}
 	done := waitPortfolio(t, s, resumed.ID)
+	if done.UsageRootJobID != j.ID || done.ID == j.ID {
+		t.Fatal("resume detached lifetime usage attribution")
+	}
 	s.Close()
 	if done.Status != "succeeded" || researchCalls.Load() != 2 || len(done.ValidationIssues) != 0 || done.ScoringAttempts != 1 || g.calls.Load() != 3 {
 		t.Fatal("resume repeated valid research or lost successful repair", done.Error, researchCalls.Load(), g.calls.Load())

@@ -7,9 +7,10 @@ import (
 )
 
 type ScoringIssue struct {
-	Code    string `json:"code"`
-	Path    string `json:"path"`
-	Message string `json:"message"`
+	Code          string   `json:"code"`
+	Path          string   `json:"path"`
+	Message       string   `json:"message"`
+	AllowedValues []string `json:"allowed_values,omitempty"`
 }
 
 type scoringIssues []ScoringIssue
@@ -36,7 +37,10 @@ func (issues *scoringIssues) collect(code, path string, err error) {
 					p = strings.TrimSuffix(path+"."+p, ".")
 				}
 			}
-			issues.add(issue.Code, p, issue.Message)
+			issue.Path = p
+			if len(*issues) < 64 {
+				*issues = append(*issues, issue)
+			}
 		}
 		return
 	}

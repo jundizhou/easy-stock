@@ -18,6 +18,10 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 )
 
+// Keep the prompt and validation enum in sync. Priorities are model judgments,
+// not aliases for action kinds or permissions to execute trades.
+var scoringActionPriorities = []string{"观察", "保持", "优先处理"}
+
 var scoreRubric = []struct {
 	Key, Label string
 	Weight     int
@@ -177,7 +181,7 @@ func buildScoringPrompt(request Request, results []HoldingResult, metrics Metric
 	return buildScoringPromptAt(request, results, metrics, rules, time.Now().UTC())
 }
 
-func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, evaluatedAt time.Time) (string, error) {
+func buildLegacyScoringPromptAt(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, evaluatedAt time.Time) (string, error) {
 	catalog := buildScoringCatalog(request, results, metrics, evaluatedAt)
 	holdings := make([]map[string]any, 0, len(results))
 	for _, r := range results {
@@ -187,7 +191,7 @@ func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metr
 		report := r.Analysis.ResearchReport
 		research := boundedSynthesis(report.ResearchSynthesis)
 		sources := make([]map[string]any, 0)
-		used := scoringSourceIDs(r, research)
+		used := scoringSourceIDs(r, report.ResearchSynthesis)
 		earnings, hasEarnings := stockanalysis.LatestResearchEarningsDisclosure(report.Sources, report.CutoffAt)
 		for _, s := range report.Sources {
 			if used[s.ID] {
@@ -220,6 +224,7 @@ func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metr
 每个维度必须有reason、adjustments（risk_id/reason/points，正加负扣）、evidence_refs和limitations。引用只返回{"evidence_id":"从evidence_catalog选择的编号"}，目录reference用于识别事实含义和来源归属，不得自行返回或拼接report_id/source_id/fact。每个维度至少一条引用。不编造引用。高分结构评价与大仓位集中等事实有冲突时，解释集中风险被怎样控制，不得称充分分散。不得引用总仓位、现金或总资产仓位事实作为维度评分依据。
 风险等级独立于总分，risk_reason必须解释低/中/高/极高；置信度为高/中/低，confidence_reason交代证据质量、覆盖、时效、周期差异和缺口。数据不足降低置信度，不能虚构事实。score不表示胜率或收益预测。
 每只真实持仓都必须出现在holdings，股票使用规范代码；条件化行动优先级考虑仓位和研究风险。risk_contribution不用填写，由后端保留量化代理值供历史兼容。风险组的symbols只含真实持仓，仓位由程序计算。
+holdings[].action_priority只能为` + strings.Join(scoringActionPriorities, "/") + `，必须使用原值，不写“持有观察”“优先复核”等近义词。优先级与action_id分开选择；优先处理表示复核/处理优先级，不代表立即交易。
 动作只能选择action_catalog中属于对应标的的action_id。holdings仅返回action_id，不写action/confirmation/invalidation；处理顺序返回adjustment_action_ids，不写adjustment_order；scenarios返回action_ids，不写portfolio_action。后端统一生成动作文字和原研究执行前提。每个情景可选择不同动作，但同一情景/处理顺序中每个标的最多一个动作。目录没有合法交易计划时选择观察、持有观察或重新评估，不另造动作。conditional_*永远是待核验计划，不代表条件已触发或可立即成交。condition只描述市场观察，不替代动作自身条件，也不解除执行限制。不返回actions，其为后端生成字段。结论/风险/理由用于解释研究，不在自由文字中另下交易指令。
 输出类型约束：primary_risks、concentration_findings、next_checklist、data_limitations，以及每个维度的limitations，均为纯字符串数组（无内容用[]）。每条直接写完整文字，不返回title/reason等嵌套对象；相关引用放入维度或风险组的evidence_refs。limitations每维度最多10条。所有score和points使用整数，不用字符串；evidence_refs是对象数组。
 严格输出一个JSON对象，最多8条主要风险、8条结构发现、10条调整/检查/缺口、3个情景、6个风险组。示例结构（分数和理由必须按事实重写）：
@@ -357,6 +362,14 @@ func synthesisSources(s stockanalysis.ResearchSynthesis) map[string]bool {
 // report's actual sources; this never authorizes invented source IDs.
 func scoringSourceIDs(r HoldingResult, research stockanalysis.ResearchSynthesis) map[string]bool {
 	ids := synthesisSources(research)
+	for _, anchor := range r.Analysis.ResearchReport.Anchors {
+		for _, condition := range research.Conditions {
+			if condition.AnchorID == anchor.ID {
+				ids[anchor.SourceID] = true
+				break
+			}
+		}
+	}
 	if earnings, ok := stockanalysis.LatestResearchEarningsDisclosure(r.Analysis.ResearchReport.Sources, r.Analysis.ResearchReport.CutoffAt); ok {
 		ids[earnings.ID] = true
 	}
@@ -436,11 +449,18 @@ func validateScoringCandidate(report *AIReport, request Request, results []Holdi
 			issues.add("research", h.Symbol, fmt.Sprintf("%s缺少有效标的AI研究，不能发布组合评分", h.Symbol))
 		}
 	}
-	if report.ExecutiveSummary == "" || report.RiskReason == "" || report.ConfidenceReason == "" {
-		issues.add("shape", "executive_summary/risk_reason/confidence_reason", "缺少组合结论、风险或置信度理由")
+	for _, field := range []struct{ path, value string }{{"executive_summary", report.ExecutiveSummary}, {"risk_reason", report.RiskReason}, {"confidence_reason", report.ConfidenceReason}} {
+		if field.value == "" {
+			issues.add("shape", field.path, "缺少组合结论、风险或置信度理由")
+		}
 	}
-	if !oneOf(report.RiskLevel, "低", "中", "高", "极高") || !oneOf(report.ConfidenceLevel, "高", "中", "低") || !oneOf(report.StyleMatch, "匹配", "部分偏离", "明显偏离") {
-		issues.add("shape", "risk_level/confidence_level/style_match", "风险、置信度或风格字段无效")
+	for _, field := range []struct {
+		path, value string
+		allowed     []string
+	}{{"risk_level", report.RiskLevel, []string{"低", "中", "高", "极高"}}, {"confidence_level", report.ConfidenceLevel, []string{"高", "中", "低"}}, {"style_match", report.StyleMatch, []string{"匹配", "部分偏离", "明显偏离"}}} {
+		if !oneOf(field.value, field.allowed...) {
+			issues = append(issues, ScoringIssue{Code: "shape", Path: field.path, Message: "字段无效", AllowedValues: field.allowed})
+		}
 	}
 	facts := portfolioFactsAt(request, results, metrics, evaluatedAt)
 	for key, f := range supplemental {
@@ -453,7 +473,7 @@ func validateScoringCandidate(report *AIReport, request Request, results []Holdi
 		weights[r.Holding.Symbol] = r.Holding.Weight
 		if validHoldingResearch(r) {
 			ids := map[string]bool{}
-			used := scoringSourceIDs(r, boundedSynthesis(r.Analysis.ResearchReport.ResearchSynthesis))
+			used := scoringSourceIDs(r, r.Analysis.ResearchReport.ResearchSynthesis)
 			for _, s := range r.Analysis.ResearchReport.Sources {
 				if used[s.ID] || !requireScenarios {
 					ids[s.ID] = true
@@ -554,8 +574,16 @@ func validateScoringCandidate(report *AIReport, request Request, results []Holdi
 			issues.add("holding", fmt.Sprintf("holdings[%d].symbol", i), "逐股判断股票不存在或重复")
 		}
 		seen[h.Symbol] = true
-		if h.Conclusion == "" || h.Action == "" || h.Confirmation == "" || h.Invalidation == "" || !oneOf(h.ActionPriority, "观察", "保持", "优先处理") {
+		if h.Conclusion == "" || h.Action == "" || h.Confirmation == "" || h.Invalidation == "" {
 			issues.add("action", fmt.Sprintf("holdings[%d]", i), "逐股动作缺少必要条件")
+		}
+		if !oneOf(h.ActionPriority, scoringActionPriorities...) && len(issues) < 64 {
+			issues = append(issues, ScoringIssue{
+				Code:          "action",
+				Path:          fmt.Sprintf("holdings[%d].action_priority", i),
+				Message:       fmt.Sprintf("动作优先级 %q 无效，仅允许：%s；请依据组合判断选择合法值", h.ActionPriority, strings.Join(scoringActionPriorities, "、")),
+				AllowedValues: append([]string(nil), scoringActionPriorities...),
+			})
 		}
 		for _, r := range results {
 			if r.Holding.Symbol == h.Symbol && !structured {
@@ -717,6 +745,7 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 	}
 	basePrompt := prompt
 	inputDigest := scoringID("input-", basePrompt)
+	var repair *scoringRepair
 	if seed != nil && seed.PromptVersion == PromptVersion && seed.ContractVersion == scoringContractVersion {
 		_, issues := validateScoringOutput(seed.Response, request, results, metrics, evaluatedAt)
 		// Always ask for a fresh answer against current facts; never publish an
@@ -729,14 +758,35 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 			return AIReport{}, fmt.Errorf("组合AI评估失败: %w", err)
 		}
 		callCtx, cancelCall := context.WithTimeout(ctx, budget.StageTimeout)
+		node := "assess"
+		if attempt > 0 {
+			node = "repair"
+		}
+		callCtx = agent.WithCallTrace(callCtx, agent.CallTrace{NodeID: node, AttemptID: fmt.Sprint(attempt + 1), ProtocolVersion: PromptVersion})
 		response, err := agent.PromptUsingOptions(callCtx, s.gateway, prompt, options)
 		cancelCall()
 		if err != nil {
 			return AIReport{}, fmt.Errorf("组合AI评估失败: %w", err)
 		}
-		report, issues := validateScoringOutput(response.Content, request, results, metrics, evaluatedAt)
+		content := response.Content
+		var mergeErr error
+		if repair != nil {
+			content, mergeErr = repair.merge(content)
+			if mergeErr != nil {
+				// Preserve the last independently decoded draft for recovery; the
+				// invalid wire patch remains in RawResponse for private diagnosis.
+				previous, _ := json.Marshal(repair.base)
+				content = string(previous)
+			}
+		}
+		report, issues := validateScoringOutput(content, request, results, metrics, evaluatedAt)
+		if mergeErr != nil {
+			issues.add("contract", "repair", mergeErr.Error())
+			report = AIReport{}
+		}
+
 		if record != nil {
-			if err := record(scoringAttempt{Number: attempt + 1, PromptVersion: PromptVersion, ContractVersion: scoringContractVersion, EvaluatedAt: evaluatedAt, RecordedAt: time.Now().UTC(), InputDigest: inputDigest, Prompt: prompt, Response: response.Content, Issues: issues}); err != nil {
+			if err := record(scoringAttempt{Number: attempt + 1, PromptVersion: PromptVersion, ContractVersion: scoringContractVersion, EvaluatedAt: evaluatedAt, RecordedAt: time.Now().UTC(), InputDigest: inputDigest, Prompt: prompt, Response: content, RawResponse: response.Content, Issues: issues}); err != nil {
 				return AIReport{}, err
 			}
 		}
@@ -744,12 +794,15 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 			return report, nil
 		}
 		if s.logger != nil {
-			s.logger.Printf("level=warn event=portfolio_scoring_validation_failed feature=portfolio-inspection attempt=%d error=%q response=%q", attempt+1, runtimelog.Redact(issues.Error()), runtimelog.Redact(clip(response.Content, 16000)))
+			s.logger.Printf("level=warn event=portfolio_scoring_validation_failed feature=portfolio-inspection attempt=%d error=%q input_digest=%q", attempt+1, runtimelog.Redact(issues.Error()), inputDigest)
 		}
 		if attempt == aggregationModelCalls-1 || ctx.Err() != nil {
 			return AIReport{}, &scoringValidationError{cause: issues}
 		}
-		prompt = scoringRepairPrompt(basePrompt, response.Content, issues)
+		repair, prompt = makeScoringRepair(basePrompt, content, issues)
+		if prompt == "" {
+			return AIReport{}, &scoringValidationError{cause: issues}
+		}
 	}
 	return AIReport{}, errors.New("组合评分未完成")
 }

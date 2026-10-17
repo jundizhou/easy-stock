@@ -112,15 +112,13 @@ func TestScoringSourceMembershipMatchesPromptAndRejectsUnexposedSources(t *testi
 			}
 			_, payload, _ := strings.Cut(prompt, "[组合证据JSON]\n")
 			var input struct {
-				Holdings []struct {
-					Sources []struct{ ID string } `json:"sources"`
-				} `json:"holdings"`
+				Sources []struct{ ID string } `json:"sources"`
 			}
 			if err := json.Unmarshal([]byte(payload), &input); err != nil {
 				t.Fatal(err)
 			}
 			provided := map[string]bool{}
-			for _, s := range input.Holdings[0].Sources {
+			for _, s := range input.Sources {
 				provided[s.ID] = true
 			}
 			if !provided["latest"] || provided["old"] || provided["future"] || provided["title"] || provided["unrelated"] {

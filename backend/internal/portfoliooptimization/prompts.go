@@ -487,7 +487,8 @@ func (s *Service) model(ctx context.Context, job *Job, original string, validate
 		if err := s.save(job); err != nil {
 			return err
 		}
-		response, err := agent.PromptUsingOptions(ctx, s.gateway, prompt, agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, ReasoningEffortCap: optimizationReasoningCap(job.Stage), FirstResponseTimeout: 3 * time.Minute, IdleTimeout: 2 * time.Minute, MaxAttempts: 1, OnProgress: func(p agent.PromptProgress) {
+		callCtx := agent.WithCallTrace(ctx, agent.CallTrace{RootJobID: job.ID, NodeID: job.Stage, AttemptID: fmt.Sprintf("%d", len(job.ModelAttempts)+1), ProtocolVersion: ModelPromptVersion})
+		response, err := agent.PromptUsingOptions(callCtx, s.gateway, prompt, agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, ReasoningEffortCap: optimizationReasoningCap(job.Stage), FirstResponseTimeout: 3 * time.Minute, IdleTimeout: 2 * time.Minute, MaxAttempts: 1, OnProgress: func(p agent.PromptProgress) {
 			progressMu.Lock()
 			defer progressMu.Unlock()
 			progress = p

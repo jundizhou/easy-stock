@@ -88,6 +88,8 @@ func (s *Service) save(job *Job) error {
 		job.executionTick = now
 	}
 	updateCheckpointProgress(job)
+	status := resultStatus(*job)
+	job.ResultStatus = &status
 	job.UpdatedAt = now
 	data, err := json.Marshal(job)
 	if err != nil {
@@ -105,6 +107,8 @@ func (s *Service) Get(ctx context.Context, id string) (Job, error) {
 		return job, err
 	}
 	err = json.Unmarshal(raw, &job)
+	status := resultStatus(job)
+	job.ResultStatus = &status
 	return job, err
 }
 func (s *Service) List(ctx context.Context, source string) ([]Job, error) {
@@ -118,6 +122,8 @@ func (s *Service) List(ctx context.Context, source string) ([]Job, error) {
 		if err := json.Unmarshal(r, &j); err != nil {
 			return nil, err
 		}
+		status := resultStatus(j)
+		j.ResultStatus = &status
 		out = append(out, j)
 	}
 	return out, nil
@@ -426,6 +432,8 @@ func equalWeights(a, b []pi.Holding) bool {
 	return true
 }
 func (s *Service) run(ctx context.Context, job Job) {
+	ctx = agent.WithUsageModule(ctx, "portfolio-optimization")
+	ctx = agent.WithCallTrace(ctx, agent.CallTrace{RootJobID: job.ID, ExecutionID: fmt.Sprintf("%s-%d", job.ID, time.Now().UnixNano())})
 	err := s.execute(ctx, &job)
 	if err != nil {
 		job.Status = "incomplete"

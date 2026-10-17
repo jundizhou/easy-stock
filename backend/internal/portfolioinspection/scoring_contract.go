@@ -66,7 +66,7 @@ func buildScoringCatalog(request Request, results []HoldingResult, metrics Metri
 			continue
 		}
 		rr := r.Analysis.ResearchReport
-		used := scoringSourceIDs(r, boundedSynthesis(rr.ResearchSynthesis))
+		used := scoringSourceIDs(r, rr.ResearchSynthesis)
 		seen := map[string]bool{}
 		for _, source := range rr.Sources {
 			if !used[source.ID] || seen[source.ID] {
@@ -197,8 +197,9 @@ func compileScoringContract(report *AIReport, catalog scoringCatalog) scoringIss
 		issues.add("contract", "contract_version", "必须使用本次输入的组合输出协议 "+scoringContractVersion)
 	}
 	evidence := map[string]EvidenceRef{}
-	for _, e := range catalog.Evidence {
+	for i, e := range catalog.Evidence {
 		evidence[e.ID] = e.Ref
+		evidence[fmt.Sprintf("ev-%d", i+1)] = e.Ref
 	}
 	walkScoringRefs(report, func(path string, ref *EvidenceRef) {
 		canonical, ok := evidence[ref.EvidenceID]
@@ -209,8 +210,9 @@ func compileScoringContract(report *AIReport, catalog scoringCatalog) scoringIss
 		*ref = canonical
 	})
 	actions := map[string]ScoringAction{}
-	for _, a := range catalog.Actions {
+	for i, a := range catalog.Actions {
 		actions[a.ID] = a
+		actions[fmt.Sprintf("act-%d", i+1)] = a
 	}
 	if len(report.Actions) > 0 {
 		issues.add("action", "actions", "actions 为后端生成字段，只能选择 action_id")
@@ -223,9 +225,9 @@ func compileScoringContract(report *AIReport, catalog scoringCatalog) scoringIss
 			issues.add("action", path, "动作编号不存在或不属于该标的，请从 action_catalog 选择")
 			return ScoringAction{}, false
 		}
-		if !selected[id] {
+		if !selected[a.ID] {
 			report.Actions = append(report.Actions, a)
-			selected[id] = true
+			selected[a.ID] = true
 		}
 		return a, true
 	}
@@ -236,6 +238,7 @@ func compileScoringContract(report *AIReport, catalog scoringCatalog) scoringIss
 			issues.add("action", path, "动作、确认和失效文字由后端生成，只返回 action_id")
 		}
 		if a, ok := selectAction(h.ActionID, h.Symbol, path+".action_id"); ok {
+			h.ActionID = a.ID
 			h.Action = a.Text
 			h.Confirmation = a.Confirmation
 			h.Invalidation = a.Invalidation
@@ -249,6 +252,7 @@ func compileScoringContract(report *AIReport, catalog scoringCatalog) scoringIss
 		}
 		for i, id := range ids {
 			if a, ok := selectAction(id, "", fmt.Sprintf("%s[%d]", path, i)); ok {
+				ids[i] = a.ID
 				if seenSymbols[a.Symbol] {
 					issues.add("action", path, "同一动作出口不能为同一标的选择重复或冲突动作")
 				}

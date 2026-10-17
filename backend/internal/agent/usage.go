@@ -11,6 +11,9 @@ type TokenUsage struct {
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
 	Model            string `json:"model,omitempty"`
+	// Provider detail fields are subsets, never added to TotalTokens.
+	CachedInputTokens *int `json:"cached_input_tokens,omitempty"`
+	ReasoningTokens   *int `json:"reasoning_tokens,omitempty"`
 }
 
 type usageModuleContextKey struct{}
@@ -62,7 +65,24 @@ func usageFromValue(value any) TokenUsage {
 		return TokenUsage{}
 	}
 	model, _ := object["model"].(string)
-	return TokenUsage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total, Model: strings.TrimSpace(model)}
+	u := TokenUsage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total, Model: strings.TrimSpace(model)}
+	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		if detail, ok := object[key].(map[string]any); ok {
+			if v, exists := detail["cached_tokens"]; exists {
+				n := numberValue(v)
+				u.CachedInputTokens = &n
+			}
+		}
+	}
+	for _, key := range []string{"completion_tokens_details", "output_tokens_details"} {
+		if detail, ok := object[key].(map[string]any); ok {
+			if v, exists := detail["reasoning_tokens"]; exists {
+				n := numberValue(v)
+				u.ReasoningTokens = &n
+			}
+		}
+	}
+	return u
 }
 
 func firstNumberValue(object map[string]any, keys ...string) int {

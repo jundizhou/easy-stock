@@ -2124,6 +2124,7 @@ export type PortfolioOptimizationPlan = {
  assessment_order: string; error?: string;
 };
 export type PortfolioOptimizationJob = {
+ result_status?: {viewable:boolean;applicable:boolean;reasons:string[]};
  execution_duration_ms?:number;
  checkpoint_progress?: {saved_stocks:number;total_stocks:number;pending_parts:number;saved_review_blocks:number;reviewed_configurations:number};
  id: string; source_id: string; root_source_id: string; baseline: PortfolioHolding[];

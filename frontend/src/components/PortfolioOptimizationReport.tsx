@@ -5,7 +5,7 @@ import { requestJSON } from '../lib/backend';
 import { ResearchPanel } from './StockResearchReport';
 import { PortfolioEvidence } from './PortfolioAIReport';
 import './portfolio-optimization.css';
-import { optimizationCandidateSource, optimizationLiquiditySource, portfolioScoreImprovement, portfolioOptimizationVersion, portfolioOptimizationPromptVersion, qualifiedOptimizationScore, verifiedOptimizationScore } from '../lib/portfolio-optimization';
+import { optimizationCandidateSource, optimizationLiquiditySource, portfolioScoreImprovement, verifiedOptimizationScore } from '../lib/portfolio-optimization';
 
 type ApplyToPlanProps = { onApplyToPlan?: (holdings: PortfolioHolding[]) => void; originalPlanName?: string; applyingToPlan?: boolean };
 
@@ -44,8 +44,7 @@ export function PortfolioOptimizationWorkspace({ config, sourceId, canStart, sta
  const control=async(action:'resume'|'cancel') => {if(!config||!job)return;setBusy(true);setError('');try {const p=await requestJSON<{data?:PortfolioOptimizationJob}>(config,`/api/v1/portfolio-optimizations/${encodeURIComponent(job.id)}/${action}`,{method:'POST'});if(action==='resume' && p.data)remember(p.data);}catch(cause){setError(cause instanceof Error?cause.message:'操作失败');}finally{setBusy(false);}};
  const completed = job?.status==='succeeded' && !launching;
  const preferredPlan = completed && job.selected_plan!==undefined ? job.plans[job.selected_plan] : undefined;
- const approved = Boolean(preferredPlan?.checks?.valid && preferredPlan.assessment?.accepted && !preferredPlan.rejection_reasons?.length && !preferredPlan.risk_checks?.some((r) => r.hard && !r.passed) && qualifiedOptimizationScore(preferredPlan.target_comparison.conclusion,preferredPlan.original_comparison.conclusion) && ['conditional','accepted'].includes(preferredPlan.status) && job?.version===portfolioOptimizationVersion && job.model_prompt_version===portfolioOptimizationPromptVersion);
- const otherPlans = completed ? job.plans.filter((p) => !approved || p!==preferredPlan) : [];
+ const otherPlans = completed ? job.plans.filter((p) => p!==preferredPlan) : [];
  return <section ref={sectionRef} className="portfolio-optimization" aria-label="持仓优化">
   <div className="portfolio-optimization-process stock-ai-panel">
    <header className="portfolio-optimization-heading">
@@ -70,11 +69,7 @@ export function PortfolioOptimizationWorkspace({ config, sourceId, canStart, sta
    {error && <div className="portfolio-error" role="alert"><CircleAlert size={16}/><span>{error}</span>{(error.includes('过期') || error.includes('先刷新巡检')) && <button type="button" disabled={applyBusy} onClick={onRefreshSource}>刷新原巡检</button>}</div>}
    {!canStart && <div className="portfolio-report-warning"><CircleAlert size={16}/><span>请先补齐或刷新巡检，完成当前口径的四维评分后再优化。24小时内有效个股研究会复用。</span><button type="button" disabled={applyBusy} onClick={onRefreshSource}>刷新原巡检</button></div>}
   </div>
-  {completed && <div className="portfolio-optimization-primary">
-   {job.version && job.version!==portfolioOptimizationVersion && <div className="portfolio-report-warning"><CircleAlert size={16}/><span>这份记录使用历史评分或筛选规则。请重新优化以应用当前筛选、复评与采纳规则，24小时内有效个股研究继续复用。</span></div>}
-   {job.version===portfolioOptimizationVersion && job.model_prompt_version!==portfolioOptimizationPromptVersion && <div className="portfolio-report-warning"><CircleAlert size={16}/><span>这份记录使用旧版复评，请重新优化后再使用目标方案；24小时内有效个股研究继续复用。</span></div>}
-   {approved && preferredPlan ? <OptimizationPlan job={job} plan={preferredPlan} selected={approved} applyBusy={applyBusy} onApplyToPlan={onApplyToPlan} originalPlanName={originalPlanName} applyingToPlan={applyingToPlan} onApply={onApply} onOpenStockAnalysis={onOpenStockAnalysis}/> : <UnchangedResult job={job}/>}
-  </div>}
+  {completed && <OptimizationPrimaryResult job={job} applyBusy={applyBusy} onApplyToPlan={onApplyToPlan} originalPlanName={originalPlanName} applyingToPlan={applyingToPlan} onApply={onApply} onOpenStockAnalysis={onOpenStockAnalysis}/>}
   {!!job?.revision_history?.length && <details className="stock-ai-panel portfolio-optimization-fold"><summary>查看方案改进记录（{job.revision_history.length}）</summary><div>{job.revision_history.map((r,i) => <article key={i}><p>第{r.round}轮 · {r.name} · 独立复评 {r.conclusion.total_score ?? '未知'}分 / 优化目标70分</p><p>{r.error}</p>{r.conclusion.dimensions?.map((d) => <p key={d.key}>{d.label} {d.score}：{d.reason}</p>)}<p>{r.assessment?.residual_risks?.join('；')}</p></article>)}</div></details>}
   {!!job?.proposal?.range_adjustments?.length && <details className="stock-ai-panel portfolio-optimization-fold"><summary>查看配仓范围调整</summary><div>{job.proposal.range_adjustments.map((r) => <p key={r.symbol}>{job.results.find((s) => s.holding.symbol===r.symbol)?.holding.name || r.symbol} · AI范围建议 {r.min_weight}%–{r.max_weight}% · {r.reason}</p>)}{job.proposal.range_bound_corrections?.map((text,i) => <p key={i}>{text}</p>)}</div></details>}
   {otherPlans.length>0 && <details className="stock-ai-panel portfolio-optimization-fold"><summary>{otherPlans.every((p) => p.status==='invalid_review')?'查看复评异常方案':'查看其他方案'}（{otherPlans.length}）</summary><div>{otherPlans.map((p,i) => <OptimizationPlan key={i} job={job!} plan={p} selected={false} applyBusy={applyBusy} onApply={onApply} onOpenStockAnalysis={onOpenStockAnalysis}/>)}</div></details>}
@@ -86,6 +81,16 @@ export function PortfolioOptimizationWorkspace({ config, sourceId, canStart, sta
   {job?.screening_audit && <details className="stock-ai-panel portfolio-optimization-fold"><summary>代码筛查：检查 {job.screening_audit.checked} 只 · 合格 {job.screening_audit.qualified} 只 · 保留 {job.screening_audit.retained} 只</summary><div><p>耗时 {Math.ceil(job.screening_audit.duration_ms/1000)} 秒 · 上限 {job.screening_audit.check_limit} 只 / {Math.round(job.screening_audit.budget_ms/60000)} 分钟 · 行业分散可选 {job.screening_audit.diverse} 只 · 实际进入 AI {job.candidates.filter((c) => c.selected).length} 只</p><p>{({candidates_ready:'合格候选与行业数量已充足',industry_limit:'本轮可检查范围的行业分散已达上限，保留实际数量',check_limit:'已达到检查数量上限',time_limit:'已达到代码筛查时间上限，保留已通过的结果',pool_exhausted:'已检查完可用的初启行业候选'})[job.screening_audit.stop_reason] || job.screening_audit.stop_reason}</p>{job.screening_audit.records?.map((r) => <p key={r.symbol}>{r.name || r.symbol} · {r.industry} · {r.qualified?'合格':'淘汰'}：{r.reason}</p>)}</div></details>}
   {job && <details className="portfolio-research-baseline stock-ai-panel portfolio-optimization-fold"><summary>候选范围、交易资格与研究来源</summary><div><p>巡检综合评分 {verifiedOptimizationScore(job.source_report.conclusion) ?? '未知'}；不用于直接计算本次评分改善。最新有效交易日 {job.latest_trade_date || '待确认'} · 统一行情冻结 {dateLabel(job.snapshot_at)}</p><p>复用 {job.reused_stocks} 份 · 新研究 {job.new_stocks} 份 · 优化链初始报告 {job.root_source_id}</p>{job.candidates.map((c) => <p key={c.symbol}>{c.name || c.symbol}{c.industry_group && ` · 行业：${c.industry_group}`} · {optimizationCandidateSource(c.source)} · {c.reason}{c.portfolio_fit_reason && ` · 组合匹配：${c.portfolio_fit_reason}`}{c.screening && <small> · 代码筛选{c.screening.qualified?'通过':'未通过'}{c.screening.recent_return_percent!==undefined && ` · 近${c.screening.return_sessions}交易日 ${c.screening.recent_return_percent.toFixed(1)}%`}{c.screening.revenue_yoy!==undefined && ` · 营收同比 ${c.screening.revenue_yoy.toFixed(1)}%`}{c.screening.deducted_profit_share!==undefined && ` · 同期扣非/归母 ${(c.screening.deducted_profit_share*100).toFixed(1)}%`}{c.screening.valuation_reason && ` · ${c.screening.valuation_reason}`}{c.screening.valuation && ` · 估值日期 ${dateLabel(c.screening.valuation.trade_time)} · ${c.screening.valuation.meta.source}`}{c.screening.financial_method && ` · ${c.screening.financial_method}`}</small>}</p>)}{(job.eligibility || []).map((e) => <p key={e.symbol}>{job.results.find((r) => r.holding.symbol===e.symbol)?.holding.name || job.candidates.find((c) => c.symbol===e.symbol)?.name || e.symbol} · {e.locked?'锁定调整':e.can_increase?'允许条件核验':'不可新增/增持'} · {e.reason}{e.liquidity_trade_date && <small> · 成交日期 {e.liquidity_trade_date} · {optimizationLiquiditySource(e.liquidity_source)}</small>}</p>)}{job.limitations.map((l,i) => <p key={i}>{l}</p>)}{job.results.map((r) => <p key={r.holding.symbol}>{r.holding.name || r.holding.symbol} · 报告 {r.analysis_id} · 完成 {dateLabel(r.report_completed_at)} · 证据 {dateLabel(r.research_cutoff_at)}{r.analysis && <button type="button" onClick={() => onOpenStockAnalysis(r.analysis!)}><ExternalLink size={13}/>查看研究</button>}</p>)}</div></details>}
  </section>;
+}
+
+export function OptimizationPrimaryResult(props: Omit<Parameters<typeof OptimizationPlan>[0], 'plan'|'selected'>) {
+ const {job}=props;
+ const plan=job.selected_plan===undefined ? undefined : job.plans[job.selected_plan];
+ const applicable=Boolean(plan && job.result_status?.applicable);
+ return <div className="portfolio-optimization-primary">
+  {plan && !applicable && <div className="portfolio-report-warning"><CircleAlert size={16}/><span>{job.result_status?.reasons.join('；') || '方案可查看，当前后端尚未确认应用资格。'}</span></div>}
+  {plan ? <OptimizationPlan {...props} plan={plan} selected={applicable}/> : <UnchangedResult job={job}/>}
+ </div>;
 }
 
 function OptimizationTimeline({job,launching}: {job:PortfolioOptimizationJob|null;launching:boolean}) {
@@ -112,6 +117,7 @@ function UnchangedResult({job}: {job:PortfolioOptimizationJob}) {
 
 export function OptimizationPlan({job,plan,selected,onApply,onOpenStockAnalysis,applyBusy,onApplyToPlan,originalPlanName,applyingToPlan}: ApplyToPlanProps & {job:PortfolioOptimizationJob;plan:PortfolioOptimizationPlan;selected:boolean;onApply:Props['onApply'];onOpenStockAnalysis:Props['onOpenStockAnalysis'];applyBusy:boolean}) {
  if (!plan.checks?.valid) return <ResearchPanel label="方案校验" title={plan.name} icon={CircleAlert}><p>{plan.error || plan.checks?.errors.join('；') || '未形成可行配置'}</p></ResearchPanel>;
+ const savedSelection = job.selected_plan!==undefined && job.plans[job.selected_plan]===plan;
  const current = job.source_report.request!.holdings;
  const rows = [...current.map((h) => h.symbol),...plan.target.filter((h) => !current.some((o) => o.symbol===h.symbol)).map((h) => h.symbol),...plan.allocations.filter((a) => !current.some((h) => h.symbol===a.symbol) && !plan.target.some((h) => h.symbol===a.symbol)).map((a) => a.symbol)];
  const originalMap=new Map(current.map((h) => [h.symbol,h]));const targetMap=new Map(plan.target.map((h) => [h.symbol,h]));
@@ -124,12 +130,12 @@ export function OptimizationPlan({job,plan,selected,onApply,onOpenStockAnalysis,
  const waitsForEntry=(a:PortfolioOptimizationPlan['allocations'][number]) => a.investment?.action==='wait' || (a.allocation_conditions || []).some((c) => c.kind==='entry' && c.status==='pending');
  const evidenceReport: PortfolioInspectionReport={...plan.original_comparison,holdings:job.results,facts:{...plan.original_comparison.facts,...job.union_facts}};
  const apply=() => { const request:PortfolioResearchRequest={...job.source_report.request!,holdings:plan.target.map((h) => ({...h,cost_price:h.weight_percent>(originalMap.get(h.symbol)?.weight_percent || 0)?undefined:h.cost_price})),source_optimization_id:job.id,force_symbols:[]};onApply(request); };
- return <ResearchPanel label={selected?(plan.target_comparison.conclusion.total_score!<70?'合格备选 · 未达70分目标':'通过复评 · 条件性目标'):plan.status==='invalid_review'?'复评异常 · 暂无有效评分':plan.status==='pending_review'?'方案尚未完成复评':'未采纳方案'} title="持仓优化结果" icon={ShieldCheck} className="portfolio-optimization-result">
+ return <ResearchPanel label={selected?(plan.target_comparison.conclusion.total_score!<70?'合格备选 · 未达70分目标':'通过复评 · 条件性目标'):savedSelection?'已保存目标方案 · 仅供查看':plan.status==='invalid_review'?'复评异常 · 暂无有效评分':plan.status==='pending_review'?'方案尚未完成复评':'未采纳方案'} title="持仓优化结果" icon={ShieldCheck} className="portfolio-optimization-result">
   {plan.status==='invalid_review' && <p role="alert" className="portfolio-report-warning">复评发生数据引用错误，尚无有效评分，不能判断这份方案是否值得采纳。{plan.error}</p>}
   {plan.allocations.some((a) => waitsForEntry(a) && (targetMap.get(a.symbol)?.weight_percent || 0)>(originalMap.get(a.symbol)?.weight_percent || 0)) && <p className="portfolio-report-warning">等待买点：目标组合在相应价格或条件满足后再调整，当前实际持仓仍为左侧原组合。</p>}
   <div className="stock-ai-tags">{plan.allocations.filter((a) => (targetMap.get(a.symbol)?.weight_percent || 0)>(originalMap.get(a.symbol)?.weight_percent || 0)).map((a) => <span key={a.symbol}>{targetMap.get(a.symbol)?.name || a.symbol} · {a.investment?.role || '建议配置'} · {waitsForEntry(a)?'等待买点':selected?'优先配置':'方案拟配置'}</span>)}</div>
   {scoreImprovement !== undefined && <div className="portfolio-scoring-scope portfolio-score-provenance" role="note" aria-label="评分来源说明"><p>巡检综合评分：{inspectionScore === undefined ? '暂无有效评分' : `${inspectionScore} 分`}；原持仓优化复评分：{originalScore} 分。</p><p>优化阶段使用本次统一的研究资料与行情，对原持仓和建议持仓进行独立复评。两次 AI 评估可能存在差异，优化改善按本次复评分计算。</p></div>}
-  <HoldingComparison original={current} target={plan.target} targetLabel={selected?'建议持仓':plan.status==='invalid_review'?'候选目标（复评异常）':'候选目标（未采纳）'} originalScore={originalScore} targetScore={targetScore}/>
+  <HoldingComparison original={current} target={plan.target} targetLabel={selected?'建议持仓':savedSelection?'已保存目标（仅供查看）':plan.status==='invalid_review'?'候选目标（复评异常）':'候选目标（未采纳）'} originalScore={originalScore} targetScore={targetScore}/>
   {scoreImprovement !== undefined && <p className="portfolio-scoring-scope">本次优化复评 {originalScore} → {targetScore} 分 · 本次优化改善 {scoreImprovement > 0 ? '+' : ''}{scoreImprovement} 分（同次独立复评）。总仓位和现金比例不参与评分。</p>}
   <div className="stock-ai-tags"><span>总仓位 {total}% → {plan.checks.total_position_percent}%</span><span>现金 {100-total}% → {plan.checks.cash_percent}%</span><span>相对初始替换 {plan.checks.replacement_ratio_percent.toFixed(1)}% / 上限70%</span><span>保留重叠 {plan.checks.retained_percent}% 总资产</span></div>
   {plan.status!=='invalid_review' && <p className="portfolio-optimization-decision">{selected && plan.target_comparison.conclusion.total_score!<70 ? job.outcome_reason : (!selected && (plan.rejection_reasons?.join('；') || plan.error)) || plan.assessment?.reason || '方案仅为建议配置，尚未成交。'}</p>}

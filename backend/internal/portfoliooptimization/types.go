@@ -231,7 +231,8 @@ type RiskCheck struct {
 	Basis   string   `json:"basis"`
 }
 type Job struct {
-	ExecutionDurationMS int64 `json:"execution_duration_ms"`
+	ResultStatus        *ResultStatus `json:"result_status,omitempty"`
+	ExecutionDurationMS int64         `json:"execution_duration_ms"`
 	executionTick       time.Time
 	ModelLoops          map[string]*ModelLoopState `json:"model_loops,omitempty"`
 	ProposalCheckpoint  *ProposalCheckpoint        `json:"proposal_checkpoint,omitempty"`

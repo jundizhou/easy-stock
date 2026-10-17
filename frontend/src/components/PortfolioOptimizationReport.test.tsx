@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { PortfolioInspectionReport, PortfolioOptimizationJob, PortfolioOptimizationPlan } from '../lib/backend';
 import { portfolioScoringVersion } from '../lib/portfolio-optimization';
 import { PortfolioAIReportView } from './PortfolioAIReport';
-import { OptimizationPlan } from './PortfolioOptimizationReport';
+import { OptimizationPlan, OptimizationPrimaryResult } from './PortfolioOptimizationReport';
 
 function report(score: number): PortfolioInspectionReport {
  return {
@@ -78,5 +78,24 @@ describe('portfolio optimization score provenance', () => {
    expect(html).not.toContain('portfolio-comparison-score');
    expect(html).not.toContain('本次优化改善');
   }
+ });
+});
+
+
+describe('backend optimization applicability', () => {
+ it('shows a newer accepted prompt version without a frontend version list', () => {
+  const {job}=fixture();job.selected_plan=0;job.model_prompt_version='portfolio-optimization-prompts-v36';job.result_status={viewable:true,applicable:true,reasons:[]};
+  const html=renderToStaticMarkup(<OptimizationPrimaryResult job={job} applyBusy={false} onApply={() => {}} onApplyToPlan={() => {}} onOpenStockAnalysis={() => {}}/>);
+  expect(html).toContain('持仓优化结果');expect(html).toContain('应用到原方案');expect(html).not.toContain('本次未生成调整方案');
+ });
+ it('keeps old selected plans viewable while application is unavailable', () => {
+  const {job}=fixture();job.selected_plan=0;job.model_prompt_version='old';job.result_status={viewable:true,applicable:false,reasons:['历史方案仍可查看']};
+  const html=renderToStaticMarkup(<OptimizationPrimaryResult job={job} applyBusy={false} onApply={() => {}} onOpenStockAnalysis={() => {}}/>);
+  expect(html).toContain('持仓优化结果');expect(html).toContain('历史方案仍可查看');expect(html).not.toContain('应用到原方案');expect(html).not.toContain('本次未生成调整方案');
+ });
+ it('fails closed for application when an older backend omits status', () => {
+  const {job}=fixture();job.selected_plan=0;
+  const html=renderToStaticMarkup(<OptimizationPrimaryResult job={job} applyBusy={false} onApply={() => {}} onOpenStockAnalysis={() => {}}/>);
+  expect(html).toContain('持仓优化结果');expect(html).not.toContain('使用该方案发起新巡检');
  });
 });
