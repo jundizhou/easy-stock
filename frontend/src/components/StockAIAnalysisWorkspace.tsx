@@ -925,8 +925,8 @@ export function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: str
 				const detail = article.content && article.content !== article.title ? article.content : article.title;
 				return <article className={open ? 'expanded' : ''} key={key}>
 					<button type="button" className="stock-ai-news-head" aria-expanded={open} onClick={() => setExpandedNews(open ? '' : key)}>
-						<span className="stock-ai-news-head-main"><header><span>{formatNewsSource(article.meta?.source)}</span><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time></header><strong>{article.title}</strong>{!open && article.content && article.content !== article.title && <small>{article.content}</small>}</span>
-						<ChevronDown size={14} aria-hidden="true" />
+						<span className="stock-ai-news-head-main"><span className="stock-ai-news-title-row"><span className="stock-ai-news-source">{formatNewsSource(article.meta?.source)}</span><strong>{article.title}</strong></span>{!open && article.content && article.content !== article.title && <small>{article.content}</small>}</span>
+						<span className="stock-ai-news-meta"><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time><ChevronDown size={14} aria-hidden="true" /></span>
 					</button>
 					{open && <div className="stock-ai-news-detail">
 						<div className="stock-ai-news-body">{formatArticleParagraphs(detail).map((paragraph, index) => <p className={isIndentedParagraph(paragraph, index) ? 'indent' : undefined} key={index}>{paragraph}</p>)}</div>

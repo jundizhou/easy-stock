@@ -10,6 +10,9 @@
 .portfolio-assets-section p { font-size: var(--fs-body); color: var(--muted); line-height: var(--lh-reading); margin: 12px 0 0; }
 .portfolio-assets-section .portfolio-quote-warning, .portfolio-assets-section [role=alert] { color: var(--theme-amber, #ad6a13); }
 .portfolio-builder .portfolio-holding-valuation { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.portfolio-builder .portfolio-quantity-input, .portfolio-builder .portfolio-cost-input { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.portfolio-builder .portfolio-quantity-input span, .portfolio-builder .portfolio-cost-input span { flex: 0 0 auto; }
+.portfolio-builder .portfolio-quantity-input input, .portfolio-builder .portfolio-cost-input input { min-width: 0; flex: 1 1 auto; }
 .portfolio-holding-valuation strong { font-size: var(--fs-body); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .portfolio-holding-valuation small, .portfolio-builder .portfolio-quote-time { font-size: var(--fs-desc); color: var(--muted); }
 .portfolio-builder .portfolio-quote-time { grid-column: 1 / -1; overflow-wrap: anywhere; }

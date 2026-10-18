@@ -44,9 +44,10 @@
 	background: var(--theme-surface, #fff);
 	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, .06));
 }
-.portfolio-inspection-workspace .portfolio-history > header { justify-content: flex-start; min-height: 64px; padding: 12px 16px; }
+.portfolio-inspection-workspace .portfolio-history > header { justify-content: flex-start; min-height: 64px; padding: 16px; }
+.portfolio-inspection-workspace .portfolio-history > header > div { display: flex; align-items: center; gap: 8px; }
 .portfolio-inspection-workspace .portfolio-history > header strong { font-size: var(--fs-subtitle); }
-.portfolio-inspection-workspace .portfolio-history > header small { font-size: var(--fs-desc); }
+.portfolio-inspection-workspace .portfolio-history > header small { padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; font-size: var(--fs-desc); }
 .portfolio-history-scope { display: block; width: calc(100% - 24px); margin: 16px 12px 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface, #fff); color: var(--text); }
 .portfolio-record-binding { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--muted); font-size: var(--fs-body); overflow-wrap: anywhere; }
 .portfolio-record-binding button, .portfolio-notice button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface, #fff); color: var(--theme-blue, #2476d2); cursor: pointer; }
@@ -89,11 +90,22 @@
 .portfolio-inspection-workspace .portfolio-holding-list article,
 .portfolio-inspection-workspace .portfolio-stock-search > label,
 .portfolio-inspection-workspace .portfolio-stock-search > button { border-radius: 8px; }
+.portfolio-inspection-workspace .portfolio-builder,
+.portfolio-inspection-workspace .portfolio-holdings-section,
+.portfolio-inspection-workspace .portfolio-holding-list,
+.portfolio-inspection-workspace .portfolio-holding-list article,
+.portfolio-inspection-workspace .portfolio-holding-valuation { min-width: 0; max-width: 100%; }
+.portfolio-inspection-workspace .portfolio-holding-list article { box-sizing: border-box; }
+.portfolio-inspection-workspace .portfolio-holding-list article > * { min-width: 0; }
+.portfolio-inspection-workspace .portfolio-holding-valuation > div { min-width: 0; overflow-wrap: anywhere; }
+.portfolio-inspection-workspace .portfolio-quote-time { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .portfolio-inspection-workspace .portfolio-builder-footer { border-radius: 0 0 12px 12px; }
 .portfolio-inspection-workspace .portfolio-builder-footer > button { border-radius: 8px; }
 .portfolio-inspection-workspace .portfolio-holding-identity strong { font-size: var(--fs-body); }
 .portfolio-inspection-workspace .portfolio-holding-identity span,
+.portfolio-inspection-workspace .portfolio-quantity-input span,
 .portfolio-inspection-workspace .portfolio-cost-input span { font-size: var(--fs-body); }
+.portfolio-inspection-workspace .portfolio-quantity-input input,
 .portfolio-inspection-workspace .portfolio-cost-input input { height: 32px; font-size: var(--fs-body); }
 .portfolio-inspection-workspace .portfolio-weight-control label { height: 32px; }
 .portfolio-inspection-workspace .portfolio-weight-control label input { font-size: var(--fs-body); }
@@ -147,7 +159,8 @@
 	.portfolio-inspection-workspace .portfolio-profile-options { grid-template-columns: 1fr; }
 	.portfolio-inspection-workspace .portfolio-holding-list article { grid-template-columns: minmax(0, 1fr) 32px; }
 	.portfolio-inspection-workspace .portfolio-weight-control,
-	.portfolio-inspection-workspace .portfolio-cost-input { grid-column: 1 / -1; }
+	.portfolio-inspection-workspace .portfolio-cost-input,
+	.portfolio-inspection-workspace .portfolio-quantity-input { grid-column: 1 / -1; min-width: 0; }
 	.portfolio-inspection-workspace .portfolio-remove { grid-column: 2; grid-row: 1; }
 	.portfolio-inspection-workspace .portfolio-builder-footer { align-items: stretch; flex-direction: column; }
 	.portfolio-inspection-workspace .portfolio-holdings-section > header { flex-wrap: wrap; }

@@ -16,7 +16,6 @@ import {
 	LayoutDashboard,
 	LoaderCircle,
 	Moon,
-	Newspaper,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Radio,
@@ -35,7 +34,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
 	KLine,
-	NewsItem,
 	Quote,
 	SectorMap,
 	SourceHealth,
@@ -125,12 +123,9 @@ export function App() {
 	const [selectedSymbol, setSelectedSymbol] = useState('');
 	const [liveQuotes, setLiveQuotes] = useState<QuoteLookup>({});
 	const [sources, setSources] = useState<SourceHealth[]>([]);
-	const [news, setNews] = useState<NewsItem[]>([]);
 	const [streamStatus, setStreamStatus] = useState('实时流待命');
 	const [configError, setConfigError] = useState('');
 	const [themeRefreshKey, setThemeRefreshKey] = useState(0);
-	const [newsError, setNewsError] = useState('');
-	const [newsRetryKey, setNewsRetryKey] = useState(0);
 	const [sourcesRetryKey, setSourcesRetryKey] = useState(0);
 	const [sourcesError, setSourcesError] = useState('');
 	const [stockQuery, setStockQuery] = useState('');
@@ -250,16 +245,6 @@ export function App() {
 			.catch(() => { if (!abort.signal.aborted) setSourcesError('数据源状态暂不可用'); });
 		return () => abort.abort();
 	}, [config, workspaceMode, themeRefreshKey, sourcesRetryKey]);
-
-	useEffect(() => {
-		if (!config || workspaceMode !== 'themes') return;
-		const abort = new AbortController();
-		setNewsError('');
-		void requestJSON<{ data: NewsItem[] }>(config, '/api/v1/market/news?source=cls&limit=12', { signal: abort.signal })
-			.then(payload => { if (!abort.signal.aborted) setNews(payload.data); })
-			.catch(() => { if (!abort.signal.aborted) setNewsError('快讯暂不可用'); });
-		return () => abort.abort();
-	}, [config, workspaceMode, themeRefreshKey, newsRetryKey]);
 
 	useEffect(() => {
 		if (!activeOverview && rankedThemes.length) setActiveTheme(rankedThemes[0].theme);
@@ -703,18 +688,6 @@ export function App() {
 						) : selectedStock ? <MetricLoadingPanel failed={selectedHistoryFailed} /> : <p>从个股梯队中选择股票查看。</p>}
 					</section>
 
-					<section className="detail-panel news-panel">
-						<div className="panel-label"><Newspaper size={16} aria-hidden="true" />市场快讯</div>
-						<div className="news-list">
-							{newsError && <p className="load-notice">{newsError} <button type="button" onClick={() => setNewsRetryKey(key => key + 1)}>重试快讯</button></p>}
-							{!news.length && !newsError && <p className="load-notice">快讯加载中…</p>}
-							{news.slice(0, 7).map((item) => (
-								<a href={item.url} target="_blank" rel="noreferrer" key={`${item.id}-${item.published_at}`}>
-									<time>{formatTime(item.published_at)}</time><span>{item.title}</span><ChevronRight size={14} aria-hidden="true" />
-								</a>
-							))}
-						</div>
-					</section>
 				</aside>
 			</div>
 			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} progress={limitUp.ladder.progress} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary onOpenNotificationSettings={() => { setSettingsInitialSection('notifications'); setSettingsOpen(true); }} config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} onModeChange={setStockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace onOpenNotificationSettings={() => { setSettingsInitialSection('notifications'); setSettingsOpen(true); }} config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} />}

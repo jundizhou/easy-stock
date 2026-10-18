@@ -1,7 +1,7 @@
 import { BrainCircuit, CheckCircle2, ChevronRight, CircleAlert, Clock3, LoaderCircle, RefreshCw, ShieldAlert, Sparkles, Target, WalletCards, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BackendConfig, PortfolioExpectationJob, PortfolioExpectationReport, StockDirectoryData, StockDirectoryEntry, requestJSON } from '../lib/backend';
-import { PortfolioDraft, portfolioDraftToHoldings, readPortfolioDraft, readPortfolioPlans, writePortfolioDraft } from '../lib/portfolio-draft';
+import { BackendConfig, PortfolioExpectationJob, PortfolioExpectationReport, PortfolioHolding, StockDirectoryData, StockDirectoryEntry, requestJSON } from '../lib/backend';
+import { PortfolioDraft, portfolioDraftToHoldingsWithAssets, readPortfolioDraft, readPortfolioPlans, writePortfolioDraft } from '../lib/portfolio-draft';
 import { PortfolioSetupForm } from './PortfolioSetupForm';
 
 type Props = {
@@ -26,7 +26,7 @@ export function PortfolioTomorrowExpectation({ config, summaryDate }: Props) {
 			.then((payload) => {
 				if (!active || !payload.data) return;
 				const draft = readPortfolioDraft();
-				const current = portfolioDraftToHoldings(draft.holdings);
+				const current = portfolioDraftToHoldingsWithAssets(draft.holdings, draft.totalAssets);
 				if (draft.profile === payload.data.request.trader_profile && sameHoldings(current, payload.data.request.holdings)) setJob(payload.data);
 			})
 			.catch(() => undefined);
@@ -52,7 +52,7 @@ export function PortfolioTomorrowExpectation({ config, summaryDate }: Props) {
 		return () => { active = false; window.clearInterval(timer); };
 	}, [config, job?.id, job?.status]);
 
-	const startExpectation = useCallback(async (draft: PortfolioDraft, force = false) => {
+	const startExpectation = useCallback(async (draft: PortfolioDraft, force = false, calculatedHoldings?: PortfolioHolding[]) => {
 		if (!config || !draft.holdings.length) return;
 		setStarting(true);
 		setError('');
@@ -60,7 +60,7 @@ export function PortfolioTomorrowExpectation({ config, summaryDate }: Props) {
 			const payload = await requestJSON<{ data: PortfolioExpectationJob }>(config, '/api/v1/reviews/portfolio-expectations', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ summary_date: summaryDate, trader_profile: draft.profile, holdings: portfolioDraftToHoldings(draft.holdings), force }),
+				body: JSON.stringify({ summary_date: summaryDate, trader_profile: draft.profile, holdings: calculatedHoldings || portfolioDraftToHoldingsWithAssets(draft.holdings, draft.totalAssets), force }),
 			});
 			setJob(payload.data);
 			setSetupDraft(null);
@@ -97,12 +97,12 @@ export function PortfolioTomorrowExpectation({ config, summaryDate }: Props) {
 	return <>
 		<button type="button" className="portfolio-expectation-trigger" onClick={handlePrimaryAction} disabled={running || starting} title="结合今日复盘和当前持仓生成明日情景预期">{running || starting ? <LoaderCircle className="spin" size={14} /> : job?.report_available ? <CheckCircle2 size={14} /> : <WalletCards size={14} />}{label}</button>
 		{error && <div className="portfolio-expectation-error" role="alert"><CircleAlert size={14} /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="关闭错误"><X size={13} /></button></div>}
-		{setupDraft && <PortfolioExpectationSetupDialog config={config} draft={setupDraft} directory={directory} busy={starting} onChange={setSetupDraft} onClose={() => setSetupDraft(null)} onSubmit={() => { try { writePortfolioDraft(setupDraft, setupPlanId); void startExpectation(setupDraft); } catch (cause) { setError(`持仓方案保存失败：${cause instanceof Error ? cause.message : '请重试'}`); } }} />}
+		{setupDraft && <PortfolioExpectationSetupDialog config={config} draft={setupDraft} directory={directory} busy={starting} onChange={setSetupDraft} onClose={() => setSetupDraft(null)} onSubmit={(holdings) => { try { writePortfolioDraft(setupDraft, setupPlanId); void startExpectation(setupDraft, false, holdings); } catch (cause) { setError(`持仓方案保存失败：${cause instanceof Error ? cause.message : '请重试'}`); } }} />}
 		{reportOpen && job?.report && <PortfolioExpectationReportDialog report={job.report} partial={job.status === 'partial'} onClose={() => setReportOpen(false)} onRegenerate={() => { setReportOpen(false); void startExpectation(readPortfolioDraft(), true); }} />}
 	</>;
 }
 
-function PortfolioExpectationSetupDialog({ config, draft, directory, busy, onChange, onClose, onSubmit }: { config: BackendConfig | null; draft: PortfolioDraft; directory: StockDirectoryEntry[]; busy: boolean; onChange: (draft: PortfolioDraft) => void; onClose: () => void; onSubmit: () => void }) {
+function PortfolioExpectationSetupDialog({ config, draft, directory, busy, onChange, onClose, onSubmit }: { config: BackendConfig | null; draft: PortfolioDraft; directory: StockDirectoryEntry[]; busy: boolean; onChange: (draft: PortfolioDraft) => void; onClose: () => void; onSubmit: (holdings?: PortfolioHolding[]) => void }) {
 	return <div className="portfolio-expectation-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
 		<section className="portfolio-expectation-setup" role="dialog" aria-modal="true" aria-labelledby="portfolio-expectation-setup-title">
 			<header><div><span><WalletCards size={16} />PORTFOLIO SETUP</span><h2 id="portfolio-expectation-setup-title">配置持仓并生成明日预期</h2><p>使用“持仓 AI 巡检”中选中的方案，保存后同步更新该方案。</p></div><button type="button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header>

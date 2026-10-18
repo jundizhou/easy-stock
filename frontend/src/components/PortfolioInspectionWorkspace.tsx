@@ -33,7 +33,7 @@ import {
 	StockDirectoryEntry,
 	requestJSON,
 } from '../lib/backend';
-import { activePortfolioPlan, addPortfolioPlan, portfolioDraftChangedEvent, portfolioDraftStorageKey, portfolioDraftToHoldings, portfolioPlansStorageKey, portfolioProfiles, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioPlans } from '../lib/portfolio-draft';
+import { activePortfolioPlan, addPortfolioPlan, portfolioDraftChangedEvent, portfolioDraftStorageKey, portfolioDraftToHoldingsWithAssets, portfolioPlansStorageKey, portfolioProfiles, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioPlans } from '../lib/portfolio-draft';
 import { applyPortfolioOptimization } from '../lib/apply-portfolio-optimization';
 import { PortfolioSchedulePanel } from './PortfolioSchedulePanel';
 import { PortfolioPlanPicker } from './PortfolioPlanPicker';
@@ -214,7 +214,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 		}
 	};
 
- const startInspection = async (forceSymbols: string[] = [], existing?: PortfolioResearchRequest) => {
+ const startInspection = async (forceSymbols: string[] = [], existing?: PortfolioResearchRequest, calculatedHoldings?: PortfolioHolding[]) => {
 		if (!config || starting || applyingRef.current || deletingRef.current || (!existing && (draft.holdings.length === 0 || totalWeight > 100))) return;
 		if (existing && !existing.portfolio_plan_id) { setError('请先将这份历史记录绑定到持仓方案'); return; }
 		setStarting(true);
@@ -225,7 +225,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-     ...(existing || { portfolio_plan_id: activePlan.id, portfolio_plan_name: activePlan.name, trader_profile: draft.profile, holdings: portfolioDraftToHoldings(draft.holdings), horizon: draft.horizon || 'swing', research_level: draft.researchLevel || 'standard' }),
+     ...(existing || { portfolio_plan_id: activePlan.id, portfolio_plan_name: activePlan.name, trader_profile: draft.profile, holdings: calculatedHoldings || portfolioDraftToHoldingsWithAssets(draft.holdings, draft.totalAssets), horizon: draft.horizon || 'swing', research_level: draft.researchLevel || 'standard' }),
      force_symbols: forceSymbols,
     }),
 			});
@@ -313,7 +313,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 
 			{(!job?.report || job.status === 'running') && <>
 				<header className="stock-ai-search-hero portfolio-setup-hero"><div><span>持仓 AI 巡检</span><h2>配置持仓，检查组合风险</h2><p>选择交易风格，填写持仓占比与成本后开始巡检。</p></div><WalletCards size={32} aria-hidden="true" /></header>
-				<PortfolioSetupForm config={config} key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={mutationBusy || Boolean(running)} busy={mutationBusy || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={() => void startInspection()} />
+				<PortfolioSetupForm config={config} key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={mutationBusy || Boolean(running)} busy={mutationBusy || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={(holdings) => void startInspection([], undefined, holdings)} />
 			</>}
 
 			{job?.status === 'running' && <><InspectionProgress job={job} /><button type="button" className="portfolio-task-action" disabled={starting} onClick={() => void cancelInspection()}>停止持仓分析</button></>}

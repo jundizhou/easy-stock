@@ -46,7 +46,7 @@ export function ThemeIndexPanel({ config, theme, refreshKey }: { config: Backend
 			<div><h3>{theme?.name || '选择题材'}</h3><small>{series ? series.method === 'provider-index' ? `${series.index_name} · ${series.index_code}` : '等权参考指数' : '查看题材整体走势'}</small></div>
 			<div className="theme-index-controls"><div role="group" aria-label="题材指数K线周期">{(['day', 'week', 'month'] as const).map(value => <button type="button" key={value} aria-pressed={period === value} className={period === value ? 'active' : ''} onClick={() => setPeriod(value)}>{{ day: '日K', week: '周K', month: '月K' }[value]}</button>)}</div>{latest && <strong className={latest.change_percent && latest.change_percent < 0 ? 'down' : 'up'}>{latest.close.toFixed(2)}<small>{latest.change_percent == null ? '--' : `${latest.change_percent >= 0 ? '+' : ''}${latest.change_percent.toFixed(2)}%`}</small></strong>}</div>
 		</div>
-		<KLineChart key={`${key}:${period}`} lines={lines} state={series ? 'ready' : state} periodLabel={label} compact timeZone="Asia/Shanghai" />
+		<div className="theme-index-chart"><KLineChart key={`${key}:${period}`} lines={lines} state={series ? 'ready' : state} periodLabel={label} compact timeZone="Asia/Shanghai" /></div>
 		{error && <p className="load-notice">{error} <button type="button" onClick={() => setRetry(value => value + 1)}>重试题材指数</button></p>}
 	</section>;
 }

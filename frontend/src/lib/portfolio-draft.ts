@@ -1,10 +1,11 @@
-import { PortfolioHolding, PortfolioTraderProfile } from './backend';
+import { PortfolioHolding, PortfolioTraderProfile, Quote } from './backend';
 
 export type PortfolioDraftHolding = {
  instrumentType?: 'stock' | 'etf';
 	symbol: string;
 	name: string;
 	weight: number;
+	quantity?: string;
 	costPrice: string;
 	entryPrice?: number;
 	entryPriceTime?: string;
@@ -117,7 +118,7 @@ function normalizeDraft(value: unknown): PortfolioDraft {
 		profile: portfolioProfiles.some((item) => item.id === draft.profile) ? draft.profile! : 'balanced',
 		horizon: draft.horizon === 'short' || draft.horizon === 'medium' ? draft.horizon : 'swing',
 		researchLevel: draft.researchLevel === 'deep' ? 'deep' : 'standard',
-		holdings: Array.isArray(draft.holdings) ? draft.holdings.filter(isDraftHolding).slice(0, maxPortfolioHoldings).map((holding) => ({ ...holding, weight: Number(holding.weight), costPrice: typeof holding.costPrice === 'string' ? holding.costPrice : '' })) : [],
+		holdings: Array.isArray(draft.holdings) ? draft.holdings.filter(isDraftHolding).slice(0, maxPortfolioHoldings).map((holding) => ({ ...holding, weight: Number(holding.weight), ...(typeof holding.quantity === 'string' || typeof holding.quantity === 'number' ? { quantity: String(holding.quantity) } : {}), costPrice: typeof holding.costPrice === 'string' ? holding.costPrice : '' })) : [],
 	};
 }
 
@@ -135,10 +136,29 @@ export function portfolioDraftToHoldings(holdings: PortfolioDraftHolding[]): Por
 	}));
 }
 
+export function portfolioDraftToHoldingsWithAssets(holdings: PortfolioDraftHolding[], totalAssets?: number, quotes?: Record<string, Quote>): PortfolioHolding[] {
+	const assets = typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null;
+	return holdings.map((item) => {
+		const quantity = portfolioHoldingQuantity(item);
+		const cost = portfolioHoldingCost(item);
+		const price = quotes?.[item.symbol]?.price;
+		const validPrice = typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
+		const weight = quantity !== null && assets !== null && validPrice !== null
+			? quantity * validPrice / assets * 100
+			: quantity !== null && cost !== null && assets !== null ? quantity * cost / assets * 100 : item.weight;
+		return { ...portfolioDraftToHoldings([item])[0], weight_percent: weight };
+	});
+}
+
 function isDraftHolding(value: unknown): value is PortfolioDraftHolding {
 	if (!value || typeof value !== 'object') return false;
 	const item = value as Partial<PortfolioDraftHolding>;
 	return typeof item.symbol === 'string' && item.symbol.length > 0
 		&& typeof item.name === 'string'
 		&& Number.isFinite(Number(item.weight)) && Number(item.weight) > 0;
+}
+
+export function portfolioHoldingQuantity(holding: PortfolioDraftHolding): number | null {
+	const value = holding.quantity?.trim() ? Number(holding.quantity) : null;
+	return value !== null && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
 }

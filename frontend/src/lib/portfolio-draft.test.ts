@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { activePortfolioPlan, addPortfolioPlan, portfolioDraftStorageKey, portfolioDraftToHoldings, portfolioPlansStorageKey, readPortfolioDraft, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioDraft } from './portfolio-draft';
+import { activePortfolioPlan, addPortfolioPlan, portfolioDraftStorageKey, portfolioDraftToHoldings, portfolioDraftToHoldingsWithAssets, portfolioPlansStorageKey, readPortfolioDraft, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioDraft } from './portfolio-draft';
 
 describe('portfolio draft mapping', () => {
 	it('keeps the inspection and tomorrow expectation request shape identical', () => {
@@ -10,6 +10,10 @@ describe('portfolio draft mapping', () => {
 			{ symbol: '600519.SH', name: '贵州茅台', weight_percent: 35, cost_price: 1420.5 },
 			{ symbol: '000858.SZ', name: '五粮液', weight_percent: 20 },
 		]);
+	});
+	it('uses the latest quote for automatic weight when quantity is provided', () => {
+		const result = portfolioDraftToHoldingsWithAssets([{ symbol: '688002.SH', name: '睿创微纳', weight: 1, quantity: '10000', costPrice: '40' }], 500000, { '688002.SH': { symbol: '688002.SH', price: 45.02 } as never });
+		expect(result[0].weight_percent).toBeCloseTo(90.04);
 	});
 });
 
