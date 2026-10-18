@@ -138,16 +138,46 @@ export function portfolioDraftToHoldings(holdings: PortfolioDraftHolding[]): Por
 
 export function portfolioDraftToHoldingsWithAssets(holdings: PortfolioDraftHolding[], totalAssets?: number, quotes?: Record<string, Quote>): PortfolioHolding[] {
 	const assets = typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null;
-	return holdings.map((item) => {
+	const exact = holdings.map((item) => {
 		const quantity = portfolioHoldingQuantity(item);
 		const cost = portfolioHoldingCost(item);
 		const price = quotes?.[item.symbol]?.price;
 		const validPrice = typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
-		const weight = quantity !== null && assets !== null && validPrice !== null
+		return quantity !== null && assets !== null && validPrice !== null
 			? quantity * validPrice / assets * 100
 			: quantity !== null && cost !== null && assets !== null ? quantity * cost / assets * 100 : item.weight;
-		return { ...portfolioDraftToHoldings([item])[0], weight_percent: weight };
 	});
+	const weights = apportionPortfolioWeights(exact);
+	return holdings.map((item, index) => ({ ...portfolioDraftToHoldings([item])[0], weight_percent: weights[index] }));
+}
+
+// A position sized by share count is fractional, but the inspection API stores
+// integer percentages between 1% and 100% that add up to at most 100%. Rounding
+// every position on its own overshoots that ceiling and can turn a tiny position
+// into the 0% the API rejects, so whole points are apportioned with the largest
+// remainder method instead.
+export function apportionPortfolioWeights(exact: number[]): number[] {
+	const sizes = exact.map((value) => Number.isFinite(value) && value > 0 ? value : 0);
+	const filled = sizes.filter((value) => value > 0).length;
+	if (filled === 0) return sizes.map(() => 0);
+	// Every non-empty position is worth at least the 1% the API accepts.
+	const weights = sizes.map((value) => value > 0 ? Math.max(1, Math.floor(value)) : 0);
+	const total = sizes.reduce((sum, value) => sum + value, 0);
+	let remaining = Math.min(100, Math.max(filled, Math.round(total))) - weights.reduce((sum, value) => sum + value, 0);
+	const ranked = sizes
+		.map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+		.filter((entry) => sizes[entry.index] > 0)
+		.sort((left, right) => right.remainder - left.remainder || left.index - right.index);
+	for (const entry of ranked) { if (remaining <= 0) break; weights[entry.index] += 1; remaining -= 1; }
+	// The 1% floor can overshoot the 100% ceiling; take the excess from the
+	// largest positions, which lose the least in relative terms.
+	for (const entry of [...ranked].sort((left, right) => weights[right.index] - weights[left.index] || left.index - right.index)) {
+		if (remaining >= 0) break;
+		const take = Math.min(-remaining, weights[entry.index] - 1);
+		weights[entry.index] -= take;
+		remaining += take;
+	}
+	return weights;
 }
 
 function isDraftHolding(value: unknown): value is PortfolioDraftHolding {
