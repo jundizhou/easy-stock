@@ -607,6 +607,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/index-series", s.marketIndexSeriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/industries", s.marketIndustriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/flows", s.marketFlowsHandler)
+	s.mux.HandleFunc("GET /api/v1/market/sector-flows", s.marketSectorFlowsHandler)
+	s.mux.HandleFunc("GET /api/v1/market/sector-flow-intraday", s.marketSectorFlowIntradayHandler)
 	s.mux.HandleFunc("GET /api/v1/market/margin-balance", s.marketMarginBalanceHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard", s.marketBillboardHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard/detail", s.marketBillboardDetailHandler)

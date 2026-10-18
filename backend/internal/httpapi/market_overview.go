@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -139,6 +140,92 @@ func (s *Server) marketFlowsHandler(w http.ResponseWriter, r *http.Request) {
 	marketOverviewList(s, w, r, fmt.Sprintf("flows:%s:%s:%d", dimension, sortKey, limit), func(ctx context.Context) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
 		return s.marketOverview.MarketFundFlows(ctx, dimension, sortKey, limit)
 	})
+}
+
+// 板块资金流向工作台：概念/行业板块资金流榜单 + 选中板块的当日分时累计净流入。
+func (s *Server) marketSectorFlowsHandler(w http.ResponseWriter, r *http.Request) {
+	dimension := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("dimension")))
+	if dimension == "" {
+		dimension = "concept"
+	}
+	if dimension != "concept" && dimension != "theme" && dimension != "industry" {
+		writeError(w, http.StatusBadRequest, "dimension must be concept or industry")
+		return
+	}
+	limit, err := marketLimitQuery(r, 200, 600)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	provider, ok := s.marketOverview.(SectorFlowProvider)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "sector flow provider is unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	data, meta, err := loadMarketOverview(ctx, s.marketSnapshots, fmt.Sprintf("sector-flows:%s:%d", dimension, limit), func(ctx context.Context) ([]foundation.SectorFlowRank, foundation.SourceMeta, error) {
+		return provider.SectorFlowRanking(ctx, dimension, limit)
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
+}
+
+func (s *Server) marketSectorFlowIntradayHandler(w http.ResponseWriter, r *http.Request) {
+	codes, err := normalizeSectorFlowQueryCodes(r.URL.Query().Get("codes"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(codes) == 0 {
+		writeError(w, http.StatusBadRequest, "codes is required, e.g. codes=BK0917,BK0490")
+		return
+	}
+	if len(codes) > 12 {
+		writeError(w, http.StatusBadRequest, "codes must contain at most 12 boards")
+		return
+	}
+	provider, ok := s.marketOverview.(SectorFlowProvider)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "sector flow provider is unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	data, meta, err := loadMarketOverview(ctx, s.marketSnapshots, "sector-flow-intraday:"+strings.Join(codes, ","), func(ctx context.Context) ([]foundation.SectorFlowSeries, foundation.SourceMeta, error) {
+		return provider.SectorFlowIntraday(ctx, codes)
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
+}
+
+// normalizeSectorFlowQueryCodes 归一化并去重板块代码，保证同样的一组板块命中同一个缓存键。
+// 非法代码直接返回错误，由调用方判定为 400 而不是上游故障。
+func normalizeSectorFlowQueryCodes(raw string) ([]string, error) {
+	seen := make(map[string]struct{})
+	codes := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		code, ok := foundation.NormalizeSectorFlowCode(part)
+		if !ok {
+			return nil, fmt.Errorf("invalid sector code %q", strings.TrimSpace(part))
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes, nil
 }
 
 func (s *Server) marketMarginBalanceHandler(w http.ResponseWriter, r *http.Request) {

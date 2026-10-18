@@ -31,15 +31,17 @@ type Client struct {
 	httpClient          *http.Client
 	// fallbackHTTPClient 与 httpClient 的区别只有地址族（强制 IPv4），
 	// 用于首个地址族被对端重置时换一条路重试。
-	fallbackHTTPClient  *http.Client
-	poolMu              sync.Mutex
-	limitUpDays         map[string]*limitUpDayFlight
-	catalogCacheMu      sync.RWMutex
-	catalogMu           sync.Mutex
-	catalog             []foundation.StockCatalogEntry
-	catalogUntil        time.Time
-	thsBillboardMu      sync.Mutex
-	thsBillboardPages   map[string]thsBillboardPage
+	fallbackHTTPClient *http.Client
+	poolMu             sync.Mutex
+	limitUpDays        map[string]*limitUpDayFlight
+	catalogCacheMu     sync.RWMutex
+	catalogMu          sync.Mutex
+	catalog            []foundation.StockCatalogEntry
+	catalogUntil       time.Time
+	thsBillboardMu     sync.Mutex
+	thsBillboardPages  map[string]thsBillboardPage
+	// sectorFlowCooldown 记录板块分时资金流连续失败，用于短暂熔断（零值可用）。
+	sectorFlowCooldown sectorFlowCooldown
 }
 
 type Option func(*Client)
