@@ -87,7 +87,11 @@ const config = {
     icon: path.join(desktopRoot, 'assets', 'easy-stock.ico'),
     target: mode === 'dir' ? [{ target: 'dir', arch: [arch] }] : [{ target: 'nsis', arch: [arch] }],
     artifactName: `easy-stock-v${packageManifest.version}-windows-${arch}.\${ext}`,
-    ...(signingCertificate ? {} : { signAndEditExecutable: false }),
+    // Unsigned local builds still need rcedit, so the app executable carries the
+    // easy-stock icon and version metadata. `signAndEditExecutable: false` skips
+    // both, which leaves Electron's default icon on the executable and on every
+    // shortcut the installer creates.
+    ...(signingCertificate ? {} : { signExecutable: false }),
   },
   nsis: {
     oneClick: false,
