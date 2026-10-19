@@ -17,6 +17,7 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/themeindex"
+	"easy-stock/backend/internal/themelibrary"
 )
 
 type RealtimeProvider interface {
@@ -201,6 +202,11 @@ type Config struct {
 	StockResearchStore       *stockanalysis.ResearchStore
 	MarketEmotionDBPath      string
 	ThemeRadarDBPath         string
+	// ThemeLibraryDBPath 是独立的开盘啦题材库参考数据；服务器首次启动时用内嵌快照填充。
+	ThemeLibraryDBPath string
+	ThemeLibraryStore  *themelibrary.Store
+	// ThemeLibraryRefreshAt 是每日收盘后重拉上游题材库的本地时间 HH:mm；为空则关闭。
+	ThemeLibraryRefreshAt string
 	// SectorFlowSampleDBPath 是板块资金流本地采样库：分时曲线在上游不可用时由它拼接。
 	SectorFlowSampleDBPath   string
 	SectorFlowSampleStore    *sectorflowsample.Store

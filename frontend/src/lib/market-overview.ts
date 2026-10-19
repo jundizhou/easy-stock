@@ -29,7 +29,8 @@ export type MarketOverviewView =
 	| 'billboard'
 	| 'announcements'
 	| 'institution-reports'
-	| 'industry-research';
+	| 'industry-research'
+	| 'theme-library';
 
 export type MarketOverviewModule = {
 	id: MarketOverviewView;
@@ -74,6 +75,7 @@ export const marketOverviewGroups: MarketOverviewGroup[] = [
 			{ id: 'announcements', name: '公告雷达', description: '重要公告分类与影响线索', status: 'ready' },
 			{ id: 'institution-reports', name: '机构观点', description: '评级、目标价与观点变化', status: 'ready' },
 			{ id: 'industry-research', name: '产业透视', description: '行业景气、产业链与研究证据', status: 'ready' },
+			{ id: 'theme-library', name: '题材库', description: '开盘啦题材、产业链与相关标的', status: 'ready' },
 		],
 	},
 ];

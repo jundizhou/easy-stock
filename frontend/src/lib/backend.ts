@@ -442,6 +442,85 @@ export type SectorPriceSeries = {
 	meta: SourceMeta;
 };
 
+// 题材库：开盘啦公开题材库的静态快照，按题材 → 细分 → 标的组织。
+export type ThemeLibraryStock = {
+	code: string;
+	name: string;
+	price: number;
+	change_percent: number;
+	is_limit_up: boolean;
+	hot: number;
+	tags?: string[];
+	description?: string;
+};
+
+export type ThemeLibraryLiveQuote = {
+	price: number;
+	change_percent: number;
+	trade_time?: string;
+};
+
+export type ThemeLibraryGroup = {
+	source_id: string;
+	name: string;
+	parent_source_id?: string;
+	parent_name?: string;
+	path?: string[];
+	change_percent: number;
+	limit_up_count: number;
+	stock_count: number;
+	stocks: ThemeLibraryStock[];
+};
+
+export type ThemeLibraryTheme = {
+	id?: number;
+	source_id: string;
+	name: string;
+	description: string;
+	introduction?: string;
+	change_percent: number;
+	stock_count: number;
+	limit_up_count: number;
+	rising_count: number;
+	falling_count: number;
+	flat_count: number;
+	hot: number;
+	group_count: number;
+	relation_count: number;
+	theme_updated_at: string;
+	as_of: string;
+	source_url: string;
+	source_api_url?: string;
+	groups?: ThemeLibraryGroup[];
+};
+
+export type ThemeLibraryMeta = {
+	schema_version: number;
+	source: string;
+	source_name: string;
+	source_url: string;
+	api_url: string;
+	source_updated_at: string;
+	generated_at: string;
+	selection: string;
+};
+
+export type ThemeLibraryStats = {
+	themes: number;
+	groups: number;
+	relations: number;
+	stocks: number;
+};
+
+export type ThemeLibraryLibrary = {
+	available: boolean;
+	message?: string;
+	meta: ThemeLibraryMeta;
+	stats: ThemeLibraryStats;
+	total: number;
+	items: ThemeLibraryTheme[];
+};
+
 export type MarketMarginPoint = {
 	trade_date: string;
 	financing_balance: number;
