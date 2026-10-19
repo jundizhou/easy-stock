@@ -3,7 +3,9 @@ package eastmoney
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -302,6 +304,10 @@ func (c *Client) getJSONWithRetry(ctx context.Context, requestURL string, target
 		if attempt == 1 && c.fallbackHTTPClient != nil {
 			client = c.fallbackHTTPClient
 		}
+		if attempt > 0 {
+			// 坏连接留在池里会让重试继续失败，先清空空闲连接再打。
+			client.CloseIdleConnections()
+		}
 		err := c.getJSONWithClient(ctx, client, requestURL, target)
 		if err == nil {
 			return nil
@@ -398,6 +404,26 @@ func isTransient(err error) bool {
 		strings.Contains(msg, "reset") ||
 		strings.Contains(msg, "forcibly closed") ||
 		strings.Contains(msg, "stream error")
+}
+
+// isConnectionError 只认连接层故障：这类错误换一条新连接（必要时换地址族）就能恢复。
+// 上游明确返回的状态码（5xx）不算，换镜像比原地重试更有效。
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "reset") ||
+		strings.Contains(msg, "forcibly closed") ||
+		strings.Contains(msg, "stream error") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection closed")
 }
 
 func eastMoneyPeriod(period string) string {

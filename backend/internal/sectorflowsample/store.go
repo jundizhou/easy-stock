@@ -36,6 +36,21 @@ type Sample struct {
 	Small         float64
 	ChangePercent float64
 	SampledAt     time.Time
+	// HasFlow / HasPrice 标记这一分钟是否真的有对应口径的数据。
+	//
+	// 采样器每次同时写入资金与涨跌幅，两个标记都为真；上游分时资金曲线回填时
+	// 只有资金字段，涨跌幅要等价格曲线回填补齐，因此用标记区分，避免把 0 当成真实值
+	// 画进另一种曲线。两个标记都为假时按整行采样处理（兼容旧数据与测试）。
+	HasFlow  bool
+	HasPrice bool
+}
+
+// flow / price 标记归一化：未显式设置时视为整行采样。
+func (s Sample) flags() (bool, bool) {
+	if !s.HasFlow && !s.HasPrice {
+		return true, true
+	}
+	return s.HasFlow, s.HasPrice
 }
 
 type Store struct {
@@ -86,13 +101,59 @@ func (s *Store) migrate(ctx context.Context) error {
 			small_net REAL NOT NULL DEFAULT 0,
 			change_percent REAL NOT NULL DEFAULT 0,
 			sampled_at TEXT NOT NULL,
+			has_flow INTEGER NOT NULL DEFAULT 1,
+			has_price INTEGER NOT NULL DEFAULT 1,
 			PRIMARY KEY (trade_date, code, minute)
 		);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate sector flow sample database: %w", err)
 	}
+	// 旧库没有两个可用性标记：先加列再回填默认值（旧行都是整行采样）。
+	for _, column := range []struct {
+		name string
+		ddl  string
+	}{
+		{"has_flow", `ALTER TABLE sector_flow_samples ADD COLUMN has_flow INTEGER NOT NULL DEFAULT 1`},
+		{"has_price", `ALTER TABLE sector_flow_samples ADD COLUMN has_price INTEGER NOT NULL DEFAULT 1`},
+	} {
+		exists, err := s.columnExists(ctx, column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, column.ddl); err != nil {
+			return fmt.Errorf("migrate sector flow sample column %s: %w", column.name, err)
+		}
+	}
 	return nil
+}
+
+func (s *Store) columnExists(ctx context.Context, name string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(sector_flow_samples)`)
+	if err != nil {
+		return false, fmt.Errorf("inspect sector flow sample table: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			index      int
+			column     string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&index, &column, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return false, err
+		}
+		if column == name {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Save 以 (trade_date, code, minute) 为键写入快照；同一分钟内重复采样只保留最新一次。
@@ -109,8 +170,8 @@ func (s *Store) Save(ctx context.Context, samples []Sample) (int, error) {
 		INSERT INTO sector_flow_samples(
 			trade_date, code, minute, name, dimension,
 			main_net, super_large_net, large_net, medium_net, small_net,
-			change_percent, sampled_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			change_percent, sampled_at, has_flow, has_price
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(trade_date, code, minute) DO UPDATE SET
 			name=excluded.name,
 			dimension=excluded.dimension,
@@ -120,7 +181,9 @@ func (s *Store) Save(ctx context.Context, samples []Sample) (int, error) {
 			medium_net=excluded.medium_net,
 			small_net=excluded.small_net,
 			change_percent=excluded.change_percent,
-			sampled_at=excluded.sampled_at
+			sampled_at=excluded.sampled_at,
+			has_flow=MAX(sector_flow_samples.has_flow, excluded.has_flow),
+			has_price=MAX(sector_flow_samples.has_price, excluded.has_price)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare sector flow sample upsert: %w", err)
@@ -136,10 +199,12 @@ func (s *Store) Save(ctx context.Context, samples []Sample) (int, error) {
 		if sampledAt.IsZero() {
 			sampledAt = time.Now()
 		}
+		hasFlow, hasPrice := sample.flags()
 		if _, err := statement.ExecContext(ctx,
 			sample.TradeDate, sample.Code, sample.Minute, sample.Name, sample.Dimension,
 			sample.Main, sample.SuperLarge, sample.Large, sample.Medium, sample.Small,
 			sample.ChangePercent, sampledAt.UTC().Format(time.RFC3339Nano),
+			boolInt(hasFlow), boolInt(hasPrice),
 		); err != nil {
 			return saved, fmt.Errorf("save sector flow sample %s %s: %w", sample.Code, sample.Minute, err)
 		}
@@ -151,6 +216,101 @@ func (s *Store) Save(ctx context.Context, samples []Sample) (int, error) {
 	return saved, nil
 }
 
+// SaveFlowBackfill 用上游分时资金曲线回填本地采样：只写资金字段，
+// 不覆盖同一分钟可能已有的涨跌幅（价格曲线的回填走 SavePriceBackfill）。
+func (s *Store) SaveFlowBackfill(ctx context.Context, samples []Sample) (int, error) {
+	return s.saveBackfill(ctx, samples, true)
+}
+
+// SavePriceBackfill 用上游分时价格曲线回填本地采样：只写涨跌幅。
+func (s *Store) SavePriceBackfill(ctx context.Context, samples []Sample) (int, error) {
+	return s.saveBackfill(ctx, samples, false)
+}
+
+// saveBackfill 是两种回填的公共实现：插入新分钟时只把本口径标记为可用，
+// 命中已有分钟时只更新本口径的数值，另一口径的数值与标记保持不变。
+func (s *Store) saveBackfill(ctx context.Context, samples []Sample, flow bool) (int, error) {
+	if s == nil || s.db == nil || len(samples) == 0 {
+		return 0, nil
+	}
+	statement := `
+		INSERT INTO sector_flow_samples(
+			trade_date, code, minute, name, dimension,
+			main_net, super_large_net, large_net, medium_net, small_net,
+			change_percent, sampled_at, has_flow, has_price
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0)
+		ON CONFLICT(trade_date, code, minute) DO UPDATE SET
+			name=CASE WHEN excluded.name <> '' THEN excluded.name ELSE sector_flow_samples.name END,
+			main_net=excluded.main_net,
+			super_large_net=excluded.super_large_net,
+			large_net=excluded.large_net,
+			medium_net=excluded.medium_net,
+			small_net=excluded.small_net,
+			sampled_at=excluded.sampled_at,
+			has_flow=1`
+	if !flow {
+		statement = `
+		INSERT INTO sector_flow_samples(
+			trade_date, code, minute, name, dimension,
+			change_percent, sampled_at, has_flow, has_price
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1)
+		ON CONFLICT(trade_date, code, minute) DO UPDATE SET
+			name=CASE WHEN excluded.name <> '' THEN excluded.name ELSE sector_flow_samples.name END,
+			change_percent=excluded.change_percent,
+			sampled_at=excluded.sampled_at,
+			has_price=1`
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin sector flow backfill transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	prepared, err := tx.PrepareContext(ctx, statement)
+	if err != nil {
+		return 0, fmt.Errorf("prepare sector flow backfill: %w", err)
+	}
+	defer prepared.Close()
+
+	saved := 0
+	for _, sample := range samples {
+		if strings.TrimSpace(sample.Code) == "" || strings.TrimSpace(sample.TradeDate) == "" || strings.TrimSpace(sample.Minute) == "" {
+			continue
+		}
+		sampledAt := sample.SampledAt
+		if sampledAt.IsZero() {
+			sampledAt = time.Now()
+		}
+		var err error
+		if flow {
+			_, err = prepared.ExecContext(ctx,
+				sample.TradeDate, sample.Code, sample.Minute, sample.Name, sample.Dimension,
+				sample.Main, sample.SuperLarge, sample.Large, sample.Medium, sample.Small,
+				sampledAt.UTC().Format(time.RFC3339Nano),
+			)
+		} else {
+			_, err = prepared.ExecContext(ctx,
+				sample.TradeDate, sample.Code, sample.Minute, sample.Name, sample.Dimension,
+				sample.ChangePercent, sampledAt.UTC().Format(time.RFC3339Nano),
+			)
+		}
+		if err != nil {
+			return saved, fmt.Errorf("backfill sector flow sample %s %s: %w", sample.Code, sample.Minute, err)
+		}
+		saved++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit sector flow backfill: %w", err)
+	}
+	return saved, nil
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 // DaySamples 返回指定交易日、指定板块的采样点，按分钟升序。
 func (s *Store) DaySamples(ctx context.Context, tradeDate string, codes []string) ([]Sample, error) {
 	if s == nil || s.db == nil || strings.TrimSpace(tradeDate) == "" {
@@ -159,7 +319,7 @@ func (s *Store) DaySamples(ctx context.Context, tradeDate string, codes []string
 	query := `
 		SELECT trade_date, code, minute, name, dimension,
 			main_net, super_large_net, large_net, medium_net, small_net,
-			change_percent, sampled_at
+			change_percent, sampled_at, has_flow, has_price
 		FROM sector_flow_samples
 		WHERE trade_date = ?`
 	arguments := []any{tradeDate}
@@ -183,14 +343,17 @@ func (s *Store) DaySamples(ctx context.Context, tradeDate string, codes []string
 	for rows.Next() {
 		var sample Sample
 		var sampledAt string
+		var hasFlow, hasPrice int
 		if err := rows.Scan(
 			&sample.TradeDate, &sample.Code, &sample.Minute, &sample.Name, &sample.Dimension,
 			&sample.Main, &sample.SuperLarge, &sample.Large, &sample.Medium, &sample.Small,
-			&sample.ChangePercent, &sampledAt,
+			&sample.ChangePercent, &sampledAt, &hasFlow, &hasPrice,
 		); err != nil {
 			return nil, err
 		}
 		sample.SampledAt, _ = time.Parse(time.RFC3339Nano, sampledAt)
+		sample.HasFlow = hasFlow != 0
+		sample.HasPrice = hasPrice != 0
 		samples = append(samples, sample)
 	}
 	return samples, rows.Err()

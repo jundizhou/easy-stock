@@ -200,6 +200,8 @@ func (s *Server) marketSectorFlowIntradayHandler(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// 上游这次成功说明曲线是完整的：把整条曲线落库，之后上游再抖动时本地也有全天数据。
+	s.persistSectorFlowCurve(ctx, data)
 	if merged, mergedMeta := s.mergeSectorFlowSamples(ctx, codes, data, meta); len(merged) > 0 {
 		data, meta = merged, mergedMeta
 	}
@@ -233,6 +235,8 @@ func (s *Server) marketSectorPriceIntradayHandler(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// 价格曲线同样在成功时落库，用来补齐资金回填里缺失的涨跌幅。
+	s.persistSectorPriceCurve(ctx, data)
 	if merged, mergedMeta := s.mergeSectorPriceSamples(ctx, codes, data, meta); len(merged) > 0 {
 		data, meta = merged, mergedMeta
 	}
@@ -325,6 +329,9 @@ func (s *Server) sectorFlowSeriesFromSamples(ctx context.Context, codes []string
 		}
 		points := make([]foundation.SectorFlowPoint, 0, len(rows))
 		for _, row := range rows {
+			if !row.HasFlow {
+				continue
+			}
 			points = append(points, foundation.SectorFlowPoint{
 				Time:       row.Minute,
 				Main:       row.Main,
@@ -334,12 +341,15 @@ func (s *Server) sectorFlowSeriesFromSamples(ctx context.Context, codes []string
 				Small:      row.Small,
 			})
 		}
+		if len(points) == 0 {
+			continue
+		}
 		name := strings.TrimSpace(rows[0].Name)
 		if name == "" {
 			name = code
 		}
-		if firstMinute == "" || rows[0].Minute < firstMinute {
-			firstMinute = rows[0].Minute
+		if firstMinute == "" || points[0].Time < firstMinute {
+			firstMinute = points[0].Time
 		}
 		items = append(items, foundation.SectorFlowSeries{
 			Code:       code,
@@ -381,14 +391,20 @@ func (s *Server) sectorPriceSeriesFromSamples(ctx context.Context, codes []strin
 		}
 		points := make([]foundation.SectorPricePoint, 0, len(rows))
 		for _, row := range rows {
+			if !row.HasPrice {
+				continue
+			}
 			points = append(points, foundation.SectorPricePoint{Time: row.Minute, ChangePercent: row.ChangePercent})
+		}
+		if len(points) == 0 {
+			continue
 		}
 		name := strings.TrimSpace(rows[0].Name)
 		if name == "" {
 			name = code
 		}
-		if firstMinute == "" || rows[0].Minute < firstMinute {
-			firstMinute = rows[0].Minute
+		if firstMinute == "" || points[0].Time < firstMinute {
+			firstMinute = points[0].Time
 		}
 		items = append(items, foundation.SectorPriceSeries{
 			Code:         code,
@@ -439,23 +455,109 @@ func (s *Server) sectorFlowSampleIntervalMinutes() int {
 	return minutes
 }
 
-// mergeSectorFlowSamples 在上游只返回部分板块时，用本地采样补齐缺的那几个。
+// persistSectorFlowCurve 把上游成功返回的整条资金曲线落库。
+//
+// 采样器每 3 分钟才有一个点，如果当天采样开始得晚（或后端中途才启动），
+// 降级曲线就只有后半段。上游既然把整天的分钟序列给出来了，就顺手存进同一张表，
+// 以后上游再抖动时本地回退也有完整的一天。只写资金字段，涨跌幅留给价格曲线回填。
+func (s *Server) persistSectorFlowCurve(ctx context.Context, series []foundation.SectorFlowSeries) {
+	if s.sectorFlowSamples == nil || len(series) == 0 {
+		return
+	}
+	now := time.Now()
+	samples := make([]sectorflowsample.Sample, 0, len(series)*240)
+	for _, item := range series {
+		tradeDate := strings.TrimSpace(item.TradeDate)
+		if tradeDate == "" || strings.TrimSpace(item.Code) == "" {
+			continue
+		}
+		for _, point := range item.Points {
+			if strings.TrimSpace(point.Time) == "" {
+				continue
+			}
+			samples = append(samples, sectorflowsample.Sample{
+				TradeDate:  tradeDate,
+				Minute:     point.Time,
+				Code:       item.Code,
+				Name:       item.Name,
+				Main:       point.Main,
+				SuperLarge: point.SuperLarge,
+				Large:      point.Large,
+				Medium:     point.Medium,
+				Small:      point.Small,
+				SampledAt:  now,
+				HasFlow:    true,
+			})
+		}
+	}
+	if len(samples) == 0 {
+		return
+	}
+	_, _ = s.sectorFlowSamples.SaveFlowBackfill(ctx, samples)
+}
+
+// persistSectorPriceCurve 把上游成功返回的分时涨跌幅落库，供资金回填补齐价格曲线。
+func (s *Server) persistSectorPriceCurve(ctx context.Context, series []foundation.SectorPriceSeries) {
+	if s.sectorFlowSamples == nil || len(series) == 0 {
+		return
+	}
+	now := time.Now()
+	samples := make([]sectorflowsample.Sample, 0, len(series)*240)
+	for _, item := range series {
+		tradeDate := strings.TrimSpace(item.TradeDate)
+		if tradeDate == "" || strings.TrimSpace(item.Code) == "" {
+			continue
+		}
+		for _, point := range item.Points {
+			if strings.TrimSpace(point.Time) == "" {
+				continue
+			}
+			samples = append(samples, sectorflowsample.Sample{
+				TradeDate:     tradeDate,
+				Minute:        point.Time,
+				Code:          item.Code,
+				Name:          item.Name,
+				ChangePercent: point.ChangePercent,
+				SampledAt:     now,
+				HasPrice:      true,
+			})
+		}
+	}
+	if len(samples) == 0 {
+		return
+	}
+	_, _ = s.sectorFlowSamples.SavePriceBackfill(ctx, samples)
+}
+
+// mergeSectorFlowSamples 用本地采样补齐上游缺的板块与缺的分钟：
+// 上游只返回部分板块时补整条序列，某条序列中间或首尾少了几分钟时按分钟补点。
 func (s *Server) mergeSectorFlowSamples(ctx context.Context, codes []string, data []foundation.SectorFlowSeries, meta foundation.SourceMeta) ([]foundation.SectorFlowSeries, foundation.SourceMeta) {
 	if s.sectorFlowSamples == nil {
 		return nil, meta
 	}
-	missing := missingSectorFlowCodes(codes, data)
-	if len(missing) == 0 {
-		return nil, meta
-	}
-	fallback, _, ok := s.sectorFlowSeriesFromSamples(ctx, missing)
-	if !ok {
-		return nil, meta
-	}
-	merged := make([]foundation.SectorFlowSeries, 0, len(data)+len(fallback))
+	merged := make([]foundation.SectorFlowSeries, 0, len(data)+len(codes))
 	merged = append(merged, data...)
-	merged = append(merged, fallback...)
-	meta.FallbackReason = appendFallbackReason(meta.FallbackReason, fmt.Sprintf("其中 %d 个板块的分时资金已改用本地采样拼接", len(missing)))
+	addedPoints := s.fillSectorFlowGaps(ctx, merged)
+
+	addedBoards := 0
+	if missing := missingSectorFlowCodes(codes, data); len(missing) > 0 {
+		if fallback, _, ok := s.sectorFlowSeriesFromSamples(ctx, missing); ok {
+			merged = append(merged, fallback...)
+			addedBoards = len(fallback)
+		}
+	}
+	if addedPoints == 0 && addedBoards == 0 {
+		return nil, meta
+	}
+
+	reasons := make([]string, 0, 2)
+	if addedBoards > 0 {
+		reasons = append(reasons, fmt.Sprintf("其中 %d 个板块的分时资金已改用本地采样拼接", addedBoards))
+	}
+	if addedPoints > 0 {
+		reasons = append(reasons, fmt.Sprintf("缺失的 %d 个分钟点已用本地采样补齐", addedPoints))
+	}
+	meta.FallbackReason = appendFallbackReason(meta.FallbackReason, strings.Join(reasons, "；"))
 	meta.Source += "+local-samples"
 	meta.Stale = true
 	for index := range merged {
@@ -464,29 +566,170 @@ func (s *Server) mergeSectorFlowSamples(ctx context.Context, codes []string, dat
 	return merged, meta
 }
 
-// mergeSectorPriceSamples 是价格分时版的部分补齐。
+// mergeSectorPriceSamples 是价格分时版：同样按板块与按分钟补齐。
 func (s *Server) mergeSectorPriceSamples(ctx context.Context, codes []string, data []foundation.SectorPriceSeries, meta foundation.SourceMeta) ([]foundation.SectorPriceSeries, foundation.SourceMeta) {
 	if s.sectorFlowSamples == nil {
 		return nil, meta
 	}
-	missing := missingSectorPriceCodes(codes, data)
-	if len(missing) == 0 {
-		return nil, meta
-	}
-	fallback, _, ok := s.sectorPriceSeriesFromSamples(ctx, missing)
-	if !ok {
-		return nil, meta
-	}
-	merged := make([]foundation.SectorPriceSeries, 0, len(data)+len(fallback))
+	merged := make([]foundation.SectorPriceSeries, 0, len(data)+len(codes))
 	merged = append(merged, data...)
-	merged = append(merged, fallback...)
-	meta.FallbackReason = appendFallbackReason(meta.FallbackReason, fmt.Sprintf("其中 %d 个板块的分时价格已改用本地采样拼接", len(missing)))
+	addedPoints := s.fillSectorPriceGaps(ctx, merged)
+
+	addedBoards := 0
+	if missing := missingSectorPriceCodes(codes, data); len(missing) > 0 {
+		if fallback, _, ok := s.sectorPriceSeriesFromSamples(ctx, missing); ok {
+			merged = append(merged, fallback...)
+			addedBoards = len(fallback)
+		}
+	}
+	if addedPoints == 0 && addedBoards == 0 {
+		return nil, meta
+	}
+
+	reasons := make([]string, 0, 2)
+	if addedBoards > 0 {
+		reasons = append(reasons, fmt.Sprintf("其中 %d 个板块的分时价格已改用本地采样拼接", addedBoards))
+	}
+	if addedPoints > 0 {
+		reasons = append(reasons, fmt.Sprintf("缺失的 %d 个价格分钟点已用本地采样补齐", addedPoints))
+	}
+	meta.FallbackReason = appendFallbackReason(meta.FallbackReason, strings.Join(reasons, "；"))
 	meta.Source += "+local-samples"
 	meta.Stale = true
 	for index := range merged {
 		merged[index].Meta = meta
 	}
 	return merged, meta
+}
+
+// fillSectorFlowGaps 把同一交易日里上游没有的分钟用真实采样点补上。
+// 不做任何插值：只补本地确实记录过的分钟。
+func (s *Server) fillSectorFlowGaps(ctx context.Context, series []foundation.SectorFlowSeries) int {
+	samples := s.daySamplesForMerge(ctx, seriesTradeDate(series, func(item foundation.SectorFlowSeries) string { return item.TradeDate }), sectorFlowSeriesCodes(series))
+	if len(samples) == 0 {
+		return 0
+	}
+	grouped := make(map[string][]sectorflowsample.Sample, len(samples))
+	for _, sample := range samples {
+		if sample.HasFlow {
+			grouped[sample.Code] = append(grouped[sample.Code], sample)
+		}
+	}
+	added := 0
+	for index := range series {
+		item := &series[index]
+		rows := grouped[item.Code]
+		if len(rows) == 0 {
+			continue
+		}
+		seen := make(map[string]struct{}, len(item.Points))
+		for _, point := range item.Points {
+			seen[point.Time] = struct{}{}
+		}
+		extra := make([]foundation.SectorFlowPoint, 0, len(rows))
+		for _, row := range rows {
+			if _, exists := seen[row.Minute]; exists {
+				continue
+			}
+			extra = append(extra, foundation.SectorFlowPoint{
+				Time:       row.Minute,
+				Main:       row.Main,
+				SuperLarge: row.SuperLarge,
+				Large:      row.Large,
+				Medium:     row.Medium,
+				Small:      row.Small,
+			})
+		}
+		if len(extra) == 0 {
+			continue
+		}
+		item.Points = append(item.Points, extra...)
+		sort.SliceStable(item.Points, func(left, right int) bool { return item.Points[left].Time < item.Points[right].Time })
+		item.LatestMain = item.Points[len(item.Points)-1].Main
+		added += len(extra)
+	}
+	return added
+}
+
+// fillSectorPriceGaps 是价格曲线的按分钟补齐。
+func (s *Server) fillSectorPriceGaps(ctx context.Context, series []foundation.SectorPriceSeries) int {
+	samples := s.daySamplesForMerge(ctx, seriesTradeDate(series, func(item foundation.SectorPriceSeries) string { return item.TradeDate }), sectorPriceSeriesCodes(series))
+	if len(samples) == 0 {
+		return 0
+	}
+	grouped := make(map[string][]sectorflowsample.Sample, len(samples))
+	for _, sample := range samples {
+		if sample.HasPrice {
+			grouped[sample.Code] = append(grouped[sample.Code], sample)
+		}
+	}
+	added := 0
+	for index := range series {
+		item := &series[index]
+		rows := grouped[item.Code]
+		if len(rows) == 0 {
+			continue
+		}
+		seen := make(map[string]struct{}, len(item.Points))
+		for _, point := range item.Points {
+			seen[point.Time] = struct{}{}
+		}
+		extra := make([]foundation.SectorPricePoint, 0, len(rows))
+		for _, row := range rows {
+			if _, exists := seen[row.Minute]; exists {
+				continue
+			}
+			extra = append(extra, foundation.SectorPricePoint{Time: row.Minute, ChangePercent: row.ChangePercent})
+		}
+		if len(extra) == 0 {
+			continue
+		}
+		item.Points = append(item.Points, extra...)
+		sort.SliceStable(item.Points, func(left, right int) bool { return item.Points[left].Time < item.Points[right].Time })
+		item.LatestChange = item.Points[len(item.Points)-1].ChangePercent
+		added += len(extra)
+	}
+	return added
+}
+
+// daySamplesForMerge 只取与上游序列同一个交易日的采样；没有日期时按当天处理。
+func (s *Server) daySamplesForMerge(ctx context.Context, tradeDate string, codes []string) []sectorflowsample.Sample {
+	if s.sectorFlowSamples == nil || len(codes) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(tradeDate) == "" {
+		tradeDate = time.Now().In(foundation.AStockLocation).Format("2006-01-02")
+	}
+	samples, err := s.sectorFlowSamples.DaySamples(ctx, tradeDate, codes)
+	if err != nil {
+		return nil
+	}
+	return samples
+}
+
+func seriesTradeDate[T any](series []T, date func(T) string) string {
+	for _, item := range series {
+		if value := strings.TrimSpace(date(item)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func sectorFlowSeriesCodes(series []foundation.SectorFlowSeries) []string {
+	codes := make([]string, 0, len(series))
+	for _, item := range series {
+		codes = append(codes, item.Code)
+	}
+	return codes
+}
+
+func sectorPriceSeriesCodes(series []foundation.SectorPriceSeries) []string {
+	codes := make([]string, 0, len(series))
+	for _, item := range series {
+		codes = append(codes, item.Code)
+	}
+	return codes
 }
 
 func missingSectorFlowCodes(codes []string, series []foundation.SectorFlowSeries) []string {

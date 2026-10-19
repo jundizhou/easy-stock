@@ -722,6 +722,27 @@ func TestClientSectorPriceIntradayRetriesWithIPv4ClientOnTransientError(t *testi
 	}
 }
 
+// 分时资金流同样要能扛住“池里的长连接被上游重置”：默认客户端 EOF 时清空连接池、
+// 换备用客户端重试一次，而不是直接让整条曲线退回本地采样。
+func TestClientSectorFlowIntradayRetriesWithFallbackClientOnConnectionError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"rc":0,"data":{"code":"BK0917","name":"半导体概念","klines":["2026-10-16 09:31,100.0,0.0,0.0,0.0,100.0"]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(WithQuoteBaseURL(server.URL))
+	client.httpClient = &http.Client{Transport: eofTransport{}}
+	client.fallbackHTTPClient = server.Client()
+
+	series, _, err := client.SectorFlowIntraday(context.Background(), []string{"BK0917"})
+	if err != nil {
+		t.Fatalf("SectorFlowIntraday should retry with the fallback client: %v", err)
+	}
+	if len(series) != 1 || len(series[0].Points) != 1 {
+		t.Fatalf("unexpected series: %+v", series)
+	}
+}
+
 // 前端逐个勾选板块时，缓存命中的板块不应重复打上游；全部命中时沿用缓存记录的来源地址。
 func TestClientSectorPriceIntradayReusesPerBoardCache(t *testing.T) {
 	var mu sync.Mutex
