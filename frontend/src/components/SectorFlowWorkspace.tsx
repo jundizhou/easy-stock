@@ -281,10 +281,10 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 			ariaLabel: '板块分时累计净流入曲线',
 			valueHint: '当日累计主力净流入',
 			errorTitle: '分时资金加载失败',
-			errorHint: '东方财富分时资金接口这次把连接断开了（上游短暂风控），稍后重试即可；价格分时走的是另一条接口，不受影响。',
+			errorHint: '东方财富分时资金接口这次不可达，本地采样曲线暂时也没有可用数据；稍后重试即可。',
 			loadingText: '正在加载分时资金…',
 			emptyTitle: '暂时取不到分时资金',
-			footer: '单位：亿元 · 曲线为当日累计主力净流入，鼠标移入查看任一时点。',
+			footer: '单位：亿元 · 曲线为当日累计主力净流入，鼠标移入查看任一时点 · 上游不可用时自动改用本地采样（每 3 分钟）。',
 		}
 		: {
 			curves: priceCurves,
@@ -301,10 +301,10 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 			ariaLabel: '板块价格分时曲线',
 			valueHint: '分时涨跌幅',
 			errorTitle: '分时价格加载失败',
-			errorHint: '东方财富分时行情接口这次不可达（上游短暂风控），稍后重试即可；资金曲线走的是另一条接口，不受影响。',
+			errorHint: '东方财富分时行情接口这次不可达，本地采样曲线暂时也没有可用数据；稍后重试即可。',
 			loadingText: '正在加载分时价格…',
 			emptyTitle: '暂时取不到分时价格',
-			footer: '单位：% · 曲线为板块分时涨跌幅（相对昨收），鼠标移入查看任一时点。',
+			footer: '单位：% · 曲线为板块分时涨跌幅（相对昨收），鼠标移入查看任一时点 · 上游不可用时自动改用本地采样（每 3 分钟）。',
 		};
 
 	const summary = useMemo(() => {

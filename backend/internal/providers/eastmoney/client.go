@@ -42,6 +42,8 @@ type Client struct {
 	thsBillboardPages  map[string]thsBillboardPage
 	// sectorFlowCooldown 记录板块分时资金流连续失败，用于短暂熔断（零值可用）。
 	sectorFlowCooldown sectorFlowCooldown
+	// sectorPriceCooldown 记录板块分时价格连续失败，避免上游不可用时反复重试镜像。
+	sectorPriceCooldown sectorFlowCooldown
 	// sectorFlowSessionRefresh 限制“让桌面端重新加载东财页面换会话”的频率（零值可用）。
 	sectorFlowSessionRefresh sectorFlowSessionRefresh
 	// sessionProvider 提供带门禁的接口所需的浏览器会话（桌面端转交），可为 nil。

@@ -33,6 +33,7 @@ import (
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
 	"easy-stock/backend/internal/sector"
+	"easy-stock/backend/internal/sectorflowsample"
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/themeindex"
@@ -68,6 +69,9 @@ type Server struct {
 	hotStockProvider         HotStockProvider
 	futuresPosition          FuturesPositionProvider
 	marketOverview           MarketOverviewProvider
+	// sectorFlowSamples 是板块资金流本地采样库：上游分时接口不可用时，曲线由它拼接。
+	sectorFlowSamples        *sectorflowsample.Store
+	sectorFlowSampleInterval time.Duration
 	inflection               InflectionEvaluator
 	themeSnapshots           *themeSnapshotCache
 	limitUpSnapshots         *limitUpLadderCache
@@ -266,6 +270,15 @@ func NewServer(config any) *Server {
 			cfg.MarketEmotionStore, _ = marketemotion.OpenStore("")
 		}
 	}
+	if cfg.SectorFlowSampleStore == nil && strings.TrimSpace(cfg.SectorFlowSampleDBPath) != "" {
+		store, err := sectorflowsample.OpenStore(cfg.SectorFlowSampleDBPath)
+		if err == nil {
+			cfg.SectorFlowSampleStore = store
+		} else {
+			// 采样库只用于降级，打不开就退回纯上游模式，不应阻塞启动。
+			cfg.Logger.Printf("level=warn event=startup feature=market-data task=sector_flow_sampler error=%q", runtimelog.Redact(err.Error()))
+		}
+	}
 	if cfg.PortfolioStore == nil {
 		store, err := portfolioinspection.OpenStore(cfg.PortfolioDBPath)
 		if err == nil {
@@ -373,6 +386,8 @@ func NewServer(config any) *Server {
 		hotStockProvider:         cfg.HotStocks,
 		futuresPosition:          cfg.FuturesPosition,
 		marketOverview:           cfg.MarketOverview,
+		sectorFlowSamples:        cfg.SectorFlowSampleStore,
+		sectorFlowSampleInterval: cfg.SectorFlowSampleInterval,
 		inflection:               cfg.Inflection,
 		themeSnapshots:           newThemeSnapshotCache(30 * time.Second),
 		themeProgress:            newThemeProgressCache(),
@@ -518,6 +533,9 @@ func (s *Server) Close() error {
 	if s.marketEmotionStore != nil {
 		closeErrors = append(closeErrors, s.marketEmotionStore.Close())
 	}
+	if s.sectorFlowSamples != nil {
+		closeErrors = append(closeErrors, s.sectorFlowSamples.Close())
+	}
 	if s.portfolioStore != nil {
 		closeErrors = append(closeErrors, s.portfolioStore.Close())
 	}
@@ -568,6 +586,24 @@ func (s *Server) RunMarketEmotionScheduler(ctx context.Context) {
 			s.marketEmotion.runScheduler(ctx, s.logger)
 		})
 	}
+}
+
+// RunSectorFlowSampler 常驻记录板块资金流快照，让分时资金/价格曲线在上游
+// 分钟序列接口不可用时仍能从本地采样拼接出来。
+func (s *Server) RunSectorFlowSampler(ctx context.Context) {
+	provider, ok := s.marketOverview.(SectorFlowProvider)
+	if !ok || s.sectorFlowSamples == nil {
+		return
+	}
+	interval := s.sectorFlowSampleInterval
+	if interval <= 0 {
+		interval = sectorflowsample.DefaultInterval
+	}
+	sampler := sectorflowsample.NewSampler(s.sectorFlowSamples, provider, sectorflowsample.SamplerConfig{
+		Interval: interval,
+		Logger:   s.logger,
+	})
+	sampler.Run(ctx)
 }
 
 func (s *Server) RunMasteryScheduler(ctx context.Context) {

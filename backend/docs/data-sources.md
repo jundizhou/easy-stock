@@ -57,6 +57,21 @@ For example, the local node `photoresist / 光刻胶` matches the EastMoney boar
 
 If EastMoney `push2` closes the constituent connection, the node falls back to `StockSymbols` in `theme.go` and uses Sina realtime quotes. The stock list is then a curated representative sample, but the price, change, and quote metadata are still live market data.
 
+## Sector Fund Flow Intraday Curve
+
+The 资金流向 workbench needs a per-board intraday curve. Two sources are combined:
+
+| Priority | Source | Behavior |
+| --- | --- | --- |
+| 1 | `push2` board minute series (`fflow/kline`, `trends2`) | Full 1-minute curve for the selected boards. Path-gated and occasionally reset by EastMoney. |
+| 2 | Local sampling of the `bkzj` ranking | Every 3 minutes the backend stores each board's cumulative 主力净流入 and 当日涨跌幅. |
+
+- The sampler runs in the backend (`internal/sectorflowsample`) and only during 09:25–11:35 and 12:55–15:05 on trading days, so no upstream request happens while the market is closed.
+- Samples live in `sector-flow-samples.db` (`A_STOCK_SECTOR_FLOW_SAMPLE_DB`), keyed by `(trade_date, code, minute)`, and are kept for 45 days.
+- When the minute-series endpoint fails, or returns only part of the requested boards, `/api/v1/market/sector-flow-intraday` and `/api/v1/market/sector-price-intraday` fill the gap from the samples: `meta.source` becomes `local:sector-flow-samples` (or `...+local-samples` when merged) and `meta.fallback_reason` names the degraded boards. Price points come from the sampled 涨跌幅, because the ranking carries no absolute price.
+- Gaps are gaps: a sample that failed is not interpolated, so the curve never invents movement. A board sampled from 13:00 onward simply starts at 13:00.
+- `A_STOCK_SECTOR_FLOW_SAMPLE_INTERVAL` overrides the 3-minute cadence; values below 30 seconds are ignored.
+
 ## Planned Sources
 
 | Source | Domain | Planned Data |

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"easy-stock/backend/internal/foundation"
+	"easy-stock/backend/internal/sectorflowsample"
 )
 
 type marketOverviewSnapshot struct {
@@ -191,8 +192,16 @@ func (s *Server) marketSectorFlowIntradayHandler(w http.ResponseWriter, r *http.
 		return provider.SectorFlowIntraday(ctx, codes)
 	})
 	if err != nil {
+		// 上游分钟序列不可用时不再直接失败：改由本地采样（每 3 分钟一次）拼出当天曲线。
+		if fallback, fallbackMeta, ok := s.sectorFlowSeriesFromSamples(ctx, codes); ok {
+			writeJSON(w, http.StatusOK, map[string]any{"data": fallback, "meta": fallbackMeta})
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	if merged, mergedMeta := s.mergeSectorFlowSamples(ctx, codes, data, meta); len(merged) > 0 {
+		data, meta = merged, mergedMeta
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
 }
@@ -216,8 +225,16 @@ func (s *Server) marketSectorPriceIntradayHandler(w http.ResponseWriter, r *http
 		return provider.SectorPriceIntraday(ctx, codes)
 	})
 	if err != nil {
+		// 与资金曲线一致：价格分时同样回退到本地采样的涨跌幅序列。
+		if fallback, fallbackMeta, ok := s.sectorPriceSeriesFromSamples(ctx, codes); ok {
+			writeJSON(w, http.StatusOK, map[string]any{"data": fallback, "meta": fallbackMeta})
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	if merged, mergedMeta := s.mergeSectorPriceSamples(ctx, codes, data, meta); len(merged) > 0 {
+		data, meta = merged, mergedMeta
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "meta": meta})
 }
@@ -259,6 +276,257 @@ func normalizeSectorFlowQueryCodes(raw string) ([]string, error) {
 	}
 	sort.Strings(codes)
 	return codes, nil
+}
+
+// sectorFlowSampleSource 是本地采样拼接曲线的数据源标识，便于前端与日志区分
+// 「上游直出」和「本地采样」两种口径。
+const sectorFlowSampleSource = "local:sector-flow-samples"
+
+// sectorFlowSamplesFor 读取指定板块的本地采样。
+//
+// 优先取当天；当天还没有任何采样时（后端刚启动、或收盘后才打开页面）退到最近
+// 一个有采样的交易日，由调用方在 meta 里写清楚是哪一天的数据。
+func (s *Server) sectorFlowSamplesFor(ctx context.Context, codes []string) ([]sectorflowsample.Sample, string, bool) {
+	if s == nil || s.sectorFlowSamples == nil {
+		return nil, "", false
+	}
+	today := time.Now().In(foundation.AStockLocation).Format("2006-01-02")
+	samples, err := s.sectorFlowSamples.DaySamples(ctx, today, codes)
+	if err == nil && len(samples) > 0 {
+		return samples, today, true
+	}
+	latest, latestErr := s.sectorFlowSamples.LatestTradeDate(ctx)
+	if latestErr != nil || latest == "" || latest == today {
+		return nil, "", false
+	}
+	samples, err = s.sectorFlowSamples.DaySamples(ctx, latest, codes)
+	if err != nil || len(samples) == 0 {
+		return nil, "", false
+	}
+	return samples, latest, true
+}
+
+// sectorFlowSeriesFromSamples 把本地采样拼成与上游同构的分时资金序列。
+func (s *Server) sectorFlowSeriesFromSamples(ctx context.Context, codes []string) ([]foundation.SectorFlowSeries, foundation.SourceMeta, bool) {
+	samples, tradeDate, ok := s.sectorFlowSamplesFor(ctx, codes)
+	if !ok {
+		return nil, foundation.SourceMeta{}, false
+	}
+	grouped := make(map[string][]sectorflowsample.Sample, len(codes))
+	for _, sample := range samples {
+		grouped[sample.Code] = append(grouped[sample.Code], sample)
+	}
+	items := make([]foundation.SectorFlowSeries, 0, len(grouped))
+	firstMinute := ""
+	for _, code := range codes {
+		rows := grouped[code]
+		if len(rows) == 0 {
+			continue
+		}
+		points := make([]foundation.SectorFlowPoint, 0, len(rows))
+		for _, row := range rows {
+			points = append(points, foundation.SectorFlowPoint{
+				Time:       row.Minute,
+				Main:       row.Main,
+				SuperLarge: row.SuperLarge,
+				Large:      row.Large,
+				Medium:     row.Medium,
+				Small:      row.Small,
+			})
+		}
+		name := strings.TrimSpace(rows[0].Name)
+		if name == "" {
+			name = code
+		}
+		if firstMinute == "" || rows[0].Minute < firstMinute {
+			firstMinute = rows[0].Minute
+		}
+		items = append(items, foundation.SectorFlowSeries{
+			Code:       code,
+			Name:       name,
+			TradeDate:  tradeDate,
+			Points:     points,
+			LatestMain: points[len(points)-1].Main,
+		})
+	}
+	if len(items) == 0 {
+		return nil, foundation.SourceMeta{}, false
+	}
+	meta := s.sectorFlowSampleMeta(tradeDate, firstMinute, "东财分时资金接口暂不可用")
+	for index := range items {
+		items[index].Meta = meta
+	}
+	return items, meta, true
+}
+
+// sectorPriceSeriesFromSamples 用采样里的涨跌幅拼出价格分时曲线。
+//
+// 本地采样只有「累计主力净流入」与「当日涨跌幅」两个标量，没有绝对点位；
+// 曲线组件本来就按涨跌幅画价格分时，因此这里 0 点位的 price 字段不影响显示。
+func (s *Server) sectorPriceSeriesFromSamples(ctx context.Context, codes []string) ([]foundation.SectorPriceSeries, foundation.SourceMeta, bool) {
+	samples, tradeDate, ok := s.sectorFlowSamplesFor(ctx, codes)
+	if !ok {
+		return nil, foundation.SourceMeta{}, false
+	}
+	grouped := make(map[string][]sectorflowsample.Sample, len(codes))
+	for _, sample := range samples {
+		grouped[sample.Code] = append(grouped[sample.Code], sample)
+	}
+	items := make([]foundation.SectorPriceSeries, 0, len(grouped))
+	firstMinute := ""
+	for _, code := range codes {
+		rows := grouped[code]
+		if len(rows) == 0 {
+			continue
+		}
+		points := make([]foundation.SectorPricePoint, 0, len(rows))
+		for _, row := range rows {
+			points = append(points, foundation.SectorPricePoint{Time: row.Minute, ChangePercent: row.ChangePercent})
+		}
+		name := strings.TrimSpace(rows[0].Name)
+		if name == "" {
+			name = code
+		}
+		if firstMinute == "" || rows[0].Minute < firstMinute {
+			firstMinute = rows[0].Minute
+		}
+		items = append(items, foundation.SectorPriceSeries{
+			Code:         code,
+			Name:         name,
+			TradeDate:    tradeDate,
+			Points:       points,
+			LatestChange: points[len(points)-1].ChangePercent,
+		})
+	}
+	if len(items) == 0 {
+		return nil, foundation.SourceMeta{}, false
+	}
+	meta := s.sectorFlowSampleMeta(tradeDate, firstMinute, "东财分时行情接口暂不可用")
+	for index := range items {
+		items[index].Meta = meta
+	}
+	return items, meta, true
+}
+
+// sectorFlowSampleMeta 统一描述本地采样曲线的来源与覆盖范围。
+func (s *Server) sectorFlowSampleMeta(tradeDate string, firstMinute string, cause string) foundation.SourceMeta {
+	interval := s.sectorFlowSampleIntervalMinutes()
+	today := time.Now().In(foundation.AStockLocation).Format("2006-01-02")
+	reason := fmt.Sprintf("%s，曲线改由本地每 %d 分钟采样拼接（自 %s 起）", cause, interval, firstMinute)
+	if tradeDate != today {
+		reason = fmt.Sprintf("当天还没有采样，以下为 %s 的本地采样曲线（每 %d 分钟一次）", tradeDate, interval)
+	}
+	nextRefresh := time.Now().Add(time.Duration(interval) * time.Minute)
+	return foundation.SourceMeta{
+		Source:          sectorFlowSampleSource,
+		FetchedAt:       time.Now(),
+		TradeDate:       tradeDate,
+		Stale:           true,
+		AvailableFields: []string{"main", "super_large", "large", "medium", "small", "change_percent"},
+		FallbackReason:  reason,
+		NextRefreshAt:   &nextRefresh,
+	}
+}
+
+func (s *Server) sectorFlowSampleIntervalMinutes() int {
+	if s.sectorFlowSampleInterval <= 0 {
+		return int(sectorflowsample.DefaultInterval / time.Minute)
+	}
+	minutes := int(s.sectorFlowSampleInterval.Round(time.Minute) / time.Minute)
+	if minutes < 1 {
+		minutes = 1
+	}
+	return minutes
+}
+
+// mergeSectorFlowSamples 在上游只返回部分板块时，用本地采样补齐缺的那几个。
+func (s *Server) mergeSectorFlowSamples(ctx context.Context, codes []string, data []foundation.SectorFlowSeries, meta foundation.SourceMeta) ([]foundation.SectorFlowSeries, foundation.SourceMeta) {
+	if s.sectorFlowSamples == nil {
+		return nil, meta
+	}
+	missing := missingSectorFlowCodes(codes, data)
+	if len(missing) == 0 {
+		return nil, meta
+	}
+	fallback, _, ok := s.sectorFlowSeriesFromSamples(ctx, missing)
+	if !ok {
+		return nil, meta
+	}
+	merged := make([]foundation.SectorFlowSeries, 0, len(data)+len(fallback))
+	merged = append(merged, data...)
+	merged = append(merged, fallback...)
+	meta.FallbackReason = appendFallbackReason(meta.FallbackReason, fmt.Sprintf("其中 %d 个板块的分时资金已改用本地采样拼接", len(missing)))
+	meta.Source += "+local-samples"
+	meta.Stale = true
+	for index := range merged {
+		merged[index].Meta = meta
+	}
+	return merged, meta
+}
+
+// mergeSectorPriceSamples 是价格分时版的部分补齐。
+func (s *Server) mergeSectorPriceSamples(ctx context.Context, codes []string, data []foundation.SectorPriceSeries, meta foundation.SourceMeta) ([]foundation.SectorPriceSeries, foundation.SourceMeta) {
+	if s.sectorFlowSamples == nil {
+		return nil, meta
+	}
+	missing := missingSectorPriceCodes(codes, data)
+	if len(missing) == 0 {
+		return nil, meta
+	}
+	fallback, _, ok := s.sectorPriceSeriesFromSamples(ctx, missing)
+	if !ok {
+		return nil, meta
+	}
+	merged := make([]foundation.SectorPriceSeries, 0, len(data)+len(fallback))
+	merged = append(merged, data...)
+	merged = append(merged, fallback...)
+	meta.FallbackReason = appendFallbackReason(meta.FallbackReason, fmt.Sprintf("其中 %d 个板块的分时价格已改用本地采样拼接", len(missing)))
+	meta.Source += "+local-samples"
+	meta.Stale = true
+	for index := range merged {
+		merged[index].Meta = meta
+	}
+	return merged, meta
+}
+
+func missingSectorFlowCodes(codes []string, series []foundation.SectorFlowSeries) []string {
+	present := make(map[string]struct{}, len(series))
+	for _, item := range series {
+		present[item.Code] = struct{}{}
+	}
+	missing := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if _, ok := present[code]; !ok {
+			missing = append(missing, code)
+		}
+	}
+	return missing
+}
+
+func missingSectorPriceCodes(codes []string, series []foundation.SectorPriceSeries) []string {
+	present := make(map[string]struct{}, len(series))
+	for _, item := range series {
+		present[item.Code] = struct{}{}
+	}
+	missing := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if _, ok := present[code]; !ok {
+			missing = append(missing, code)
+		}
+	}
+	return missing
+}
+
+func appendFallbackReason(current string, addition string) string {
+	current = strings.TrimSpace(current)
+	addition = strings.TrimSpace(addition)
+	if current == "" {
+		return addition
+	}
+	if addition == "" {
+		return current
+	}
+	return current + "；" + addition
 }
 
 func (s *Server) marketMarginBalanceHandler(w http.ResponseWriter, r *http.Request) {

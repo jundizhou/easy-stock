@@ -27,6 +27,7 @@ func main() {
 	stockResearchDBPath := os.Getenv("A_STOCK_RESEARCH_DB")
 	marketEmotionDBPath := os.Getenv("A_STOCK_MARKET_EMOTION_DB")
 	themeRadarDBPath := os.Getenv("A_STOCK_THEME_RADAR_DB")
+	sectorFlowSampleDBPath := os.Getenv("A_STOCK_SECTOR_FLOW_SAMPLE_DB")
 	settingsPath := os.Getenv("A_STOCK_SETTINGS_PATH")
 	masteryCacheDir := os.Getenv("A_STOCK_MASTERY_CACHE")
 	dataDir := ""
@@ -50,6 +51,9 @@ func main() {
 	}
 	if themeRadarDBPath == "" {
 		themeRadarDBPath = dataPath(dataDir, "theme-radar.db")
+	}
+	if sectorFlowSampleDBPath == "" {
+		sectorFlowSampleDBPath = dataPath(dataDir, "sector-flow-samples.db")
 	}
 	if masteryCacheDir == "" {
 		masteryCacheDir = dataPath(dataDir, "trading-mastery")
@@ -94,20 +98,22 @@ func main() {
 		HermesHome: hermesHome,
 	})
 	server := httpapi.NewServer(httpapi.Config{
-		Token:                os.Getenv("A_STOCK_TOKEN"),
-		ReviewDBPath:         reviewDBPath,
-		PortfolioDBPath:      portfolioDBPath,
-		StockResearchDBPath:  stockResearchDBPath,
-		RemoteDailyReviewURL: os.Getenv("A_STOCK_DAILY_REVIEW_BASE_URL"),
-		MarketEmotionDBPath:  marketEmotionDBPath,
-		ThemeRadarDBPath:     themeRadarDBPath,
-		DuanxianxiaBaseURL:   os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
-		WeChatAPIURL:         os.Getenv("A_STOCK_WECHAT_API_URL"),
-		SettingsPath:         settingsPath,
-		AgentGateway:         agentGateway,
-		MasteryLibrary:       masteryLibrary,
-		Logger:               log.Default(),
-		StrictPersistence:    true,
+		Token:                    os.Getenv("A_STOCK_TOKEN"),
+		ReviewDBPath:             reviewDBPath,
+		PortfolioDBPath:          portfolioDBPath,
+		StockResearchDBPath:      stockResearchDBPath,
+		RemoteDailyReviewURL:     os.Getenv("A_STOCK_DAILY_REVIEW_BASE_URL"),
+		MarketEmotionDBPath:      marketEmotionDBPath,
+		ThemeRadarDBPath:         themeRadarDBPath,
+		SectorFlowSampleDBPath:   sectorFlowSampleDBPath,
+		SectorFlowSampleInterval: sectorFlowSampleInterval(),
+		DuanxianxiaBaseURL:       os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
+		WeChatAPIURL:             os.Getenv("A_STOCK_WECHAT_API_URL"),
+		SettingsPath:             settingsPath,
+		AgentGateway:             agentGateway,
+		MasteryLibrary:           masteryLibrary,
+		Logger:                   log.Default(),
+		StrictPersistence:        true,
 	})
 	if err := server.StartupError(); err != nil {
 		log.Fatalf("persistent data startup failed: %v", err)
@@ -118,6 +124,7 @@ func main() {
 	go server.RunDailySummaryScheduler(ctx)
 	go server.RunRemoteDailyReviewScheduler(ctx)
 	go server.RunMarketEmotionScheduler(ctx)
+	go server.RunSectorFlowSampler(ctx)
 	go server.RunMasteryScheduler(ctx)
 	go server.RunPortfolioScheduler(ctx)
 	httpServer := &http.Server{Addr: addr, Handler: server}
@@ -165,6 +172,22 @@ func dataPath(dataDir, name string) string {
 		return ""
 	}
 	return filepath.Join(dataDir, name)
+}
+
+// sectorFlowSampleInterval 允许通过环境变量调整采样间隔。
+//
+// 默认 3 分钟（与公开同类产品一致）；低于 30 秒的配置会被忽略，
+// 避免误配之后把上游榜单打成突发流量。
+func sectorFlowSampleInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("A_STOCK_SECTOR_FLOW_SAMPLE_INTERVAL"))
+	if raw == "" {
+		return 0
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed < 30*time.Second {
+		return 0
+	}
+	return parsed
 }
 
 func resolveHermesRuntimeRoot() string {

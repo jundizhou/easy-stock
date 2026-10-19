@@ -18,8 +18,8 @@ const (
 	sectorFlowConceptFilter  = "m:90+t:3+f:!50"
 	sectorFlowIndustryFilter = "m:90+t:2+f:!50"
 
-	sectorFlowRankSource     = "eastmoney:bkzj"
-	sectorFlowIntradaySource = "eastmoney:board-intraday-flow"
+	sectorFlowRankSource      = "eastmoney:bkzj"
+	sectorFlowIntradaySource  = "eastmoney:board-intraday-flow"
 	sectorPriceIntradaySource = "eastmoney:board-intraday-trend"
 
 	// 榜单最多返回 600 行，覆盖概念（约 508）与行业（约 496）两个维度。
@@ -639,6 +639,10 @@ func (c *Client) SectorPriceIntraday(ctx context.Context, codes []string) ([]fou
 	if err != nil {
 		return nil, foundation.SourceMeta{}, err
 	}
+	// 上游整片不可用时快速失败：HTTP 层随后改用本地采样，不必每个板块都去撞一遍镜像。
+	if remaining, blocked := c.sectorPriceCooldown.blocked(); blocked {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("板块分时行情上游暂不可用，约 %.0f 秒后自动重试", remaining.Seconds())
+	}
 
 	start := time.Now()
 	meta := foundation.SourceMeta{Source: sectorPriceIntradaySource, FetchedAt: time.Now()}
@@ -692,11 +696,13 @@ func (c *Client) SectorPriceIntraday(ctx context.Context, codes []string) ([]fou
 		skipped = append(skipped, code)
 	}
 	if len(items) == 0 {
+		c.sectorPriceCooldown.recordFailure()
 		if lastErr == nil {
 			lastErr = fmt.Errorf("eastmoney intraday trend returned no series")
 		}
 		return nil, foundation.SourceMeta{}, lastErr
 	}
+	c.sectorPriceCooldown.reset()
 
 	tradeDate := items[0].TradeDate
 	meta.TradeDate = tradeDate
