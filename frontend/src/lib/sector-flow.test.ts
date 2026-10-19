@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SectorFlowRank, SectorFlowSeries, SectorPriceSeries, SourceMeta } from './backend';
 import {
-	MAX_SECTOR_FLOW_SERIES,
 	SECTOR_FLOW_AXIS_GUTTER,
 	SECTOR_FLOW_EMPTY_AXIS_EXTENT,
 	SECTOR_FLOW_SELECTION_STORAGE_KEY,
@@ -13,6 +12,7 @@ import {
 	formatSectorFlowAxis,
 	formatSectorFlowPercent,
 	formatSectorFlowPriceAxis,
+	nearestSectorFlowCurve,
 	readSectorFlowSelection,
 	sectorFlowAxisScale,
 	sectorFlowFundCurves,
@@ -121,16 +121,14 @@ describe('sector flow selection', () => {
 		expect(defaultSectorFlowSelection(ranks)).toEqual(['BK0917', 'BK0490', 'BK1137']);
 	});
 
-	it('adds and removes boards', () => {
+	it('adds and removes boards without a cap', () => {
 		const added = toggleSectorFlowSelection(['BK0917'], 'BK0490');
-		expect(added).toEqual({ selection: ['BK0917', 'BK0490'], limited: false });
-		expect(toggleSectorFlowSelection(added.selection, 'BK0917').selection).toEqual(['BK0490']);
-	});
-
-	it('reports the limit instead of silently dropping a board', () => {
-		const full = Array.from({ length: MAX_SECTOR_FLOW_SERIES }, (_, index) => `BK${String(index).padStart(4, '0')}`);
-		expect(toggleSectorFlowSelection(full, 'BK9999')).toEqual({ selection: full, limited: true });
-		expect(toggleSectorFlowSelection(full, full[0]).selection).toHaveLength(MAX_SECTOR_FLOW_SERIES - 1);
+		expect(added).toEqual(['BK0917', 'BK0490']);
+		expect(toggleSectorFlowSelection(added, 'BK0917')).toEqual(['BK0490']);
+		// 选中数量不设上限：第 13 个、第 40 个板块照样加进去。
+		const many = Array.from({ length: 40 }, (_, index) => `BK${String(index).padStart(4, '0')}`);
+		expect(toggleSectorFlowSelection(many, 'BK9999')).toHaveLength(41);
+		expect(toggleSectorFlowSelection(many, 'BK9999')).toContain('BK9999');
 	});
 });
 
@@ -150,10 +148,12 @@ describe('sector flow formatting', () => {
 		expect(sectorFlowTone(0)).toBe('flat');
 	});
 
-	it('keeps series colors unique within the limit and truncates long names', () => {
-		const colors = Array.from({ length: MAX_SECTOR_FLOW_SERIES }, (_, index) => sectorFlowSeriesColor(index));
-		expect(new Set(colors).size).toBe(MAX_SECTOR_FLOW_SERIES);
-		expect(sectorFlowSeriesColor(MAX_SECTOR_FLOW_SERIES)).toBe(colors[0]);
+	it('keeps series colors distinct beyond the 12-colour palette and truncates long names', () => {
+		const colors = Array.from({ length: 40 }, (_, index) => sectorFlowSeriesColor(index));
+		// 前 12 条用品牌色且互不重复；第 13 条起按色相生成，不再回到第 1 条的颜色。
+		expect(new Set(colors.slice(0, 12)).size).toBe(12);
+		expect(sectorFlowSeriesColor(12)).not.toBe(colors[0]);
+		expect(new Set(colors).size).toBeGreaterThanOrEqual(30);
 		expect(shortSectorFlowName('光通信模块')).toBe('光通信模块');
 		expect(shortSectorFlowName('汽车一体化压铸产业概念')).toBe('汽车一体化压铸产业概…');
 	});
@@ -175,6 +175,21 @@ describe('sector flow formatting', () => {
 		expect(estimateSectorFlowLabelWidth('+3.75%')).toBe(42);
 		// 超长标签最多也只占到 176px，不会把曲线区挤没。
 		expect(sectorFlowLabelGutter(['汽车一体化压铸产业概念 +1,279.23亿'])).toBe(176);
+	});
+
+	it('picks the curve under the pointer for hover highlighting', () => {
+		const curves = [
+			{ code: 'BK0917', name: '半导体概念', trade_date: '2026-10-16', points: [{ time: '09:31', value: 10 }, { time: '09:32', value: 12 }] },
+			{ code: 'BK0490', name: '军工', trade_date: '2026-10-16', points: [{ time: '09:31', value: -10 }] },
+		];
+		// 纵轴换算：数值越大越靠上（y 越小）。
+		const positionY = (value: number) => 100 - value * 2;
+		expect(nearestSectorFlowCurve(curves, '09:31', 82, positionY)).toBe('BK0917');
+		expect(nearestSectorFlowCurve(curves, '09:31', 118, positionY)).toBe('BK0490');
+		// 离所有曲线都超过 16px 的空白处不高亮。
+		expect(nearestSectorFlowCurve(curves, '09:31', 100, positionY)).toBeNull();
+		// 该分钟没有数据的曲线不参与命中（军工缺 09:32）。
+		expect(nearestSectorFlowCurve(curves, '09:32', 118, positionY)).toBeNull();
 	});
 
 	it('gives the empty frame a labelled placeholder axis', () => {
@@ -261,14 +276,14 @@ describe('sector flow curves', () => {
 });
 
 describe('sector flow selection persistence', () => {
-	it('reads valid entries, drops junk and caps the list', () => {
+	it('reads valid entries, drops junk and keeps the whole list', () => {
 		const storage = { getItem: (key: string) => (key === `${SECTOR_FLOW_SELECTION_STORAGE_KEY}.concept` ? JSON.stringify(['BK0917', 42, '', 'BK0490']) : null) };
 		expect(readSectorFlowSelection(storage, 'concept')).toEqual(['BK0917', 'BK0490']);
 		expect(readSectorFlowSelection({ getItem: () => '{not json' }, 'concept')).toBeNull();
 		expect(readSectorFlowSelection({ getItem: () => '{"a":1}' }, 'concept')).toBeNull();
 		expect(readSectorFlowSelection(null, 'concept')).toBeNull();
 		const many = { getItem: () => JSON.stringify(Array.from({ length: 40 }, (_, index) => `BK${index}`)) };
-		expect(readSectorFlowSelection(many, 'concept')).toHaveLength(MAX_SECTOR_FLOW_SERIES);
+		expect(readSectorFlowSelection(many, 'concept')).toHaveLength(40);
 	});
 
 	it('writes selections and tolerates unavailable storage', () => {

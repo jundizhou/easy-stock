@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SectorFlowSeries, SectorPriceSeries } from '../lib/backend';
-import { SECTOR_FLOW_AXIS_GUTTER, SECTOR_PRICE_EMPTY_AXIS_EXTENT, formatSectorFlowPercent, formatSectorFlowPriceAxis, sectorFlowFundCurves, sectorFlowPriceCurves } from '../lib/sector-flow';
+import { SECTOR_FLOW_AXIS_GUTTER, SECTOR_PRICE_EMPTY_AXIS_EXTENT, formatSectorFlowPercent, formatSectorFlowPriceAxis, sectorFlowAxisGutter, sectorFlowFundCurves, sectorFlowPriceCurves } from '../lib/sector-flow';
 import { SectorFlowChart, SectorFlowWorkspace } from './SectorFlowWorkspace';
 
 function series(code: string, name: string, values: number[]): SectorFlowSeries {
@@ -48,7 +48,10 @@ describe('SectorFlowWorkspace', () => {
 		expect(markup).toContain('aria-pressed="true">资金曲线');
 		expect(markup).toContain('价格分时');
 		expect(markup).toContain('aria-label="资金曲线"');
-		expect(markup).toContain('INTRADAY NET INFLOW');
+		// 面板标题只留中文：英文角标与曲线图例都已收掉，移除曲线改由左侧榜单行完成。
+		expect(markup).not.toContain('INTRADAY NET INFLOW');
+		expect(markup).not.toContain('SECTOR RANKING');
+		expect(markup).not.toContain('sector-flow-legend');
 		// 单位随口径变化：默认是资金曲线的亿元。
 		expect(markup).toContain('单位：亿元');
 		expect(markup).toContain('净流入占比');
@@ -56,7 +59,9 @@ describe('SectorFlowWorkspace', () => {
 		// 概览卡片一行四个：榜首板块 / 净流入板块 / 净流出板块 / 合计净流入。
 		expect(markup).toContain('榜首板块');
 		expect(markup).toContain('净流出板块');
-		expect(markup).toContain('已选 0/12');
+		// 标题下只删掉「点击板块」四个字，保留操作提示；已选计数不再重复显示。
+		expect(markup).not.toContain('点击板块关注资金曲线流入流出');
+		expect(markup).not.toContain('已选 0');
 		expect(markup).toContain('等待数据来源');
 		// 资金口径滑动按钮：当日/5日/10日三档，默认选中当日。
 		expect(markup).toContain('aria-label="资金口径"');
@@ -65,9 +70,16 @@ describe('SectorFlowWorkspace', () => {
 		// 板块维度同样是滑动按钮：选中档带白色滑块，两个分段控件外观一致。
 		expect(markup).toContain('aria-label="板块维度"');
 		expect(markup).toContain('sector-flow-tabs-thumb');
-		// 口径切换排在搜索框前面，搜索框之后才是「已选中」与右侧操作。
+		// 口径切换排在搜索框前面；曲线区头部只留「清空曲线」与曲线口径切换。
 		expect(markup.indexOf('aria-label="资金口径"')).toBeLessThan(markup.indexOf('sector-flow-search'));
-		expect(markup.indexOf('sector-flow-search')).toBeLessThan(markup.indexOf('已选中'));
+		const chartHead = markup.slice(markup.indexOf('sector-flow-chart-head'), markup.indexOf('sector-flow-chart-body'));
+		expect(chartHead.indexOf('清空曲线')).toBeGreaterThan(-1);
+		expect(chartHead.indexOf('清空曲线')).toBeLessThan(chartHead.indexOf('aria-label="曲线口径"'));
+		// 「已选中」筛选从曲线区头部移到榜单右上角（清空曲线留在原处）。
+		expect(chartHead).not.toContain('已选中');
+		const rankHead = markup.slice(markup.indexOf('sector-flow-ranking'), markup.indexOf('sector-flow-table'));
+		expect(rankHead).toContain('sector-flow-rank-flag');
+		expect(rankHead).not.toContain('sector-flow-head-pill');
 		// 表头点击可在净流入榜/净流出榜之间切换方向，当前排序列带方向箭头。
 		expect(markup).toContain('aria-sort="descending"');
 		expect(markup).toContain('sector-flow-sort-arrow');
@@ -103,6 +115,17 @@ describe('SectorFlowChart', () => {
 		expect(railSpan(markup)).toBeLessThan(980 - SECTOR_FLOW_AXIS_GUTTER * 2);
 	});
 
+	it('lets one curve take the focus and fades the rest', () => {
+		const markup = renderToStaticMarkup(<SectorFlowChart curves={curves} hoverIndex={null} onHover={() => {}} focusCode="BK0917" onFocus={() => {}} />);
+		// 选中的曲线与末端标签加 focused，其余曲线、圆点、标签一起变浅（dim）。
+		expect(markup).toContain('series-group focused');
+		expect(markup).toContain('series-group dim');
+		expect(markup).toContain('series-label-group focused');
+		expect(markup).toContain('series-label-group dim');
+		// 能点选时每条曲线补一条加粗的透明命中线。
+		expect((markup.match(/class="series-hit"/g) || [])).toHaveLength(2);
+	});
+
 	it('keeps the whole session on the axis and pins the end labels to the data end', () => {
 		// 数据只画到 09:35：坐标轴照样到收盘，十字线与末端标签挂在数据末端，不是钉在绘图区右缘。
 		const early: Array<{ code: string; name: string; trade_date: string; points: Array<{ time: string; value: number }> }> = [
@@ -133,8 +156,11 @@ describe('SectorFlowChart', () => {
 		for (const label of ['-40亿', '-20亿', '0亿', '20亿', '40亿']) {
 			expect(markup).toContain(`>${label}</text>`);
 		}
-		// 没有曲线时右侧不留标签区，左右留白等宽，坐标轴在面板里居中。
-		expect(railSpan(markup)).toBe(980 - SECTOR_FLOW_AXIS_GUTTER * 2);
+		// 没有曲线时右侧不留标签区，左右留白等宽，坐标轴在面板里居中；
+		// 留白按刻度文字实际宽度收窄（-40亿 这类短刻度不再固定占 76px）。
+		const emptyGutter = sectorFlowAxisGutter(['-40亿', '-20亿', '0亿', '20亿', '40亿']);
+		expect(emptyGutter).toBeLessThan(SECTOR_FLOW_AXIS_GUTTER);
+		expect(railSpan(markup)).toBe(980 - emptyGutter * 2);
 		// 没有数据不画静态十字线，也不出末端标签。
 		expect(markup).not.toContain('hover-line');
 		expect(markup).not.toContain('series-label');
