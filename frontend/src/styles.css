@@ -554,23 +554,6 @@ a:focus-visible {
 	padding: 20px;
 }
 
-/* 满高工作台页面（资金流向）：把高度钉在视口上，页面本身不滚动，榜单与曲线在面板内部滚动，
-   桌面端固定窗口下不会在底部留出大块空白；窗口过矮（低于工作台最小高度）时由 .app-shell 自己滚动。
-   注意：这里必须是确定高度（height），只写 min-height 会让工作台被内容撑高，面板里的滚动容器也就永远不滚。 */
-.app-shell-fill {
-	display: flex;
-	flex-direction: column;
-	height: 100vh;
-	overflow-y: auto;
-	overscroll-behavior: contain;
-}
-
-/* 不在这里写 min-height: 0：那会盖掉工作台自己的 560px 下限。
-   弹性收缩自然停在 560px，窗口再矮就由上面那条 overflow-y 兜住。 */
-.app-shell-fill > .sector-flow-workspace {
-	flex: 1 1 auto;
-}
-
 .token-usage-workspace {
 	display: grid;
 	align-content: start;

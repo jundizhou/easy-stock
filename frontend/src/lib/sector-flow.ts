@@ -118,6 +118,14 @@ export function visibleSectorFlowRanks(
 	});
 }
 
+/** 默认对比当日净流入、净流出最多的各 3 个板块；某一侧不足 3 个时按实际数量返回。 */
+export function defaultSectorFlowSelection(ranks: SectorFlowRank[]): string[] {
+	const available = ranks.filter((item) => Number.isFinite(item.main_net_inflow));
+	const inflow = visibleSectorFlowRanks(available.filter((item) => item.main_net_inflow > 0)).slice(0, 3);
+	const outflow = visibleSectorFlowRanks(available.filter((item) => item.main_net_inflow < 0), { direction: 'asc' }).slice(0, 3);
+	return [...inflow, ...outflow].map((item) => item.code);
+}
+
 /**
  * 切换某个板块的分时曲线。达到上限时保持原样并通过 limited 告知调用方，
  * 由界面提示用户先移除一个板块。
@@ -251,23 +259,24 @@ export function sectorFlowAxisScale(min: number, max: number, steps = 4): { min:
 	return { min: start, max: end, ticks };
 }
 
-export function readSectorFlowSelection(storage: Pick<Storage, 'getItem'> | null | undefined, max: number = MAX_SECTOR_FLOW_SERIES): string[] {
-	if (!storage) return [];
+// 概念与行业分别保存；null 表示尚未选择，[] 表示用户主动清空，不应重新填入默认项。
+export function readSectorFlowSelection(storage: Pick<Storage, 'getItem'> | null | undefined, dimension: SectorFlowDimension, max: number = MAX_SECTOR_FLOW_SERIES): string[] | null {
+	if (!storage) return null;
 	try {
-		const raw = storage.getItem(SECTOR_FLOW_SELECTION_STORAGE_KEY);
-		if (!raw) return [];
+		const raw = storage.getItem(`${SECTOR_FLOW_SELECTION_STORAGE_KEY}.${dimension}`);
+		if (!raw) return null;
 		const parsed: unknown = JSON.parse(raw);
-		if (!Array.isArray(parsed)) return [];
+		if (!Array.isArray(parsed)) return null;
 		return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, max);
 	} catch {
-		return [];
+		return null;
 	}
 }
 
-export function writeSectorFlowSelection(storage: Pick<Storage, 'setItem'> | null | undefined, selection: string[]): void {
+export function writeSectorFlowSelection(storage: Pick<Storage, 'setItem'> | null | undefined, dimension: SectorFlowDimension, selection: string[]): void {
 	if (!storage) return;
 	try {
-		storage.setItem(SECTOR_FLOW_SELECTION_STORAGE_KEY, JSON.stringify(selection));
+		storage.setItem(`${SECTOR_FLOW_SELECTION_STORAGE_KEY}.${dimension}`, JSON.stringify(selection));
 	} catch {
 		// 隐私模式下 localStorage 可能不可写，选中状态保留在内存即可。
 	}

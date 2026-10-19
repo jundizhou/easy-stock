@@ -7,6 +7,7 @@ import {
 	SECTOR_FLOW_SELECTION_STORAGE_KEY,
 	SECTOR_PRICE_EMPTY_AXIS_EXTENT,
 	buildSectorFlowPrompt,
+	defaultSectorFlowSelection,
 	estimateSectorFlowLabelWidth,
 	formatSectorFlowAmount,
 	formatSectorFlowAxis,
@@ -99,6 +100,27 @@ describe('sector flow ranking', () => {
 });
 
 describe('sector flow selection', () => {
+	it('defaults to the three largest inflows and outflows regardless of input order', () => {
+		const items = [0, -20, 10, -40, 40, -10, 30, -30, 20, Number.NaN].map((value, index) => rank({
+			code: `BK${index}`, name: `板块${index}`, main_net_inflow: value,
+			// 默认曲线始终按当日资金选择，不受涨幅、多日资金排名影响。
+			change_percent: -value, five_day_main_net_inflow: -value,
+		}));
+		expect(defaultSectorFlowSelection(items)).toEqual(['BK4', 'BK6', 'BK8', 'BK3', 'BK7', 'BK1']);
+		expect(items[0].main_net_inflow).toBe(0);
+	});
+
+	it('uses only available inflows and outflows without filling with zero or opposite-side boards', () => {
+		expect(defaultSectorFlowSelection([])).toEqual([]);
+		expect(defaultSectorFlowSelection([
+			rank({ code: 'BK0003', name: '零值' }),
+			rank({ code: 'BK0002', name: '乙', main_net_inflow: 100 }),
+			rank({ code: 'BK0001', name: '甲', main_net_inflow: 100 }),
+			rank({ code: 'BK0004', name: '流出', main_net_inflow: -200 }),
+		])).toEqual(['BK0001', 'BK0002', 'BK0004']);
+		expect(defaultSectorFlowSelection(ranks)).toEqual(['BK0917', 'BK0490', 'BK1137']);
+	});
+
 	it('adds and removes boards', () => {
 		const added = toggleSectorFlowSelection(['BK0917'], 'BK0490');
 		expect(added).toEqual({ selection: ['BK0917', 'BK0490'], limited: false });
@@ -240,21 +262,34 @@ describe('sector flow curves', () => {
 
 describe('sector flow selection persistence', () => {
 	it('reads valid entries, drops junk and caps the list', () => {
-		const storage = { getItem: (key: string) => (key === SECTOR_FLOW_SELECTION_STORAGE_KEY ? JSON.stringify(['BK0917', 42, '', 'BK0490']) : null) };
-		expect(readSectorFlowSelection(storage)).toEqual(['BK0917', 'BK0490']);
-		expect(readSectorFlowSelection({ getItem: () => '{not json' })).toEqual([]);
-		expect(readSectorFlowSelection({ getItem: () => '{"a":1}' })).toEqual([]);
-		expect(readSectorFlowSelection(null)).toEqual([]);
+		const storage = { getItem: (key: string) => (key === `${SECTOR_FLOW_SELECTION_STORAGE_KEY}.concept` ? JSON.stringify(['BK0917', 42, '', 'BK0490']) : null) };
+		expect(readSectorFlowSelection(storage, 'concept')).toEqual(['BK0917', 'BK0490']);
+		expect(readSectorFlowSelection({ getItem: () => '{not json' }, 'concept')).toBeNull();
+		expect(readSectorFlowSelection({ getItem: () => '{"a":1}' }, 'concept')).toBeNull();
+		expect(readSectorFlowSelection(null, 'concept')).toBeNull();
 		const many = { getItem: () => JSON.stringify(Array.from({ length: 40 }, (_, index) => `BK${index}`)) };
-		expect(readSectorFlowSelection(many)).toHaveLength(MAX_SECTOR_FLOW_SERIES);
+		expect(readSectorFlowSelection(many, 'concept')).toHaveLength(MAX_SECTOR_FLOW_SERIES);
 	});
 
 	it('writes selections and tolerates unavailable storage', () => {
 		const writes: Array<[string, string]> = [];
-		writeSectorFlowSelection({ setItem: (key: string, value: string) => writes.push([key, value]) }, ['BK0917']);
-		expect(writes).toEqual([[SECTOR_FLOW_SELECTION_STORAGE_KEY, '["BK0917"]']]);
-		expect(() => writeSectorFlowSelection({ setItem: () => { throw new Error('quota'); } }, ['BK0917'])).not.toThrow();
-		expect(() => writeSectorFlowSelection(null, ['BK0917'])).not.toThrow();
+		writeSectorFlowSelection({ setItem: (key: string, value: string) => writes.push([key, value]) }, 'concept', ['BK0917']);
+		expect(writes).toEqual([[`${SECTOR_FLOW_SELECTION_STORAGE_KEY}.concept`, '["BK0917"]']]);
+		expect(() => writeSectorFlowSelection({ setItem: () => { throw new Error('quota'); } }, 'concept', ['BK0917'])).not.toThrow();
+		expect(() => writeSectorFlowSelection(null, 'concept', ['BK0917'])).not.toThrow();
+	});
+
+	it('keeps concept and industry independent and distinguishes manual clearing from first use', () => {
+		const values = new Map<string, string>([[SECTOR_FLOW_SELECTION_STORAGE_KEY, '["BK0917"]']]);
+		const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+		// 旧版共用列表没有维度信息，不能作为任何维度的手动选择。
+		expect(readSectorFlowSelection(storage, 'concept')).toBeNull();
+		expect(readSectorFlowSelection(storage, 'industry')).toBeNull();
+		writeSectorFlowSelection(storage, 'concept', ['BK0917']);
+		writeSectorFlowSelection(storage, 'industry', ['BK0475']);
+		writeSectorFlowSelection(storage, 'concept', []);
+		expect(readSectorFlowSelection(storage, 'concept')).toEqual([]);
+		expect(readSectorFlowSelection(storage, 'industry')).toEqual(['BK0475']);
 	});
 });
 

@@ -19,6 +19,7 @@ import { formatFuturesOpeningHands } from './futures-position';
 export type MarketOverviewView =
 	| 'pulse'
 	| 'core-indexes'
+	| 'sector-flow'
 	| 'industry-momentum'
 	| 'industry-flow'
 	| 'theme-flow'
@@ -56,6 +57,7 @@ export const marketOverviewGroups: MarketOverviewGroup[] = [
 		id: 'flow',
 		name: '资金结构',
 		modules: [
+			{ id: 'sector-flow', name: '资金流向', description: '概念与行业资金排名、分时曲线', status: 'ready' },
 			{ id: 'industry-momentum', name: '行业趋势强度', description: '行业多周期趋势强弱与领涨结构', status: 'ready' },
 			{ id: 'industry-flow', name: '行业资金', description: '行业资金净流入与持续性', status: 'ready' },
 			{ id: 'theme-flow', name: '题材概念', description: '题材概念资金强度与领涨结构', status: 'ready' },
@@ -79,6 +81,7 @@ export const marketOverviewGroups: MarketOverviewGroup[] = [
 export const defaultMarketOverviewView: MarketOverviewView = 'pulse';
 
 export function resolveMarketOverviewView(hash: string): MarketOverviewView {
+	if (/^#sector-flow(?:[?&]|$)/.test(hash)) return 'sector-flow';
 	const candidate = hash.replace(/^#market\/?/, '').split(/[?&]/)[0] as MarketOverviewView;
 	return marketOverviewGroups.some((group) => group.modules.some((module) => module.id === candidate))
 		? candidate

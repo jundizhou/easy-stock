@@ -11,6 +11,7 @@ import {
 	SECTOR_FLOW_PERIODS,
 	SECTOR_PRICE_EMPTY_AXIS_EXTENT,
 	buildSectorFlowPrompt,
+	defaultSectorFlowSelection,
 	estimateSectorFlowLabelWidth,
 	formatSectorFlowAmount,
 	formatSectorFlowAxis,
@@ -65,7 +66,11 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 	const [chartMode, setChartMode] = useState<SectorFlowChartMode>('fund');
 	// 曲线失败时的就地重试：上游是按时间窗放行的，等一会儿再点比重启页面方便。
 	const [retryKey, setRetryKey] = useState(0);
-	const [selection, setSelection] = useState<string[]>(() => readSectorFlowSelection(typeof window === 'undefined' ? null : window.localStorage));
+	const [selectionByDimension, setSelectionByDimension] = useState<Record<SectorFlowDimension, string[] | null>>(() => {
+		const storage = typeof window === 'undefined' ? null : window.localStorage;
+		return { concept: readSectorFlowSelection(storage, 'concept'), industry: readSectorFlowSelection(storage, 'industry') };
+	});
+	const selection = useMemo(() => selectionByDimension[dimension] ?? [], [selectionByDimension, dimension]);
 	const [seriesByCode, setSeriesByCode] = useState<Record<string, SectorFlowSeries>>({});
 	const [seriesState, setSeriesState] = useState<LoadState>('idle');
 	const [seriesError, setSeriesError] = useState('');
@@ -81,9 +86,21 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 	const [priceNotice, setPriceNotice] = useState('');
 	const [priceHoverIndex, setPriceHoverIndex] = useState<number | null>(null);
 
-	useEffect(() => {
-		writeSectorFlowSelection(typeof window === 'undefined' ? null : window.localStorage, selection);
-	}, [selection]);
+	// 只持久化手动选择；未调整过的默认项在下次打开页面时从最新榜单重新选取。
+	const setSelection = useCallback((next: string[]) => {
+		setSelectionByDimension((current) => ({ ...current, [dimension]: next }));
+		writeSectorFlowSelection(typeof window === 'undefined' ? null : window.localStorage, dimension, next);
+	}, [dimension]);
+
+	const selectDimension = useCallback((next: SectorFlowDimension) => {
+		if (next === dimension) return;
+		setDimension(next);
+		setRanks([]);
+		setMeta(null);
+		setHoverIndex(null);
+		setPriceHoverIndex(null);
+		setFocusCode(null);
+	}, [dimension]);
 
 	useEffect(() => {
 		if (!config) return;
@@ -93,7 +110,13 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 		requestJSON<{ data: SectorFlowRank[]; meta: SourceMeta }>(config, `/api/v1/market/sector-flows?dimension=${dimension}&limit=${RANK_LIMIT}`)
 			.then((payload) => {
 				if (cancelled) return;
-				setRanks(payload.data || []);
+				const nextRanks = payload.data || [];
+				setRanks(nextRanks);
+				if (nextRanks.length) {
+					setSelectionByDimension((current) => current[dimension] !== null
+						? current
+						: { ...current, [dimension]: defaultSectorFlowSelection(nextRanks) });
+				}
 				setMeta(payload.meta);
 				setState('ready');
 			})
@@ -187,7 +210,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 		}
 		setSeriesNotice('');
 		setSelection(next.selection);
-	}, [selection]);
+	}, [selection, setSelection]);
 
 	const visibleRanks = useMemo(
 		() => visibleSectorFlowRanks(ranks, { query, selectedOnly, selection, sortKey, direction: sortDirection, period }),
@@ -306,7 +329,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 				<div className="sector-flow-tabs" role="group" aria-label="板块维度">
 					<i className="sector-flow-tabs-thumb" style={{ transform: `translateX(${dimensionIndex * 100}%)` }} aria-hidden="true" />
 					{SECTOR_FLOW_DIMENSIONS.map((item) => (
-						<button key={item.id} type="button" className={dimension === item.id ? 'active' : ''} onClick={() => setDimension(item.id)} title={item.hint} aria-pressed={dimension === item.id}>{item.label}</button>
+						<button key={item.id} type="button" className={dimension === item.id ? 'active' : ''} onClick={() => selectDimension(item.id)} title={item.hint} aria-pressed={dimension === item.id}>{item.label}</button>
 					))}
 				</div>
 				<div className="sector-flow-tabs sector-flow-periods" role="group" aria-label="资金口径">
