@@ -144,6 +144,13 @@ type MarketOverviewProvider interface {
 	MarketReports(ctx context.Context, kind string, query string, symbol string, industry string, limit int) ([]foundation.MarketResearchItem, foundation.SourceMeta, error)
 }
 
+// SectorFlowProvider 是行情总览之上的可选举能力：板块（概念/行业）资金流榜单、分时资金与分时价格序列。
+type SectorFlowProvider interface {
+	SectorFlowRanking(ctx context.Context, dimension string, limit int) ([]foundation.SectorFlowRank, foundation.SourceMeta, error)
+	SectorFlowIntraday(ctx context.Context, codes []string) ([]foundation.SectorFlowSeries, foundation.SourceMeta, error)
+	SectorPriceIntraday(ctx context.Context, codes []string) ([]foundation.SectorPriceSeries, foundation.SourceMeta, error)
+}
+
 type InflectionEvaluator interface {
 	Evaluate(request inflection.EvaluationRequest) (inflection.Evaluation, error)
 }

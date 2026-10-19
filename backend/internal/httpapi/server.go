@@ -105,6 +105,22 @@ type Server struct {
 	tokenUsage               *tokenUsageStore
 }
 
+// eastMoneyDesktopOptions 接入桌面端提供的东财能力：浏览器会话（nid18）与 push2 转发桥。
+//
+// 分时资金流（push2 fflow/kline）有会话门禁；此外 push2 整条报价链路会按客户端
+// 指纹拦截非浏览器请求（Go 直接被断连），所以桌面端把请求交给 Chromium 代发。
+// 网页版两项都拿不到，保持直连 + 无会话的降级行为。
+func eastMoneyDesktopOptions() []eastmoney.Option {
+	var options []eastmoney.Option
+	if provider := eastmoney.NewBrowserSessionProviderFromEnv(); provider != nil {
+		options = append(options, eastmoney.WithSessionProvider(provider))
+	}
+	if proxy := eastmoney.NewPush2ProxyFromEnv(); proxy != nil {
+		options = append(options, eastmoney.WithPush2Proxy(proxy))
+	}
+	return options
+}
+
 func NewServer(config any) *Server {
 	cfg := normalizeConfig(config)
 	tokenUsage := newTokenUsageStore(cfg.SettingsPath)
@@ -113,7 +129,7 @@ func NewServer(config any) *Server {
 	}
 	var startupErrors []error
 	sinaClient := sina.NewClient()
-	eastMoneyClient := eastmoney.NewClient()
+	eastMoneyClient := eastmoney.NewClient(eastMoneyDesktopOptions()...)
 	tencentClient := tencent.NewClient()
 	if cfg.ETF == nil {
 		cfg.ETF = fund.NewClient()
@@ -607,6 +623,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/index-series", s.marketIndexSeriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/industries", s.marketIndustriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/flows", s.marketFlowsHandler)
+	s.mux.HandleFunc("GET /api/v1/market/sector-flows", s.marketSectorFlowsHandler)
+	s.mux.HandleFunc("GET /api/v1/market/sector-flow-intraday", s.marketSectorFlowIntradayHandler)
+	s.mux.HandleFunc("GET /api/v1/market/sector-price-intraday", s.marketSectorPriceIntradayHandler)
 	s.mux.HandleFunc("GET /api/v1/market/margin-balance", s.marketMarginBalanceHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard", s.marketBillboardHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard/detail", s.marketBillboardDetailHandler)

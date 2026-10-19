@@ -18,6 +18,8 @@ const {
   statePathForProfile,
   writeStorageState,
 } = require('./browser-auth.cjs');
+const { createEastmoneyPush2Bridge } = require('./eastmoney-push2-bridge.cjs');
+const { createEastmoneySessionBridge } = require('./eastmoney-session-bridge.cjs');
 const { createTaogubaBrowserBridge } = require('./taoguba-browser-bridge.cjs');
 const { createXueqiuBrowserBridge } = require('./xueqiu-browser-bridge.cjs');
 const {
@@ -71,6 +73,10 @@ let xueqiuBrowserBridge;
 let xueqiuBrowserBridgeConfig;
 let taogubaBrowserBridge;
 let taogubaBrowserBridgeConfig;
+let eastmoneySessionBridge;
+let eastmoneySessionBridgeConfig;
+let eastmoneyPush2Bridge;
+let eastmoneyPush2BridgeConfig;
 let wechatServiceProcess;
 let wechatServiceConfig;
 let wechatServiceError = '';
@@ -169,6 +175,8 @@ async function createWindow() {
   await Promise.all([
     bootXueqiuBrowserBridge(),
     bootTaogubaBrowserBridge(),
+    bootEastmoneySessionBridge(),
+    bootEastmoneyPush2Bridge(),
     bootWechatService().catch((error) => {
       wechatServiceError = error.message || String(error);
 			desktopLogger.event('error', 'wechat-service', 'startup failed', error);
@@ -295,6 +303,8 @@ async function stopRuntime() {
   await Promise.all([
     xueqiuBrowserBridge?.close(),
     taogubaBrowserBridge?.close(),
+    eastmoneySessionBridge?.close(),
+    eastmoneyPush2Bridge?.close(),
     terminateChild(backendProcess),
     terminateChild(wechatServiceProcess),
   ].filter(Boolean));
@@ -302,6 +312,10 @@ async function stopRuntime() {
   xueqiuBrowserBridgeConfig = undefined;
   taogubaBrowserBridge = undefined;
   taogubaBrowserBridgeConfig = undefined;
+  eastmoneySessionBridge = undefined;
+  eastmoneySessionBridgeConfig = undefined;
+  eastmoneyPush2Bridge = undefined;
+  eastmoneyPush2BridgeConfig = undefined;
   backendProcess = undefined;
   backendConfig = undefined;
   wechatServiceProcess = undefined;
@@ -385,6 +399,14 @@ function buildRuntimeEnv(resourcesRoot) {
       A_STOCK_TAOGUBA_BROWSER_BRIDGE_URL: taogubaBrowserBridgeConfig.baseURL,
       A_STOCK_TAOGUBA_BROWSER_BRIDGE_TOKEN: taogubaBrowserBridgeConfig.token,
     } : {}),
+    ...(eastmoneySessionBridgeConfig ? {
+      A_STOCK_EASTMONEY_SESSION_BRIDGE_URL: eastmoneySessionBridgeConfig.baseURL,
+      A_STOCK_EASTMONEY_SESSION_BRIDGE_TOKEN: eastmoneySessionBridgeConfig.token,
+    } : {}),
+    ...(eastmoneyPush2BridgeConfig ? {
+      A_STOCK_EASTMONEY_PUSH2_BRIDGE_URL: eastmoneyPush2BridgeConfig.baseURL,
+      A_STOCK_EASTMONEY_PUSH2_BRIDGE_TOKEN: eastmoneyPush2BridgeConfig.token,
+    } : {}),
     ...(wechatServiceConfig ? { A_STOCK_WECHAT_API_URL: wechatServiceConfig.baseURL } : {}),
     A_STOCK_AGENT_BROWSER_WRAPPER_DIR: browserWrapperDir,
     A_STOCK_AGENT_BROWSER_REAL: browserReal,
@@ -412,6 +434,30 @@ async function bootTaogubaBrowserBridge() {
   });
   taogubaBrowserBridgeConfig = await taogubaBrowserBridge.start();
   return taogubaBrowserBridgeConfig;
+}
+
+async function bootEastmoneySessionBridge() {
+  if (eastmoneySessionBridgeConfig) return eastmoneySessionBridgeConfig;
+  eastmoneySessionBridge = createEastmoneySessionBridge({
+    BrowserWindow,
+    logger: featureLogger('eastmoney-session-bridge'),
+  });
+  eastmoneySessionBridgeConfig = await eastmoneySessionBridge.start();
+  return eastmoneySessionBridgeConfig;
+}
+
+// bootEastmoneyPush2Bridge 让后端把 push2 报价请求转给 Chromium 网络栈。
+//
+// push2 对非浏览器客户端有指纹门禁（Go 直接被断连），这里复用默认 session：
+// 会话桥接取得的 nid18 就在同一份 Cookie 里，net 请求会自动带上。
+async function bootEastmoneyPush2Bridge() {
+  if (eastmoneyPush2BridgeConfig) return eastmoneyPush2BridgeConfig;
+  eastmoneyPush2Bridge = createEastmoneyPush2Bridge({
+    session: session.defaultSession,
+    logger: featureLogger('eastmoney-push2-bridge'),
+  });
+  eastmoneyPush2BridgeConfig = await eastmoneyPush2Bridge.start();
+  return eastmoneyPush2BridgeConfig;
 }
 
 function agentBrowserBinaryName() {
@@ -689,6 +735,8 @@ app.on('before-quit', () => {
   clearInterval(updateCheckTimer);
   if (xueqiuBrowserBridge) void xueqiuBrowserBridge.close();
   if (taogubaBrowserBridge) void taogubaBrowserBridge.close();
+  if (eastmoneySessionBridge) void eastmoneySessionBridge.close();
+  if (eastmoneyPush2Bridge) void eastmoneyPush2Bridge.close();
   if (backendProcess && !backendProcess.killed) killChildTree(backendProcess);
   if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
 });

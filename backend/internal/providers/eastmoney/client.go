@@ -31,15 +31,29 @@ type Client struct {
 	httpClient          *http.Client
 	// fallbackHTTPClient 与 httpClient 的区别只有地址族（强制 IPv4），
 	// 用于首个地址族被对端重置时换一条路重试。
-	fallbackHTTPClient  *http.Client
-	poolMu              sync.Mutex
-	limitUpDays         map[string]*limitUpDayFlight
-	catalogCacheMu      sync.RWMutex
-	catalogMu           sync.Mutex
-	catalog             []foundation.StockCatalogEntry
-	catalogUntil        time.Time
-	thsBillboardMu      sync.Mutex
-	thsBillboardPages   map[string]thsBillboardPage
+	fallbackHTTPClient *http.Client
+	poolMu             sync.Mutex
+	limitUpDays        map[string]*limitUpDayFlight
+	catalogCacheMu     sync.RWMutex
+	catalogMu          sync.Mutex
+	catalog            []foundation.StockCatalogEntry
+	catalogUntil       time.Time
+	thsBillboardMu     sync.Mutex
+	thsBillboardPages  map[string]thsBillboardPage
+	// sectorFlowCooldown 记录板块分时资金流连续失败，用于短暂熔断（零值可用）。
+	sectorFlowCooldown sectorFlowCooldown
+	// sectorFlowSessionRefresh 限制“让桌面端重新加载东财页面换会话”的频率（零值可用）。
+	sectorFlowSessionRefresh sectorFlowSessionRefresh
+	// sessionProvider 提供带门禁的接口所需的浏览器会话（桌面端转交），可为 nil。
+	sessionProvider SessionProvider
+	// push2Proxy 让 push2 报价请求经桌面端 Chromium 网络栈转发，可为 nil。
+	push2Proxy *Push2Proxy
+	// sectorFlowIntradayBoards 按板块缓存当日分时序列（逐板块命中，降低上游请求量）。
+	sectorFlowIntradayMu     sync.Mutex
+	sectorFlowIntradayBoards map[string]sectorFlowIntradayEntry
+	// sectorPriceIntradayBoards 按板块缓存当日分时价格序列（trends2，缓存窗口更短）。
+	sectorPriceIntradayMu     sync.Mutex
+	sectorPriceIntradayBoards map[string]sectorPriceIntradayEntry
 }
 
 type Option func(*Client)
@@ -125,6 +139,25 @@ func WithHTTPClient(httpClient *http.Client) Option {
 	}
 }
 
+// WithSessionProvider 注入浏览器会话来源（桌面端桥接）。未注入时，需要会话的接口
+// 按无 Cookie 请求上游，维持原有的降级行为。
+func WithSessionProvider(provider SessionProvider) Option {
+	return func(c *Client) {
+		if provider != nil {
+			c.sessionProvider = provider
+		}
+	}
+}
+
+// WithPush2Proxy 注入桌面端的 push2 转发桥。未注入时（网页版、命令行）直连上游。
+func WithPush2Proxy(proxy *Push2Proxy) Option {
+	return func(c *Client) {
+		if proxy != nil {
+			c.push2Proxy = proxy
+		}
+	}
+}
+
 // newHTTPClient 返回东财请求使用的客户端，地址族跟随系统选择。
 //
 // 这里以前强制走 IPv4（因为某些网络到 np-cnotice-stock.eastmoney.com 的 IPv6 入口会被对端重置）。
@@ -167,7 +200,7 @@ func NewClient(opts ...Option) *Client {
 	c := &Client{
 		baseURL:             "https://push2his.eastmoney.com",
 		quoteBaseURL:        "https://push2.eastmoney.com",
-		quoteFallbackURLs:   []string{"https://82.push2.eastmoney.com", "https://90.push2.eastmoney.com"},
+		quoteFallbackURLs:   []string{"https://push2delay.eastmoney.com", "https://82.push2.eastmoney.com", "https://90.push2.eastmoney.com"},
 		dataBaseURL:         "https://data.eastmoney.com",
 		topicBaseURL:        "https://push2ex.eastmoney.com",
 		datacenterBaseURL:   "https://datacenter-web.eastmoney.com",
@@ -283,13 +316,64 @@ func (c *Client) getJSON(ctx context.Context, requestURL string, target any) err
 	return c.getJSONWithClient(ctx, c.httpClient, requestURL, target)
 }
 
+// getJSONWithHeaders 与 getJSON 相同，但允许按请求追加请求头（例如东财会话 Cookie）。
+func (c *Client) getJSONWithHeaders(ctx context.Context, requestURL string, headers map[string]string, target any) error {
+	return c.getJSONWithClientHeaders(ctx, c.httpClient, requestURL, headers, target)
+}
+
+// sessionCookie 取一份浏览器会话 Cookie；不可用时返回空串，调用方按“无会话”继续。
+func (c *Client) sessionCookie(ctx context.Context, refresh bool) string {
+	if c.sessionProvider == nil {
+		return ""
+	}
+	cookie, err := c.sessionProvider.SessionCookie(ctx, refresh)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cookie)
+}
+
 func (c *Client) getJSONWithClient(ctx context.Context, client *http.Client, requestURL string, target any) error {
+	return c.getJSONWithClientHeaders(ctx, client, requestURL, nil, target)
+}
+
+func (c *Client) getJSONWithClientHeaders(ctx context.Context, client *http.Client, requestURL string, headers map[string]string, target any) error {
+	// push2 系列对非浏览器客户端有指纹门禁：Go 直连会被直接断连（EOF / 空回复）。
+	// 桌面端提供转发桥时优先走桥接，一是拿到真实响应，二是避免注定失败的直连请求
+	// 持续打到上游（上游对连续失败/突发请求会临时拒绝，见 push2_proxy.go）。
+	// 桥接自身不可用时再退回直连，保持原有的降级路径。
+	if c.push2Proxy.accepts(requestURL) {
+		body, proxyErr := c.push2Proxy.get(ctx, requestURL)
+		if proxyErr == nil {
+			if decodeErr := json.Unmarshal(body, target); decodeErr == nil {
+				return nil
+			}
+		}
+		directErr := c.decodeJSON(ctx, client, requestURL, headers, target)
+		if directErr == nil {
+			return nil
+		}
+		if proxyErr != nil {
+			return fmt.Errorf("%w（桌面端 push2 桥接: %v）", directErr, proxyErr)
+		}
+		return directErr
+	}
+	return c.decodeJSON(ctx, client, requestURL, headers, target)
+}
+
+// decodeJSON 用给定的客户端完成一次 GET + JSON 解码，不含任何桥接回退。
+func (c *Client) decodeJSON(ctx context.Context, client *http.Client, requestURL string, headers map[string]string, target any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 easy-stock/0.1")
 	req.Header.Set("Referer", "https://quote.eastmoney.com/")
+	for name, value := range headers {
+		if value != "" {
+			req.Header.Set(name, value)
+		}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

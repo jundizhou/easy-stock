@@ -74,3 +74,60 @@ func TestLiveCLSNewsReturnsItems(t *testing.T) {
 		t.Fatal("CLS news returned no items")
 	}
 }
+
+// 资金流向用东财的 bkzj 榜单与板块分时资金流：榜单分路径可达，分时资金流带会话门禁
+// （需要桌面端转交 nid18，见 A_STOCK_EASTMONEY_SESSION_BRIDGE_URL）。没有会话时只校验榜单。
+func TestLiveEastMoneySectorFlowRankingAndIntraday(t *testing.T) {
+	requireLive(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var options []eastmoney.Option
+	if provider := eastmoney.NewBrowserSessionProviderFromEnv(); provider != nil {
+		options = append(options, eastmoney.WithSessionProvider(provider))
+	}
+	hasSession := len(options) > 0
+	client := eastmoney.NewClient(options...)
+	ranks, meta, err := client.SectorFlowRanking(ctx, "concept", 10)
+	if err != nil {
+		t.Fatalf("SectorFlowRanking failed: %v", err)
+	}
+	if len(ranks) < 5 || ranks[0].MainNetInflow == 0 {
+		t.Fatalf("unexpected ranking payload: %+v", ranks)
+	}
+	for index := 1; index < len(ranks); index++ {
+		if ranks[index].MainNetInflow > ranks[index-1].MainNetInflow {
+			t.Fatalf("ranking is not sorted by main net inflow: %+v", ranks)
+		}
+	}
+	if ranks[0].Name == "" || meta.Source != "eastmoney:bkzj" {
+		t.Fatalf("missing ranking evidence: %+v / %+v", ranks[0], meta)
+	}
+	if !hasSession {
+		t.Logf("ranking top=%s %.2f亿 5日=%.0f 10日=%.0f（未配置东财会话，跳过板块分时资金校验）",
+			ranks[0].Name, float64(ranks[0].MainNetInflow)/1e8, ranks[0].FiveDayMainNet, ranks[0].TenDayMainNet)
+		t.Skip("板块分时资金流需要东财会话：请设置 A_STOCK_EASTMONEY_SESSION_BRIDGE_URL 后重跑")
+	}
+
+	series, seriesMeta, err := client.SectorFlowIntraday(ctx, []string{ranks[0].Code})
+	if err != nil {
+		t.Fatalf("SectorFlowIntraday failed: %v", err)
+	}
+	if len(series) != 1 || len(series[0].Points) < 30 {
+		t.Fatalf("unexpected intraday series: %+v", series)
+	}
+	if series[0].TradeDate == "" || seriesMeta.TradeDate != series[0].TradeDate {
+		t.Fatalf("missing trade date evidence: %+v / %+v", series[0], seriesMeta)
+	}
+	t.Logf("ranking top=%s %.2f亿 5日=%.0f(%.2f%%) 10日=%.0f(%.2f%%); intraday %s points=%d latest=%.2f亿",
+		ranks[0].Name,
+		float64(ranks[0].MainNetInflow)/1e8,
+		float64(ranks[0].FiveDayMainNet),
+		ranks[0].FiveDayMainRatio,
+		float64(ranks[0].TenDayMainNet),
+		ranks[0].TenDayMainRatio,
+		series[0].TradeDate,
+		len(series[0].Points),
+		float64(series[0].LatestMain)/1e8,
+	)
+}

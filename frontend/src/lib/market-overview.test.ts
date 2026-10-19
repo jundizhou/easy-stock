@@ -13,6 +13,9 @@ describe('market overview navigation', () => {
 
 	it('resolves supported market hashes and falls back to pulse', () => {
 		expect(resolveMarketOverviewView('#market/core-indexes')).toBe('core-indexes');
+		expect(resolveMarketOverviewView('#market/sector-flow')).toBe('sector-flow');
+		expect(resolveMarketOverviewView('#sector-flow')).toBe('sector-flow');
+		expect(resolveMarketOverviewView('#sector-flow?period=main')).toBe('sector-flow');
 		expect(resolveMarketOverviewView('#market/billboard')).toBe('billboard');
 		expect(resolveMarketOverviewView('#market/margin-balance')).toBe('margin-balance');
 		expect(resolveMarketOverviewView('#market/global')).toBe('pulse');

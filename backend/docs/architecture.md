@@ -78,13 +78,21 @@ Hermes 与 Codex 是可选运行时。应用共享模型连接、Skills 与 MCP 
 
 雪球、淘股吧订阅优先通过桌面 Browser Bridge 读取已登录的 Electron 页面，Go 整理元数据、去重并归档原文。没有桌面桥接时，通过所选 Agent 与 `agent-browser` 复用导出的登录态进行采集。登录态按来源与配置隔离。
 
+行情侧的板块分时资金流（东财 `push2` 的 `fflow/kline`）带会话门禁：缺少浏览器下发的 `nid18` 时上游直接断开连接。桌面端在隐藏窗口里访问东财页面取得该 Cookie，再经 `eastmoney-session-bridge.cjs` 转交后端（`A_STOCK_EASTMONEY_SESSION_BRIDGE_URL` / `A_STOCK_EASTMONEY_SESSION_BRIDGE_TOKEN`）；后端只按需索取、不伪造也不持久化会话，并按板块缓存 45 秒、串行限速取数。没有桌面桥接（例如网页版）时退化为无会话请求，由前端提示重试。
+
+`push2`/`push2delay`/`push2his`/编号镜像这一整族报价接口还会按客户端指纹拦截非浏览器请求：同一时刻、同一出口 IP 下，Go/curl 的 TLS 连接会被上游直接断开（EOF），浏览器则正常返回。因此桌面端另外提供 `eastmoney-push2-bridge.cjs`（`A_STOCK_EASTMONEY_PUSH2_BRIDGE_URL` / `_TOKEN`），由主进程把 `push2` 的 `/api/` 请求交给 Electron 的 Chromium 网络栈发出，复用同一份会话 Cookie，只放行 `push2` 族主机的 `/api/` 路径。后端在东财客户端里对这类地址优先走桥接，桥接不可用时退回直连：既拿到真实响应，也避免注定失败的直连请求持续打到上游。
+
+上游对这条路径还会按突发流量临时拒绝连接，全部镜像失败时后端会在 60 秒窗口内最多重取一次会话（让桌面端把东财页面完整重载一遍，实测可立即恢复取数），并且仅重试主入口、镜像之间留出间隔，避免放大突发。
+
+板块分时价格走另一条上游路径（东财 `trends2` 的逐分钟行情，`/api/v1/market/sector-price-intraday`）：该路径不按会话拦截，无会话也能直接取到（在桌面端同样经由 push2 桥转发）；涨跌幅按昨收换算，多板块叠在同一纵轴上对照。它按板块缓存 30 秒、最多 3 个并发，与分时资金流是相互独立的两条链路，一边失败不会影响另一边。
+
 微信链接由本机 Python / FastAPI 解析服务或配置的兼容服务导入。当前内置服务支持已知文章链接解析；代码明确处理公众号历史文章列表不可用的状态。
 
 公共每日复盘由 `RemoteDailySync` 拉取清单与文章，验证结构和正文摘要后写入本地复盘库。游资心法优先使用包内资料，定时刷新远端缓存，并生成 Skills references 与 Hermes `MEMORY.md` 的资料索引。
 
 后端入口启动四类调度：订阅复盘同步、公共每日复盘同步、市场情绪同步与心法缓存刷新。个股研究、持仓巡检、综合复盘及次日验证通过 API 提交后台任务，前端轮询进度；行情和 AI 交互使用 WebSocket。
 
-关键入口：[automation.go](../internal/review/automation.go)、[remote_daily.go](../internal/review/remote_daily.go)、[daily_summary.go](../internal/review/daily_summary.go)、[daily_validation.go](../internal/review/daily_validation.go)、[xueqiu-browser-bridge.cjs](../../desktop/xueqiu-browser-bridge.cjs)、[taoguba-browser-bridge.cjs](../../desktop/taoguba-browser-bridge.cjs)、[wechat-service.cjs](../../desktop/wechat-service.cjs)。
+关键入口：[automation.go](../internal/review/automation.go)、[remote_daily.go](../internal/review/remote_daily.go)、[daily_summary.go](../internal/review/daily_summary.go)、[daily_validation.go](../internal/review/daily_validation.go)、[xueqiu-browser-bridge.cjs](../../desktop/xueqiu-browser-bridge.cjs)、[taoguba-browser-bridge.cjs](../../desktop/taoguba-browser-bridge.cjs)、[eastmoney-session-bridge.cjs](../../desktop/eastmoney-session-bridge.cjs)、[wechat-service.cjs](../../desktop/wechat-service.cjs)。
 
 ## 本地持久化与运行保障
 

@@ -180,3 +180,31 @@ func (p *Provider) MarketReportContent(ctx context.Context, kind string, infoCod
 	}
 	return foundation.MarketResearchDetail{}, fmt.Errorf("report body provider unavailable")
 }
+
+// SectorFlowSource 是能提供板块资金流榜单、分时资金序列与分时价格序列的行情源（目前只有东方财富）。
+type SectorFlowSource interface {
+	SectorFlowRanking(ctx context.Context, dimension string, limit int) ([]foundation.SectorFlowRank, foundation.SourceMeta, error)
+	SectorFlowIntraday(ctx context.Context, codes []string) ([]foundation.SectorFlowSeries, foundation.SourceMeta, error)
+	SectorPriceIntraday(ctx context.Context, codes []string) ([]foundation.SectorPriceSeries, foundation.SourceMeta, error)
+}
+
+func (p *Provider) SectorFlowRanking(ctx context.Context, dimension string, limit int) ([]foundation.SectorFlowRank, foundation.SourceMeta, error) {
+	if provider, ok := p.primary.(SectorFlowSource); ok {
+		return provider.SectorFlowRanking(ctx, dimension, limit)
+	}
+	return nil, foundation.SourceMeta{}, fmt.Errorf("sector flow ranking provider unavailable")
+}
+
+func (p *Provider) SectorFlowIntraday(ctx context.Context, codes []string) ([]foundation.SectorFlowSeries, foundation.SourceMeta, error) {
+	if provider, ok := p.primary.(SectorFlowSource); ok {
+		return provider.SectorFlowIntraday(ctx, codes)
+	}
+	return nil, foundation.SourceMeta{}, fmt.Errorf("sector flow intraday provider unavailable")
+}
+
+func (p *Provider) SectorPriceIntraday(ctx context.Context, codes []string) ([]foundation.SectorPriceSeries, foundation.SourceMeta, error) {
+	if provider, ok := p.primary.(SectorFlowSource); ok {
+		return provider.SectorPriceIntraday(ctx, codes)
+	}
+	return nil, foundation.SourceMeta{}, fmt.Errorf("sector price intraday provider unavailable")
+}

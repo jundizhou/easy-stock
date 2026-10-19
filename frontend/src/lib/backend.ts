@@ -388,6 +388,60 @@ export type MarketFundFlow = {
 	meta: SourceMeta;
 };
 
+// 资金流向：东方财富板块口径（概念/行业），主力净流入 = 超大单 + 大单。
+export type SectorFlowRank = {
+	code: string;
+	name: string;
+	change_percent: number;
+	main_net_inflow: number;
+	main_net_inflow_ratio: number;
+	super_large_net_inflow: number;
+	large_net_inflow: number;
+	medium_net_inflow: number;
+	small_net_inflow: number;
+	five_day_main_net_inflow: number;
+	five_day_main_net_inflow_ratio: number;
+	ten_day_main_net_inflow: number;
+	ten_day_main_net_inflow_ratio: number;
+	meta: SourceMeta;
+};
+
+export type SectorFlowPoint = {
+	time: string;
+	main: number;
+	super_large: number;
+	large: number;
+	medium: number;
+	small: number;
+};
+
+export type SectorFlowSeries = {
+	code: string;
+	name: string;
+	trade_date: string;
+	points: SectorFlowPoint[];
+	latest_main: number;
+	meta: SourceMeta;
+};
+
+// 板块分时价格：东方财富分时行情（trends2），价格为板块指数点位，涨跌幅相对昨收。
+export type SectorPricePoint = {
+	time: string;
+	price: number;
+	average: number;
+	change_percent: number;
+};
+
+export type SectorPriceSeries = {
+	code: string;
+	name: string;
+	trade_date: string;
+	pre_close: number;
+	points: SectorPricePoint[];
+	latest_change_percent: number;
+	meta: SourceMeta;
+};
+
 export type MarketMarginPoint = {
 	trade_date: string;
 	financing_balance: number;
@@ -401,7 +455,6 @@ export type MarketMarginPoint = {
 	securities_lending_repay_volume: number;
 	meta: SourceMeta;
 };
-
 export type MarketFuturesPositionRow = {
 	trade_date: string;
 	long_position: number;

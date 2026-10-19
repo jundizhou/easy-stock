@@ -38,3 +38,29 @@ test('redactor removes secret query parameters without removing route context', 
   const redacted = redactRuntimeLog('GET /api/v1/settings?token=secret&mode=test');
   assert.equal(redacted, 'GET /api/v1/settings?token=<redacted>&mode=test');
 });
+
+test('runtime logger keeps writing when the console mirror fails', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-logs-'));
+  const failures = [];
+  const logger = createRotatingLogger({
+    directory,
+    fileName: 'desktop.log',
+    component: 'desktop',
+    // 父进程 stdout 管道断开时 Electron 主进程会收到 EPIPE，日志不应因此中断或崩溃。
+    mirror: {
+      log() { throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }); },
+      warn() { failures.push('warn'); },
+      error() { throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }); },
+    },
+  });
+
+  assert.doesNotThrow(() => logger.info('mirror-down-info'));
+  assert.doesNotThrow(() => logger.warn('mirror-down-warn'));
+  assert.doesNotThrow(() => logger.error('mirror-down-error'));
+
+  const content = fs.readFileSync(path.join(directory, 'desktop.log'), 'utf8');
+  assert.match(content, /mirror-down-info/);
+  assert.match(content, /mirror-down-warn/);
+  assert.match(content, /mirror-down-error/);
+  assert.deepEqual(failures, ['warn']);
+});

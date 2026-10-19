@@ -110,6 +110,7 @@ export function App() {
 		if (window.location.hash === '#portfolio-inspection') return 'portfolio-inspection';
 		if (window.location.hash === '#ai') return 'ai';
 		if (window.location.hash.startsWith('#market')) return 'market';
+		if (/^#sector-flow(?:[?&]|$)/.test(window.location.hash)) return 'market';
 		if (window.location.hash === '#token-usage') return 'token-usage';
 		return 'themes';
 	});
