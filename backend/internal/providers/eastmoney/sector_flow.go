@@ -25,8 +25,6 @@ const (
 
 	// 榜单最多返回 600 行，覆盖概念（约 508）与行业（约 496）两个维度。
 	sectorFlowRankLimit = 600
-	// 分时曲线一次最多拉取 12 个板块，避免前端叠加过多序列。
-	sectorFlowIntradayLimit = 12
 	// 榜单与分时都按并发上限抓取，降低被限流的概率。
 	sectorFlowRankConcurrent = 3
 	// 分时资金流串行抓取：东财对突发请求会直接断连（营销看板项目实测同样如此，
@@ -944,9 +942,6 @@ func normalizeSectorFlowCodes(codes []string) ([]string, error) {
 	}
 	if len(normalized) == 0 {
 		return nil, fmt.Errorf("at least one sector code is required")
-	}
-	if len(normalized) > sectorFlowIntradayLimit {
-		normalized = normalized[:sectorFlowIntradayLimit]
 	}
 	return normalized, nil
 }

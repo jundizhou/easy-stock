@@ -244,7 +244,8 @@ func (s *Server) marketSectorPriceIntradayHandler(w http.ResponseWriter, r *http
 }
 
 // sectorFlowIntradayCodes 解析 codes 查询参数：归一化去重后按从小到大排序，
-// 保证同一组板块命中同一个缓存键；非法代码与超限都作为请求错误返回。
+// 保证同一组板块命中同一个缓存键；非法代码作为请求错误返回。
+// 选中板块数量不设上限，前端可以把整张榜单的板块一起带上来。
 func sectorFlowIntradayCodes(r *http.Request) ([]string, error) {
 	codes, err := normalizeSectorFlowQueryCodes(r.URL.Query().Get("codes"))
 	if err != nil {
@@ -252,9 +253,6 @@ func sectorFlowIntradayCodes(r *http.Request) ([]string, error) {
 	}
 	if len(codes) == 0 {
 		return nil, fmt.Errorf("codes is required, e.g. codes=BK0917,BK0490")
-	}
-	if len(codes) > 12 {
-		return nil, fmt.Errorf("codes must contain at most 12 boards")
 	}
 	return codes, nil
 }
