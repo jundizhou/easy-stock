@@ -71,8 +71,14 @@ function createRotatingLogger({
     } catch (error) {
       mirror?.error?.('[runtime-logger]', error);
     }
-    const mirrorMethod = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
-    mirror?.[mirrorMethod]?.(...values);
+    // 控制台镜像只是附加输出：父进程的 stdout 管道断开时会抛 EPIPE，
+    // 日志已经落盘，镜像失败不应让 Electron 主进程崩溃。
+    try {
+      const mirrorMethod = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
+      mirror?.[mirrorMethod]?.(...values);
+    } catch {
+      // ignore mirror failures
+    }
   };
 
   return {

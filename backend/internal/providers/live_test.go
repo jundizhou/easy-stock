@@ -75,14 +75,19 @@ func TestLiveCLSNewsReturnsItems(t *testing.T) {
 	}
 }
 
-// 板块资金流向用东财的 bkzj 榜单与板块分时资金流，两者都是分路径可达的，
-// 这里在真实网络下确认榜单排序、多日字段与分时序列都能取到。
+// 资金流向用东财的 bkzj 榜单与板块分时资金流：榜单分路径可达，分时资金流带会话门禁
+// （需要桌面端转交 nid18，见 A_STOCK_EASTMONEY_SESSION_BRIDGE_URL）。没有会话时只校验榜单。
 func TestLiveEastMoneySectorFlowRankingAndIntraday(t *testing.T) {
 	requireLive(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	client := eastmoney.NewClient()
+	var options []eastmoney.Option
+	if provider := eastmoney.NewBrowserSessionProviderFromEnv(); provider != nil {
+		options = append(options, eastmoney.WithSessionProvider(provider))
+	}
+	hasSession := len(options) > 0
+	client := eastmoney.NewClient(options...)
 	ranks, meta, err := client.SectorFlowRanking(ctx, "concept", 10)
 	if err != nil {
 		t.Fatalf("SectorFlowRanking failed: %v", err)
@@ -98,6 +103,11 @@ func TestLiveEastMoneySectorFlowRankingAndIntraday(t *testing.T) {
 	if ranks[0].Name == "" || meta.Source != "eastmoney:bkzj" {
 		t.Fatalf("missing ranking evidence: %+v / %+v", ranks[0], meta)
 	}
+	if !hasSession {
+		t.Logf("ranking top=%s %.2f亿 5日=%.0f 10日=%.0f（未配置东财会话，跳过板块分时资金校验）",
+			ranks[0].Name, float64(ranks[0].MainNetInflow)/1e8, ranks[0].FiveDayMainNet, ranks[0].TenDayMainNet)
+		t.Skip("板块分时资金流需要东财会话：请设置 A_STOCK_EASTMONEY_SESSION_BRIDGE_URL 后重跑")
+	}
 
 	series, seriesMeta, err := client.SectorFlowIntraday(ctx, []string{ranks[0].Code})
 	if err != nil {
@@ -109,11 +119,13 @@ func TestLiveEastMoneySectorFlowRankingAndIntraday(t *testing.T) {
 	if series[0].TradeDate == "" || seriesMeta.TradeDate != series[0].TradeDate {
 		t.Fatalf("missing trade date evidence: %+v / %+v", series[0], seriesMeta)
 	}
-	t.Logf("ranking top=%s %.2f亿 5日=%.0f 10日=%.0f; intraday %s points=%d latest=%.2f亿",
+	t.Logf("ranking top=%s %.2f亿 5日=%.0f(%.2f%%) 10日=%.0f(%.2f%%); intraday %s points=%d latest=%.2f亿",
 		ranks[0].Name,
 		float64(ranks[0].MainNetInflow)/1e8,
 		float64(ranks[0].FiveDayMainNet),
+		ranks[0].FiveDayMainRatio,
 		float64(ranks[0].TenDayMainNet),
+		ranks[0].TenDayMainRatio,
 		series[0].TradeDate,
 		len(series[0].Points),
 		float64(series[0].LatestMain)/1e8,

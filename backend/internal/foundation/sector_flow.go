@@ -34,7 +34,7 @@ func NormalizeSectorFlowCode(raw string) (string, bool) {
 //
 // 口径来自东方财富板块资金流（data.eastmoney.com/bkzj）：
 // 主力净流入 = 超大单净流入 + 大单净流入；净占比 = 净流入 / 成交额，单位为百分比数值。
-// 5 日、10 日字段是最近 N 个交易日的累计净流入，不是单日数据。
+// 5 日、10 日字段是最近 N 个交易日的累计净流入与净占比，不是单日数据。
 type SectorFlowRank struct {
 	Code               string     `json:"code"`
 	Name               string     `json:"name"`
@@ -46,7 +46,9 @@ type SectorFlowRank struct {
 	MediumNet          float64    `json:"medium_net_inflow"`
 	SmallNet           float64    `json:"small_net_inflow"`
 	FiveDayMainNet     float64    `json:"five_day_main_net_inflow"`
+	FiveDayMainRatio   float64    `json:"five_day_main_net_inflow_ratio"`
 	TenDayMainNet      float64    `json:"ten_day_main_net_inflow"`
+	TenDayMainRatio    float64    `json:"ten_day_main_net_inflow_ratio"`
 	Meta               SourceMeta `json:"meta"`
 }
 
@@ -68,4 +70,26 @@ type SectorFlowSeries struct {
 	Points     []SectorFlowPoint `json:"points"`
 	LatestMain float64           `json:"latest_main"`
 	Meta       SourceMeta        `json:"meta"`
+}
+
+// SectorPricePoint 是板块分时价格的一个采样点。
+//
+// 口径来自东方财富分时行情（trends2）：Price 为该分钟收盘点位，Average 为当日均价，
+// ChangePercent 为相对昨收的涨跌幅（百分比数值，便于不同点位高度的板块叠加对比）。
+type SectorPricePoint struct {
+	Time          string  `json:"time"` // 交易时间，形如 09:30
+	Price         float64 `json:"price"`
+	Average       float64 `json:"average"`
+	ChangePercent float64 `json:"change_percent"`
+}
+
+// SectorPriceSeries 是单个板块的当日分时价格序列。
+type SectorPriceSeries struct {
+	Code         string             `json:"code"`
+	Name         string             `json:"name"`
+	TradeDate    string             `json:"trade_date"`
+	PreClose     float64            `json:"pre_close"`
+	Points       []SectorPricePoint `json:"points"`
+	LatestChange float64            `json:"latest_change_percent"`
+	Meta         SourceMeta         `json:"meta"`
 }

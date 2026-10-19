@@ -53,6 +53,8 @@ const config = {
     'runtime-logger.cjs',
     'browser-auth.cjs',
     'data-protection.cjs',
+    'eastmoney-push2-bridge.cjs',
+    'eastmoney-session-bridge.cjs',
     'hermes-runtime-root.cjs',
     'taoguba-browser-bridge.cjs',
     'update-feed.cjs',

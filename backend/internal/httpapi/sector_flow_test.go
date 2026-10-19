@@ -18,11 +18,14 @@ type fakeSectorFlowProvider struct {
 	mu              sync.Mutex
 	rankingCalls    int
 	intradayCalls   int
+	priceCalls      int
 	lastDimension   string
 	lastLimit       int
 	lastCodes       []string
+	lastPriceCodes  []string
 	rankingFailure  error
 	intradayFailure error
+	priceFailure    error
 }
 
 func (p *fakeSectorFlowProvider) SectorFlowRanking(_ context.Context, dimension string, limit int) ([]foundation.SectorFlowRank, foundation.SourceMeta, error) {
@@ -67,6 +70,43 @@ func (p *fakeSectorFlowProvider) counts() (int, int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.rankingCalls, p.intradayCalls
+}
+
+func (p *fakeSectorFlowProvider) priceCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.priceCalls
+}
+
+func (p *fakeSectorFlowProvider) priceCodes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.lastPriceCodes...)
+}
+
+// SectorPriceIntraday 是分时价格（trends2）的测试替身：返回单点序列，涨跌幅相对昨收换算。
+func (p *fakeSectorFlowProvider) SectorPriceIntraday(_ context.Context, codes []string) ([]foundation.SectorPriceSeries, foundation.SourceMeta, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.priceCalls++
+	p.lastPriceCodes = append([]string(nil), codes...)
+	if p.priceFailure != nil {
+		return nil, foundation.SourceMeta{}, p.priceFailure
+	}
+	meta := foundation.SourceMeta{Source: "eastmoney:board-intraday-trend", TradeDate: "2026-10-16"}
+	items := make([]foundation.SectorPriceSeries, 0, len(codes))
+	for _, code := range codes {
+		items = append(items, foundation.SectorPriceSeries{
+			Code:         code,
+			Name:         "半导体概念",
+			TradeDate:    "2026-10-16",
+			PreClose:     2419.01,
+			Points:       []foundation.SectorPricePoint{{Time: "09:30", Price: 2468.24, Average: 2468.238, ChangePercent: 2.035}, {Time: "15:00", Price: 2414.76, ChangePercent: -0.176}},
+			LatestChange: -0.176,
+			Meta:         meta,
+		})
+	}
+	return items, meta, nil
 }
 
 func (p *fakeSectorFlowProvider) codes() []string {
@@ -194,12 +234,61 @@ func TestSectorFlowIntradayRouteValidatesCodes(t *testing.T) {
 	}
 }
 
+// 分时价格与分时资金共用一套代码校验与缓存键规则：乱序请求命中同一个缓存条目。
+func TestSectorPriceIntradayRouteNormalizesAndCachesCodes(t *testing.T) {
+	provider := &fakeSectorFlowProvider{fakeMarketOverviewProvider: &fakeMarketOverviewProvider{}}
+	server := NewServer(Config{MarketOverview: provider})
+
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/sector-price-intraday?codes=BK0490,bk0917", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := provider.priceCodes(); len(got) != 2 || got[0] != "BK0490" || got[1] != "BK0917" {
+		t.Fatalf("codes = %+v, want [BK0490 BK0917]", got)
+	}
+	var payload struct {
+		Data []foundation.SectorPriceSeries `json:"data"`
+		Meta foundation.SourceMeta          `json:"meta"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 2 || payload.Data[0].LatestChange != -0.176 || payload.Meta.TradeDate != "2026-10-16" {
+		t.Fatalf("unexpected payload: %+v / %+v", payload.Data, payload.Meta)
+	}
+
+	reordered := httptest.NewRecorder()
+	server.ServeHTTP(reordered, httptest.NewRequest(http.MethodGet, "/api/v1/market/sector-price-intraday?codes=BK0917,BK0490", nil))
+	if reordered.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", reordered.Code, reordered.Body.String())
+	}
+	if calls := provider.priceCount(); calls != 1 {
+		t.Fatalf("price calls = %d, want 1 (cache hit expected)", calls)
+	}
+}
+
+func TestSectorPriceIntradayRouteValidatesCodes(t *testing.T) {
+	server := NewServer(Config{MarketOverview: &fakeSectorFlowProvider{fakeMarketOverviewProvider: &fakeMarketOverviewProvider{}}})
+	for _, path := range []string{
+		"/api/v1/market/sector-price-intraday",
+		"/api/v1/market/sector-price-intraday?codes=hello",
+	} {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestSectorFlowRoutesReportUnavailableProvider(t *testing.T) {
 	// 旧行情源不提供板块资金流时，接口应明确返回 503，而不是空榜单。
 	server := NewServer(Config{MarketOverview: &fakeMarketOverviewProvider{}})
 	for _, path := range []string{
 		"/api/v1/market/sector-flows",
 		"/api/v1/market/sector-flow-intraday?codes=BK0917",
+		"/api/v1/market/sector-price-intraday?codes=BK0917",
 	} {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

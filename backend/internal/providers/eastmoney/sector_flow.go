@@ -20,26 +20,54 @@ const (
 
 	sectorFlowRankSource     = "eastmoney:bkzj"
 	sectorFlowIntradaySource = "eastmoney:board-intraday-flow"
+	sectorPriceIntradaySource = "eastmoney:board-intraday-trend"
 
 	// 榜单最多返回 600 行，覆盖概念（约 508）与行业（约 496）两个维度。
 	sectorFlowRankLimit = 600
 	// 分时曲线一次最多拉取 12 个板块，避免前端叠加过多序列。
 	sectorFlowIntradayLimit = 12
 	// 榜单与分时都按并发上限抓取，降低被限流的概率。
-	sectorFlowRankConcurrent     = 3
-	sectorFlowIntradayConcurrent = 4
+	sectorFlowRankConcurrent = 3
+	// 分时资金流串行抓取：东财对突发请求会直接断连（营销看板项目实测同样如此，
+	// 见其 server/sources/eastmoney.cjs 的串行队列 + 节流），并发请求很容易触发临时封禁。
+	sectorFlowIntradayConcurrent = 1
+	// 相邻两次分时请求之间的最小间隔，进一步降低触发风控的概率。
+	sectorFlowIntradayInterval = 400 * time.Millisecond
+	// 相邻两次镜像尝试之间的间隔：镜像轮换只在主入口失败时发生，
+	// 连着打多个镜像同样会被当成突发流量，这里留出和板块间一致的节奏。
+	sectorFlowIntradayMirrorInterval = 400 * time.Millisecond
+	// 分时序列按板块缓存，前端逐个勾选板块时只抓新增的代码。
+	sectorFlowIntradayBoardTTL = 45 * time.Second
 
 	// 分时资金流连续失败到阈值后熔断一段时间，避免持续打已不可用的上游路径。
 	sectorFlowFailureThreshold = 2
 	sectorFlowCooldownWindow   = 90 * time.Second
+
+	// sectorFlowIntradayPath 是分时（当日逐分钟）累计资金流的接口路径。
+	sectorFlowIntradayPath = "/api/qt/stock/fflow/kline/get"
+	// sectorFlowIntradayToken 是东财页面调用该接口时携带的 ut 参数，
+	// 这里保持一致，避免成为风控判定的差异项。
+	sectorFlowIntradayToken = "b2884a393a59ad64002292a3e90d46a5"
+
+	// sectorPriceIntradayPath 是板块分时行情（逐分钟价格）的接口路径。
+	//
+	// 与分时资金流不同：上游是按路径拦截的，fflow/kline 在缺少会话时会被直接断连，
+	// 而 trends2 这条路径可以匿名取到（2026-10-18 复测：8/8 成功），
+	// 因此价格分时不需要浏览器会话，作为资金曲线的走势对照。
+	sectorPriceIntradayPath = "/api/qt/stock/trends2/get"
+	// 价格分时按板块缓存，窗口比分时资金流更短。
+	sectorPriceIntradayBoardTTL = 30 * time.Second
+	// 分时行情接口比资金流宽松，允许小幅并发。
+	sectorPriceIntradayConcurrent = 3
 )
 
 // sectorFlowRankMetricKeys 是需要从 bkzj 拉取的字段。
 //
 // f62 是主口径（今日主力净流入），失败即整体失败；其余字段失败只降级提示，
 // 榜单仍然可用。f3 涨幅、f184 主力净占比、f164/f174 为 5 日/10 日累计净流入，
-// f66/f72/f84 为超大单、大单、小单净流入（中单由四类资金净额之和为零反推）。
-var sectorFlowRankMetricKeys = []string{"f62", "f3", "f184", "f66", "f72", "f84", "f164", "f174"}
+// f165/f175 为对应的 5 日/10 日主力净占比，f66/f72/f84 为超大单、大单、小单净流入
+// （中单由四类资金净额之和为零反推）。
+var sectorFlowRankMetricKeys = []string{"f62", "f3", "f184", "f66", "f72", "f84", "f164", "f165", "f174", "f175"}
 
 type sectorFlowRankPayload struct {
 	RC   int `json:"rc"`
@@ -51,16 +79,18 @@ type sectorFlowRankPayload struct {
 
 // sectorFlowRankRow 覆盖 bkzj 返回的所有候选字段；每次请求只会带回 key 指定的那一个字段。
 type sectorFlowRankRow struct {
-	Code        string        `json:"f12"`
-	Name        string        `json:"f14"`
-	ChangePct   flexibleFloat `json:"f3"`
-	Main        flexibleFloat `json:"f62"`
-	MainRatio   flexibleFloat `json:"f184"`
-	SuperLarge  flexibleFloat `json:"f66"`
-	Large       flexibleFloat `json:"f72"`
-	Small       flexibleFloat `json:"f84"`
-	FiveDayMain flexibleFloat `json:"f164"`
-	TenDayMain  flexibleFloat `json:"f174"`
+	Code         string        `json:"f12"`
+	Name         string        `json:"f14"`
+	ChangePct    flexibleFloat `json:"f3"`
+	Main         flexibleFloat `json:"f62"`
+	MainRatio    flexibleFloat `json:"f184"`
+	SuperLarge   flexibleFloat `json:"f66"`
+	Large        flexibleFloat `json:"f72"`
+	Small        flexibleFloat `json:"f84"`
+	FiveDayMain  flexibleFloat `json:"f164"`
+	FiveDayRatio flexibleFloat `json:"f165"`
+	TenDayMain   flexibleFloat `json:"f174"`
+	TenDayRatio  flexibleFloat `json:"f175"`
 }
 
 type sectorFlowMetricResult struct {
@@ -79,10 +109,24 @@ type sectorFlowKLinePayload struct {
 	} `json:"data"`
 }
 
+// sectorPriceTrendPayload 是东财分时行情（trends2）的返回结构。
+//
+// trends 每行形如「2026-10-16 09:30,2468.24,2468.24,2468.24,2461.28,623298,2815619168.00,2468.238」，
+// 字段依次为 时间、开、收、高、低、成交量、成交额、均价。
+type sectorPriceTrendPayload struct {
+	RC   int `json:"rc"`
+	Data struct {
+		Code     string        `json:"code"`
+		Name     string        `json:"name"`
+		PreClose flexibleFloat `json:"preClose"`
+		Trends   []string      `json:"trends"`
+	} `json:"data"`
+}
+
 // sectorFlowCooldown 记录分时资金流的连续失败次数。
 //
-// push2 的分时资金流路径在被密集请求后会整段重置连接（同机其他 push2 路径仍然可用），
-// 这里做一层熔断：确认不可用时短时间内不再打上游，让接口快速回落到缓存。
+// 分时资金流走的是 push2 的专用路径，可用镜像比其它报价路径窄，
+// 这里做一层熔断：确认所有镜像都不可用时短时间内不再打上游，让接口快速回落到缓存。
 type sectorFlowCooldown struct {
 	mu           sync.Mutex
 	failures     int
@@ -113,6 +157,28 @@ func (c *sectorFlowCooldown) reset() {
 	defer c.mu.Unlock()
 	c.failures = 0
 	c.blockedUntil = time.Time{}
+}
+
+// sectorFlowSessionRefresh 限制会话重取的频率。
+//
+// 会话重取会让桌面端在隐藏窗口里把东财页面重新加载一遍（秒级），
+// 多板块连续失败时没有必要逐个触发，因此按时间窗口去重。
+type sectorFlowSessionRefresh struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+// sectorFlowSessionRefreshWindow 是两次会话重取之间的最小间隔。
+const sectorFlowSessionRefreshWindow = 60 * time.Second
+
+func (r *sectorFlowSessionRefresh) allow(now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.last.IsZero() && now.Sub(r.last) < sectorFlowSessionRefreshWindow {
+		return false
+	}
+	r.last = now
+	return true
 }
 
 // SectorFlowRanking 返回板块资金流榜单，dimension 支持 concept（题材/概念）与 industry。
@@ -232,32 +298,58 @@ func (c *Client) SectorFlowIntraday(ctx context.Context, codes []string) ([]foun
 	start := time.Now()
 	meta := foundation.SourceMeta{Source: sectorFlowIntradaySource, FetchedAt: time.Now()}
 
-	series := make([]foundation.SectorFlowSeries, len(normalized))
-	failures := make([]error, len(normalized))
+	// 先按板块命中缓存：前端逐个勾选板块会反复请求递增的代码组合，
+	// 只抓缺失或过期的板块可以把上游请求量压到最低。
+	cached, pending := c.sectorFlowIntradayCached(normalized, time.Now())
+
+	series := make([]foundation.SectorFlowSeries, len(pending))
+	usedURLs := make([]string, len(pending))
+	failures := make([]error, len(pending))
 	var waitGroup sync.WaitGroup
 	semaphore := make(chan struct{}, sectorFlowIntradayConcurrent)
-	for index, code := range normalized {
+	for index, code := range pending {
 		waitGroup.Add(1)
 		go func(index int, code string) {
 			defer waitGroup.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			value, loadErr := c.sectorFlowIntradayOne(ctx, code)
-			series[index], failures[index] = value, loadErr
+			value, requestURL, loadErr := c.sectorFlowIntradayOne(ctx, code)
+			series[index], usedURLs[index], failures[index] = value, requestURL, loadErr
+			// 串行抓取时给上游留出间隔，避免连续请求被判定为突发流量。
+			time.Sleep(sectorFlowIntradayInterval)
 		}(index, code)
 	}
 	waitGroup.Wait()
 
-	items := make([]foundation.SectorFlowSeries, 0, len(series))
-	skipped := make([]string, 0, len(series))
-	var lastErr error
-	for index, value := range series {
+	fetched := make(map[string]foundation.SectorFlowSeries, len(pending))
+	failed := make(map[string]error, len(pending))
+	for index, code := range pending {
 		if failures[index] != nil {
-			lastErr = failures[index]
-			skipped = append(skipped, normalized[index])
+			failed[code] = failures[index]
 			continue
 		}
-		items = append(items, value)
+		fetched[code] = series[index]
+		c.storeSectorFlowIntraday(code, series[index], usedURLs[index])
+	}
+
+	items := make([]foundation.SectorFlowSeries, 0, len(pending))
+	skipped := make([]string, 0, len(pending))
+	cachedURL := ""
+	var lastErr error
+	for _, code := range normalized {
+		if entry, ok := cached[code]; ok {
+			items = append(items, entry.series)
+			if cachedURL == "" {
+				cachedURL = entry.sourceURL
+			}
+			continue
+		}
+		if value, ok := fetched[code]; ok {
+			items = append(items, value)
+			continue
+		}
+		lastErr = failed[code]
+		skipped = append(skipped, code)
 	}
 	if len(items) == 0 {
 		c.sectorFlowCooldown.recordFailure()
@@ -270,7 +362,18 @@ func (c *Client) SectorFlowIntraday(ctx context.Context, codes []string) ([]foun
 
 	tradeDate := items[0].TradeDate
 	meta.TradeDate = tradeDate
-	meta.SourceURL = c.quoteBaseURL + "/api/qt/stock/fflow/kline/get"
+	meta.SourceURL = c.quoteBaseURL + sectorFlowIntradayPath
+	for _, usedURL := range usedURLs {
+		if usedURL != "" {
+			// 记录实际命中的镜像，便于排查某个镜像被上游摘掉的情况。
+			meta.SourceURL = usedURL
+			break
+		}
+	}
+	// 全部命中缓存时没有新的请求 URL，沿用缓存条目记录的上游地址。
+	if cachedURL != "" && (len(usedURLs) == 0 || meta.SourceURL == c.quoteBaseURL+sectorFlowIntradayPath) {
+		meta.SourceURL = cachedURL
+	}
 	meta.LatencyMS = time.Since(start).Milliseconds()
 	meta.AvailableFields = []string{"main", "super_large", "large", "medium", "small"}
 	if len(skipped) > 0 {
@@ -314,31 +417,32 @@ func (c *Client) fetchSectorFlowRankMetric(ctx context.Context, filter string, k
 	return rows, requestURL, nil
 }
 
-func (c *Client) sectorFlowIntradayOne(ctx context.Context, code string) (foundation.SectorFlowSeries, error) {
+func (c *Client) sectorFlowIntradayOne(ctx context.Context, code string) (foundation.SectorFlowSeries, string, error) {
 	params := url.Values{}
 	params.Set("lmt", "0")
 	params.Set("klt", "1")
 	params.Set("secid", "90."+code)
 	params.Set("fields1", "f1,f2,f3,f7")
 	params.Set("fields2", "f51,f52,f53,f54,f55,f56")
+	params.Set("ut", sectorFlowIntradayToken)
 	query := params.Encode()
 
-	// push2 的分时资金流偶发整站被重置，逐个镜像重试；全部失败才向上报错，
-	// 单个板块失败由上层跳过，不影响其它曲线。
-	var payload sectorFlowKLinePayload
-	var lastErr error
-	for _, host := range append([]string{c.quoteBaseURL}, c.quoteFallbackURLs...) {
-		requestURL := host + "/api/qt/stock/fflow/kline/get?" + query
-		lastErr = c.getJSONWithRetry(ctx, requestURL, &payload)
-		if lastErr == nil && payload.RC == 0 {
-			break
-		}
-		if lastErr == nil {
-			lastErr = fmt.Errorf("eastmoney intraday flow rc=%d for %s", payload.RC, code)
+	// 该路径在上游有反爬门禁：缺少东财会话（nid18）时连接会被直接断开。
+	// 会话由桌面端在真实浏览器里取得后转交，这里只负责带上。
+	cookie := c.sessionCookie(ctx, false)
+	payload, usedURL, lastErr := c.fetchSectorFlowIntraday(ctx, query, code, cookie)
+	if lastErr != nil {
+		// 全部镜像都失败，通常是当前这份会话被上游临时拒绝（连接被直接断开）。
+		// 桌面端重新走一遍东财页面即可恢复，这里换一份会话、只打主入口再试一次：
+		// nid18 本身不会因为刷新而变，起作用的是页面回访带来的现场状态。
+		if host, refreshed, ok := c.refreshSectorFlowSession(ctx, cookie); ok {
+			if candidate, retryErr := c.fetchSectorFlowIntradayHost(ctx, host, query, code, refreshed); retryErr == nil {
+				payload, usedURL, lastErr = candidate, host+sectorFlowIntradayPath+"?"+query, nil
+			}
 		}
 	}
 	if lastErr != nil {
-		return foundation.SectorFlowSeries{}, lastErr
+		return foundation.SectorFlowSeries{}, "", lastErr
 	}
 
 	points := make([]foundation.SectorFlowPoint, 0, len(payload.Data.Klines))
@@ -362,7 +466,7 @@ func (c *Client) sectorFlowIntradayOne(ctx context.Context, code string) (founda
 		})
 	}
 	if len(points) == 0 {
-		return foundation.SectorFlowSeries{}, fmt.Errorf("eastmoney intraday flow returned no points for %s", code)
+		return foundation.SectorFlowSeries{}, "", fmt.Errorf("eastmoney intraday flow returned no points for %s", code)
 	}
 
 	name := strings.TrimSpace(payload.Data.Name)
@@ -375,7 +479,371 @@ func (c *Client) sectorFlowIntradayOne(ctx context.Context, code string) (founda
 		TradeDate:  tradeDate,
 		Points:     points,
 		LatestMain: points[len(points)-1].Main,
-	}, nil
+	}, usedURL, nil
+}
+
+// sectorFlowIntradayCached 把请求拆成“命中缓存”与“需要抓取”两组。
+//
+// 上游对这个接口有配额/风控限制（突发请求会被临时封禁），而前端每次勾选板块都会
+// 重新请求整组代码，因此逐板块缓存能显著减少上游请求。
+func (c *Client) sectorFlowIntradayCached(codes []string, now time.Time) (map[string]sectorFlowIntradayEntry, []string) {
+	c.sectorFlowIntradayMu.Lock()
+	defer c.sectorFlowIntradayMu.Unlock()
+	cached := make(map[string]sectorFlowIntradayEntry, len(codes))
+	pending := make([]string, 0, len(codes))
+	for _, code := range codes {
+		entry, exists := c.sectorFlowIntradayBoards[code]
+		if exists && now.Before(entry.expiresAt) {
+			cached[code] = entry
+			continue
+		}
+		pending = append(pending, code)
+	}
+	return cached, pending
+}
+
+func (c *Client) storeSectorFlowIntraday(code string, series foundation.SectorFlowSeries, sourceURL string) {
+	if series.Code == "" {
+		return
+	}
+	c.sectorFlowIntradayMu.Lock()
+	defer c.sectorFlowIntradayMu.Unlock()
+	if c.sectorFlowIntradayBoards == nil {
+		c.sectorFlowIntradayBoards = make(map[string]sectorFlowIntradayEntry)
+	}
+	c.sectorFlowIntradayBoards[code] = sectorFlowIntradayEntry{
+		series:    series,
+		sourceURL: sourceURL,
+		expiresAt: time.Now().Add(sectorFlowIntradayBoardTTL),
+	}
+}
+
+// sectorFlowIntradayEntry 是单个板块分时序列的缓存条目。
+type sectorFlowIntradayEntry struct {
+	series    foundation.SectorFlowSeries
+	sourceURL string
+	expiresAt time.Time
+}
+
+// fetchSectorFlowIntraday 按镜像顺序抓取单个板块的分时资金流，命中即止。
+//
+// 每个镜像只打一次：不可用的镜像会快速断连，重试留给下一个镜像；
+// 镜像之间留出间隔，避免连续请求被上游判定为突发流量。
+// 全部镜像都失败时返回最后一个错误。
+func (c *Client) fetchSectorFlowIntraday(ctx context.Context, query string, code string, cookie string) (sectorFlowKLinePayload, string, error) {
+	var lastErr error
+	for index, host := range c.sectorFlowIntradayHosts() {
+		if index > 0 {
+			select {
+			case <-ctx.Done():
+				return sectorFlowKLinePayload{}, "", ctx.Err()
+			case <-time.After(sectorFlowIntradayMirrorInterval):
+			}
+		}
+		payload, err := c.fetchSectorFlowIntradayHost(ctx, host, query, code, cookie)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return payload, host + sectorFlowIntradayPath + "?" + query, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("eastmoney intraday flow has no available mirror for %s", code)
+	}
+	return sectorFlowKLinePayload{}, "", lastErr
+}
+
+// fetchSectorFlowIntradayHost 抓取单个镜像；空数据与上游错误都按失败返回，交由调用方决定是否换镜像。
+func (c *Client) fetchSectorFlowIntradayHost(ctx context.Context, host string, query string, code string, cookie string) (sectorFlowKLinePayload, error) {
+	var headers map[string]string
+	if cookie != "" {
+		headers = map[string]string{"Cookie": cookie}
+	}
+	requestURL := host + sectorFlowIntradayPath + "?" + query
+	candidate := sectorFlowKLinePayload{}
+	if err := c.getJSONWithHeaders(ctx, requestURL, headers, &candidate); err != nil {
+		return sectorFlowKLinePayload{}, err
+	}
+	if candidate.RC != 0 {
+		return sectorFlowKLinePayload{}, fmt.Errorf("eastmoney intraday flow rc=%d for %s", candidate.RC, code)
+	}
+	if len(candidate.Data.Klines) == 0 {
+		// 部分镜像（如 push2his）对该路径返回 rc=0 但空数据。
+		return sectorFlowKLinePayload{}, fmt.Errorf("eastmoney intraday flow returned no points for %s", code)
+	}
+	return candidate, nil
+}
+
+// refreshSectorFlowSession 让桌面端重新加载东财页面换一份会话，返回主入口与新的 Cookie。
+//
+// 会话由桌面端提供、且按时间窗口去重；没有会话来源或刚刷新过时返回 false，
+// 调用方按原来的错误返回即可。
+func (c *Client) refreshSectorFlowSession(ctx context.Context, fallback string) (string, string, bool) {
+	if c.sessionProvider == nil || !c.sectorFlowSessionRefresh.allow(time.Now()) {
+		return "", "", false
+	}
+	hosts := c.sectorFlowIntradayHosts()
+	if len(hosts) == 0 {
+		return "", "", false
+	}
+	refreshed := c.sessionCookie(ctx, true)
+	if refreshed == "" {
+		// 刷新拿不到新会话时沿用原来的那份，浏览器侧也可能已经把状态恢复了。
+		refreshed = fallback
+	}
+	return hosts[0], refreshed, true
+}
+
+// sectorFlowIntradayHosts 给出分时资金流的候选主机顺序：常规入口在前，编号镜像兜底。
+func (c *Client) sectorFlowIntradayHosts() []string {
+	candidates := make([]string, 0, len(c.quoteFallbackURLs)+1)
+	candidates = append(candidates, c.quoteBaseURL)
+	candidates = append(candidates, c.quoteFallbackURLs...)
+
+	hosts := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, host := range candidates {
+		host = strings.TrimRight(strings.TrimSpace(host), "/")
+		if host == "" {
+			continue
+		}
+		if _, duplicate := seen[host]; duplicate {
+			continue
+		}
+		seen[host] = struct{}{}
+		hosts = append(hosts, host)
+	}
+	return hosts
+}
+
+// getJSONWithHeadersAndFamilyRetry 先按默认地址族请求，失败且属于瞬时错误时，
+// 用强制 IPv4 的客户端对同一地址再试一次。
+//
+// 东财部分域名（例如 90.push2）会只对某一个地址族放行：默认拨号优先 IPv6 时 TCP 建连成功、
+// 紧接着被对端断开（表现为 EOF），而 Go 不会自己回退到 IPv4。实测同一时刻、同一 URL，
+// 默认客户端 EOF、强制 IPv4 返回 200，因此这里补一次地址族回退。
+func (c *Client) getJSONWithHeadersAndFamilyRetry(ctx context.Context, requestURL string, headers map[string]string, target any) error {
+	err := c.getJSONWithHeaders(ctx, requestURL, headers, target)
+	if err == nil || c.fallbackHTTPClient == nil || !isTransient(err) {
+		return err
+	}
+	return c.getJSONWithClientHeaders(ctx, c.fallbackHTTPClient, requestURL, headers, target)
+}
+
+// SectorPriceIntraday 返回多个板块的当日分时价格序列（东财分时行情 trends2）。
+//
+// 这条路径与分时资金流是两条独立的上游：fflow/kline 会被按路径拒绝，trends2 不会，
+// 因此价格分时在没有浏览器会话时也能取到；涨跌幅按昨收换算，多板块叠加时口径一致。
+func (c *Client) SectorPriceIntraday(ctx context.Context, codes []string) ([]foundation.SectorPriceSeries, foundation.SourceMeta, error) {
+	normalized, err := normalizeSectorFlowCodes(codes)
+	if err != nil {
+		return nil, foundation.SourceMeta{}, err
+	}
+
+	start := time.Now()
+	meta := foundation.SourceMeta{Source: sectorPriceIntradaySource, FetchedAt: time.Now()}
+
+	// 与分时资金流一样先按板块命中缓存：前端逐个勾选板块时只抓缺失的代码。
+	cached, pending := c.sectorPriceIntradayCached(normalized, time.Now())
+	series := make([]foundation.SectorPriceSeries, len(pending))
+	usedURLs := make([]string, len(pending))
+	failures := make([]error, len(pending))
+	var waitGroup sync.WaitGroup
+	semaphore := make(chan struct{}, sectorPriceIntradayConcurrent)
+	for index, code := range pending {
+		waitGroup.Add(1)
+		go func(index int, code string) {
+			defer waitGroup.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			series[index], usedURLs[index], failures[index] = c.sectorPriceIntradayOne(ctx, code)
+		}(index, code)
+	}
+	waitGroup.Wait()
+
+	fetched := make(map[string]foundation.SectorPriceSeries, len(pending))
+	failed := make(map[string]error, len(pending))
+	for index, code := range pending {
+		if failures[index] != nil {
+			failed[code] = failures[index]
+			continue
+		}
+		fetched[code] = series[index]
+		c.storeSectorPriceIntraday(code, series[index], usedURLs[index])
+	}
+
+	items := make([]foundation.SectorPriceSeries, 0, len(pending))
+	skipped := make([]string, 0, len(pending))
+	cachedURL := ""
+	var lastErr error
+	for _, code := range normalized {
+		if entry, ok := cached[code]; ok {
+			items = append(items, entry.series)
+			if cachedURL == "" {
+				cachedURL = entry.sourceURL
+			}
+			continue
+		}
+		if value, ok := fetched[code]; ok {
+			items = append(items, value)
+			continue
+		}
+		lastErr = failed[code]
+		skipped = append(skipped, code)
+	}
+	if len(items) == 0 {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("eastmoney intraday trend returned no series")
+		}
+		return nil, foundation.SourceMeta{}, lastErr
+	}
+
+	tradeDate := items[0].TradeDate
+	meta.TradeDate = tradeDate
+	meta.SourceURL = c.quoteBaseURL + sectorPriceIntradayPath
+	for _, usedURL := range usedURLs {
+		if usedURL != "" {
+			meta.SourceURL = usedURL
+			break
+		}
+	}
+	// 全部命中缓存时没有新的请求 URL，沿用缓存条目记录的上游地址。
+	if cachedURL != "" && (len(usedURLs) == 0 || meta.SourceURL == c.quoteBaseURL+sectorPriceIntradayPath) {
+		meta.SourceURL = cachedURL
+	}
+	meta.LatencyMS = time.Since(start).Milliseconds()
+	meta.AvailableFields = []string{"price", "average", "change_percent"}
+	if len(skipped) > 0 {
+		meta.FallbackReason = fmt.Sprintf("部分板块分时价格不可用（%s），已跳过", strings.Join(skipped, ","))
+	}
+	for index := range items {
+		items[index].Meta = meta
+		if items[index].TradeDate == "" {
+			items[index].TradeDate = tradeDate
+		}
+	}
+	return items, meta, nil
+}
+
+func (c *Client) sectorPriceIntradayOne(ctx context.Context, code string) (foundation.SectorPriceSeries, string, error) {
+	params := url.Values{}
+	params.Set("secid", "90."+code)
+	params.Set("ndays", "1")
+	params.Set("iscr", "0")
+	params.Set("fields1", "f1,f2,f3,f4,f5,f6,f7,f8")
+	params.Set("fields2", "f51,f52,f53,f54,f55,f56,f57,f58")
+	params.Set("ut", sectorFlowIntradayToken)
+	query := params.Encode()
+
+	var payload sectorPriceTrendPayload
+	usedURL := ""
+	var lastErr error
+	// 与分时资金流一样按镜像顺序尝试，命中即止；东财的 fflow 路径可能被摘掉，
+	// 分时行情路径不一定同时不可用，所以镜像列表各自独立生效。
+	for _, host := range c.sectorFlowIntradayHosts() {
+		requestURL := host + sectorPriceIntradayPath + "?" + query
+		candidate := sectorPriceTrendPayload{}
+		if err := c.getJSONWithHeadersAndFamilyRetry(ctx, requestURL, nil, &candidate); err != nil {
+			lastErr = err
+			continue
+		}
+		if candidate.RC != 0 {
+			lastErr = fmt.Errorf("eastmoney intraday trend rc=%d for %s", candidate.RC, code)
+			continue
+		}
+		if len(candidate.Data.Trends) == 0 {
+			lastErr = fmt.Errorf("eastmoney intraday trend returned no points for %s", code)
+			continue
+		}
+		payload, usedURL = candidate, requestURL
+		break
+	}
+	if usedURL == "" {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("eastmoney intraday trend has no available mirror for %s", code)
+		}
+		return foundation.SectorPriceSeries{}, "", lastErr
+	}
+
+	preClose := float64(payload.Data.PreClose)
+	points := make([]foundation.SectorPricePoint, 0, len(payload.Data.Trends))
+	tradeDate := ""
+	for _, line := range payload.Data.Trends {
+		parts := strings.Split(line, ",")
+		// 时间、开、收三列齐全才是一条有效的分时点。
+		if len(parts) < 3 {
+			continue
+		}
+		stamp := strings.TrimSpace(parts[0])
+		if len(stamp) >= 10 {
+			tradeDate = stamp[:10]
+		}
+		price := sectorFlowValue(parts[2])
+		point := foundation.SectorPricePoint{Time: sectorFlowClock(stamp), Price: price}
+		if len(parts) >= 8 {
+			point.Average = sectorFlowValue(parts[7])
+		}
+		// 昨收缺失时涨跌幅留 0，前端按点位显示而不是编造百分比。
+		if preClose > 0 {
+			point.ChangePercent = (price/preClose - 1) * 100
+		}
+		points = append(points, point)
+	}
+	if len(points) == 0 {
+		return foundation.SectorPriceSeries{}, "", fmt.Errorf("eastmoney intraday trend returned no points for %s", code)
+	}
+
+	name := strings.TrimSpace(payload.Data.Name)
+	if name == "" {
+		name = code
+	}
+	return foundation.SectorPriceSeries{
+		Code:         code,
+		Name:         name,
+		TradeDate:    tradeDate,
+		PreClose:     preClose,
+		Points:       points,
+		LatestChange: points[len(points)-1].ChangePercent,
+	}, usedURL, nil
+}
+
+func (c *Client) sectorPriceIntradayCached(codes []string, now time.Time) (map[string]sectorPriceIntradayEntry, []string) {
+	c.sectorPriceIntradayMu.Lock()
+	defer c.sectorPriceIntradayMu.Unlock()
+	cached := make(map[string]sectorPriceIntradayEntry, len(codes))
+	pending := make([]string, 0, len(codes))
+	for _, code := range codes {
+		entry, exists := c.sectorPriceIntradayBoards[code]
+		if exists && now.Before(entry.expiresAt) {
+			cached[code] = entry
+			continue
+		}
+		pending = append(pending, code)
+	}
+	return cached, pending
+}
+
+func (c *Client) storeSectorPriceIntraday(code string, series foundation.SectorPriceSeries, sourceURL string) {
+	if series.Code == "" {
+		return
+	}
+	c.sectorPriceIntradayMu.Lock()
+	defer c.sectorPriceIntradayMu.Unlock()
+	if c.sectorPriceIntradayBoards == nil {
+		c.sectorPriceIntradayBoards = make(map[string]sectorPriceIntradayEntry)
+	}
+	c.sectorPriceIntradayBoards[code] = sectorPriceIntradayEntry{
+		series:    series,
+		sourceURL: sourceURL,
+		expiresAt: time.Now().Add(sectorPriceIntradayBoardTTL),
+	}
+}
+
+// sectorPriceIntradayEntry 是单个板块分时价格序列的缓存条目。
+type sectorPriceIntradayEntry struct {
+	series    foundation.SectorPriceSeries
+	sourceURL string
+	expiresAt time.Time
 }
 
 func applySectorFlowMetric(rank *foundation.SectorFlowRank, key string, row sectorFlowRankRow) {
@@ -395,8 +863,12 @@ func applySectorFlowMetric(rank *foundation.SectorFlowRank, key string, row sect
 		rank.SmallNet = float64(row.Small)
 	case "f164":
 		rank.FiveDayMainNet = float64(row.FiveDayMain)
+	case "f165":
+		rank.FiveDayMainRatio = float64(row.FiveDayRatio) / 100
 	case "f174":
 		rank.TenDayMainNet = float64(row.TenDayMain)
+	case "f175":
+		rank.TenDayMainRatio = float64(row.TenDayRatio) / 100
 	}
 }
 
@@ -450,7 +922,7 @@ func sectorFlowValue(raw string) float64 {
 }
 
 func sectorFlowRankFields(items []foundation.SectorFlowRank) []string {
-	fields := []string{"change_percent", "main_net_inflow", "main_net_inflow_ratio", "five_day_main_net_inflow", "ten_day_main_net_inflow"}
+	fields := []string{"change_percent", "main_net_inflow", "main_net_inflow_ratio", "five_day_main_net_inflow", "five_day_main_net_inflow_ratio", "ten_day_main_net_inflow", "ten_day_main_net_inflow_ratio"}
 	for _, item := range items {
 		if item.SuperLargeNet != 0 || item.LargeNet != 0 || item.SmallNet != 0 {
 			return append(fields, "super_large_net_inflow", "large_net_inflow", "medium_net_inflow", "small_net_inflow")
