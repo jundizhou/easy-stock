@@ -13,6 +13,7 @@ import (
 	"easy-stock/backend/internal/methodology"
 	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/review"
+	"easy-stock/backend/internal/sectorflowsample"
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/themeindex"
@@ -200,6 +201,10 @@ type Config struct {
 	StockResearchStore       *stockanalysis.ResearchStore
 	MarketEmotionDBPath      string
 	ThemeRadarDBPath         string
+	// SectorFlowSampleDBPath 是板块资金流本地采样库：分时曲线在上游不可用时由它拼接。
+	SectorFlowSampleDBPath   string
+	SectorFlowSampleStore    *sectorflowsample.Store
+	SectorFlowSampleInterval time.Duration
 	DuanxianxiaBaseURL       string
 	WeChatAPIURL             string
 	ReviewHTTP               *http.Client

@@ -3,6 +3,7 @@ package eastmoney
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -18,14 +19,12 @@ const (
 	sectorFlowConceptFilter  = "m:90+t:3+f:!50"
 	sectorFlowIndustryFilter = "m:90+t:2+f:!50"
 
-	sectorFlowRankSource     = "eastmoney:bkzj"
-	sectorFlowIntradaySource = "eastmoney:board-intraday-flow"
+	sectorFlowRankSource      = "eastmoney:bkzj"
+	sectorFlowIntradaySource  = "eastmoney:board-intraday-flow"
 	sectorPriceIntradaySource = "eastmoney:board-intraday-trend"
 
 	// 榜单最多返回 600 行，覆盖概念（约 508）与行业（约 496）两个维度。
 	sectorFlowRankLimit = 600
-	// 分时曲线一次最多拉取 12 个板块，避免前端叠加过多序列。
-	sectorFlowIntradayLimit = 12
 	// 榜单与分时都按并发上限抓取，降低被限流的概率。
 	sectorFlowRankConcurrent = 3
 	// 分时资金流串行抓取：东财对突发请求会直接断连（营销看板项目实测同样如此，
@@ -40,8 +39,12 @@ const (
 	sectorFlowIntradayBoardTTL = 45 * time.Second
 
 	// 分时资金流连续失败到阈值后熔断一段时间，避免持续打已不可用的上游路径。
+	// 熔断窗口不宜太长：东财这条路径经常几十秒内就恢复，窗口过长会让页面在本可恢复时
+	// 一直用本地采样。现在请求内部已经有地址族/坏连接重试，短暂抖动基本不会走到熔断。
 	sectorFlowFailureThreshold = 2
-	sectorFlowCooldownWindow   = 90 * time.Second
+	sectorFlowCooldownWindow   = 30 * time.Second
+	// 连续这么多个板块在全部镜像上都失败时，判定整条上游路径不可用，放弃本轮剩余板块。
+	sectorFlowAbortAfterFailures = 2
 
 	// sectorFlowIntradayPath 是分时（当日逐分钟）累计资金流的接口路径。
 	sectorFlowIntradayPath = "/api/qt/stock/fflow/kline/get"
@@ -302,34 +305,29 @@ func (c *Client) SectorFlowIntraday(ctx context.Context, codes []string) ([]foun
 	// 只抓缺失或过期的板块可以把上游请求量压到最低。
 	cached, pending := c.sectorFlowIntradayCached(normalized, time.Now())
 
-	series := make([]foundation.SectorFlowSeries, len(pending))
-	usedURLs := make([]string, len(pending))
-	failures := make([]error, len(pending))
-	var waitGroup sync.WaitGroup
-	semaphore := make(chan struct{}, sectorFlowIntradayConcurrent)
-	for index, code := range pending {
-		waitGroup.Add(1)
-		go func(index int, code string) {
-			defer waitGroup.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			value, requestURL, loadErr := c.sectorFlowIntradayOne(ctx, code)
-			series[index], usedURLs[index], failures[index] = value, requestURL, loadErr
-			// 串行抓取时给上游留出间隔，避免连续请求被判定为突发流量。
-			time.Sleep(sectorFlowIntradayInterval)
-		}(index, code)
-	}
-	waitGroup.Wait()
-
+	// 串行抓取：东财对突发请求会直接断连，这里一个板块一个板块来。
 	fetched := make(map[string]foundation.SectorFlowSeries, len(pending))
 	failed := make(map[string]error, len(pending))
-	for index, code := range pending {
-		if failures[index] != nil {
-			failed[code] = failures[index]
-			continue
+	usedURLs := make([]string, 0, len(pending))
+	consecutiveFailures := 0
+	for _, code := range pending {
+		value, requestURL, loadErr := c.sectorFlowIntradayOne(ctx, code)
+		if loadErr != nil {
+			failed[code] = loadErr
+			consecutiveFailures++
+			// 连续多个板块在全部镜像上都失败，说明是整条路径不可用：
+			// 继续打剩下的板块只会放大请求量、延长上游的临时拒绝。
+			if consecutiveFailures >= sectorFlowAbortAfterFailures {
+				break
+			}
+		} else {
+			consecutiveFailures = 0
+			fetched[code] = value
+			usedURLs = append(usedURLs, requestURL)
+			c.storeSectorFlowIntraday(code, value, requestURL)
 		}
-		fetched[code] = series[index]
-		c.storeSectorFlowIntraday(code, series[index], usedURLs[index])
+		// 串行抓取时给上游留出间隔，避免连续请求被判定为突发流量。
+		time.Sleep(sectorFlowIntradayInterval)
 	}
 
 	items := make([]foundation.SectorFlowSeries, 0, len(pending))
@@ -348,7 +346,9 @@ func (c *Client) SectorFlowIntraday(ctx context.Context, codes []string) ([]foun
 			items = append(items, value)
 			continue
 		}
-		lastErr = failed[code]
+		if loadErr, ok := failed[code]; ok {
+			lastErr = loadErr
+		}
 		skipped = append(skipped, code)
 	}
 	if len(items) == 0 {
@@ -561,7 +561,7 @@ func (c *Client) fetchSectorFlowIntradayHost(ctx context.Context, host string, q
 	}
 	requestURL := host + sectorFlowIntradayPath + "?" + query
 	candidate := sectorFlowKLinePayload{}
-	if err := c.getJSONWithHeaders(ctx, requestURL, headers, &candidate); err != nil {
+	if err := c.getJSONWithHeadersRetry(ctx, requestURL, headers, &candidate); err != nil {
 		return sectorFlowKLinePayload{}, err
 	}
 	if candidate.RC != 0 {
@@ -627,7 +627,42 @@ func (c *Client) getJSONWithHeadersAndFamilyRetry(ctx context.Context, requestUR
 	if err == nil || c.fallbackHTTPClient == nil || !isTransient(err) {
 		return err
 	}
+	c.fallbackHTTPClient.CloseIdleConnections()
 	return c.getJSONWithClientHeaders(ctx, c.fallbackHTTPClient, requestURL, headers, target)
+}
+
+// getJSONWithHeadersRetry 只在「连接层失败」（EOF / 被重置 / 超时）时重试：
+// 这类错误通常来自池里被上游静默关闭的长连接，清掉空闲连接、换地址族再打一次就能恢复。
+// 上游返回 5xx / rc≠0 属于镜像本身的问题，换镜像比重试同一个地址更有效。
+func (c *Client) getJSONWithHeadersRetry(ctx context.Context, requestURL string, headers map[string]string, target any) error {
+	err := c.getJSONWithHeaders(ctx, requestURL, headers, target)
+	if err == nil || !isConnectionError(err) {
+		return err
+	}
+	clients := make([]*http.Client, 0, 2)
+	if c.fallbackHTTPClient != nil {
+		clients = append(clients, c.fallbackHTTPClient)
+	}
+	if c.httpClient != nil && c.httpClient != c.fallbackHTTPClient {
+		clients = append(clients, c.httpClient)
+	}
+	for _, client := range clients {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(120 * time.Millisecond):
+		}
+		client.CloseIdleConnections()
+		retryErr := c.getJSONWithClientHeaders(ctx, client, requestURL, headers, target)
+		if retryErr == nil {
+			return nil
+		}
+		if !isConnectionError(retryErr) {
+			return retryErr
+		}
+		err = retryErr
+	}
+	return err
 }
 
 // SectorPriceIntraday 返回多个板块的当日分时价格序列（东财分时行情 trends2）。
@@ -638,6 +673,10 @@ func (c *Client) SectorPriceIntraday(ctx context.Context, codes []string) ([]fou
 	normalized, err := normalizeSectorFlowCodes(codes)
 	if err != nil {
 		return nil, foundation.SourceMeta{}, err
+	}
+	// 上游整片不可用时快速失败：HTTP 层随后改用本地采样，不必每个板块都去撞一遍镜像。
+	if remaining, blocked := c.sectorPriceCooldown.blocked(); blocked {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("板块分时行情上游暂不可用，约 %.0f 秒后自动重试", remaining.Seconds())
 	}
 
 	start := time.Now()
@@ -688,15 +727,19 @@ func (c *Client) SectorPriceIntraday(ctx context.Context, codes []string) ([]fou
 			items = append(items, value)
 			continue
 		}
-		lastErr = failed[code]
+		if loadErr, ok := failed[code]; ok {
+			lastErr = loadErr
+		}
 		skipped = append(skipped, code)
 	}
 	if len(items) == 0 {
+		c.sectorPriceCooldown.recordFailure()
 		if lastErr == nil {
 			lastErr = fmt.Errorf("eastmoney intraday trend returned no series")
 		}
 		return nil, foundation.SourceMeta{}, lastErr
 	}
+	c.sectorPriceCooldown.reset()
 
 	tradeDate := items[0].TradeDate
 	meta.TradeDate = tradeDate
@@ -899,9 +942,6 @@ func normalizeSectorFlowCodes(codes []string) ([]string, error) {
 	}
 	if len(normalized) == 0 {
 		return nil, fmt.Errorf("at least one sector code is required")
-	}
-	if len(normalized) > sectorFlowIntradayLimit {
-		normalized = normalized[:sectorFlowIntradayLimit]
 	}
 	return normalized, nil
 }

@@ -7,9 +7,6 @@ export type SectorFlowSortDirection = 'desc' | 'asc';
 /** 列表资金口径：当日 / 5日 / 10日，由榜单上方的滑动按钮切换。 */
 export type SectorFlowPeriod = 'main' | 'five' | 'ten';
 
-/** 后端一次最多接受 12 个板块代码，分时曲线数量上限与之保持一致。 */
-export const MAX_SECTOR_FLOW_SERIES = 12;
-
 export const SECTOR_FLOW_SELECTION_STORAGE_KEY = 'easy-stock.sector-flow.selection';
 
 export const SECTOR_FLOW_DIMENSIONS: Array<{ id: SectorFlowDimension; label: string; hint: string }> = [
@@ -32,7 +29,7 @@ export const SECTOR_FLOW_CHART_MODES: Array<{ id: SectorFlowChartMode; label: st
 	{ id: 'price', label: '价格分时', hint: '板块分时涨跌幅（相对昨收，%）' },
 ];
 
-// 12 条曲线足以覆盖主线对比，同时保证每条线的颜色可区分。
+// 前 12 条曲线用品牌色；选中的板块没有数量上限，超出的曲线按色相环继续生成颜色。
 export const SECTOR_FLOW_SERIES_COLORS = [
 	'#e0533d',
 	'#2f7fe0',
@@ -126,27 +123,18 @@ export function defaultSectorFlowSelection(ranks: SectorFlowRank[]): string[] {
 	return [...inflow, ...outflow].map((item) => item.code);
 }
 
-/**
- * 切换某个板块的分时曲线。达到上限时保持原样并通过 limited 告知调用方，
- * 由界面提示用户先移除一个板块。
- */
-export function toggleSectorFlowSelection(
-	selection: string[],
-	code: string,
-	max: number = MAX_SECTOR_FLOW_SERIES,
-): { selection: string[]; limited: boolean } {
-	if (selection.includes(code)) {
-		return { selection: selection.filter((item) => item !== code), limited: false };
-	}
-	if (selection.length >= max) {
-		return { selection, limited: true };
-	}
-	return { selection: [...selection, code], limited: false };
+/** 切换某个板块的分时曲线：选中数量不设上限，点一次加上，再点一次移除。 */
+export function toggleSectorFlowSelection(selection: string[], code: string): string[] {
+	return selection.includes(code) ? selection.filter((item) => item !== code) : [...selection, code];
 }
 
+/** 曲线颜色：前 12 条用品牌色，之后按黄金角沿色相环取色，相邻曲线颜色尽量拉开且不重复。 */
 export function sectorFlowSeriesColor(index: number): string {
-	const normalized = ((index % SECTOR_FLOW_SERIES_COLORS.length) + SECTOR_FLOW_SERIES_COLORS.length) % SECTOR_FLOW_SERIES_COLORS.length;
-	return SECTOR_FLOW_SERIES_COLORS[normalized];
+	const palette = SECTOR_FLOW_SERIES_COLORS;
+	const normalized = ((index % palette.length) + palette.length) % palette.length;
+	if (index < palette.length) return palette[normalized];
+	const hue = Math.round((index * 137.508 + 23) % 360);
+	return `hsl(${hue} 62% 46%)`;
 }
 
 export function sectorFlowTone(value: number): 'up' | 'down' | 'flat' {
@@ -172,6 +160,17 @@ export function estimateSectorFlowLabelWidth(text: string): number {
 
 /** 纵轴左侧留白：容纳「-1,279亿」这类刻度文字 + 刻度短线。 */
 export const SECTOR_FLOW_AXIS_GUTTER = 76;
+
+/**
+ * 按当前刻度文字的实际宽度决定左侧留白：
+ * 刻度只有「-100亿」时收窄到 58px 左右，纵轴和绘图区整体左移，
+ * 出现「-1,279亿」这种长刻度时再自动放宽，不会把数字裁掉。
+ */
+export function sectorFlowAxisGutter(labels: string[]): number {
+	if (!labels.length) return SECTOR_FLOW_AXIS_GUTTER;
+	const widest = Math.max(...labels.map((label) => estimateSectorFlowLabelWidth(label)));
+	return Math.min(SECTOR_FLOW_AXIS_GUTTER, Math.max(52, widest + 18));
+}
 
 /** 没有曲线时的占位纵轴量级（±40亿）：空框架也有一套完整刻度，而不是只有刻度线没有数字。 */
 export const SECTOR_FLOW_EMPTY_AXIS_EXTENT = 4_000_000_000;
@@ -208,6 +207,32 @@ export function sectorFlowPriceCurves(series: SectorPriceSeries[]): SectorFlowCu
 		trade_date: item.trade_date,
 		points: item.points.map((point) => ({ time: point.time, value: point.change_percent })),
 	}));
+}
+
+/**
+ * 悬停命中：在某个分钟上，找出纵向离鼠标最近、且距离在 range 像素内的曲线。
+ * 只认该分钟确实有数据的曲线（缺口分钟不参与），找不到就返回 null（不高亮），
+ * 这样鼠标在空白处移动时不会误把某条曲线点亮。
+ */
+export function nearestSectorFlowCurve(
+	curves: SectorFlowCurve[],
+	time: string,
+	y: number,
+	positionY: (value: number) => number,
+	range = 16,
+): string | null {
+	let nearest: string | null = null;
+	let distance = range;
+	for (const curve of curves) {
+		const point = curve.points.find((item) => item.time === time);
+		if (!point) continue;
+		const offset = Math.abs(positionY(point.value) - y);
+		if (offset <= distance) {
+			distance = offset;
+			nearest = curve.code;
+		}
+	}
+	return nearest;
 }
 
 /**
@@ -260,14 +285,14 @@ export function sectorFlowAxisScale(min: number, max: number, steps = 4): { min:
 }
 
 // 概念与行业分别保存；null 表示尚未选择，[] 表示用户主动清空，不应重新填入默认项。
-export function readSectorFlowSelection(storage: Pick<Storage, 'getItem'> | null | undefined, dimension: SectorFlowDimension, max: number = MAX_SECTOR_FLOW_SERIES): string[] | null {
+export function readSectorFlowSelection(storage: Pick<Storage, 'getItem'> | null | undefined, dimension: SectorFlowDimension): string[] | null {
 	if (!storage) return null;
 	try {
 		const raw = storage.getItem(`${SECTOR_FLOW_SELECTION_STORAGE_KEY}.${dimension}`);
 		if (!raw) return null;
 		const parsed: unknown = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return null;
-		return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, max);
+		return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
 	} catch {
 		return null;
 	}
