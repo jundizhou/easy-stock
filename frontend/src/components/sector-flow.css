@@ -1,5 +1,29 @@
 /* 内嵌行情总览后按内容区宽度排版；榜单与曲线保留确定高度，内部独立滚动。 */
 .market-overview-sector-flow { container: sector-flow / inline-size; }
+/* 浏览器预览没有桌面壳的定高框架：把资金流向视图锁在视口高度内，
+   否则几百行的榜单会把网格行撑开，曲线区被 ResizeObserver 量成几万像素高。
+   桌面端由 .desktop-titlebar-overlay 给 workspace-frame / app-shell 定高，这里不重复覆盖。 */
+html:not(.desktop-titlebar-overlay) .workspace-frame:has(.market-overview-sector-flow) {
+	height: 100vh;
+	min-height: 0;
+	grid-template-rows: minmax(0, 1fr);
+}
+html:not(.desktop-titlebar-overlay) .workspace-frame:has(.market-overview-sector-flow) .app-shell {
+	height: 100%;
+	min-height: 0;
+	overflow-x: hidden;
+	overflow-y: auto;
+}
+
+/* 资金流向占满工作台剩余高度：卡片 → 主区 → 榜单/曲线依次分掉高度，
+   窗口放大缩小时一起伸缩，底部时间轴不会再被推到窗口之外。
+   只有窗口矮于卡片下限、或窄到上下堆叠时，才退回区块内部滚动。 */
+.app-shell:has(.market-overview-sector-flow) { display: flex; flex-direction: column; }
+.app-shell:has(.market-overview-sector-flow) > .market-overview-workspace { flex: 1 1 auto; width: 100%; min-height: 720px; }
+.app-shell:has(.market-overview-sector-flow) .market-overview-nav { overflow-y: auto; }
+.market-overview-sector-flow { display: flex; flex-direction: column; min-height: 0; }
+.market-overview-sector-flow > .market-overview-hero { flex: 0 0 auto; }
+.market-overview-sector-flow > .sector-flow-workspace { flex: 1 1 auto; height: auto; min-height: 0; overflow-y: auto; }
 .sector-flow-workspace { display: flex; flex-direction: column; gap: 16px; width: 100%; height: max(680px, calc(100vh - 190px)); margin: 0 auto; }
 .sector-flow-control-panel,
 .sector-flow-summary { flex: 0 0 auto; }
@@ -37,7 +61,7 @@
 .sector-flow-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* 榜单窄、曲线宽：榜单列固定在这一段宽度内（宽屏不再跟着窗口一起变宽），其余全部给曲线。 */
-.sector-flow-body { display: grid; flex: 1 1 auto; grid-template-columns: minmax(360px, 38%) minmax(0, 1fr); gap: 16px; min-width: 0; min-height: 420px; }
+.sector-flow-body { display: grid; flex: 1 1 auto; grid-template-columns: minmax(320px, 31%) minmax(0, 1fr); gap: 16px; min-width: 0; min-height: 420px; }
 
 /* 两块面板套用系统的行情面板外观（.market-margin-panel：12px 圆角 + 64px 表头 + 分隔线），
    这里只负责它们内部的行高分配。 */
@@ -46,19 +70,26 @@
 .sector-flow-ranking { container: sector-flow-ranking / inline-size; }
 .sector-flow-ranking > header small,
 .sector-flow-chart-panel > header small { color: var(--theme-subtle, #8794a4); font-size: var(--fs-desc); }
-.sector-flow-head-pill { padding: 3px 8px; border-radius: 999px; background: var(--theme-surface-soft, #eef3f8); color: var(--theme-muted, #718094); font-size: var(--fs-desc); font-style: normal; white-space: nowrap; }
 
-/* 曲线区头部右侧：口径切换按钮 + 当前口径的图例（空间不够时整体换行，不挤压标题）。
+/* 曲线区头部右侧：清空按钮 + 口径切换。空间不够时整体换行，不挤压标题。
    曲线面板只有一块满高图：资金曲线与板块价格分时用这组按钮切换，两种口径量纲不同，不同图叠加。 */
 .sector-flow-chart-head { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; min-width: 0; }
 .sector-flow-chart-tabs { flex: 0 0 auto; }
 .sector-flow-chart-tabs button { min-width: 84px; }
 
+/* 「已选中」沿用主按钮的蓝色（与「问 AI」同一套色）：未开启是蓝字描边，开启后填蓝底白字。 */
+.sector-flow-rank-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; margin-left: auto; }
+.sector-flow-rank-flag { min-height: 28px; padding: 0 9px; gap: 4px; border-radius: 7px; border-color: var(--theme-blue-line, #a9c6e2); color: var(--theme-blue, #2476d2); font-size: var(--fs-desc); }
+.sector-flow-rank-flag:hover { border-color: var(--theme-blue, #2476d2); background: var(--theme-blue-soft, #edf6ff); color: var(--theme-blue, #2476d2); }
+.sector-flow-rank-flag.active,
+.sector-flow-rank-flag.active:hover { border-color: var(--theme-blue, #2476d2); background: var(--theme-blue, #2476d2); color: var(--theme-on-emphasis, #ffffff); font-weight: 700; }
+.sector-flow-rank-flag svg { width: 12px; height: 12px; }
+
 /* 表格是面板内部的无边框列表：表头吸顶，表头与数据行在同一个滚动容器里，
    滚动条不会把数据列整体缩窄，列位置始终对齐。左右内边距 16px 与面板其它留白一致。 */
 .sector-flow-table { display: block; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .sector-flow-table-head,
-.sector-flow-row { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 0.6fr); align-items: center; gap: 8px; padding: 8px 16px; }
+.sector-flow-row { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr); align-items: center; gap: 8px; padding: 8px 16px; }
 /* 首列（板块名称/代码）左对齐，三个资金列（净流入占比 / 当日 / 涨幅）一律右对齐，
    数值贴住各自列的右边界，表格右缘不留大片空白。 */
 .sector-flow-table-head > :first-child,
@@ -140,8 +171,11 @@
 .sector-flow-chart .series-group.dim,
 .sector-flow-chart .series-label-group.dim,
 .sector-flow-chart circle.dim { opacity: 0.18; }
-/* 曲线本身只有 1.8px 宽，命中线把可点区域加粗到 12px（透明描边也要接住鼠标）。 */
-.sector-flow-chart .series-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
+/* 选中的曲线加粗一档，配合其余曲线变浅，一眼就能看出高亮的是哪条。 */
+.sector-flow-chart .series-group.focused .series-line { stroke-width: 2.8; }
+.sector-flow-chart .series-label-group.focused .series-label { font-weight: 800; }
+/* 曲线本身只有 1.8px 宽，命中线把可点区域加粗到 16px（透明描边也要接住鼠标）。 */
+.sector-flow-chart .series-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 /* 悬停浮层：贴着十字线；十字线在右半边时整块翻到左侧，避免压住曲线末端标签。 */
 .sector-flow-chart-tip { position: absolute; top: 26px; z-index: 3; display: grid; gap: 6px; min-width: 178px; margin-left: 12px; padding: 10px 12px; border: 1px solid var(--theme-line-soft, #e3e9f1); border-radius: var(--radius, 10px); background: var(--theme-surface, #ffffff); box-shadow: 0 12px 28px rgba(16, 38, 64, 0.12); pointer-events: none; }
 .sector-flow-chart-tip.flip { margin-left: 0; transform: translateX(calc(-100% - 12px)); }
@@ -154,17 +188,6 @@
 .sector-flow-chart-tip b.down { color: var(--down, #17906a); }
 .sector-flow-chart-tip b.flat { color: var(--theme-muted, #6c7d90); }
 .sector-flow-loading { display: inline-flex; align-items: center; gap: 8px; color: var(--theme-subtle, #8794a4); font-size: var(--fs-body); }
-
-/* 图例沿用系统的 .market-margin-legend（15×2 圆角线 + 12px 间距 + 右对齐），
-   板块名用曲线颜色、数值用涨跌色，与列表里的选中标记对得上。 */
-.sector-flow-legend-item strong { font-family: var(--font-num); font-size: var(--fs-desc); }
-/* 板块名可点：点一下只看这一条曲线（其余曲线与末端标签半透明），选中态用浅底加粗标出来。 */
-.sector-flow-legend-focus { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: var(--fs-desc); cursor: pointer; }
-.sector-flow-legend-focus:hover,
-.sector-flow-legend-item.focused .sector-flow-legend-focus { background: var(--theme-surface-soft, #eef3f8); }
-.sector-flow-legend-item.focused .sector-flow-legend-focus { font-weight: 700; }
-.sector-flow-legend-remove { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--theme-subtle, #93a0ae); cursor: pointer; }
-.sector-flow-legend-remove:hover { background: var(--theme-surface-soft, #eef2f6); color: var(--theme-muted, #506176); }
 
 .sector-flow-workspace .up { color: var(--up); }
 .sector-flow-workspace .down { color: var(--down); }

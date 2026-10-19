@@ -510,6 +510,8 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 		DuanxianxiaBaseURL: remote.URL,
 		ThemeRadarFallback: fakeServerRadarFallback{},
 	})
+	// Windows 下 SQLite 句柄不关闭会让 TempDir 清理失败，这里显式释放。
+	defer server.Close()
 	overviewRequest := httptest.NewRequest(http.MethodGet, "/api/v1/themes/overview", nil)
 	overviewRecorder := httptest.NewRecorder()
 	server.ServeHTTP(overviewRecorder, overviewRequest)

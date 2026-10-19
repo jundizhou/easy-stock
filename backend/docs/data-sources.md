@@ -57,6 +57,23 @@ For example, the local node `photoresist / 光刻胶` matches the EastMoney boar
 
 If EastMoney `push2` closes the constituent connection, the node falls back to `StockSymbols` in `theme.go` and uses Sina realtime quotes. The stock list is then a curated representative sample, but the price, change, and quote metadata are still live market data.
 
+## Sector Fund Flow Intraday Curve
+
+The 资金流向 workbench needs a per-board intraday curve. Two sources are combined:
+
+| Priority | Source | Behavior |
+| --- | --- | --- |
+| 1 | `push2` board minute series (`fflow/kline`, `trends2`) | Full 1-minute curve for the selected boards. Path-gated and occasionally reset by EastMoney. |
+| 2 | Local sampling of the `bkzj` ranking | Every 3 minutes the backend stores each board's cumulative 主力净流入 and 当日涨跌幅. |
+
+- The sampler runs in the backend (`internal/sectorflowsample`) and only during 09:25–11:35 and 12:55–15:05 on trading days, so no upstream request happens while the market is closed.
+- Samples live in `sector-flow-samples.db` (`A_STOCK_SECTOR_FLOW_SAMPLE_DB`), keyed by `(trade_date, code, minute)`, and are kept for 45 days.
+- When the minute-series endpoint fails, or returns only part of the requested boards, `/api/v1/market/sector-flow-intraday` and `/api/v1/market/sector-price-intraday` fill the gap from the samples: `meta.source` becomes `local:sector-flow-samples` (or `...+local-samples` when merged) and `meta.fallback_reason` names the degraded boards. Price points come from the sampled 涨跌幅, because the ranking carries no absolute price.
+- A successful upstream fetch is written back into the sample table (`has_flow` / `has_price` mark which side a minute really has). That way a later upstream outage still has the whole day, even if sampling only started in the afternoon.
+- A board whose upstream series is missing minutes keeps its upstream values and receives the missing minutes from the samples; nothing is interpolated. Only the field that was actually sampled is used, so a flow-only backfill never draws a fake 0% price point.
+- `A_STOCK_SECTOR_FLOW_SAMPLE_INTERVAL` overrides the 3-minute cadence; values below 30 seconds are ignored.
+- Upstream requests retry once over a fresh connection (and the other address family) on connection-level failures such as `EOF` or a reset. HTTP 5xx is not retried in place; the next mirror is tried instead. After two consecutive boards fail on every mirror the request stops early, and the cooldown is 30 seconds, so a recovered upstream is used again quickly.
+
 ## Planned Sources
 
 | Source | Domain | Planned Data |

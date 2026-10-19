@@ -3,8 +3,6 @@ import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, us
 import type { BackendConfig, SectorFlowRank, SectorFlowSeries, SectorPriceSeries, SourceMeta } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
 import {
-	MAX_SECTOR_FLOW_SERIES,
-	SECTOR_FLOW_AXIS_GUTTER,
 	SECTOR_FLOW_CHART_MODES,
 	SECTOR_FLOW_DIMENSIONS,
 	SECTOR_FLOW_EMPTY_AXIS_EXTENT,
@@ -17,7 +15,9 @@ import {
 	formatSectorFlowAxis,
 	formatSectorFlowPercent,
 	formatSectorFlowPriceAxis,
+	nearestSectorFlowCurve,
 	readSectorFlowSelection,
+	sectorFlowAxisGutter,
 	sectorFlowAxisScale,
 	sectorFlowFundCurves,
 	sectorFlowLabelGutter,
@@ -132,7 +132,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 
 	useEffect(() => {
 		if (!config) return;
-		const codes = selection.slice(0, MAX_SECTOR_FLOW_SERIES);
+		const codes = selection;
 		if (!codes.length) {
 			setSeriesByCode({});
 			setSeriesState('idle');
@@ -169,7 +169,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 
 	useEffect(() => {
 		if (!config) return;
-		const codes = selection.slice(0, MAX_SECTOR_FLOW_SERIES);
+		const codes = selection;
 		if (!codes.length) {
 			setPriceByCode({});
 			setPriceState('idle');
@@ -203,13 +203,8 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 	}, [config, selection, refreshKey, retryKey]);
 
 	const toggleSelection = useCallback((code: string) => {
-		const next = toggleSectorFlowSelection(selection, code);
-		if (next.limited) {
-			setSeriesNotice(`最多同时对比 ${MAX_SECTOR_FLOW_SERIES} 个板块，请先移除一个`);
-			return;
-		}
 		setSeriesNotice('');
-		setSelection(next.selection);
+		setSelection(toggleSectorFlowSelection(selection, code));
 	}, [selection, setSelection]);
 
 	const visibleRanks = useMemo(
@@ -281,10 +276,9 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 			ariaLabel: '板块分时累计净流入曲线',
 			valueHint: '当日累计主力净流入',
 			errorTitle: '分时资金加载失败',
-			errorHint: '东方财富分时资金接口这次把连接断开了（上游短暂风控），稍后重试即可；价格分时走的是另一条接口，不受影响。',
 			loadingText: '正在加载分时资金…',
 			emptyTitle: '暂时取不到分时资金',
-			footer: '单位：亿元 · 曲线为当日累计主力净流入，鼠标移入查看任一时点。',
+			footer: '单位：亿元 · 曲线为当日累计主力净流入，鼠标移入查看任一时点 · 上游不可用时自动改用本地采样（每 3 分钟）。',
 		}
 		: {
 			curves: priceCurves,
@@ -301,10 +295,9 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 			ariaLabel: '板块价格分时曲线',
 			valueHint: '分时涨跌幅',
 			errorTitle: '分时价格加载失败',
-			errorHint: '东方财富分时行情接口这次不可达（上游短暂风控），稍后重试即可；资金曲线走的是另一条接口，不受影响。',
 			loadingText: '正在加载分时价格…',
 			emptyTitle: '暂时取不到分时价格',
-			footer: '单位：% · 曲线为板块分时涨跌幅（相对昨收），鼠标移入查看任一时点。',
+			footer: '单位：% · 曲线为板块分时涨跌幅（相对昨收），鼠标移入查看任一时点 · 上游不可用时自动改用本地采样（每 3 分钟）。',
 		};
 
 	const summary = useMemo(() => {
@@ -342,15 +335,13 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 					<Search size={14} aria-hidden="true" />
 					<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索名称或代码，如${dimension === 'concept' ? '半导体' : '银行'}`} aria-label="搜索板块名称" />
 				</label>
-				<button type="button" className={`sector-flow-flag ${selectedOnly ? 'active' : ''}`} aria-pressed={selectedOnly} onClick={() => setSelectedOnly((value) => !value)}><Check size={14} aria-hidden="true" />已选中</button>
 				<div className="sector-flow-actions">
-					<button type="button" className="sector-flow-button" onClick={() => setSelection([])} disabled={!selection.length}><X size={16} aria-hidden="true" />清空曲线</button>
 					<button type="button" className="sector-flow-button primary" onClick={askAI} disabled={!ranks.length}><Sparkles size={16} aria-hidden="true" />问 AI</button>
 				</div>
 			</section>
 
 			<section className="market-flow-summary sector-flow-summary" aria-label="板块资金概览">
-				<article><i><Trophy size={17} aria-hidden="true" /></i><span><small>榜首板块</small><strong className="is-text">{topBoard?.name || '--'}</strong><em>{topBoard ? `${periodOption.label}净流入 ${formatSectorFlowAmount(sectorFlowNetValue(topBoard, period))}` : '等待资金榜单'}</em></span></article>
+				<article><i><Trophy size={17} aria-hidden="true" /></i><span><small>榜首板块</small><strong className="is-text up">{topBoard?.name || '--'}</strong><em>{topBoard ? `${periodOption.label}净流入 ${formatSectorFlowAmount(sectorFlowNetValue(topBoard, period))}` : '等待资金榜单'}</em></span></article>
 				<article><i><TrendingUp size={17} aria-hidden="true" /></i><span><small>净流入板块</small><strong className="up">{summary.inflow}</strong><em>主力净流入为正</em></span></article>
 				<article><i><TrendingDown size={17} aria-hidden="true" /></i><span><small>净流出板块</small><strong className="down">{summary.outflow}</strong><em>主力净流入为负</em></span></article>
 				<article><i><Activity size={17} aria-hidden="true" /></i><span><small>合计净流入</small><strong className={sectorFlowTone(summary.total)}>{formatSectorFlowAmount(summary.total)}</strong><em>主力净流入 = 超大单 + 大单</em></span></article>
@@ -360,11 +351,13 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 				<section className="market-margin-panel sector-flow-ranking" aria-label="板块资金流">
 					<header>
 						<div>
-							<span>SECTOR RANKING</span>
 							<h3>板块资金流</h3>
-							<small>{meta ? '点击表头排序，点击板块叠加资金 / 价格曲线' : '等待数据来源'}</small>
+							<small>{meta ? '关注资金曲线流入流出' : '等待数据来源'}</small>
 						</div>
-						<em className="sector-flow-head-pill">已选 {selection.length}/{MAX_SECTOR_FLOW_SERIES}</em>
+						{/* 「已选中」是榜单的筛选开关，放在榜单右上角，比挂在曲线区更贴近它筛选的对象。 */}
+						<div className="sector-flow-rank-actions">
+							<button type="button" className={`sector-flow-flag sector-flow-rank-flag ${selectedOnly ? 'active' : ''}`} aria-pressed={selectedOnly} onClick={() => setSelectedOnly((value) => !value)}><Check size={12} aria-hidden="true" />已选中</button>
+						</div>
 					</header>
 
 					{state === 'error' ? <div className="sector-flow-state"><AlertTriangle size={22} aria-hidden="true" /><strong>数据加载失败</strong><span>{error || '请稍后重试'}</span></div> : (
@@ -427,7 +420,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 										</button>
 									);
 								})}
-								{state !== 'loading' && !visibleRanks.length ? <div className="sector-flow-state"><TrendingUp size={22} aria-hidden="true" /><strong>没有匹配的板块</strong><span>{selectedOnly ? '先在上方榜单里选中板块，再切回已选中视图' : '换个关键词试试'}</span></div> : null}
+								{state !== 'loading' && !visibleRanks.length ? <div className="sector-flow-state"><TrendingUp size={22} aria-hidden="true" /><strong>没有匹配的板块</strong><span>{selectedOnly ? '先在左侧榜单里选中板块，再切回已选中视图' : '换个关键词试试'}</span></div> : null}
 							</div>
 						</div>
 					)}
@@ -437,41 +430,21 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 				<section className="market-margin-panel sector-flow-chart-panel" aria-label={chartMode === 'fund' ? '资金曲线' : '板块价格分时曲线'}>
 					<header>
 						<div>
-							<span>{chartMode === 'fund' ? 'INTRADAY NET INFLOW' : 'INTRADAY PRICE TREND'}</span>
 							<h3>{chartMode === 'fund' ? '资金曲线' : '板块价格分时'}</h3>
-							<small>{chartMode === 'fund' ? '点击左侧列表添加或删除曲线 · 末端为当日累计主力净流入' : '同一批板块的分时涨跌幅（相对昨收） · 末端为最新涨跌幅'}</small>
+							<small>{chartMode === 'fund' ? '资金流向趋势研判' : '板块价格趋势研判'}</small>
 						</div>
 						<div className="sector-flow-chart-head">
+							<button type="button" className="sector-flow-button" onClick={() => setSelection([])} disabled={!selection.length}><X size={16} aria-hidden="true" />清空曲线</button>
 							<div className="sector-flow-tabs sector-flow-chart-tabs" role="group" aria-label="曲线口径">
 								<i className="sector-flow-tabs-thumb" style={{ transform: `translateX(${chartModeIndex * 100}%)` }} aria-hidden="true" />
 								{SECTOR_FLOW_CHART_MODES.map((item) => (
 									<button key={item.id} type="button" className={chartMode === item.id ? 'active' : ''} onClick={() => setChartMode(item.id)} title={item.hint} aria-pressed={chartMode === item.id}>{item.label}</button>
 								))}
 							</div>
-							{chartView.curves.length ? (
-								<div className="market-margin-legend sector-flow-legend">
-									{chartView.curves.map((item, index) => {
-										const point = chartView.hoverIndex === null ? item.points.at(-1) : item.points[Math.min(chartView.hoverIndex, item.points.length - 1)];
-										const value = point?.value || 0;
-										const focused = chartView.focusCode === item.code;
-										return (
-											<span key={item.code} className={`sector-flow-legend-item${focused ? ' focused' : ''}`} style={{ color: sectorFlowSeriesColor(index) }} title={`${item.name} · ${chartView.valueHint}`}>
-												{/* 板块名可点：点一下只看这一条（其余曲线与末端标签半透明），再点一次恢复。 */}
-												<button type="button" className="sector-flow-legend-focus" onClick={() => setFocusCode((current) => (current === item.code ? null : item.code))} aria-pressed={focused} title={focused ? `取消只看 ${item.name}` : `只看 ${item.name}，其余曲线半透明`}>
-													{shortSectorFlowName(item.name)}
-													<strong className={sectorFlowTone(value)}>{chartView.formatValue(value)}</strong>
-												</button>
-												<button type="button" className="sector-flow-legend-remove" onClick={() => toggleSelection(item.code)} aria-label={`移除 ${item.name}`} title="移除该曲线"><X size={12} aria-hidden="true" /></button>
-											</span>
-										);
-									})}
-								</div>
-							) : <em className="sector-flow-head-pill">{selection.length ? `${selection.length} 个板块` : '等待选择'}</em>}
 						</div>
 					</header>
 					<div className="sector-flow-chart-body">
 						{chartView.notice ? <p className="sector-flow-notice">{chartView.notice}</p> : null}
-						{chartView.state === 'error' ? <p className="sector-flow-notice">{chartView.errorHint}</p> : null}
 						{chartView.state === 'error' && chartView.curves.length ? <p className="sector-flow-notice">{chartView.error || '部分板块加载失败'}</p> : null}
 						<div className="sector-flow-chart-stage">
 							<SectorFlowChart
@@ -569,6 +542,8 @@ export function SectorFlowChart({
 	onFocus,
 }: SectorFlowChartProps) {
 	const [wrapRef, size] = useElementSize<HTMLDivElement>();
+	// 鼠标压在某根曲线上时的高亮（临时预览），移开就恢复；点选则是把某一条曲线锁定为高亮。
+	const [hoverCode, setHoverCode] = useState<string | null>(null);
 	const hasData = curves.length > 0;
 	// 时间轴固定为一整个交易日：曲线从开盘处向右生长，标线与标签挂在「数据末端」，
 	// 盘中任何时候看到的都是同一套坐标，而不是把横轴压缩到当前时刻。
@@ -603,11 +578,13 @@ export function SectorFlowChart({
 	// 高度下限压到 150px：右侧要同时放下资金曲线与价格分时，面板再矮也不会因为下限过高而变形。
 	const labelTexts = curves.map((item) => curveLabelText(item, formatValue));
 	const labelGutter = sectorFlowLabelGutter(labelTexts);
+	const axisGutter = sectorFlowAxisGutter(scale.ticks.map((value) => formatAxis(value)));
 	const geometry = {
 		width: Math.max(360, size.width || 980),
 		height: Math.max(150, size.height || 380),
-		left: SECTOR_FLOW_AXIS_GUTTER,
-		right: labelGutter,
+		left: axisGutter,
+		// 有曲线时右侧留给末端标签；空框架退化成左右等宽，坐标轴仍然居中。
+		right: curves.length ? labelGutter : axisGutter,
 		top: 18,
 		bottom: 34,
 	};
@@ -642,12 +619,16 @@ export function SectorFlowChart({
 
 	const timeTicks = useMemo(() => {
 		const last = times.length - 1;
+		const spacing = plotWidth / Math.max(1, last);
+		// 首末两个时间点固定标注；紧贴它们的档位刻度让位，免得开盘的 09:30 / 09:40 叠成一团。
+		const edge = 44;
 		return times.filter((time, index) => {
 			if (index === 0 || index === last) return true;
+			if (index * spacing < edge || (last - index) * spacing < edge) return false;
 			const [hour, minute] = time.split(':').map(Number);
 			return (hour * 60 + minute) % tickStep === 0;
 		});
-	}, [times, tickStep]);
+	}, [times, tickStep, plotWidth]);
 	const lastIndex = times.length ? times.length - 1 : 0;
 	// 曲线画到的最后一分钟：全天坐标轴下它才是「当前时刻」，十字线、圆点与末端标签都挂在它右边。
 	const dataEndIndex = useMemo(() => curves.reduce((last, item) => {
@@ -658,6 +639,8 @@ export function SectorFlowChart({
 	const activeIndex = hoverIndex === null ? endIndex : Math.min(Math.max(hoverIndex, 0), lastIndex);
 	// 有曲线时十字线停在数据末端（当日此刻），鼠标移上来跟着走；没有曲线时只跟随鼠标，不显示静态竖线。
 	const showCrosshair = hasData || hoverIndex !== null;
+	// 悬停预览优先于点选锁定：鼠标压在某根曲线上先点亮这一根，移开再回到点选锁定的那根。
+	const emphasisCode = (hoverCode && curves.some((item) => item.code === hoverCode) ? hoverCode : null) ?? focusCode;
 	const labels = paths
 		.map((entry) => ({ ...entry, y: positionY(entry.item.points.at(-1)?.value ?? 0) }))
 		.sort((left, right) => left.y - right.y)
@@ -678,15 +661,21 @@ export function SectorFlowChart({
 		if (!rect.width || !times.length) return;
 		// svg 宽度按容器铺满：先把鼠标位置换算回 viewBox 坐标，再映射到绘图区里的分钟。
 		const x = (event.clientX - rect.left) * (geometry.width / rect.width);
+		const y = (event.clientY - rect.top) * (geometry.height / rect.height);
 		const ratio = (x - geometry.left) / plotWidth;
-		onHover(Math.min(Math.max(Math.round(ratio * lastIndex), 0), lastIndex));
+		const index = Math.min(Math.max(Math.round(ratio * lastIndex), 0), lastIndex);
+		onHover(index);
+		// 悬停到某根曲线附近时临时把它单独点亮，其余曲线变淡；鼠标在空白处移动不点亮任何一条。
+		setHoverCode(x >= geometry.left && x <= geometry.left + plotWidth
+			? nearestSectorFlowCurve(curves, times[index], y, positionY)
+			: null);
 	};
 	// 点选聚焦：再点一次同一根就取消，点空白（svg 背景）取消。
 	const toggleFocus = (code: string) => onFocus?.(code === focusCode ? null : code);
 
 	return (
 		<div className="sector-flow-chart-wrap" ref={wrapRef}>
-			<svg className="sector-flow-chart" width={geometry.width} height={geometry.height} viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={ariaLabel} onMouseMove={handleMove} onMouseLeave={() => onHover(null)} onClick={() => onFocus?.(null)}>
+			<svg className="sector-flow-chart" width={geometry.width} height={geometry.height} viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={ariaLabel} onMouseMove={handleMove} onMouseLeave={() => { onHover(null); setHoverCode(null); }} onClick={() => onFocus?.(null)}>
 				{/* 坐标轴框架：左竖轴 + 下横轴 + 刻度短线，没有数据时就是一套空框架。 */}
 				<line className="axis-rail" x1={axisX(0)} x2={axisX(0)} y1={geometry.top} y2={geometry.top + plotHeight} />
 				<line className="axis-rail" x1={geometry.left} x2={geometry.left + plotWidth} y1={axisY(extent.min)} y2={axisY(extent.min)} />
@@ -705,7 +694,7 @@ export function SectorFlowChart({
 					</g>;
 				})}
 				{paths.map((entry) => (
-					<g key={entry.item.code} className={`series-group${focusCode && entry.item.code !== focusCode ? ' dim' : ''}`}>
+					<g key={entry.item.code} className={`series-group${emphasisCode === entry.item.code ? ' focused' : ''}${emphasisCode && entry.item.code !== emphasisCode ? ' dim' : ''}`}>
 						<path className="series-line" d={entry.d} fill="none" stroke={entry.color} strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" />
 						{/* 曲线本身只有 1.8px 宽，点选聚焦再补一条加粗的透明命中线，细线也好点。 */}
 						{onFocus ? <path className="series-hit" d={entry.d} fill="none" onClick={(event) => { event.stopPropagation(); toggleFocus(entry.item.code); }} /> : null}
@@ -720,11 +709,11 @@ export function SectorFlowChart({
 				{hasData ? paths.map((entry) => {
 					const point = entry.item.points[Math.min(activeIndex, entry.item.points.length - 1)];
 					if (!point) return null;
-					return <circle key={entry.item.code} className={focusCode && entry.item.code !== focusCode ? 'dim' : undefined} cx={positionX(activeIndex)} cy={positionY(point.value)} r={3} fill={entry.color} />;
+					return <circle key={entry.item.code} className={emphasisCode && entry.item.code !== emphasisCode ? 'dim' : undefined} cx={positionX(activeIndex)} cy={positionY(point.value)} r={3} fill={entry.color} />;
 				}) : null}
 				{showCrosshair ? <text className="axis strong" x={positionX(activeIndex)} y={geometry.top - 4} textAnchor="middle">{times[activeIndex] || ''}</text> : null}
 				{labels.map((entry) => (
-					<g key={entry.item.code} className={`series-label-group${focusCode && entry.item.code !== focusCode ? ' dim' : ''}`} onClick={(event) => { event.stopPropagation(); toggleFocus(entry.item.code); }}>
+					<g key={entry.item.code} className={`series-label-group${emphasisCode === entry.item.code ? ' focused' : ''}${emphasisCode && entry.item.code !== emphasisCode ? ' dim' : ''}`} onClick={(event) => { event.stopPropagation(); toggleFocus(entry.item.code); }}>
 						<line className="series-label-link" x1={dataEndX + 2} x2={labelX - 3} y1={positionY(entry.item.points.at(-1)?.value ?? 0)} y2={entry.y} stroke={entry.color} strokeWidth={1} />
 						<text className="series-label" x={labelX} y={entry.y + 4} fill={entry.color}>{curveLabelText(entry.item, formatValue)}</text>
 					</g>

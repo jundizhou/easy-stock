@@ -215,22 +215,27 @@ func TestSectorFlowIntradayRouteNormalizesAndCachesCodes(t *testing.T) {
 
 func TestSectorFlowIntradayRouteValidatesCodes(t *testing.T) {
 	server := NewServer(Config{MarketOverview: &fakeSectorFlowProvider{fakeMarketOverviewProvider: &fakeMarketOverviewProvider{}}})
-	tooMany := make([]string, 0, 13)
-	for index := 0; index < 13; index++ {
-		tooMany = append(tooMany, fmt.Sprintf("BK%04d", index))
-	}
 	for _, path := range []string{
 		"/api/v1/market/sector-flow-intraday",
 		"/api/v1/market/sector-flow-intraday?codes=,,,",
 		"/api/v1/market/sector-flow-intraday?codes=hello",
 		"/api/v1/market/sector-flow-intraday?codes=BK0917,hello",
-		"/api/v1/market/sector-flow-intraday?codes=" + strings.Join(tooMany, ","),
 	} {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
 		}
+	}
+	// 选中数量不设上限：一次带 13 个板块也照常返回，不再按 12 个截断或报错。
+	many := make([]string, 0, 13)
+	for index := 0; index < 13; index++ {
+		many = append(many, fmt.Sprintf("BK%04d", index))
+	}
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/sector-flow-intraday?codes="+strings.Join(many, ","), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
