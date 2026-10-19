@@ -18,6 +18,7 @@ export function readTheme(): Theme {
 export function applyTheme(theme: Theme, target: Document = document) {
 	target.documentElement.dataset.theme = theme;
 	target.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#151719' : '#ffffff');
+	void window.aStock?.setTitleBarTheme?.(theme === 'dark').catch(() => undefined);
 }
 
 export function saveTheme(theme: Theme) {

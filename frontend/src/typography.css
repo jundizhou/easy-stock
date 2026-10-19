@@ -1,0 +1,60 @@
+:root {
+  /* Inter is self-hosted (see imports in main.tsx), so Latin and digits render
+     identically on every machine; Chinese falls back to the platform UI font. */
+  --font-ui: "Inter", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-num: "Inter", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-code: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+
+  --fs-micro: 10px;
+  --fs-desc: 11px;
+  --fs-caption: 11px;
+  --fs-body: 12px;
+  --fs-subtitle: 14px;
+  --fs-heading: 16px;
+  --fs-title: 18px;
+  --fs-display: 22px;
+  --fs-metric: 26px;
+
+  --lh-metric: 1.1;
+  --lh-tight: 1.25;
+  --lh-snug: 1.45;
+  --lh-body: 1.6;
+  --lh-reading: 1.8;
+
+  --tracking-eyebrow: 0.08em;
+
+  /* Financial tables and metric rows must line up digit by digit. */
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: var(--lh-tight);
+  text-wrap: balance;
+}
+
+/* Never let browser default heading sizes leak in as off-scale font sizes. */
+h1 { font-size: var(--fs-display); }
+h2 { font-size: var(--fs-title); }
+h3 { font-size: var(--fs-subtitle); }
+h4 { font-size: var(--fs-subtitle); }
+h5,
+h6 { font-size: var(--fs-body); }
+
+p {
+  text-wrap: pretty;
+}
+
+/* `strong` inside a bold parent (e.g. a table `th`) would otherwise compute to
+   900 via the UA `bolder` keyword and break the 400/600/700 weight palette. */
+strong,
+b {
+  font-weight: 700;
+}

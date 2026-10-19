@@ -1,5 +1,5 @@
 import type { PortfolioResearchRequest } from './backend';
-import { portfolioDraftToHoldings, type PortfolioPlan } from './portfolio-draft';
+import { portfolioDraftToHoldingsWithAssets, type PortfolioPlan } from './portfolio-draft';
 
 export type ScheduleChannel = 'dingtalk' | 'feishu';
 export type PortfolioScheduleConfig = {
@@ -21,7 +21,7 @@ export type PortfolioSchedule = PortfolioScheduleConfig & {
 
 export function scheduleRequest(plan: PortfolioPlan): PortfolioResearchRequest {
  return { portfolio_plan_id: plan.id, portfolio_plan_name: plan.name, trader_profile: plan.draft.profile,
-  holdings: portfolioDraftToHoldings(plan.draft.holdings), horizon: plan.draft.horizon || 'swing', research_level: plan.draft.researchLevel || 'standard' };
+  holdings: portfolioDraftToHoldingsWithAssets(plan.draft.holdings, plan.draft.totalAssets), horizon: plan.draft.horizon || 'swing', research_level: plan.draft.researchLevel || 'standard' };
 }
 
 export function scheduleSnapshotMatches(left: PortfolioResearchRequest, right: PortfolioResearchRequest): boolean {

@@ -171,3 +171,14 @@ type MarketResearchItem struct {
 	URL            string     `json:"url"`
 	Meta           SourceMeta `json:"meta"`
 }
+
+// MarketResearchDetail carries the full body of a research report.列表接口不返回研报正文，
+// 前端在展开某条记录时按需拉取，避免一次请求抓取几十个正文页面。
+type MarketResearchDetail struct {
+	Kind    string     `json:"kind"`
+	ID      string     `json:"id"`
+	Title   string     `json:"title,omitempty"`
+	Content string     `json:"content"`
+	URL     string     `json:"url,omitempty"`
+	Meta    SourceMeta `json:"meta"`
+}

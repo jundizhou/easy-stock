@@ -15,6 +15,11 @@ describe('portfolio valuation', () => {
   expect(higher.profitPercent).toBeCloseTo(10);
   expect(valuePortfolioHolding(holding, 1000000, quote(22)).quantity).toBe(15000);
  });
+ it('calculates the holding share from explicit quantity, latest price, and total assets', () => {
+  const value = valuePortfolioHolding({ ...holding, quantity: '10000' }, 500000, quote(45.02));
+  expect(value.weightPercent).toBeCloseTo(90.04);
+  expect(valuePortfolioHolding(holding, 500000, quote(45.02)).weightPercent).toBeNull();
+ });
  it('aggregates mixed gains and losses by invested cost and keeps rounding remainder in cash', () => {
   const second = { ...holding, symbol: '600002.SH', weight: 20, costPrice: '30' };
   const value = valuePortfolio({ profile: 'balanced', holdings: [holding, second] }, { [holding.symbol]: quote(22), [second.symbol]: quote(27) });

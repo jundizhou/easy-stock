@@ -34,6 +34,7 @@ export type TokenUsageSummary = {
 
 export type BackendBridge = {
   getBackendConfig: () => Promise<BackendConfig>;
+  setTitleBarTheme?: (dark: boolean) => Promise<boolean>;
 	getRuntimeLogStatus?: () => Promise<RuntimeLogStatus>;
 	openRuntimeLogs?: () => Promise<void>;
 	logRuntimeEvent?: (entry: RuntimeLogEntry) => Promise<boolean>;
@@ -533,6 +534,15 @@ export type MarketResearchItem = {
 	category?: string;
 	published_at: string;
 	url: string;
+	meta: SourceMeta;
+};
+
+export type MarketResearchDetail = {
+	kind: string;
+	id: string;
+	title?: string;
+	content: string;
+	url?: string;
 	meta: SourceMeta;
 };
 

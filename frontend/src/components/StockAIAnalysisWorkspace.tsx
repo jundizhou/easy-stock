@@ -9,6 +9,7 @@ import {
 	Building2,
 	Calculator,
 	CheckCircle2,
+	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	CircleAlert,
@@ -69,6 +70,7 @@ import {
 	searchStockDirectory,
 	signedPercent,
 } from '../lib/stock-analysis';
+import { formatArticleParagraphs, isIndentedParagraph } from '../lib/article';
 import { useStockResearch } from '../lib/use-stock-research';
 import { isResearchRunning, researchPlanText, type ResearchAnalysisLevel, type ResearchRequest } from '../lib/stock-research';
 import { StockResearchHistory, StockResearchProgress, StockResearchReportView } from './StockResearchReport';
@@ -406,12 +408,18 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearch query={query} mode={mode} directory={directory} directoryState={directoryState} directoryWarnings={directoryWarnings} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} llmProfiles={llmProfiles} activeLLMProfileID={activeLLMProfileID} config={config} refreshKey={String(refreshKey)} choiceBusy={aiChoiceBusy} onModelChange={(id) => void switchResearchModel(id)} />
-			<nav className="mode-nav stock-ai-mode-nav" aria-label="工作台模式">
-				<button type="button" className={mode === 'analysis' ? 'active' : ''} aria-pressed={mode === 'analysis'} onClick={() => onModeChange('analysis')}><BrainCircuit size={16} aria-hidden="true" />股票 / ETF 分析</button>
-				<button type="button" className={mode === 'expectation' ? 'active' : ''} aria-pressed={mode === 'expectation'} onClick={() => onModeChange('expectation')}><Target size={16} aria-hidden="true" />{analysis?.instrument_type === 'etf' ? '情景与核验' : '隔日预期'}</button>
-				<button type="button" className={mode === 'risk' ? 'active' : ''} aria-pressed={mode === 'risk'} onClick={() => onModeChange('risk')}><ShieldCheck size={16} aria-hidden="true" />风控执行</button>
-			</nav>
+			<AnalysisSearchHero mode={mode} right={<AnalysisSearchForm query={query} directory={directory} directoryState={directoryState} directoryWarnings={directoryWarnings} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />} />
+			<div className="stock-ai-mode-row">
+				<nav className="mode-nav stock-ai-mode-nav" aria-label="工作台模式">
+					<button type="button" className={mode === 'analysis' ? 'active' : ''} aria-pressed={mode === 'analysis'} onClick={() => onModeChange('analysis')}><BrainCircuit size={16} aria-hidden="true" />股票 / ETF 分析</button>
+					<button type="button" className={mode === 'expectation' ? 'active' : ''} aria-pressed={mode === 'expectation'} onClick={() => onModeChange('expectation')}><Target size={16} aria-hidden="true" />{analysis?.instrument_type === 'etf' ? '情景与核验' : '隔日预期'}</button>
+					<button type="button" className={mode === 'risk' ? 'active' : ''} aria-pressed={mode === 'risk'} onClick={() => onModeChange('risk')}><ShieldCheck size={16} aria-hidden="true" />风控执行</button>
+				</nav>
+				<div className="stock-ai-research-options">
+					<label><select value={activeLLMProfileID} onChange={(event) => void switchResearchModel(event.target.value)} disabled={aiChoiceBusy || state === 'loading' || state === 'refining' || !llmProfiles.length} aria-label="完整分析模型"><option value="">当前模型</option>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name} · {profile.model}</option>)}</select></label>
+					<ReasoningControl config={config} refreshKey={JSON.stringify([activeLLMProfileID, llmProfiles.find((profile) => profile.id === activeLLMProfileID), String(refreshKey)])} disabled={aiChoiceBusy || state === 'loading' || state === 'refining'} label="完整分析思考等级" />
+				</div>
+			</div>
 			{levelDialogOpen && <StockResearchSetupDialog symbol={pendingAnalysisSymbol} isETF={isETFCandidate(pendingAnalysisSymbol)} initialOptions={{ purpose, horizon, cost, level: isETFCandidate(pendingAnalysisSymbol) ? 'standard' : 'deep' }} onCancel={() => setLevelDialogOpen(false)} onConfirm={confirmResearchLevel} />}
 			<div className={`stock-ai-shell ${hotStockSidebarCollapsed ? 'is-hot-collapsed' : ''}`.trim()}>
 					<HotStockSidebar data={hotRanks} state={hotRankState} error={hotRankError} activeSymbol={analysis?.symbol} collapsed={hotStockSidebarCollapsed} onToggle={toggleHotStockSidebar} onRefresh={() => void loadHotRanks(true)} onSelect={(symbol) => requestAnalysis(symbol)} />
@@ -566,31 +574,39 @@ function AnalysisExportFooter({ analysis }: { analysis: InstrumentAnalysis }) {
 	</footer>;
 }
 
-function AnalysisSearch({ query, mode, directory, directoryState, directoryWarnings, onQuery, onSubmit, loading, llmProfiles, activeLLMProfileID, config, refreshKey, choiceBusy, onModelChange }: {
-	query: string;
+function AnalysisSearchHero({ mode, right }: {
 	mode: StockAIWorkspaceMode;
+	right: ReactNode;
+}) {
+	const descriptions: Record<StockAIWorkspaceMode, string> = {
+		analysis: '按标的类型组织证据：股票研究业务与量价，ETF 分别判断底层资产、基金产品和介入条件。',
+		expectation: '查看支持、反对与失效情景，按所选周期核对后续行情和待披露事项。',
+		risk: '核实新仓与已有持仓的执行边界；资料不足时保留观察，不生成价格计划。',
+	};
+	return (
+		<header className="stock-ai-search-hero">
+			<div>
+				<span>STOCK DECISION SYSTEM</span>
+				<p>{descriptions[mode]}</p>
+			</div>
+			{right}
+		</header>
+	);
+}
+
+function AnalysisSearchForm({ query, directory, directoryState, directoryWarnings, onQuery, onSubmit, loading }: {
+	query: string;
 	directory: StockDirectoryEntry[];
 	directoryState: DirectoryState;
 	directoryWarnings: string[];
 	onQuery: (value: string) => void;
 	onSubmit: (event: FormEvent) => void;
 	loading: boolean;
-	llmProfiles: LLMProfile[];
-	activeLLMProfileID: string;
-	config: BackendConfig | null;
-	refreshKey: string;
-	choiceBusy: boolean;
-	onModelChange: (value: string) => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const suggestions = useMemo(() => searchStockDirectory(directory, query), [directory, query]);
 	const resolvedSymbol = useMemo(() => resolveStockDirectorySymbol(query, directory), [directory, query]);
-	const descriptions: Record<StockAIWorkspaceMode, string> = {
-		analysis: '按标的类型组织证据：股票研究业务与量价，ETF 分别判断底层资产、基金产品和介入条件。',
-		expectation: '查看支持、反对与失效情景，按所选周期核对后续行情和待披露事项。',
-		risk: '核实新仓与已有持仓的执行边界；资料不足时保留观察，不生成价格计划。',
-	};
 	const chooseSuggestion = (stock: StockDirectoryEntry) => {
 		onQuery(stock.symbol);
 		setExpanded(false);
@@ -611,40 +627,25 @@ function AnalysisSearch({ query, mode, directory, directoryState, directoryWarni
 			setExpanded(false);
 		}
 	};
-	const directoryHint = directoryState === 'loading' || directoryState === 'idle'
-		? '正在缓存股票与沪深 ETF 目录…'
-		: directoryState === 'error'
-			? '目录暂不可用，可直接输入6位代码'
-			: `${directoryState === 'cached' ? '本机缓存' : '已缓存'} ${directory.length.toLocaleString('zh-CN')} 个股票 / ETF 标的 · 名称/代码均可搜索`;
+	const directoryNotice = directoryState === 'error' ? ['目录暂不可用，可直接输入6位代码', ...directoryWarnings].join(' · ') : directoryWarnings.join(' · ');
 	return (
-		<header className="stock-ai-search-hero">
-			<div className="stock-ai-research-options">
-				<label><span>模型</span><select value={activeLLMProfileID} onChange={(event) => onModelChange(event.target.value)} disabled={choiceBusy || loading || !llmProfiles.length} aria-label="完整分析模型"><option value="">当前模型</option>{llmProfiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name} · {profile.model}</option>)}</select></label>
-				<ReasoningControl config={config} refreshKey={JSON.stringify([activeLLMProfileID, llmProfiles.find((profile) => profile.id === activeLLMProfileID), refreshKey])} disabled={choiceBusy || loading} label="完整分析思考等级" />
+		<form className="stock-ai-search-form" onSubmit={onSubmit}>
+			<div className="stock-ai-search-control" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(false); }}>
+				<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="股票或 ETF 代码 / 名称" aria-label="股票或 ETF 名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
+				{directoryNotice && <small className={directoryState === 'error' ? 'error' : ''} role={directoryState === 'error' ? 'alert' : undefined}>{directoryNotice}</small>}
+				{expanded && query.trim() && suggestions.length > 0 && (
+					<div className="stock-ai-search-suggestions" id="stock-ai-search-suggestions" role="listbox">
+						{suggestions.map((stock, index) => (
+							<button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseSuggestion(stock)} onMouseEnter={() => setActiveIndex(index)} key={stock.symbol}>
+								<span><strong>{stock.name}</strong><small>{stockMarketLabel(stock.symbol)} · {stock.instrument_type === 'etf' ? 'ETF' : '股票'}</small></span>
+								<em>{stock.code}</em>
+							</button>
+						))}
+					</div>
+				)}
 			</div>
-			<div>
-				<span><BrainCircuit size={15} />STOCK DECISION SYSTEM</span>
-				<h2>股票 / ETF AI 分析</h2>
-				<p>{descriptions[mode]}</p>
-			</div>
-			<form onSubmit={onSubmit}>
-				<div className="stock-ai-search-control" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(false); }}>
-					<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="股票或 ETF 名称 / 代码，如 沪深300ETF / 510300" aria-label="股票或 ETF 名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
-					<small className={directoryState === 'error' ? 'error' : ''} title={directoryWarnings.join('；')}>{directoryHint}{directoryWarnings.length > 0 ? ` · ${directoryWarnings.join('；')}` : ''}</small>
-					{expanded && query.trim() && suggestions.length > 0 && (
-						<div className="stock-ai-search-suggestions" id="stock-ai-search-suggestions" role="listbox">
-							{suggestions.map((stock, index) => (
-								<button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseSuggestion(stock)} onMouseEnter={() => setActiveIndex(index)} key={stock.symbol}>
-									<span><strong>{stock.name}</strong><small>{stockMarketLabel(stock.symbol)} · {stock.instrument_type === 'etf' ? 'ETF' : '股票'}</small></span>
-									<em>{stock.code}</em>
-								</button>
-							))}
-						</div>
-					)}
-				</div>
-				<button type="submit" disabled={loading || !query.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}完整分析</button>
-			</form>
-		</header>
+			<button type="submit" disabled={loading || !query.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}完整分析</button>
+		</form>
 	);
 }
 
@@ -859,7 +860,7 @@ function ThemeAttributionPanel({ analysis }: { analysis: StockAIAnalysis }) {
 				<div><span>事实支撑</span>{(theme.confirmed_themes || []).length ? theme.confirmed_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>证据{item.confidence} · 相关性{item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无结构化事实题材</small>}</div>
 				<div><span>市场延伸 / 映射</span>{(theme.speculative_themes || []).length ? theme.speculative_themes?.map((item) => <article key={item.name}><strong>{item.name}</strong><em>置信度{item.confidence} · 相关性{item.score}</em><small>{item.detail}</small></article>) : <small className="empty">暂无有效延伸题材</small>}</div>
 			</div>
-			<div className="stock-ai-theme-resonance"><div><span>题材共振</span><strong>{resonance.available ? `${resonance.score} · ${resonance.state}` : inactiveResonance}</strong><small>{resonance.detail}</small></div>{resonance.available && <div className="stock-ai-theme-resonance-metrics">{[['个股动能', resonance.stock_momentum], ['相对强度', resonance.relative_strength], ['上涨广度', resonance.breadth], ['涨停能量', resonance.limit_up_energy], ['持续性', resonance.persistence], ['证据质量', resonance.evidence_quality], ['资金扩散', resonance.capital_diffusion]].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong><i><b style={{ width: `${value}%` }} /></i></article>)}</div>}</div>
+			<div className="stock-ai-theme-resonance"><div><span>题材共振</span><strong>{resonance.available ? `${resonance.score} · ${resonance.state}` : inactiveResonance}</strong>{!resonance.available && <small>{resonance.detail}</small>}</div>{resonance.available && <div className="stock-ai-theme-resonance-metrics">{[['个股动能', resonance.stock_momentum], ['相对强度', resonance.relative_strength], ['上涨广度', resonance.breadth], ['涨停能量', resonance.limit_up_energy], ['持续性', resonance.persistence], ['题材地位', resonance.leader_position], ['证据质量', resonance.evidence_quality], ['资金扩散', resonance.capital_diffusion]].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong><i><b style={{ width: `${Math.max(0, Math.min(100, Number(value) || 0))}%` }} /></i></article>)}</div>}</div>
 		</div>
 	</section>;
 }
@@ -904,7 +905,8 @@ function ResearchPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	</section>;
 }
 
-function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; title: string; item?: StockAINewsAnalysis; icon: ReactNode }) {
+export function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; title: string; item?: StockAINewsAnalysis; icon: ReactNode }) {
+	const [expandedNews, setExpandedNews] = useState('');
 	return <section className="stock-ai-panel stock-ai-news-panel">
 		<header><div><span>{eyebrow}</span><h3>{title}</h3></div>{icon}</header>
 		{item ? <>
@@ -917,10 +919,22 @@ function NewsAnalysisPanel({ eyebrow, title, item, icon }: { eyebrow: string; ti
 				<div className="positive"><strong><Sparkles size={13} />潜在催化</strong>{item.catalysts?.length ? <ul>{item.catalysts.map((value) => <li key={value}>{value}</li>)}</ul> : <small>暂无可验证的明确催化</small>}</div>
 				<div className="negative"><strong><ShieldAlert size={13} />风险信号</strong>{item.risks?.length ? <ul>{item.risks.map((value) => <li key={value}>{value}</li>)}</ul> : <small>暂无突出风险关键词</small>}</div>
 			</div>
-			{item.articles?.length ? <div className="stock-ai-news-list">{item.articles.map((article, index) => <article key={article.id || article.url || `${article.title}-${index}`}>
-				<div><header><span>{formatNewsSource(article.meta?.source)}</span><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time></header><strong>{article.title}</strong>{article.content && article.content !== article.title && <small>{article.content}</small>}</div>
-				{article.url && <a href={article.url} target="_blank" rel="noreferrer" title="查看新闻原文"><ExternalLink size={14} /></a>}
-			</article>)}</div> : <div className="stock-ai-news-empty">暂无匹配新闻，当前不对新闻催化作额外加分。</div>}
+			{item.articles?.length ? <div className="stock-ai-news-list">{item.articles.map((article, index) => {
+				const key = article.id || article.url || `${article.title}-${index}`;
+				const open = expandedNews === key;
+				const detail = article.content && article.content !== article.title ? article.content : article.title;
+				return <article className={open ? 'expanded' : ''} key={key}>
+					<button type="button" className="stock-ai-news-head" aria-expanded={open} onClick={() => setExpandedNews(open ? '' : key)}>
+						<span className="stock-ai-news-head-main"><span className="stock-ai-news-title-row"><span className="stock-ai-news-source">{formatNewsSource(article.meta?.source)}</span><strong>{article.title}</strong></span>{!open && article.content && article.content !== article.title && <small>{article.content}</small>}</span>
+						<span className="stock-ai-news-meta"><time>{article.published_at ? formatShortDate(article.published_at) : '--'}</time><ChevronDown size={14} aria-hidden="true" /></span>
+					</button>
+					{open && <div className="stock-ai-news-detail">
+						<div className="stock-ai-news-body">{formatArticleParagraphs(detail).map((paragraph, index) => <p className={isIndentedParagraph(paragraph, index) ? 'indent' : undefined} key={index}>{paragraph}</p>)}</div>
+						{article.tags?.length ? <div className="stock-ai-news-tags">{article.tags.map((tag) => <span key={tag}>{tag}</span>)}</div> : null}
+						<div className="stock-ai-news-detail-foot"><span>{formatNewsSource(article.meta?.source)} · {article.published_at ? formatShortDate(article.published_at) : '--'}</span>{article.url && <a href={article.url} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" />查看原文</a>}</div>
+					</div>}
+				</article>;
+			})}</div> : <div className="stock-ai-news-empty">暂无匹配新闻，当前不对新闻催化作额外加分。</div>}
 			<footer>新闻与公告仅作信息参考，需结合事件落地和价格反应验证，不构成买卖建议。</footer>
 		</> : <div className="stock-ai-panel-empty">旧版分析记录未包含新闻数据，请重新分析后查看</div>}
 	</section>;
@@ -1341,7 +1355,12 @@ function DataQualityPanel({ analysis }: { analysis: StockAIAnalysis }) {
 }
 
 function KPICard({ icon, label, value, detail, tone }: { icon: ReactNode; label: string; value: string; detail: string; tone: string }) {
-	return <article className={`stock-ai-kpi ${tone}`}><div>{icon}<span>{label}</span></div><strong>{value}</strong><small>{detail}</small></article>;
+	const text = String(value);
+	// Split "44 · D" / "232.6亿" so digits use the numeric stack and the suffix stays in the UI font.
+	// Values without a leading number are states ("修复"), rendered as a chip so they read
+	// as a label instead of a mis-sized number in the same row.
+	const parts = text.match(/^([\d.,]+)(.*)$/);
+	return <article className={`stock-ai-kpi ${tone}`}><div>{icon}<span>{label}</span></div><strong className={parts ? undefined : 'is-text'}>{parts ? <>{parts[1]}<span className="kpi-unit">{parts[2]}</span></> : <span className="kpi-chip">{text}</span>}</strong><small>{detail}</small></article>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

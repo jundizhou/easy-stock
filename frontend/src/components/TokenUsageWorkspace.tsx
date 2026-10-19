@@ -78,7 +78,6 @@ export function TokenUsageWorkspace({ config, refreshKey }: { config: BackendCon
 			<header className="token-usage-hero">
 				<div>
 					<span className="workspace-kicker">USAGE ANALYTICS</span>
-					<h2>Token 统计</h2>
 					<p>真实用量来自模型返回的 usage；本地估算单独展示，不并入真实总量。</p>
 					{rows.some(row => row.module === 'review-legacy') && <p>历史复盘用量按旧版调用路径推定归类，保留原始金额，无法进一步拆分采集、整理和分析。</p>}
 				</div>

@@ -6,7 +6,7 @@
     "dev:frontend": "npm --workspace frontend run dev",
     "dev:desktop": "npm --workspace desktop run dev",
     "restart": "bash scripts/rebuild-restart.sh",
-    "build:backend": "mkdir -p desktop/bin && cd backend && go build -o ../desktop/bin/easy-stock-backend ./cmd/server",
+    "build:backend": "node scripts/build-backend.mjs",
     "build:frontend": "npm --workspace frontend run build",
     "build:desktop": "npm run build:backend && npm run build:frontend && npm --workspace desktop run build",
     "prepare:desktop-package": "npm --workspace desktop run prepare:package",

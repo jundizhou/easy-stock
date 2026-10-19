@@ -7,7 +7,7 @@
   "main": "main.cjs",
   "scripts": {
     "predev": "npm --prefix .. run build:backend",
-    "dev": "node scripts/ensure-hermes-runtime.mjs && node scripts/ensure-codex-runtime.mjs && ELECTRON_RENDERER_URL=http://127.0.0.1:20073 electron .",
+    "dev": "node scripts/ensure-hermes-runtime.mjs && node scripts/ensure-codex-runtime.mjs && node scripts/dev-electron.mjs",
     "build": "npm run test",
     "test": "node --test test/*.test.cjs",
     "prepare:package": "node scripts/prepare-package.mjs",

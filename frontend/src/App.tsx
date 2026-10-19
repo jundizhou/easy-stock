@@ -13,11 +13,9 @@ import {
 	Flame,
 	Gauge,
 	History,
-	Layers3,
 	LayoutDashboard,
 	LoaderCircle,
 	Moon,
-	Newspaper,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Radio,
@@ -36,7 +34,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
 	KLine,
-	NewsItem,
 	Quote,
 	SectorMap,
 	SourceHealth,
@@ -82,6 +79,19 @@ import { ThemeIndexPanel } from './components/ThemeIndexPanel';
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'themes' | 'limit-up' | 'mastery' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'ai' | 'market' | 'token-usage';
 
+// 顶部栏标题图标按页面语义区分：每个工作台用自己的图标与色调，替代原来所有页面一样的应用 LOGO。
+const workspaceTopbarMarks: Record<WorkspaceMode, { tone: 'blue' | 'green' | 'red' | 'amber' | 'purple'; icon: React.ReactNode }> = {
+	themes: { tone: 'blue', icon: <LayoutDashboard size={21} aria-hidden="true" /> },
+	'limit-up': { tone: 'red', icon: <Flame size={21} aria-hidden="true" /> },
+	reviews: { tone: 'amber', icon: <BookOpen size={21} aria-hidden="true" /> },
+	'stock-ai': { tone: 'purple', icon: <BrainCircuit size={21} aria-hidden="true" /> },
+	'portfolio-inspection': { tone: 'green', icon: <WalletCards size={21} aria-hidden="true" /> },
+	market: { tone: 'blue', icon: <BarChart3 size={21} aria-hidden="true" /> },
+	mastery: { tone: 'purple', icon: <BookMarked size={21} aria-hidden="true" /> },
+	ai: { tone: 'blue', icon: <Bot size={21} aria-hidden="true" /> },
+	'token-usage': { tone: 'amber', icon: <Gauge size={21} aria-hidden="true" /> },
+};
+
 const emptyStockPagination = (): ThemeScreenPagination => ({
 	page: 1,
 	page_size: 20,
@@ -104,7 +114,8 @@ export function App() {
 		return 'themes';
 	});
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
-	const [topbarExpanded, setTopbarExpanded] = useState(true);
+	// 顶部栏全局默认收起，只在需要看标题、数据源与刷新入口时手动展开。
+	const [topbarExpanded, setTopbarExpanded] = useState(false);
 	const [config, setConfig] = useState<BackendConfig | null>(null);
 	const [themeStrengthWindow, setThemeStrengthWindow] = useState<ThemeStrengthWindow>('daily');
 	const [activeTheme, setActiveTheme] = useState('');
@@ -112,12 +123,9 @@ export function App() {
 	const [selectedSymbol, setSelectedSymbol] = useState('');
 	const [liveQuotes, setLiveQuotes] = useState<QuoteLookup>({});
 	const [sources, setSources] = useState<SourceHealth[]>([]);
-	const [news, setNews] = useState<NewsItem[]>([]);
 	const [streamStatus, setStreamStatus] = useState('实时流待命');
 	const [configError, setConfigError] = useState('');
 	const [themeRefreshKey, setThemeRefreshKey] = useState(0);
-	const [newsError, setNewsError] = useState('');
-	const [newsRetryKey, setNewsRetryKey] = useState(0);
 	const [sourcesRetryKey, setSourcesRetryKey] = useState(0);
 	const [sourcesError, setSourcesError] = useState('');
 	const [stockQuery, setStockQuery] = useState('');
@@ -237,16 +245,6 @@ export function App() {
 			.catch(() => { if (!abort.signal.aborted) setSourcesError('数据源状态暂不可用'); });
 		return () => abort.abort();
 	}, [config, workspaceMode, themeRefreshKey, sourcesRetryKey]);
-
-	useEffect(() => {
-		if (!config || workspaceMode !== 'themes') return;
-		const abort = new AbortController();
-		setNewsError('');
-		void requestJSON<{ data: NewsItem[] }>(config, '/api/v1/market/news?source=cls&limit=12', { signal: abort.signal })
-			.then(payload => { if (!abort.signal.aborted) setNews(payload.data); })
-			.catch(() => { if (!abort.signal.aborted) setNewsError('快讯暂不可用'); });
-		return () => abort.abort();
-	}, [config, workspaceMode, themeRefreshKey, newsRetryKey]);
 
 	useEffect(() => {
 		if (!activeOverview && rankedThemes.length) setActiveTheme(rankedThemes[0].theme);
@@ -404,9 +402,11 @@ export function App() {
 		: workspaceMode === 'mastery' ? 'GitHub 原始资料 · 每日缓存 · Agent 本地知识库' : workspaceMode === 'reviews' ? '雪球 · 淘股吧 · 微信公众号' : workspaceMode === 'stock-ai' ? '多周期评分 · 基准超额 · 隔日情景 · 动态风控' : workspaceMode === 'portfolio-inspection' ? '24 小时报告复用 · 组合 AI 评分 · 后台任务' : workspaceMode === 'ai' ? '本机 Agent AI 对话' : workspaceMode === 'market' ? '全球指数 · 行业资金 · 龙虎榜 · 公告研报' : workspaceMode === 'token-usage' ? '模型输入、输出与功能模块消耗' : themeSourceStatus + ' · ' + streamStatus;
 	const topbarTitle = workspaceMode === 'themes' ? '趋势题材雷达' : workspaceMode === 'limit-up' ? '短线连板雷达' : workspaceMode === 'mastery' ? '游资心法库' : workspaceMode === 'reviews' ? '大V复盘日记' : workspaceMode === 'stock-ai' ? '股票 / ETF AI 分析' : workspaceMode === 'portfolio-inspection' ? '持仓 AI 巡检' : workspaceMode === 'market' ? '行情总览' : workspaceMode === 'token-usage' ? 'Token 统计' : 'AI 对话';
 	const topbarDescription = workspaceMode === 'themes' ? '炒作主线、趋势强度、个股梯队与日 K 联动工作台' : workspaceMode === 'limit-up' ? '连板高度、炒作概念与晋级结构工作台' : workspaceMode === 'mastery' ? '阅读不同游资的交易经验，并由 Agent 按原文辅助研读' : workspaceMode === 'reviews' ? '多平台复盘内容、作者观点与原文归档工作台' : workspaceMode === 'stock-ai' ? '股票与场内 ETF 研究、证据对照与条件核验工作台' : workspaceMode === 'portfolio-inspection' ? '逐股研判、集中度识别与组合风险巡检工作台' : workspaceMode === 'market' ? '从盘面快讯到资金与研究信号的统一行情工作台' : workspaceMode === 'token-usage' ? '按日、按月和功能模块查看模型 Token 消耗' : '';
+	const topbarMark = workspaceTopbarMarks[workspaceMode];
 
 	return (
 		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${workspaceMode === 'ai' ? 'workspace-ai' : ''}`}>
+			<div className="desktop-titlebar" aria-hidden="true" />
 			<aside className="app-sidebar" aria-label="功能导航">
 				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>{sidebarExpanded && <div className="sidebar-brand-name"><strong>easy-stock</strong><span>AI STOCK LAB</span></div>}<SidebarUpdateNotice onOpenUpdates={() => { setSettingsInitialSection('updates'); setSettingsOpen(true); }} /></div>
 				<nav>
@@ -426,8 +426,8 @@ export function App() {
 				</div>
 			</aside>
 			<div className="app-shell">
-			{workspaceMode !== 'ai' && <div className={`workspace-topbar ${workspaceMode !== 'stock-ai' ? `collapsible ${topbarExpanded ? 'expanded' : ''}` : ''}`}>
-				{workspaceMode !== 'stock-ai' && <button
+			{workspaceMode !== 'ai' && <div className={`workspace-topbar collapsible ${topbarExpanded ? 'expanded' : ''}`}>
+				<button
 					type="button"
 					className="topbar-toggle"
 					onClick={() => setTopbarExpanded((value) => !value)}
@@ -435,10 +435,10 @@ export function App() {
 					aria-controls="workspace-topbar-content"
 					aria-label={topbarExpanded ? '收起顶部栏' : '展开顶部栏'}
 					title={topbarExpanded ? '收起顶部栏' : '展开顶部栏'}
-				><ChevronDown size={16} aria-hidden="true" /></button>}
-			<header id="workspace-topbar-content" className="topbar" hidden={workspaceMode !== 'stock-ai' && !topbarExpanded}>
+				><ChevronDown size={16} aria-hidden="true" /></button>
+			<header id="workspace-topbar-content" className="topbar" hidden={!topbarExpanded}>
 				<div className="brand-block">
-					<div className="brand-mark"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>
+					<div className={`brand-mark ${topbarMark.tone}`}>{topbarMark.icon}</div>
 					<div>
 						<h1>{topbarTitle}</h1>
 						{topbarDescription && <p>{topbarDescription}</p>}
@@ -496,7 +496,6 @@ export function App() {
 				<aside className="theme-rail">
 					<div className="rail-heading">
 						<div className="rail-heading-copy">
-							<span>近期主线</span>
 							<strong>{rankedThemes.some(item => !item.provisional) ? `按${themeStrengthWindow === 'daily' ? '当日' : '5日'}强度排序` : '基础题材 · 来源顺序'}</strong>
 							<div className="strength-window-toggle" role="group" aria-label="趋势强度周期">
 								<button type="button" title="按题材成分股实时涨跌计算，最多每10分钟更新一次" className={themeStrengthWindow === 'daily' ? 'active' : ''} aria-pressed={themeStrengthWindow === 'daily'} onClick={() => setThemeStrengthWindow('daily')}>当日强度</button>
@@ -536,7 +535,6 @@ export function App() {
 					<header className="theme-hero">
 						<div className="theme-title-row">
 							<div>
-								<div className="eyebrow"><Layers3 size={15} aria-hidden="true" />当前主线</div>
 								<h2>{sectorMap?.name || activeOverview?.name || '加载题材中'}</h2>
 								<p>{isTrendOverview
 									? activeOverview?.leaders?.length ? `核心标的：${activeOverview.leaders.join(' · ')}` : '等待主线共振证据'
@@ -575,11 +573,13 @@ export function App() {
 								<h3>主线个股梯队</h3>
 								<p>综合多日高度、启动时序、持续性、关注度、主线影响代理和分歧承接。</p>
 							</div>
-							<div className={`history-status ${historyState}`}>
-								<History size={14} aria-hidden="true" />
-								<span>{historyStatusLabel(historyState, historyReadyCount, historySymbols.length)}</span>
-								{historyErrorSymbols.size > 0 && <button type="button" onClick={history.retry}>重试失败项</button>}
-							</div>
+							{historyState === 'ready' && historyErrorSymbols.size === 0 ? null : (
+								<div className={`history-status ${historyState}`}>
+									<History size={14} aria-hidden="true" />
+									<span>{historyStatusLabel(historyState, historyReadyCount, historySymbols.length)}</span>
+									{historyErrorSymbols.size > 0 && <button type="button" onClick={history.retry}>重试失败项</button>}
+								</div>
+							)}
 						</div>
 						<div className="stock-controls">
 							<label><span>涨跌幅制度</span><select value={stockLane} onChange={(event) => { setStockLane(event.target.value as ThemeScreenLane); setStockPage(1); }}><option value="all">全部</option><option value="10cm">10cm</option><option value="20cm">20cm</option><option value="30cm">30cm</option></select></label>
@@ -639,7 +639,6 @@ export function App() {
 					<section className="detail-panel chart-panel">
 						<div className="detail-heading">
 							<div>
-								<span>个股日 K</span>
 								<h3>{selectedStock?.name || '选择个股'}</h3>
 								<small>{selectedStock?.symbol || '--'}</small>
 							</div>
@@ -689,18 +688,6 @@ export function App() {
 						) : selectedStock ? <MetricLoadingPanel failed={selectedHistoryFailed} /> : <p>从个股梯队中选择股票查看。</p>}
 					</section>
 
-					<section className="detail-panel news-panel">
-						<div className="panel-label"><Newspaper size={16} aria-hidden="true" />市场快讯</div>
-						<div className="news-list">
-							{newsError && <p className="load-notice">{newsError} <button type="button" onClick={() => setNewsRetryKey(key => key + 1)}>重试快讯</button></p>}
-							{!news.length && !newsError && <p className="load-notice">快讯加载中…</p>}
-							{news.slice(0, 7).map((item) => (
-								<a href={item.url} target="_blank" rel="noreferrer" key={`${item.id}-${item.published_at}`}>
-									<time>{formatTime(item.published_at)}</time><span>{item.title}</span><ChevronRight size={14} aria-hidden="true" />
-								</a>
-							))}
-						</div>
-					</section>
 				</aside>
 			</div>
 			</> : workspaceMode === 'limit-up' ? <LimitUpWorkspace config={config} data={limitUpData} state={limitUpState} error={limitUpError} emotionData={marketEmotionData} emotionState={marketEmotionState} emotionError={marketEmotionError} progress={limitUp.ladder.progress} onRefresh={refreshLimitUpWorkspace} /> : workspaceMode === 'mastery' ? <TradingMastery config={config} refreshKey={masteryRefreshKey} onAskAI={askMasteryAI} /> : workspaceMode === 'reviews' ? <ReviewDiary onOpenNotificationSettings={() => { setSettingsInitialSection('notifications'); setSettingsOpen(true); }} config={config} refreshKey={reviewRefreshKey} /> : workspaceMode === 'stock-ai' ? <StockAIAnalysisWorkspace config={config} refreshKey={stockAIRefreshKey} mode={stockAIWorkspaceMode} onModeChange={setStockAIWorkspaceMode} initialAnalysis={stockAIInitialAnalysis} onInitialAnalysisConsumed={() => setStockAIInitialAnalysis(null)} onAskAI={askStockAnalysisAI} onOpenSettings={() => setSettingsOpen(true)} /> : workspaceMode === 'portfolio-inspection' ? <PortfolioInspectionWorkspace onOpenNotificationSettings={() => { setSettingsInitialSection('notifications'); setSettingsOpen(true); }} config={config} refreshKey={portfolioInspectionRefreshKey} onOpenSettings={() => setSettingsOpen(true)} onOpenStockAnalysis={openPortfolioStockAnalysis} /> : workspaceMode === 'market' ? <MarketOverviewWorkspace config={config} refreshKey={marketRefreshKey} onAskAI={askMarketAI} /> : <AIChatWorkspace config={config} refreshKey={aiRefreshKey} initialPrompt={aiPrefill} initialAnalysisID={aiAnalysisID} onInitialPromptConsumed={() => { setAIPrefill(''); setAIAnalysisID(undefined); }} onOpenSettings={() => setSettingsOpen(true)} />}
