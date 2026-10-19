@@ -26,7 +26,7 @@ func (s *Server) collectETFUnderlying(ctx context.Context, holdings []foundation
 				continue
 			}
 			seen[v.Symbol] = true
-			candidates = append(candidates, etfanalysis.UnderlyingEvidence{Holding: v, HoldingReportDate: h.ReportDate})
+			candidates = append(candidates, etfanalysis.UnderlyingEvidence{Holding: v, HoldingReportDate: h.ReportDate, Financials: []foundation.StockFinancialEvidence{}})
 		}
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Holding.WeightPercent > candidates[j].Holding.WeightPercent })

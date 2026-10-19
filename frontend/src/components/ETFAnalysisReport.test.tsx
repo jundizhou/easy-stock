@@ -47,4 +47,26 @@ describe('ETF reports and shared research',()=>{
   const candidates=[{symbol:'510300.SH',code:'510300',name:'沪深300ETF',instrument_type:'etf' as const},{symbol:'600519.SH',code:'600519',name:'贵州茅台',instrument_type:'stock' as const}];
   expect(searchStockDirectory(candidates,'300ETF')[0].instrument_type).toBe('etf');
  });
+ it.each([{label:'null', financials:null}, {label:'omitted', financials:undefined}, {label:'empty', financials:[]}])('renders and copies persisted valuation-only samples with $label financials', ({financials}) => {
+  for (const withReport of [true, false]) {
+   const a = JSON.parse(JSON.stringify(etfFixture(withReport)));
+   a.etf.underlying = [{
+    holding: {code:'688001',symbol:'688001.SH',name:'财务缺失样本',weight_percent:8.51},
+    holding_report_date:'2026-06-30', financials,
+    valuation:{pe_ttm:30,pb:3,trade_time:'2026-10-19T15:00:00+08:00'},
+   }];
+   for (const view of ['research', 'expectation', 'risk'] as const) {
+    const html = renderToStaticMarkup(<ETFAnalysisReport {...props} analysis={a} view={view}/>);
+    expect(html).toContain('财务缺失样本');
+    expect(html).toContain('<td>未取得</td>');
+    expect(html).toContain('30.00');
+    expect(html).toContain('3.00');
+    expect(html).not.toContain('NaN');
+   }
+   const copy = etfSnapshotText(a);
+   expect(copy).toContain('财务缺失样本');
+   expect(copy).toContain('重仓股财务：未取得');
+   expect(copy).not.toContain('营收同比：0');
+  }
+ });
 });

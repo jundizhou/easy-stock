@@ -2229,7 +2229,7 @@ export type ETFFacts = {
  holdings?: ETFHoldings[]; announcements?: ETFAnnouncement[]; execution?: ETFExecution;
  actions?: {symbol: string; items: Array<{kind:string;date:string;value:number;price_effective_date?:string}>;meta:SourceMeta};
  trend_bars?: KLine[];
- underlying?: Array<{holding: ETFHoldings['items'][number];holding_report_date:string;financials:Array<{symbol:string;report_date:string;published_at?:string;fields:Record<string,number>;meta:SourceMeta}>;valuation?:{pe_ttm?:number;pb?:number;trade_time:string}}>;
+ underlying?: Array<{holding: ETFHoldings['items'][number];holding_report_date:string;financials?:Array<{symbol:string;report_date:string;published_at?:string;fields:Record<string,number>;meta:SourceMeta}> | null;valuation?:{pe_ttm?:number;pb?:number;trade_time:string}}>;
 
  profile: ETFProfile;
  net_values: { symbol: string; points: ETFNAVPoint[]; income_per_ten_thousand?: ETFNAVPoint[]; seven_day_annualized?: ETFNAVPoint[]; meta: SourceMeta };

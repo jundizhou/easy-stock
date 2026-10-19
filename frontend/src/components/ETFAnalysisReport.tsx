@@ -21,7 +21,7 @@ export function etfSnapshotText(analysis: ETFAnalysis) {
   `管理费：${p.management_fee || '未取得'}；托管费：${p.custody_fee || '未取得'}`,
   ...metrics.map(m => `${m.label}：${m.value == null ? '数据不足' : m.value.toFixed(m.unit === '元' ? 3 : 2) + m.unit}（${m.as_of || '日期未知'}）`),
   ...(actions?.items || []).map(a => `基金事件：${a.date} ${a.kind === 'split' ? `份额拆分 1:${a.value}${a.price_effective_date ? `，行情调整日 ${a.price_effective_date}（按前后报价核对）` : ''}` : `每份现金分红 ${a.value} 元`}`),
-  ...underlying.flatMap(v => [`底层样本：${v.holding.name}（${v.holding.symbol}），${v.holding_report_date} 披露权重 ${v.holding.weight_percent}%`, ...v.financials.map(f => `${f.report_date} 营收同比：${f.fields.revenue_yoy ?? '未知'}%；归母净利润同比：${f.fields.net_profit_yoy ?? '未知'}%`)]),
+  ...underlying.flatMap(v => [`底层样本：${v.holding.name}（${v.holding.symbol}），${v.holding_report_date} 披露权重 ${v.holding.weight_percent}%`, ...(v.financials?.length ? v.financials.map(f => `${f.report_date} 营收同比：${f.fields.revenue_yoy ?? '未知'}%；归母净利润同比：${f.fields.net_profit_yoy ?? '未知'}%`) : ['重仓股财务：未取得'])]),
   ...holdings.flatMap(h => [
    `持仓披露：${h.report_date} · ${h.scope} · 合计${h.disclosed_weight_percent.toFixed(2)}%`,
    ...h.items.map(v => `${v.symbol || v.code} ${v.name}：${v.weight_percent.toFixed(2)}%`),
@@ -103,7 +103,7 @@ export function ETFAnalysisReport({ analysis, view, copied, exporting, onCopy, o
    {data.underlying?.length ? <ResearchPanel label="底层样本" title="已披露重仓股的盈利与估值" icon={Layers3}>
     <p className="etf-panel-note">按披露权重选取最多 3 只境内重仓股，财务按报告期展示。样本不代表整个指数或行业，披露持仓不等于实时持仓。</p>
     <div className="etf-table-scroll" role="region" aria-label="重仓股盈利与估值表" tabIndex={0}><table className="etf-underlying-table"><thead><tr><th scope="col">披露持仓</th><th scope="col">财务报告期</th><th scope="col" className="etf-number">营收同比</th><th scope="col" className="etf-number">归母净利润同比</th><th scope="col" className="etf-number">PE / PB（采集时点）</th></tr></thead><tbody>{data.underlying.map(v => <tr key={v.holding.symbol}>
-     <td><strong>{v.holding.name}</strong><small>{v.holding_report_date} · {v.holding.weight_percent.toFixed(2)}%</small></td><td>{v.financials[0]?.report_date || '未取得'}</td><td className="etf-number">{etfPercent(v.financials[0]?.fields.revenue_yoy)}</td><td className="etf-number">{etfPercent(v.financials[0]?.fields.net_profit_yoy)}</td><td className="etf-number">{v.valuation?.pe_ttm?.toFixed(2) ?? '—'} / {v.valuation?.pb?.toFixed(2) ?? '—'}<small>{v.valuation ? etfDate(v.valuation.trade_time) : ''}</small></td>
+     <td><strong>{v.holding.name}</strong><small>{v.holding_report_date} · {v.holding.weight_percent.toFixed(2)}%</small></td><td>{v.financials?.[0]?.report_date || '未取得'}</td><td className="etf-number">{etfPercent(v.financials?.[0]?.fields.revenue_yoy)}</td><td className="etf-number">{etfPercent(v.financials?.[0]?.fields.net_profit_yoy)}</td><td className="etf-number">{v.valuation?.pe_ttm?.toFixed(2) ?? '—'} / {v.valuation?.pb?.toFixed(2) ?? '—'}<small>{v.valuation ? etfDate(v.valuation.trade_time) : ''}</small></td>
     </tr>)}</tbody></table></div>
    </ResearchPanel> : null}
    <ResearchPanel label="报告期披露" title="基金持仓与覆盖范围" icon={Layers3}>
