@@ -48,6 +48,11 @@ backend/data/theme-library/raw/
 **/.env.*
 !**/.env.example
 
+# 本地工作区工具目录与临时产物，不入库。
+.workbuddy/
+.openchamber/
+_inspect_*/
+
 # Private keys and signing credentials must never be committed.
 *.pem
 *.key

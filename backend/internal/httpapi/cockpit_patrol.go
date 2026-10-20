@@ -94,7 +94,8 @@ func (s *Server) cockpitFeed() cockpit.Feed {
 			return cockpitIndexQuotes(items, true), nil
 		}
 		feed.Industry = func(ctx context.Context) ([]cockpit.FlowItem, error) {
-			rows, _, err := s.marketOverview.MarketFundFlows(ctx, "industry", "net", 60)
+			// 与概念侧同理：limit 截太小会把净流出的行业挡在样本外，取接口上限。
+			rows, _, err := s.marketOverview.MarketFundFlows(ctx, "industry", "net", 200)
 			if err != nil {
 				return nil, err
 			}
@@ -106,7 +107,11 @@ func (s *Server) cockpitFeed() cockpit.Feed {
 		}
 		if provider, ok := s.marketOverview.(SectorFlowProvider); ok {
 			feed.Concepts = func(ctx context.Context) ([]cockpit.FlowItem, error) {
-				rows, _, err := provider.SectorFlowRanking(ctx, "concept", 60)
+				// 概念板块约 516 个，正流入的常超过 200 个；limit 截小了榜单尾部
+				// 的净流出板块根本进不来，龙卷风图永远只有半边。上游 bkzj 榜单
+				// 本身就是全量抓取后本地截断，放大 limit 不增加上游请求量，
+				// 直接取榜单上限 600，保证流入头部与流出尾部都在样本里。
+				rows, _, err := provider.SectorFlowRanking(ctx, "concept", 600)
 				if err != nil {
 					return nil, err
 				}
