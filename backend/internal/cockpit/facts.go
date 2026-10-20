@@ -142,7 +142,10 @@ func CollectFacts(ctx context.Context, phase Phase, feed Feed) Facts {
 			return err
 		})
 	}
-	if feed.Intraday != nil && phase == PhaseIntraday {
+	// Keep the intraday market-judgment card available after the close as well.
+	// The feed contains the latest real snapshot, and the dashboard should not
+	// lose the module merely because the scheduler moved to post_close.
+	if feed.Intraday != nil && (phase == PhaseIntraday || phase == PhasePostClose) {
 		c.run(ctx, "盘中情绪", func(ctx context.Context) error {
 			v, err := feed.Intraday(ctx)
 			c.set(func(f *Facts) { f.Intraday = v })

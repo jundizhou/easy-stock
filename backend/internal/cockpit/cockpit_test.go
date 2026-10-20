@@ -136,14 +136,23 @@ func TestCollectFactsIsolatesFailingSource(t *testing.T) {
 	}
 }
 
-func TestCollectFactsSkipsIntradayFeedOutsideSession(t *testing.T) {
+func TestCollectFactsSkipsIntradayFeedBeforeSession(t *testing.T) {
 	called := false
-	facts := CollectFacts(context.Background(), PhasePostClose, Feed{Intraday: func(context.Context) (*IntradayView, error) {
+	facts := CollectFacts(context.Background(), PhasePreOpen, Feed{Intraday: func(context.Context) (*IntradayView, error) {
 		called = true
 		return &IntradayView{}, nil
 	}})
 	if called || facts.Intraday != nil {
-		t.Fatal("intraday feed must not run after the close")
+		t.Fatal("intraday feed must not run before the session")
+	}
+}
+
+func TestCollectFactsKeepsIntradayFeedAfterClose(t *testing.T) {
+	facts := CollectFacts(context.Background(), PhasePostClose, Feed{Intraday: func(context.Context) (*IntradayView, error) {
+		return &IntradayView{Status: "收盘快照"}, nil
+	}})
+	if facts.Intraday == nil || facts.Intraday.Status != "收盘快照" {
+		t.Fatalf("post-close intraday facts missing: %+v", facts.Intraday)
 	}
 }
 
