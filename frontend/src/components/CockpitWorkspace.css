@@ -191,9 +191,10 @@
 	gap: 10px;
 }
 
-/* 持仓健康：图表行距拉开，文字与卡片整体同步加高。 */
+/* 持仓健康：整卡加大内边距与分区间距，视觉不再拥挤（横向内边距保持 16px，避免挤压条形宽度）。 */
 .cockpit-card.is-roomy {
-	gap: 15px;
+	gap: 18px;
+	padding: 16px 16px 18px;
 }
 
 .cockpit-card header,
@@ -236,24 +237,20 @@
 	min-width: 0;
 }
 
-.cockpit-card-link {
-	justify-self: start;
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	padding: 0;
-	border: 0;
-	background: none;
-	color: var(--theme-blue);
-	font-size: var(--fs-body);
-	font-weight: 600;
+/* 整卡可点跳转：不显示跳转字样，指针与悬停描边暗示可点。 */
+.cockpit-card.is-clickable {
 	cursor: pointer;
+	transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
-.cockpit-card-link:hover {
-	color: var(--theme-blue-hover, var(--theme-blue));
-	text-decoration: underline;
-	text-underline-offset: 2px;
+.cockpit-card.is-clickable:hover {
+	border-color: var(--theme-blue-line, var(--theme-blue));
+	box-shadow: 0 2px 10px var(--theme-shadow, rgba(31, 49, 70, 0.1));
+}
+
+.cockpit-card.is-clickable:focus-visible {
+	outline: 2px solid var(--theme-blue-solid, var(--theme-blue));
+	outline-offset: 2px;
 }
 
 .cockpit-muted {
@@ -430,7 +427,7 @@
 .cockpit-spark svg {
 	display: block;
 	width: 100%;
-	height: 88px;
+	height: 164px;
 	overflow: visible;
 	touch-action: pan-y;
 	cursor: crosshair;
@@ -522,7 +519,7 @@
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	margin-bottom: 6px;
+	margin-bottom: 4px;
 }
 
 .cockpit-health > strong {
@@ -549,7 +546,7 @@
 /* 健康分维度：名称 / 分数 / 进度条 / 权重，四列对齐，悬停浮出该维度的扣分原因。 */
 .cockpit-dims {
 	display: grid;
-	gap: 13px;
+	gap: 9px;
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -561,7 +558,7 @@
 	gap: 8px;
 	align-items: center;
 	margin: 0 -4px;
-	padding: 7px 8px;
+	padding: 5px 8px;
 	border-radius: 8px;
 	font-size: var(--fs-body);
 	transition: background-color 0.14s ease;
@@ -645,10 +642,13 @@
 	-webkit-line-clamp: 3;
 }
 
-/* 主要风险：只留一条真实存在的风险文本，两行收口，全文在悬停提示里。 */
+/* 主要风险：只留一条真实存在的风险文本，两行收口，全文在悬停提示里。
+   上方用分割线与能量条数据区分隔（分割线加在文字块上，不影响条形宽度）。 */
 .cockpit-risk {
 	display: -webkit-box;
-	margin: 4px 0 0;
+	margin: 12px 0 0;
+	padding-top: 10px;
+	border-top: 1px solid var(--line-soft);
 	overflow: hidden;
 	color: var(--muted);
 	font-size: var(--fs-body);
@@ -664,11 +664,14 @@
 	white-space: nowrap;
 }
 
-/* 评分来源说明放在卡片右下角，与左下角的「持仓巡检」同一行。 */
+/* 评分来源说明：跟随内容流排在卡片末尾右对齐，上方再一条分割线收尾。
+   small 默认是行内元素，行内元素的 margin/padding/border-top 不占布局，
+   必须显式转成块级，否则这条分割线既不上移也不显形。 */
 .cockpit-score-note {
-	position: absolute;
-	right: 16px;
-	bottom: 11px;
+	display: block;
+	margin: 10px 0 0;
+	padding-top: 8px;
+	border-top: 1px solid var(--line-soft);
 	color: var(--theme-subtle);
 	font-size: var(--fs-desc);
 	line-height: var(--lh-tight);

@@ -340,10 +340,11 @@ export function App() {
 		history.retry();
 	};
 
-	const switchWorkspace = (mode: WorkspaceMode) => {
+	// subView 仅 market 工作区使用：跳到行情总览的某个模块（如 core-indexes / industry-flow）。
+	const switchWorkspace = (mode: WorkspaceMode, subView?: string) => {
 		if (mode !== workspaceMode) setTopbarExpanded(true);
 		setWorkspaceMode(mode);
-		window.history.replaceState(null, '', mode === 'cockpit' ? '#cockpit' : mode === 'limit-up' ? '#limit-up' : mode === 'mastery' ? '#mastery' : mode === 'reviews' ? '#reviews' : mode === 'stock-ai' ? '#stock-ai' : mode === 'portfolio-inspection' ? '#portfolio-inspection' : mode === 'ai' ? '#ai' : mode === 'market' ? '#market/pulse' : mode === 'token-usage' ? '#token-usage' : '#themes');
+		window.history.replaceState(null, '', mode === 'cockpit' ? '#cockpit' : mode === 'limit-up' ? '#limit-up' : mode === 'mastery' ? '#mastery' : mode === 'reviews' ? '#reviews' : mode === 'stock-ai' ? '#stock-ai' : mode === 'portfolio-inspection' ? '#portfolio-inspection' : mode === 'ai' ? '#ai' : mode === 'market' ? `#market/${subView || 'pulse'}` : mode === 'token-usage' ? '#token-usage' : '#themes');
 	};
 
 	const askMasteryAI = (traderName: string) => {

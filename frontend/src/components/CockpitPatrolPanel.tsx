@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ChevronDown, ChevronUp, Clock3, LoaderCircle, Play, Sparkles } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeftRight, BarChart3, Bot, ChevronDown, ChevronUp, Clock3, Compass, Gauge, LoaderCircle, Newspaper, Play, Sparkles, TrendingUp } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { BackendConfig } from '../lib/backend';
 import { type CockpitTarget, cockpitTargetLabels, formatPercent } from '../lib/cockpit';
@@ -12,6 +12,7 @@ import {
 	type PatrolIntraday,
 	type PatrolLimitUp,
 	clockText,
+	foldTimeline,
 	latestBriefFor,
 	narrativeNotice,
 	narrativeVerifyRule,
@@ -20,6 +21,7 @@ import {
 	patrolPhaseLabel,
 	patrolPhases,
 	sessionIntradayBriefs,
+	TIMELINE_FOLD_LIMIT,
 } from '../lib/cockpit-patrol';
 import { useCockpitLiveFacts } from '../lib/use-cockpit-live-facts';
 import { useCockpitPatrol } from '../lib/use-cockpit-patrol';
@@ -48,7 +50,7 @@ export function formatMoney(value: number) {
 }
 
 // 事实卡：既是图表容器，也是进入对应工作台的入口。整卡可点，悬停时才露出目标页名称。
-function Fact({ title, source, badge, children, wide = false, onOpen, openLabel }: { title: string; source?: string; badge?: ReactNode; children: ReactNode; wide?: boolean; onOpen?: () => void; openLabel?: string }) {
+function Fact({ title, icon, source, badge, children, wide = false, onOpen, openLabel, centerBadge = false }: { title: string; icon?: ReactNode; source?: string; badge?: ReactNode; children: ReactNode; wide?: boolean; onOpen?: () => void; openLabel?: string; centerBadge?: boolean }) {
 	return (
 		<section
 			className={`patrol-fact${wide ? ' is-wide' : ''}${onOpen ? ' is-clickable' : ''}`}
@@ -63,15 +65,31 @@ function Fact({ title, source, badge, children, wide = false, onOpen, openLabel 
 				}
 			} : undefined}
 		>
-			<header>
-				<div className="patrol-fact-title">
-					<h4>{title}</h4>
-					{badge}
-				</div>
-				<div className="patrol-fact-meta">
-					{source ? <small>{source}</small> : null}
-					{onOpen && openLabel ? <span className="patrol-fact-open" aria-hidden="true">{openLabel}<ArrowRight size={12} /></span> : null}
-				</div>
+			<header className={centerBadge ? 'is-center-badge' : undefined}>
+				{centerBadge ? (
+					// 三栏网格：标题 | 居中徽标 | 右侧动作，让徽标与标题同一行且水平居中。
+					<>
+						<div className="patrol-fact-title">
+							{icon}
+							<h4>{title}</h4>
+						</div>
+						{badge ? <div className="patrol-fact-badge">{badge}</div> : null}
+						<div className="patrol-fact-meta">
+							{source ? <small>{source}</small> : null}
+						</div>
+					</>
+				) : (
+					<>
+						<div className="patrol-fact-title">
+							{icon}
+							<h4>{title}</h4>
+							{badge}
+						</div>
+						<div className="patrol-fact-meta">
+							{source ? <small>{source}</small> : null}
+						</div>
+					</>
+				)}
 			</header>
 			{children}
 		</section>
@@ -303,7 +321,7 @@ function FlowTornado({ board }: { board?: PatrolFlowBoard | null }) {
 	);
 }
 
-// 题材涨跌：同一批概念样本按即时涨跌幅排序，领涨/领跌各取前四，条形按同一最大绝对值缩放。
+// 题材涨跌：同一批概念样本按即时涨跌幅排序，领涨/领跌各取前五，条形按同一最大绝对值缩放。
 function ThemeMoves({ board }: { board: PatrolFlowBoard }) {
 	const seen = new Set<string>();
 	const items: PatrolFlowItem[] = [];
@@ -318,7 +336,7 @@ function ThemeMoves({ board }: { board: PatrolFlowBoard }) {
 	if (!ups.length && !downs.length) return <p className="patrol-empty">暂无题材涨跌数据</p>;
 	// 单边缺失时不做半栏留白：把有数据的一侧铺满并显示更多行。
 	const single = !ups.length || !downs.length;
-	const take = single ? 6 : 4;
+	const take = single ? 6 : 5;
 	return (
 		<div className={`move-board${single ? ' is-single' : ''}`}>
 			{ups.length > 0 && (
@@ -348,8 +366,9 @@ function MoveRow({ item, max }: { item: PatrolFlowItem; max: number }) {
 	);
 }
 
-function FactsView({ facts, onNavigate }: { facts: PatrolFacts; onNavigate?: (target: CockpitTarget) => void }) {
+function FactsView({ facts, onNavigate }: { facts: PatrolFacts; onNavigate?: (target: CockpitTarget, subView?: string) => void }) {
 	const { emotion, intraday, limit_up: limitUp } = facts;
+	const [flowTab, setFlowTab] = useState<'industry' | 'concept'>('industry');
 	const overseas = (facts.overseas ?? []).filter(
 		(item) => !OMITTED_OVERSEAS_CODES.has(item.code.toUpperCase()) && !OMITTED_OVERSEAS_NAMES.has(item.name),
 	);
@@ -357,16 +376,26 @@ function FactsView({ facts, onNavigate }: { facts: PatrolFacts; onNavigate?: (ta
 	const hasIndexes = Boolean(overseas.length || cn.length);
 	const indexMax = Math.max(0, ...[...overseas, ...cn].map((item) => Math.abs(item.change_percent || 0)));
 	const news = facts.news ?? [];
-	const theories = facts.concept_flows;
+	// 题材涨跌用按涨跌幅排序的取样（concept_moves），资金榜样本只按净流入取两端，
+	// 领跌侧常常凑不满；老版本后端没有该字段时回落到资金榜。
+	const theories = facts.concept_moves ?? facts.concept_flows;
 	const theoryCount = new Set([...(theories?.inflow ?? []), ...(theories?.outflow ?? [])].map((item) => item.name)).size;
 	// 同一行只剩一张卡时让它占满整行，避免半行留白。
 	const ladderWide = !intraday;
 	const intradayWide = !limitUp;
-	const open = (target: CockpitTarget) => (onNavigate ? { onOpen: () => onNavigate(target), openLabel: cockpitTargetLabels[target] } : {});
+	// subView 落到行情总览的某个模块：市场核心指数 / 行业资金 / 资金流向等。
+	const open = (target: CockpitTarget, subView?: string, label?: string) =>
+		onNavigate ? { onOpen: () => onNavigate(target, subView), openLabel: label ?? cockpitTargetLabels[target] } : {};
+	// 行业资金与概念资金共用一张卡，用分段开关切换维度；当前维度无数据时回落到有数据的一侧。
+	const flowTabs = ([
+		{ key: 'industry' as const, label: '行业', board: facts.industry_flows },
+		{ key: 'concept' as const, label: '概念', board: facts.concept_flows },
+	]).filter((tab) => tab.board?.inflow?.length || tab.board?.outflow?.length);
+	const activeFlow = flowTabs.find((tab) => tab.key === flowTab) ?? flowTabs[0];
 	return (
 		<div className="patrol-facts">
 			{hasIndexes && (
-				<Fact title="指数" wide {...open('market')}>
+				<Fact title="指数" icon={<Activity size={15} aria-hidden="true" />} wide {...open('market', 'core-indexes', '市场核心指数')}>
 					<div className={`index-groups${overseas.length && cn.length ? '' : ' is-single'}`}>
 						<IndexGroup caption="海外" items={overseas} maxAbs={indexMax} />
 						<IndexGroup caption="A 股" items={cn} maxAbs={indexMax} />
@@ -375,43 +404,75 @@ function FactsView({ facts, onNavigate }: { facts: PatrolFacts; onNavigate?: (ta
 			)}
 
 			{limitUp && (
-				<Fact title="涨停梯队" source={`${limitUp.trade_date} · ${limitUp.session_status}`} wide={ladderWide} {...open('limit-up')}>
+				<Fact title="涨停梯队" icon={<BarChart3 size={15} aria-hidden="true" />} source={`${limitUp.trade_date} · ${limitUp.session_status}`} wide={ladderWide} {...open('limit-up')}>
 					<LadderColumns limitUp={limitUp} previousMax={intraday?.previous_max_streak} />
 				</Fact>
 			)}
 
 			{emotion && (
-				<Fact title="情绪周期" source={`${emotion.trade_date} 收盘`} badge={<span className="patrol-badge is-soft">{emotion.phase}</span>} {...open('limit-up')}>
+				<Fact title="情绪周期" icon={<Gauge size={15} aria-hidden="true" />} source={`${emotion.trade_date} 收盘`} badge={<span className="patrol-badge is-soft">{emotion.phase}</span>} {...open('limit-up')}>
 					<EmotionDonut emotion={emotion} />
 				</Fact>
 			)}
 
 			{intraday && (
-				<Fact title="盘中判断" wide={intradayWide} {...open('limit-up')}>
+				<Fact title="盘中判断" icon={<Compass size={15} aria-hidden="true" />} wide={intradayWide} {...open('limit-up')}>
 					<IntradayMeters intraday={intraday} />
 				</Fact>
 			)}
 
 			{theoryCount > 0 && (
-				<Fact title="题材涨跌" source={`概念资金样本 · ${theoryCount} 个题材`} wide={intradayWide} {...open('themes')}>
+				<Fact title="题材涨跌" icon={<TrendingUp size={15} aria-hidden="true" />} source={`概念资金样本 · ${theoryCount} 个题材`} wide={intradayWide} {...open('themes')}>
 					<ThemeMoves board={theories!} />
 				</Fact>
 			)}
 
-			{facts.industry_flows?.inflow?.length || facts.industry_flows?.outflow?.length ? (
-				<Fact title="行业资金" wide {...open('market')}>
-					<FlowTornado board={facts.industry_flows} />
+			{activeFlow && (
+				<Fact
+					title="资金流向"
+					icon={<ArrowLeftRight size={15} aria-hidden="true" />}
+					wide
+					centerBadge
+					// 行业维度跳行情总览的「行业资金」，概念维度跳「资金流向」。
+					{...open('market', activeFlow.key === 'concept' ? 'sector-flow' : 'industry-flow', activeFlow.key === 'concept' ? '行情总览 · 资金流向' : '行情总览 · 行业资金')}
+					badge={
+						flowTabs.length > 1 ? (
+							// 整卡可点跳转行情总览，开关区域必须拦住点击与回车，避免切换维度时误跳页。
+							// 滑块按档位等分平移，与行情总览的分段控件同一套视觉。
+							<div
+								className="flow-switch"
+								role="tablist"
+								aria-label="资金流向维度"
+								onClick={(event) => event.stopPropagation()}
+								onKeyDown={(event) => event.stopPropagation()}
+							>
+								<span
+									className="flow-switch-thumb"
+									aria-hidden="true"
+									style={{ transform: `translateX(${Math.max(0, flowTabs.findIndex((tab) => tab.key === activeFlow.key)) * 100}%)` }}
+								/>
+								{flowTabs.map((tab) => (
+									<button
+										key={tab.key}
+										type="button"
+										role="tab"
+										aria-selected={tab.key === activeFlow.key}
+										className={tab.key === activeFlow.key ? 'active' : ''}
+										onClick={() => setFlowTab(tab.key)}
+									>
+										{tab.label}
+									</button>
+								))}
+							</div>
+						) : null
+					}
+				>
+					<FlowTornado board={activeFlow.board} />
 				</Fact>
-			) : null}
-
-			{facts.concept_flows?.inflow?.length || facts.concept_flows?.outflow?.length ? (
-				<Fact title="概念资金" wide {...open('market')}>
-					<FlowTornado board={facts.concept_flows} />
-				</Fact>
-			) : null}
+			)}
 
 			{news.length > 0 && (
-				<Fact title="快讯" source={`${news.length} 条`} wide {...open('market')}>
+				<Fact title="快讯" icon={<Newspaper size={15} aria-hidden="true" />} source={`${news.length} 条`} wide {...open('market')}>
 					<ol className="news-timeline">
 						{news.map((item, index) => (
 							<li key={`${item.title}-${index}`}>
@@ -439,6 +500,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 	const [pickedPhase, setPickedPhase] = useState<PatrolPhaseKey | null>(null);
 	const [selectedID, setSelectedID] = useState<string>('');
 	const [narrativeOpen, setNarrativeOpen] = useState(false);
+	const [timelineOpen, setTimelineOpen] = useState(false);
 
 	const currentPhase = patrol.status?.phase;
 	const followPhase: PatrolPhaseKey = currentPhase === 'intraday' || currentPhase === 'post_close' ? currentPhase : currentPhase === 'pre_open' ? 'pre_open' : 'post_close';
@@ -453,9 +515,20 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 		return byID ?? latestBriefFor(patrol.briefs, activePhase);
 	}, [patrol.briefs, phaseBriefs, selectedID, activePhase]);
 
+	// 默认只显示当天最近若干次盘中巡查，展开后回到全天；当天条数不多时不做折叠。
+	const foldedTimeline = useMemo(
+		() => foldTimeline(timeline, TIMELINE_FOLD_LIMIT, timelineOpen, selected?.id ?? ''),
+		[timeline, timelineOpen, selected?.id],
+	);
+
 	useEffect(() => {
 		setSelectedID('');
 	}, [activePhase]);
+
+	// 换到新交易日就收回到默认的最近若干次，不让上一天展开的列表延续过来。
+	useEffect(() => {
+		setTimelineOpen(false);
+	}, [sessionDate]);
 
 	// 切换记录或刷新后回到收起状态，避免上一次的展开延续到新记录。
 	useEffect(() => {
@@ -489,7 +562,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 					<div className="patrol-status-main">
 						<span className={`patrol-phase phase-${currentPhase || 'rest'}`}>{patrolPhaseLabel(currentPhase || 'rest')}</span>
 						<div>
-							<strong>AI 自动巡查</strong>
+							<strong><Bot size={16} aria-hidden="true" />AI 自动巡查</strong>
 							<small>
 								会话 {sessionDate || '--'}{patrol.status && !patrol.status.trading_day ? ' · 休市' : ''} · 下次 {nextRun}
 							</small>
@@ -509,6 +582,12 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 				</header>
 
 				<div className="patrol-tabs" role="tablist" aria-label="巡查阶段">
+					{/* 选中态用白色滑块平移表示（档位等分），与行情总览的分段控件同一套视觉。 */}
+					<span
+						className="patrol-tabs-thumb"
+						aria-hidden="true"
+						style={{ transform: `translateX(${Math.max(0, patrolPhases.findIndex((item) => item.phase === activePhase)) * 100}%)` }}
+					/>
 					{patrolPhases.map((item) => {
 						const latest = latestBriefFor(patrol.briefs, item.phase);
 						return (
@@ -529,7 +608,14 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 
 				{activePhase === 'intraday' && timeline.length > 0 && (
 					<ol className="patrol-timeline" aria-label="今日盘中巡查时间线">
-						{timeline.map((brief) => (
+						{foldedTimeline.hidden > 0 && (
+							<li>
+								<button type="button" className="patrol-timeline-more" onClick={() => setTimelineOpen(true)}>
+									更早 {foldedTimeline.hidden} 次
+								</button>
+							</li>
+						)}
+						{foldedTimeline.visible.map((brief) => (
 							<li key={brief.id}>
 								<button type="button" className={selected?.id === brief.id ? 'active' : ''} onClick={() => setSelectedID(brief.id)}>
 									<Clock3 size={12} aria-hidden="true" />
@@ -538,6 +624,13 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 								</button>
 							</li>
 						))}
+						{timelineOpen && timeline.length > TIMELINE_FOLD_LIMIT && (
+							<li>
+								<button type="button" className="patrol-timeline-more" onClick={() => setTimelineOpen(false)}>
+									收起
+								</button>
+							</li>
+						)}
 					</ol>
 				)}
 			</div>
@@ -555,7 +648,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 					<article className="patrol-brief">
 						<header>
 							<div className="patrol-brief-head">
-								<strong>{selected.label}</strong>
+								<strong><Clock3 size={15} aria-hidden="true" />{selected.label}</strong>
 								<span>{triggerText[selected.trigger] || selected.trigger}</span>
 								{windowText ? <span>{windowText}</span> : null}
 							</div>
@@ -805,17 +898,12 @@ function narrativeEvidence(facts?: PatrolFacts | null): string[] {
 
 // CockpitLiveModules：驾驶舱的固定模块。数据来自 /cockpit/facts 的实时采集，
 // 与巡查记录解耦，按分钟级刷新，不会因为某次巡查失败而空白。
-export function CockpitLiveModules({ config, refreshKey, onNavigate }: { config: BackendConfig | null; refreshKey: number; onNavigate: (target: CockpitTarget) => void }) {
+export function CockpitLiveModules({ config, refreshKey, onNavigate }: { config: BackendConfig | null; refreshKey: number; onNavigate: (target: CockpitTarget, subView?: string) => void }) {
 	const live = useCockpitLiveFacts(config, refreshKey);
-	const collectedAt = clockText(live.data?.collected_at);
 	// 实时采集按指数、情绪、资金、快讯四类给出结论性读数，价格与占比都带时间与来源。
+	// 区块标题与采集状态提示已按需求移除：整段常驻不折叠，采集失败时由下方的错误段落提示。
 	return (
 		<section className="cockpit-live" aria-label="实时盘面">
-			<header className="cockpit-live-head">
-				<strong>实时盘面</strong>
-				<small>{live.error ? '采集失败' : collectedAt ? `${collectedAt} 采集 · 每分钟刷新` : '正在采集…'}</small>
-			</header>
-
 			{live.error && <p className="patrol-error"><AlertTriangle size={14} aria-hidden="true" />{live.error}</p>}
 
 			{live.data ? (

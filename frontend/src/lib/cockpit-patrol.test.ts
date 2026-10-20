@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type PatrolBrief, intradaySummary, latestBriefFor, narrativeNotice, sessionIntradayBriefs, stripLeadingTitle } from './cockpit-patrol';
+import { type PatrolBrief, TIMELINE_FOLD_LIMIT, foldTimeline, intradaySummary, latestBriefFor, narrativeNotice, sessionIntradayBriefs, stripLeadingTitle } from './cockpit-patrol';
 
 const facts = { sources: [] };
 const brief = (overrides: Partial<PatrolBrief>): PatrolBrief => ({
@@ -60,5 +60,30 @@ describe('patrol brief selection', () => {
 			brief({ id: 'post', phase: 'post_close', started_at: '2026-10-20T07:35:00Z' }),
 		];
 		expect(sessionIntradayBriefs(briefs, '2026-10-20').map((item) => item.id)).toEqual(['early', 'late']);
+	});
+});
+
+describe('intraday timeline folding', () => {
+	const many = Array.from({ length: 15 }, (_, index) => brief({ id: `b${index}`, started_at: `2026-10-20T${String(index).padStart(2, '0')}:00:00Z` }));
+
+	it('keeps the timeline untouched while it is short enough', () => {
+		const short = many.slice(0, TIMELINE_FOLD_LIMIT);
+		expect(foldTimeline(short)).toEqual({ visible: short, hidden: 0 });
+	});
+
+	it('keeps only the latest runs and reports how many are hidden', () => {
+		const folded = foldTimeline(many);
+		expect(folded.visible.map((item) => item.id)).toEqual(many.slice(-TIMELINE_FOLD_LIMIT).map((item) => item.id));
+		expect(folded.hidden).toBe(15 - TIMELINE_FOLD_LIMIT);
+	});
+
+	it('shows everything again once expanded', () => {
+		expect(foldTimeline(many, TIMELINE_FOLD_LIMIT, true).visible).toHaveLength(15);
+	});
+
+	it('keeps an older selected run visible so the panel and the list agree', () => {
+		const folded = foldTimeline(many, TIMELINE_FOLD_LIMIT, false, 'b1');
+		expect(folded.visible[0].id).toBe('b1');
+		expect(folded.visible).toHaveLength(TIMELINE_FOLD_LIMIT + 1);
 	});
 });

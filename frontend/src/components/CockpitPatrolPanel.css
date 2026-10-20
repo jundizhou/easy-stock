@@ -64,10 +64,16 @@
 }
 
 .patrol-status-main strong {
-	display: block;
+	display: flex;
+	align-items: center;
+	gap: 6px;
 	font-size: var(--fs-subtitle);
 	font-weight: 700;
 	line-height: var(--lh-tight);
+}
+
+.patrol-status-main strong svg {
+	color: var(--theme-blue);
 }
 
 /* 阶段标签：系统的状态胶囊规格（11px / 700 / 999 圆角）。 */
@@ -183,49 +189,63 @@
 
 /* 阶段页签：整条分格的分段控件（segmented），一格一段，选中格蓝底蓝字。 */
 .patrol-tabs {
+	position: relative;
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 0;
+	padding: 3px;
 	overflow: hidden;
 	border: 1px solid var(--line);
 	border-radius: 8px;
-	background: var(--theme-surface-soft, var(--surface-2));
+	background: var(--theme-surface-soft, #f3f6fa);
+}
+
+/* 选中态用白色滑块平移表示（档位等分），与行情总览的分段控件一致。 */
+.patrol-tabs-thumb {
+	position: absolute;
+	top: 3px;
+	bottom: 3px;
+	left: 3px;
+	width: calc((100% - 6px) / 3);
+	border-radius: 6px;
+	background: var(--theme-surface, #ffffff);
+	box-shadow: 0 2px 7px var(--theme-shadow, rgba(31, 49, 70, 0.14));
+	transition: transform 160ms ease;
 }
 
 .patrol-tabs button {
+	position: relative;
+	z-index: 1;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
-	min-height: 38px;
+	min-height: 34px;
 	padding: 0 12px;
 	border: 0;
-	border-left: 1px solid var(--line-soft);
-	border-radius: 0;
+	border-radius: 6px;
 	background: transparent;
 	color: var(--theme-muted);
 	font-size: var(--fs-body);
-	font-weight: 600;
+	font-weight: 400;
 	line-height: var(--lh-tight);
 	text-align: center;
 	cursor: pointer;
-}
-
-.patrol-tabs button:first-child {
-	border-left: 0;
+	white-space: nowrap;
 }
 
 .patrol-tabs button:hover {
-	background: var(--theme-surface, var(--surface-1));
-	color: var(--theme-text);
+	color: var(--theme-blue);
 }
 
 .patrol-tabs button.active {
-	border-color: var(--theme-blue-line);
-	background: var(--theme-blue-soft);
 	color: var(--theme-blue);
 	font-weight: 700;
-	box-shadow: inset 0 0 0 1px var(--theme-blue-line);
+}
+
+.patrol-tabs button:focus-visible {
+	outline: 2px solid var(--theme-blue-solid);
+	outline-offset: -2px;
 }
 
 .patrol-tabs button small {
@@ -237,6 +257,12 @@
 
 .patrol-tabs button.active small {
 	color: var(--theme-blue);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.patrol-tabs-thumb {
+		transition: none;
+	}
 }
 
 .patrol-timeline {
@@ -281,6 +307,18 @@
 	color: var(--theme-red);
 }
 
+/* 折叠入口比记录胶囊弱一档：它是辅助操作，不该和巡查记录抢注意力。 */
+.patrol-timeline button.patrol-timeline-more {
+	border-style: dashed;
+	background: transparent;
+	color: var(--theme-muted);
+}
+
+.patrol-timeline button.patrol-timeline-more:hover {
+	border-color: var(--theme-blue-line);
+	color: var(--theme-blue);
+}
+
 .patrol-brief {
 	display: grid;
 	gap: 12px;
@@ -301,9 +339,16 @@
 }
 
 .patrol-brief-head strong {
+	display: flex;
+	align-items: center;
+	gap: 6px;
 	font-size: var(--fs-subtitle);
 	font-weight: 700;
 	line-height: var(--lh-tight);
+}
+
+.patrol-brief-head strong svg {
+	color: var(--theme-muted);
 }
 
 .patrol-brief-head span {
@@ -479,25 +524,7 @@
 	container-name: patrol;
 }
 
-.cockpit-live-head {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	justify-content: space-between;
-	gap: 4px 12px;
-	padding: 0 2px;
-}
-
-.cockpit-live-head strong {
-	font-size: var(--fs-subtitle);
-	font-weight: 700;
-	line-height: var(--lh-tight);
-}
-
-.cockpit-live-head small {
-	color: var(--theme-subtle);
-	font-size: var(--fs-desc);
-}
+/* 区块标题与采集状态提示已移除（用户要求直接展示卡片），保留容器间距规则备查。 */
 
 /* 固定模块里事实卡直接排在页面上，不需要巡查面板内那层分界线。 */
 .cockpit-live .patrol-facts {
@@ -521,7 +548,7 @@
 	align-content: start;
 	gap: 14px;
 	min-width: 0;
-	padding: 14px 16px 16px;
+	padding: 14px 16px 15px;
 	border: 1px solid var(--line-soft);
 	border-radius: 10px;
 	background: var(--theme-surface, #ffffff);
@@ -561,25 +588,6 @@
 	min-width: 0;
 }
 
-.patrol-fact-open {
-	display: inline-flex;
-	align-items: center;
-	gap: 3px;
-	color: var(--theme-blue);
-	font-size: var(--fs-caption);
-	font-weight: 600;
-	white-space: nowrap;
-	opacity: 0;
-	transform: translateX(-3px);
-	transition: opacity 0.16s ease, transform 0.16s ease;
-}
-
-.patrol-fact.is-clickable:hover .patrol-fact-open,
-.patrol-fact.is-clickable:focus-visible .patrol-fact-open {
-	opacity: 1;
-	transform: none;
-}
-
 .patrol-fact h4 {
 	margin: 0;
 	font-size: var(--fs-body);
@@ -602,6 +610,12 @@
 	min-width: 0;
 }
 
+/* 标题图标：与侧栏卡片头部图标同一规格，浅灰不抢数据的风头。 */
+.patrol-fact-title > svg {
+	flex-shrink: 0;
+	color: var(--theme-muted);
+}
+
 /* 事实标题旁的状态胶囊沿用系统的写法：11px / 600 / 999 圆角。 */
 .patrol-badge {
 	display: inline-flex;
@@ -620,6 +634,86 @@
 .patrol-badge.is-soft {
 	color: var(--theme-muted);
 	font-weight: 600;
+}
+
+/* 资金流向卡的维度开关：与行情总览的分段控件（.sector-flow-tabs）同一套视觉——
+   浅底槽 + 白色选中胶囊滑块，选中字变蓝加粗，滑块平移过渡。
+   头部用三栏网格让开关与「资金流向」标题同一行且水平居中。 */
+.patrol-fact > header.is-center-badge {
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	align-items: center;
+	gap: 12px;
+}
+
+.patrol-fact > header.is-center-badge .patrol-fact-title {
+	justify-self: start;
+}
+
+.patrol-fact > header.is-center-badge .patrol-fact-meta {
+	justify-self: end;
+}
+
+.patrol-fact-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-self: center;
+}
+
+.flow-switch {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	min-height: 36px;
+	padding: 3px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface-soft, #f3f6fa);
+}
+
+.flow-switch button {
+	position: relative;
+	z-index: 1;
+	flex: 1 1 0;
+	min-width: 62px;
+	min-height: 28px;
+	padding: 0 10px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--theme-muted, #56657a);
+	font: inherit;
+	font-size: var(--fs-body);
+	font-weight: 400;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.flow-switch button:hover {
+	color: var(--theme-blue, #2476d2);
+}
+
+.flow-switch button.active {
+	color: var(--theme-blue, #2476d2);
+	font-weight: 700;
+}
+
+.flow-switch button:focus-visible {
+	outline: 2px solid var(--theme-blue-solid);
+	outline-offset: -2px;
+}
+
+/* 选中态用白色滑块平移表示（档位等分），与系统分段控件一致。 */
+.flow-switch-thumb {
+	position: absolute;
+	top: 3px;
+	bottom: 3px;
+	left: 3px;
+	width: calc((100% - 6px) / 2);
+	border-radius: 6px;
+	background: var(--theme-surface, #ffffff);
+	box-shadow: 0 2px 7px var(--theme-shadow, rgba(31, 49, 70, 0.14));
+	transition: transform 160ms ease;
 }
 
 /* 指数：能量条。条形长度 = |涨跌幅| / 同一最大绝对值，红涨绿跌，海外与 A 股共用一把尺子。 */
@@ -937,7 +1031,7 @@
 /* 盘中判断：状态标签 + 风险分，比率做成带刻度线的仪表条，底部一行连板背景。 */
 .intraday {
 	display: grid;
-	gap: 12px;
+	gap: 14px;
 }
 
 .intraday-top {
@@ -965,6 +1059,9 @@
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 14px 18px;
 	align-items: stretch;
+	/* 与上方状态徽标之间加一条分割线，读数区独立成段。 */
+	padding-top: 10px;
+	border-top: 1px solid var(--line-soft);
 }
 
 .meter {
@@ -1089,11 +1186,35 @@
 
 .tornado-side li {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 52px minmax(0, 1fr);
+	/* 名称列收成内容宽度，条形吃掉其余全部空间：宽卡里条形拉长，
+	   不会在卡片左右两侧各留一条空白带。 */
+	grid-template-columns: minmax(0, max-content) 56px minmax(0, 1fr);
 	gap: 8px;
 	align-items: center;
 	height: 24px;
 	font-size: var(--fs-body);
+}
+
+/* 右栏 DOM 顺序是「条形 → 数值 → 名称」，列宽必须镜像，
+   否则条形会落进 max-content 列：百分比宽度相对自身宽度解析成 0，条形消失。
+   限定 :not(:only-child)：单侧存在时走下方统一的单向排行布局。 */
+.tornado-side.is-in:not(:only-child) li {
+	grid-template-columns: minmax(0, 1fr) 56px minmax(0, max-content);
+}
+
+.tornado-side.is-in:not(:only-child) li .t-bar {
+	grid-column: 1;
+	grid-row: 1;
+}
+
+.tornado-side.is-in:not(:only-child) li .t-value {
+	grid-column: 2;
+	grid-row: 1;
+}
+
+.tornado-side.is-in:not(:only-child) li .t-name {
+	grid-column: 3;
+	grid-row: 1;
 }
 
 .t-name {
@@ -1169,15 +1290,18 @@
 
 .tornado-side:only-child .t-name {
 	grid-column: 1;
+	grid-row: 1;
 	text-align: left;
 }
 
 .tornado-side:only-child .t-bar {
 	grid-column: 2;
+	grid-row: 1;
 }
 
 .tornado-side:only-child .t-value {
 	grid-column: 3;
+	grid-row: 1;
 	text-align: right;
 }
 
@@ -1281,7 +1405,7 @@
 	gap: 8px;
 	align-items: center;
 	margin: 0 -4px;
-	padding: 2px 4px;
+	padding: 3px 4px;
 	border-radius: 6px;
 	font-size: var(--fs-body);
 	transition: background-color 0.14s ease;
@@ -1419,8 +1543,7 @@
 	.t-bar i,
 	.meter i b,
 	.ladder-plot i,
-	.patrol-fact.is-clickable,
-	.patrol-fact-open {
+	.patrol-fact.is-clickable {
 		transition: none;
 	}
 }
@@ -1639,18 +1762,21 @@
 	.tornado-side.is-out .t-name,
 	.tornado-side.is-in .t-name {
 		grid-column: 1;
+		grid-row: 1;
 		text-align: left;
 	}
 
 	.tornado-side.is-out .t-bar,
 	.tornado-side.is-in .t-bar {
 		grid-column: 2;
+		grid-row: 1;
 		justify-content: flex-start;
 	}
 
 	.tornado-side.is-out .t-value,
 	.tornado-side.is-in .t-value {
 		grid-column: 3;
+		grid-row: 1;
 		text-align: right;
 	}
 }

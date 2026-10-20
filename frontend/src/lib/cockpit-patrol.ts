@@ -35,6 +35,8 @@ export type PatrolFacts = {
 	limit_up?: PatrolLimitUp;
 	industry_flows?: PatrolFlowBoard;
 	concept_flows?: PatrolFlowBoard;
+	// 题材涨跌的取样口径：按涨跌幅排序的领涨/领跌各若干条，比资金榜样本更大。
+	concept_moves?: PatrolFlowBoard;
 	news?: PatrolNews[];
 	sources: PatrolSource[];
 };
@@ -92,6 +94,20 @@ export function sessionIntradayBriefs(briefs: PatrolBrief[], sessionDate: string
 	return briefs
 		.filter((brief) => brief.phase === 'intraday' && brief.session_date === sessionDate)
 		.sort((a, b) => a.started_at.localeCompare(b.started_at));
+}
+
+// 盘中时间线默认只展示最近若干次：手动巡查点得多了会把整行撑满，但历史仍可展开查看。
+export const TIMELINE_FOLD_LIMIT = 8;
+
+// 折叠时保留最近 limit 次记录；若当前选中的是更早的一次，把它一起保留，
+// 避免选中项因为折叠从界面上消失、右侧正文却还是那一条。
+export function foldTimeline(briefs: PatrolBrief[], limit = TIMELINE_FOLD_LIMIT, expanded = false, pinnedID = ''): { visible: PatrolBrief[]; hidden: number } {
+	if (expanded || briefs.length <= limit) return { visible: briefs, hidden: 0 };
+	const tail = briefs.slice(-limit);
+	const keep = new Set(tail.map((brief) => brief.id));
+	if (pinnedID) keep.add(pinnedID);
+	const visible = briefs.filter((brief) => keep.has(brief.id));
+	return { visible, hidden: briefs.length - visible.length };
 }
 
 // 后端 summary 形如「高位延续 · 低位一般」，已包含状态；界面单独展示状态，这里去掉重复前缀。

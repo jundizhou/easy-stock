@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, BarChart3, BookMarked, BookOpen, BrainCircuit, Bot, Flame, Gauge, LayoutDashboard, RefreshCw, Sparkles, WalletCards } from 'lucide-react';
+import { AlertTriangle, BarChart3, BookMarked, BookOpen, BrainCircuit, Bot, Flame, Gauge, LayoutDashboard, RefreshCw, Sparkles, WalletCards } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useId, useMemo, useState } from 'react';
 import type { BackendConfig, MarketEmotionHistory, MarketEmotionPoint, MarketIndexSnapshot, PortfolioInspectionJob, SourceHealth } from '../lib/backend';
@@ -21,7 +21,7 @@ import './CockpitWorkspace.css';
 type Props = {
 	config: BackendConfig | null;
 	refreshKey: number;
-	onNavigate: (target: CockpitTarget) => void;
+	onNavigate: (target: CockpitTarget, subView?: string) => void;
 	onAskAI: (prompt: string) => void;
 	onRefresh: () => void;
 };
@@ -77,16 +77,28 @@ function stateLabel<T>(resource: CockpitResource<T>) {
 }
 
 // 面板外壳沿用系统工作台的写法：标题栏 + 内容区，内容区自己滚动。
+// 有 onOpen 时整卡可点跳转，不再显示右下角的跳转字样按钮。
 function Card({ title, icon, resource, onOpen, openLabel, children, className = '', action }: { title: string; icon: ReactNode; resource?: CockpitResource<unknown>; onOpen?: () => void; openLabel?: string; children: ReactNode; className?: string; action?: ReactNode }) {
 	return (
-		<section className={`cockpit-card ${className}`.trim()}>
+		<section
+			className={`cockpit-card ${className}${onOpen ? ' is-clickable' : ''}`.trim()}
+			role={onOpen ? 'link' : undefined}
+			tabIndex={onOpen ? 0 : undefined}
+			aria-label={onOpen ? `${title}，打开${openLabel || '对应模块'}` : undefined}
+			onClick={onOpen}
+			onKeyDown={onOpen ? (event) => {
+				if (event.key === 'Enter' || event.key === ' ') {
+					event.preventDefault();
+					onOpen();
+				}
+			} : undefined}
+		>
 			<header>
 				<div className="cockpit-card-title">{icon}<h3>{title}</h3></div>
 				{action}
 				{resource && <small className={resource.state === 'error' && !resource.data ? 'is-error' : ''}>{stateLabel(resource)}</small>}
 			</header>
 			<div className="cockpit-card-body">{children}</div>
-			{onOpen && <button type="button" className="cockpit-card-link" onClick={onOpen}>{openLabel || '进入'}<ArrowRight size={13} aria-hidden="true" /></button>}
 		</section>
 	);
 }
@@ -98,9 +110,9 @@ function EmotionSpark({ points }: { points: MarketEmotionPoint[] }) {
 	if (points.length < 2) return <p className="cockpit-muted">情绪历史样本不足</p>;
 
 	const width = 300;
-	const height = 72;
+	const height = 108;
 	const padX = 8;
-	const padY = 12;
+	const padY = 14;
 	const scores = points.map((point) => point.emotion_score);
 	const min = Math.min(...scores);
 	const max = Math.max(...scores);
