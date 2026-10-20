@@ -61,6 +61,32 @@ type FlowBoard struct {
 	Outflow []FlowItem `json:"outflow"`
 }
 
+// BuildMoveBoard 按即时涨跌幅排序取样：涨幅最大的 n 条与跌幅最大的 n 条。
+// 资金榜按净流入排序，尾部板块的涨跌幅未必是当日最差的；题材涨跌这张卡要的是
+// 「涨得最多/跌得最多」，所以单独按 ChangePercent 取两端，避免领跌侧样本不足。
+func BuildMoveBoard(items []FlowItem, n int) *FlowBoard {
+	if len(items) == 0 || n <= 0 {
+		return nil
+	}
+	sorted := append([]FlowItem(nil), items...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ChangePercent > sorted[j].ChangePercent })
+	board := &FlowBoard{Inflow: []FlowItem{}, Outflow: []FlowItem{}}
+	for _, item := range sorted {
+		if len(board.Inflow) >= n {
+			break
+		}
+		if item.ChangePercent > 0 {
+			board.Inflow = append(board.Inflow, item)
+		}
+	}
+	for i := len(sorted) - 1; i >= 0 && len(board.Outflow) < n; i-- {
+		if sorted[i].ChangePercent < 0 {
+			board.Outflow = append(board.Outflow, sorted[i])
+		}
+	}
+	return board
+}
+
 type NewsLine struct {
 	Title       string `json:"title"`
 	PublishedAt string `json:"published_at,omitempty"`
@@ -73,15 +99,17 @@ type SourceResult struct {
 }
 
 type Facts struct {
-	Overseas  []IndexQuote   `json:"overseas,omitempty"`
-	CNIndexes []IndexQuote   `json:"cn_indexes,omitempty"`
-	Emotion   *Emotion       `json:"emotion,omitempty"`
-	Intraday  *IntradayView  `json:"intraday,omitempty"`
-	LimitUp   *LimitUpView   `json:"limit_up,omitempty"`
-	Industry  *FlowBoard     `json:"industry_flows,omitempty"`
-	Concepts  *FlowBoard     `json:"concept_flows,omitempty"`
-	News      []NewsLine     `json:"news,omitempty"`
-	Sources   []SourceResult `json:"sources"`
+	Overseas  []IndexQuote  `json:"overseas,omitempty"`
+	CNIndexes []IndexQuote  `json:"cn_indexes,omitempty"`
+	Emotion   *Emotion      `json:"emotion,omitempty"`
+	Intraday  *IntradayView `json:"intraday,omitempty"`
+	LimitUp   *LimitUpView  `json:"limit_up,omitempty"`
+	Industry  *FlowBoard    `json:"industry_flows,omitempty"`
+	Concepts  *FlowBoard    `json:"concept_flows,omitempty"`
+	// ConceptMoves 是题材涨跌卡的取样（按涨跌幅两端各取若干），与资金榜互不影响。
+	ConceptMoves *FlowBoard     `json:"concept_moves,omitempty"`
+	News         []NewsLine     `json:"news,omitempty"`
+	Sources      []SourceResult `json:"sources"`
 }
 
 // Feed 是采集器依赖的数据入口。字段为 nil 表示该数据源未接入。
@@ -169,7 +197,11 @@ func CollectFacts(ctx context.Context, phase Phase, feed Feed) Facts {
 	if feed.Concepts != nil {
 		c.run(ctx, "概念资金", func(ctx context.Context) error {
 			items, err := feed.Concepts(ctx)
-			c.set(func(f *Facts) { f.Concepts = BuildFlowBoard(items, 8) })
+			c.set(func(f *Facts) {
+				f.Concepts = BuildFlowBoard(items, 8)
+				// 题材卡与资金卡共用同一次上游请求，只是各自按不同口径截断。
+				f.ConceptMoves = BuildMoveBoard(items, 5)
+			})
 			return err
 		})
 	}

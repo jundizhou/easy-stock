@@ -315,3 +315,24 @@ func TestStoreMarksInterruptedRunsAndPersists(t *testing.T) {
 		t.Fatal("dedupe key lost across restart")
 	}
 }
+
+func TestBuildMoveBoardRanksByChangePercent(t *testing.T) {
+	board := BuildMoveBoard([]FlowItem{
+		{Name: "A", NetInflow: -9, ChangePercent: 3.1},
+		{Name: "B", NetInflow: 9, ChangePercent: -2.4},
+		{Name: "C", NetInflow: 1, ChangePercent: 1.2},
+		{Name: "D", NetInflow: -1, ChangePercent: -0.6},
+		{Name: "E", NetInflow: 5, ChangePercent: 0},
+	}, 2)
+	if len(board.Inflow) != 2 || board.Inflow[0].Name != "A" || board.Inflow[1].Name != "C" {
+		t.Fatalf("inflow = %+v", board.Inflow)
+	}
+	// 净流入为正但当日下跌的板块也必须进领跌侧，这是资金榜口径取不到的部分；
+	// 流出侧与资金榜一致，跌得最多的排在最前。
+	if len(board.Outflow) != 2 || board.Outflow[0].Name != "B" || board.Outflow[1].Name != "D" {
+		t.Fatalf("outflow = %+v", board.Outflow)
+	}
+	if BuildMoveBoard(nil, 3) != nil {
+		t.Fatal("empty input should produce no board")
+	}
+}
