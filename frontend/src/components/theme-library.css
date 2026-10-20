@@ -109,7 +109,7 @@
 	grid-template-columns: 360px minmax(0, 1fr);
 	align-items: stretch;
 	gap: 12px;
-	height: calc(100vh - 248px);
+	height: calc(100vh - 252px);
 	min-height: 540px;
 	min-width: 0;
 }
@@ -334,6 +334,11 @@
 	overflow-y: auto;
 	overscroll-behavior: contain;
 	padding-right: 2px;
+	scrollbar-width: none;
+}
+
+.theme-library-detail-panel::-webkit-scrollbar {
+	display: none;
 }
 
 .theme-library-detail-panel > * {
@@ -545,8 +550,10 @@
 /* 产业链矩阵：每个细分一整行，组成员全部铺开，不再用标签页隐藏信息。 */
 .theme-library-members {
 	display: flex;
+	flex: 1 1 auto;
 	flex-direction: column;
 	min-width: 0;
+	min-height: 0;
 }
 
 .theme-library-members > header {
@@ -599,8 +606,12 @@
 
 .theme-library-matrix {
 	display: flex;
+	flex: 1 1 auto;
 	flex-direction: column;
 	min-width: 0;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 
 .theme-library-group-row {

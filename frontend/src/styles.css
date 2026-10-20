@@ -7345,7 +7345,20 @@ a:focus-visible {
 .market-flow-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .market-flow-summary.market-margin-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
-.market-data-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #ffffff); }
+.market-data-table {
+	overflow-x: auto;
+	overflow-y: auto;
+	max-height: calc(100vh - 320px);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, #ffffff);
+}
+
+.market-data-table > header {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+}
 .market-data-table > header,
 .market-data-table > article { display: grid; align-items: center; gap: 8px; min-width: 900px; padding: 8px 12px; }
 .market-data-table > header { min-height: 35px; background: var(--theme-surface-soft, #f7f9fc); color: var(--theme-muted, #8390a0); font-size: var(--fs-desc); }

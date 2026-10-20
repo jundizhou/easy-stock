@@ -338,7 +338,6 @@ export function ThemeLibraryWorkspace({ config, refreshKey }: Props) {
 												<div className="theme-library-state"><Tags size={22} aria-hidden="true" /><strong>没有匹配的细分或标的</strong><span>换个股票名称、代码或细分名称试试</span></div>
 											) : null}
 										</div>
-										<footer>标的涨跌幅优先为实时行情，行情获取失败时回退为题材更新时点的快照；细分与题材汇总涨跌为快照值。同一股票可能同时属于多个细分，因此「标的归属」大于去重后的股票数。</footer>
 									</section>
 								</>
 							) : null}
