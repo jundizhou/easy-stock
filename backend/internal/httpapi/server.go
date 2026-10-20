@@ -15,6 +15,7 @@ import (
 
 	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/cockpit"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
@@ -48,6 +49,8 @@ type Server struct {
 	etfKLinePrimary          RawKLineProvider
 	etfKLineFallback         RawKLineProvider
 	ladderThemeAI            *ladderThemeAI
+	cockpit                  *cockpit.Service
+	cockpitLive              cockpitLiveFacts
 	mux                      *http.ServeMux
 	token                    string
 	realtimeProvider         RealtimeProvider
@@ -481,6 +484,7 @@ func NewServer(config any) *Server {
 			KLines:  history.load,
 		})
 	}
+	s.cockpit = s.newCockpitPatrolService(cfg.SettingsPath, cfg.Logger)
 	s.routes()
 	return s
 }
@@ -768,6 +772,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/settings/notifications/test", s.settingsNotificationsTest)
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)
+	s.mux.HandleFunc("GET /api/v1/cockpit/status", s.cockpitStatus)
+	s.mux.HandleFunc("GET /api/v1/cockpit/facts", s.cockpitFacts)
+	s.mux.HandleFunc("GET /api/v1/cockpit/briefs", s.cockpitBriefs)
+	s.mux.HandleFunc("GET /api/v1/cockpit/briefs/{id}", s.cockpitBrief)
+	s.mux.HandleFunc("POST /api/v1/cockpit/briefs", s.cockpitRun)
 	s.mux.HandleFunc("GET /api/v1/ws/stream", s.stream)
 }
 

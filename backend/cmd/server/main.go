@@ -127,7 +127,9 @@ func main() {
 	go server.RunSectorFlowSampler(ctx)
 	go server.RunMasteryScheduler(ctx)
 	go server.RunPortfolioScheduler(ctx)
-	httpServer := &http.Server{Addr: addr, Handler: server}
+<	go server.RunCockpitPatrol(ctx)
+	go server.RunThemeLibraryDailyRefresh(ctx)
+>	httpServer := &http.Server{Addr: addr, Handler: server}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -174,11 +176,8 @@ func dataPath(dataDir, name string) string {
 	return filepath.Join(dataDir, name)
 }
 
-// sectorFlowSampleInterval 允许通过环境变量调整采样间隔。
-//
-// 默认 3 分钟（与公开同类产品一致）；低于 30 秒的配置会被忽略，
-// 避免误配之后把上游榜单打成突发流量。
-func sectorFlowSampleInterval() time.Duration {
+// sectorFlowSampleInterval 鍏佽閫氳繃鐜鍙橀噺璋冩暣閲囨牱闂撮殧銆?//
+// 榛樿 3 鍒嗛挓锛堜笌鍏紑鍚岀被浜у搧涓€鑷达級锛涗綆浜?30 绉掔殑閰嶇疆浼氳蹇界暐锛?// 閬垮厤璇厤涔嬪悗鎶婁笂娓告鍗曟墦鎴愮獊鍙戞祦閲忋€?func sectorFlowSampleInterval() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("A_STOCK_SECTOR_FLOW_SAMPLE_INTERVAL"))
 	if raw == "" {
 		return 0
