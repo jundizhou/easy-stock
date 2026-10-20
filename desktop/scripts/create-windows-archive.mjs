@@ -17,12 +17,14 @@ fs.mkdirSync(releaseRoot, { recursive: true });
 fs.rmSync(archivePath, { force: true });
 
 run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), packageRoot, 'windows']);
+// Compress-Archive 会把整个目录读进内存，win-unpacked 接近 500MB 时直接 OOM；
+// 改用 .NET ZipFile 流式写入，压缩级别与原来一致，包内同样保留顶层目录。
 const result = spawnSync('powershell.exe', [
 	'-NoLogo',
 	'-NoProfile',
 	'-NonInteractive',
 	'-Command',
-	"$ErrorActionPreference = 'Stop'; Compress-Archive -LiteralPath $env:EASY_STOCK_ARCHIVE_SOURCE -DestinationPath $env:EASY_STOCK_ARCHIVE_DESTINATION -CompressionLevel Optimal -Force",
+	"$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory($env:EASY_STOCK_ARCHIVE_SOURCE, $env:EASY_STOCK_ARCHIVE_DESTINATION, [System.IO.Compression.CompressionLevel]::Optimal, $true)",
 ], {
 	stdio: 'inherit',
 	env: {

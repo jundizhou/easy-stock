@@ -3,6 +3,7 @@ import {
 	AlertTriangle,
 	BarChart3,
 	Bot,
+	BookMarked,
 	Building2,
 	ChartCandlestick,
 	ChartSpline,
@@ -67,6 +68,7 @@ import {
 	ResearchView,
 } from './market/MarketDataViews';
 import { SectorFlowWorkspace } from './SectorFlowWorkspace';
+import { ThemeLibraryWorkspace } from './ThemeLibraryWorkspace';
 
 type Props = {
 	config: BackendConfig | null;
@@ -89,11 +91,13 @@ const moduleIcons = {
 	announcements: Megaphone,
 	'institution-reports': FileSearch,
 	'industry-research': SearchCheck,
+	'theme-library': BookMarked,
 } satisfies Record<MarketOverviewView, typeof Newspaper>;
 
 export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) {
 	const [activeView, setActiveView] = useState<MarketOverviewView>(() => resolveMarketOverviewView(window.location.hash));
 	const [sectorFlowRefreshKey, setSectorFlowRefreshKey] = useState(0);
+	const [themeLibraryRefreshKey, setThemeLibraryRefreshKey] = useState(0);
 	const [news, setNews] = useState<NewsItem[]>([]);
 	const [themes, setThemes] = useState<ThemeOverview[]>([]);
 	const [themeMeta, setThemeMeta] = useState<SourceMeta | null>(null);
@@ -162,7 +166,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	}, [config]);
 
 	const loadModule = useCallback(async () => {
-		if (!config || activeView === 'pulse' || activeView === 'sector-flow') return;
+		if (!config || activeView === 'pulse' || activeView === 'sector-flow' || activeView === 'theme-library') return;
 		setModuleState('loading');
 		setModuleError('');
 		try {
@@ -365,9 +369,14 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 		}
 	};
 
-	const refreshing = activeView === 'pulse' ? pulseState === 'loading' : activeView !== 'sector-flow' && moduleState === 'loading';
+	const refreshing = activeView === 'pulse'
+		? pulseState === 'loading'
+		: activeView === 'theme-library'
+			? false
+			: activeView !== 'sector-flow' && moduleState === 'loading';
 	const refresh = () => {
 		if (activeView === 'sector-flow') setSectorFlowRefreshKey((current) => current + 1);
+		else if (activeView === 'theme-library') setThemeLibraryRefreshKey((current) => current + 1);
 		else if (activeView === 'pulse') void loadPulse();
 		else void loadModule();
 	};
@@ -391,10 +400,10 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				<div><span>{marketOverviewGroups.find((group) => group.modules.some((module) => module.id === activeView))?.name}</span><h2>{activeModule.name}</h2><p>{activeModule.description}</p></div>
 				{activeView === 'futures-position' && <div className="market-futures-headline-stat" role="status"><span>当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : <FuturesHandsValue text={formatFuturesOpeningHands(futuresConsensus?.top20_net_long_change ?? null, true)} />}</strong><small>+ 多单 · − 空单 · 全部合约 · 前20会员{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus && moduleState !== 'loading' ? ' · 共识数据不可用' : ''}</small></div>}
 				{activeView === 'futures-position' && <div className="market-futures-headline-stat market-futures-citic-stat" role="status"><span>中信当日四大期指多空单变化</span><strong>{moduleState === 'loading' ? '计算中…' : <FuturesHandsValue text={formatFuturesOpeningHands(futuresConsensus?.citic_net_long_change ?? null, true)} />}</strong><small>+ 多单 · − 空单 · 中信期货(代客) · 全部合约{futuresConsensus?.trade_date ? ` · ${futuresConsensus.trade_date}` : ''}{!futuresConsensus ? ' · 共识数据不可用' : ''}</small></div>}
-				<div>{activeView !== 'sector-flow' && <button type="button" className="market-ai-button" onClick={() => void askAI()} disabled={!hasEvidence || aiPreparing}>{aiPreparing ? <LoaderCircle className="spin" size={16} /> : <Bot size={16} />}{aiPreparing ? '正在聚合席位与连板证据' : '交给 AI 解读'}</button>}<button type="button" className="market-refresh-button" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
+				<div>{activeView !== 'sector-flow' && activeView !== 'theme-library' && <button type="button" className="market-ai-button" onClick={() => void askAI()} disabled={!hasEvidence || aiPreparing}>{aiPreparing ? <LoaderCircle className="spin" size={16} /> : <Bot size={16} />}{aiPreparing ? '正在聚合席位与连板证据' : '交给 AI 解读'}</button>}<button type="button" className="market-refresh-button" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
 			</header>
 
-			{activeView === 'sector-flow' ? <SectorFlowWorkspace config={config} refreshKey={refreshKey + sectorFlowRefreshKey} onAskAI={onAskAI} /> : activeView === 'pulse' ? <PulseView news={news} themes={themes} themeMeta={themeMeta} sources={sources} state={pulseState} error={pulseError} lastUpdated={lastUpdated} /> : <ModuleState state={moduleState} error={moduleError}>
+			{activeView === 'sector-flow' ? <SectorFlowWorkspace config={config} refreshKey={refreshKey + sectorFlowRefreshKey} onAskAI={onAskAI} /> : activeView === 'theme-library' ? <ThemeLibraryWorkspace config={config} refreshKey={refreshKey + themeLibraryRefreshKey} /> : activeView === 'pulse' ? <PulseView news={news} themes={themes} themeMeta={themeMeta} sources={sources} state={pulseState} error={pulseError} lastUpdated={lastUpdated} /> : <ModuleState state={moduleState} error={moduleError}>
 				{activeView === 'core-indexes' && <CoreIndexView indexes={indexes} selectedID={selectedIndexID} onSelect={setSelectedIndexID} series={indexSeries} seriesLoading={seriesLoading} meta={moduleMeta} />}
 				{activeView === 'industry-momentum' && <IndustryMomentumView items={industries} meta={moduleMeta} />}
 				{isFlowView(activeView) && <FundFlowView key={activeView} items={flows} dimension={flowDimension(activeView)} meta={moduleMeta} />}

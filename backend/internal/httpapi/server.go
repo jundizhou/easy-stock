@@ -38,6 +38,7 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/themeindex"
+	"easy-stock/backend/internal/themelibrary"
 )
 
 type Server struct {
@@ -106,6 +107,8 @@ type Server struct {
 	masteryLibrary           *methodology.Library
 	marketEmotionStore       *marketemotion.Store
 	themeRadarStore          *duanxianxia.Store
+	themeLibrary             *themelibrary.Store
+	themeLibraryRefreshAt    string
 	themeProgress            *themeProgressCache
 	startupError             error
 	logger                   *log.Logger
@@ -282,6 +285,14 @@ func NewServer(config any) *Server {
 			cfg.Logger.Printf("level=warn event=startup feature=market-data task=sector_flow_sampler error=%q", runtimelog.Redact(err.Error()))
 		}
 	}
+	if cfg.ThemeLibraryStore == nil && strings.TrimSpace(cfg.ThemeLibraryDBPath) != "" {
+		store, err := themelibrary.Open(cfg.ThemeLibraryDBPath)
+		if err == nil {
+			cfg.ThemeLibraryStore = store
+		} else {
+			cfg.Logger.Printf("level=warn event=startup feature=market-data task=theme_library error=%q", runtimelog.Redact(err.Error()))
+		}
+	}
 	if cfg.PortfolioStore == nil {
 		store, err := portfolioinspection.OpenStore(cfg.PortfolioDBPath)
 		if err == nil {
@@ -415,6 +426,8 @@ func NewServer(config any) *Server {
 		usageGateway:             usageGateway,
 		masteryLibrary:           cfg.MasteryLibrary,
 		marketEmotionStore:       cfg.MarketEmotionStore,
+		themeLibrary:             cfg.ThemeLibraryStore,
+		themeLibraryRefreshAt:    cfg.ThemeLibraryRefreshAt,
 		startupError:             errors.Join(startupErrors...),
 		logger:                   cfg.Logger,
 		tokenUsage:               tokenUsage,
@@ -546,6 +559,9 @@ func (s *Server) Close() error {
 	if s.themeRadarStore != nil {
 		closeErrors = append(closeErrors, s.themeRadarStore.Close())
 	}
+	if s.themeLibrary != nil {
+		closeErrors = append(closeErrors, s.themeLibrary.Close())
+	}
 	return errors.Join(closeErrors...)
 }
 
@@ -666,6 +682,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/sector-flows", s.marketSectorFlowsHandler)
 	s.mux.HandleFunc("GET /api/v1/market/sector-flow-intraday", s.marketSectorFlowIntradayHandler)
 	s.mux.HandleFunc("GET /api/v1/market/sector-price-intraday", s.marketSectorPriceIntradayHandler)
+	s.mux.HandleFunc("GET /api/v1/market/theme-library", s.themeLibraryListHandler)
+	s.mux.HandleFunc("GET /api/v1/market/theme-library/{id}", s.themeLibraryDetailHandler)
 	s.mux.HandleFunc("GET /api/v1/market/margin-balance", s.marketMarginBalanceHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard", s.marketBillboardHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard/detail", s.marketBillboardDetailHandler)

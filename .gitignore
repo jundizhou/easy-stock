@@ -37,6 +37,9 @@ desktop/.cache/
 backend/tmp/
 backend/bin/
 backend/server
+# BigAMap raw responses archived by cmd/theme-library-import; the curated snapshot
+# lives in backend/internal/themelibrary/seed.json and is embedded into the binary.
+backend/data/theme-library/raw/
 
 # Hermes and model/provider credentials.
 **/hermes-home/
