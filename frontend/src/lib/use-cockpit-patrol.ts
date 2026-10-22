@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BackendConfig } from './backend';
-import { type PatrolBrief, type PatrolStatus, fetchPatrolBriefs, fetchPatrolStatus, runPatrol } from './cockpit-patrol';
+import { type AutoPatrolUpdate, type PatrolBrief, type PatrolStatus, fetchPatrolBriefs, fetchPatrolStatus, runPatrol, updateAutoPatrol } from './cockpit-patrol';
 
 const STATUS_INTERVAL_MS = 30_000;
 const RUNNING_INTERVAL_MS = 3_000;
@@ -12,6 +12,10 @@ export function useCockpitPatrol(config: BackendConfig | null, refreshKey: numbe
 	const [error, setError] = useState('');
 	const [loading, setLoading] = useState(false);
 	const [starting, setStarting] = useState(false);
+	const [savingAutoPatrol, setSavingAutoPatrol] = useState(false);
+	const [autoPatrolError, setAutoPatrolError] = useState('');
+	const savingAutoPatrolRef = useRef(false);
+	const statusRevision = useRef(0);
 	const mounted = useRef(true);
 
 	useEffect(() => {
@@ -23,11 +27,13 @@ export function useCockpitPatrol(config: BackendConfig | null, refreshKey: numbe
 
 	const load = useCallback(async (signal?: AbortSignal) => {
 		if (!config) return;
+		const revision = statusRevision.current;
 		setLoading(true);
 		try {
 			const [nextStatus, nextBriefs] = await Promise.all([fetchPatrolStatus(config, signal), fetchPatrolBriefs(config, signal)]);
 			if (!mounted.current || signal?.aborted) return;
-			setStatus(nextStatus);
+			// 切换前或保存中的轮询响应不能覆盖刚保存的开关状态。
+			if (revision === statusRevision.current && !savingAutoPatrolRef.current) setStatus(nextStatus);
 			setBriefs(nextBriefs);
 			setError('');
 		} catch (reason) {
@@ -71,5 +77,23 @@ export function useCockpitPatrol(config: BackendConfig | null, refreshKey: numbe
 		}
 	}, [config, load]);
 
-	return { status, briefs, error, loading, starting, running, start, reload: load } as const;
+	const saveAutoPatrol = useCallback(async (update: AutoPatrolUpdate) => {
+		if (!config || savingAutoPatrolRef.current) return;
+		savingAutoPatrolRef.current = true;
+		statusRevision.current += 1;
+		setSavingAutoPatrol(true);
+		setAutoPatrolError('');
+		try {
+			const nextStatus = await updateAutoPatrol(config, update);
+			if (mounted.current) setStatus(nextStatus);
+		} catch (reason) {
+			if (mounted.current) setAutoPatrolError(reason instanceof Error ? reason.message : '保存自动巡查设置失败');
+		} finally {
+			statusRevision.current += 1;
+			savingAutoPatrolRef.current = false;
+			if (mounted.current) setSavingAutoPatrol(false);
+		}
+	}, [config]);
+
+	return { status, briefs, error: autoPatrolError || error, loading, starting, running, start, savingAutoPatrol, saveAutoPatrol, reload: load } as const;
 }

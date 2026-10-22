@@ -73,7 +73,7 @@ func (s *Server) newCockpitPatrolService(settingsPath string, logger *log.Logger
 		}
 		return nil
 	}
-	return cockpit.NewService(store, s.cockpitFeed(), cockpitNarrator{gateway: s.agentGateway, usage: s.usageGateway}, logger)
+	return cockpit.NewService(store, s.cockpitFeed(), cockpitNarrator{gateway: s.agentGateway, usage: s.usageGateway}, logger, s.settingsStore)
 }
 
 func (s *Server) cockpitFeed() cockpit.Feed {
@@ -245,6 +245,37 @@ func cockpitLimitUp(ladder limitUpLadderData) *cockpit.LimitUpView {
 func (s *Server) cockpitStatus(w http.ResponseWriter, r *http.Request) {
 	if s.cockpit == nil {
 		writeError(w, http.StatusServiceUnavailable, "驾驶舱巡查服务不可用")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": s.cockpit.Status()})
+}
+
+func (s *Server) cockpitAutoPatrolUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.cockpit == nil {
+		writeError(w, http.StatusServiceUnavailable, "驾驶舱巡查服务不可用")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	var request struct {
+		Enabled         *bool `json:"enabled"`
+		IntervalMinutes *int  `json:"interval_minutes"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "无效的自动巡查设置")
+		return
+	}
+	if err := ensureJSONEOF(decoder); err != nil || (request.Enabled == nil && request.IntervalMinutes == nil) {
+		writeError(w, http.StatusBadRequest, "请提供自动巡查开关或时间间隔")
+		return
+	}
+	if err := s.cockpit.UpdateAutoPatrol(request.Enabled, request.IntervalMinutes); err != nil {
+		if errors.Is(err, cockpit.ErrInvalidPatrolInterval) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "保存自动巡查设置失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": s.cockpit.Status()})

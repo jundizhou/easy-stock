@@ -3,6 +3,8 @@ import { BackendConfig, requestJSON } from './backend';
 export type PatrolPhase = 'pre_open' | 'intraday' | 'post_close' | 'rest';
 
 export type PatrolStatus = {
+	interval_minutes: number;
+	auto_patrol_enabled: boolean;
 	phase: PatrolPhase;
 	session_date: string;
 	trading_day: boolean;
@@ -150,6 +152,19 @@ export function narrativeNotice(brief: PatrolBrief): NarrativeNotice {
 
 export async function fetchPatrolStatus(config: BackendConfig, signal?: AbortSignal): Promise<PatrolStatus> {
 	const payload = await requestJSON<{ data: PatrolStatus }>(config, '/api/v1/cockpit/status', { signal });
+	return payload.data;
+}
+
+export const patrolIntervalOptions = [5, 10, 15, 30, 60] as const;
+
+export type AutoPatrolUpdate = { enabled?: boolean; interval_minutes?: number };
+
+export async function updateAutoPatrol(config: BackendConfig, update: AutoPatrolUpdate): Promise<PatrolStatus> {
+	const payload = await requestJSON<{ data: PatrolStatus }>(config, '/api/v1/cockpit/auto-patrol', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(update),
+	});
 	return payload.data;
 }
 

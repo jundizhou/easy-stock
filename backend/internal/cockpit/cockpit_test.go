@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/foundation"
 )
 
@@ -70,29 +71,29 @@ func TestDueSlotRunsLatestDueIntradaySlotOnly(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			slot, ok := DueSlot(tc.now)
+			slot, ok := DueSlot(tc.now, 30)
 			if !ok || slot.Key != tc.key {
 				t.Fatalf("DueSlot(%v) = %+v, %v; want key %s", tc.now, slot, ok, tc.key)
 			}
 		})
 	}
 	for _, quiet := range []time.Time{at(20, 8, 30), at(20, 9, 30), at(24, 10, 0)} {
-		if slot, ok := DueSlot(quiet); ok {
+		if slot, ok := DueSlot(quiet, 30); ok {
 			t.Fatalf("DueSlot(%v) unexpectedly returned %+v", quiet, slot)
 		}
 	}
 }
 
 func TestNextRunSkipsToNextSession(t *testing.T) {
-	next, name := NextRun(at(20, 9, 0))
+	next, name := NextRun(at(20, 9, 0), 30)
 	if name != "盘中巡查 09:40" || !next.Equal(at(20, 9, 40)) {
 		t.Fatalf("intraday next = %v %q", next, name)
 	}
-	next, name = NextRun(at(20, 15, 40))
+	next, name = NextRun(at(20, 15, 40), 30)
 	if name != "盘前巡查" || !next.Equal(at(21, 8, 40)) {
 		t.Fatalf("after close next = %v %q", next, name)
 	}
-	next, name = NextRun(at(23, 16, 0))
+	next, name = NextRun(at(23, 16, 0), 30)
 	if name != "周末外围巡查" || !next.Equal(at(24, 20, 0)) {
 		t.Fatalf("friday evening next = %v %q", next, name)
 	}
@@ -204,7 +205,11 @@ func newTestService(t *testing.T, narrator Narrator, now time.Time) (*Service, *
 			return &IntradayView{Status: "退潮风险", Summary: "高位股跌幅扩大"}, nil
 		},
 	}
-	service := NewService(store, feed, narrator, nil)
+	settings, err := appsettings.Open(filepath.Join(t.TempDir(), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, feed, narrator, nil, settings)
 	service.now = func() time.Time { return now }
 	return service, store
 }

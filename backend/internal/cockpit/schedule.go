@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/foundation"
 )
 
@@ -24,9 +25,17 @@ const (
 	restEveningMinutes  = 20 * 60
 )
 
-// intradaySlots 是盘中巡查的计划时点（北京时间）。开盘后 10 分钟才发第一次，
-// 避免竞价刚结束时数据不稳定。
-var intradaySlots = []int{9*60 + 40, 10*60 + 10, 10*60 + 40, 11*60 + 10, 13*60 + 10, 13*60 + 40, 14*60 + 10, 14*60 + 40}
+// 上午和下午各在开盘 10 分钟后开始，收盘前按所选间隔安排；午休不安排时点。
+func intradaySlots(intervalMinutes int) []int {
+	intervalMinutes = appsettings.NormalizeCockpitPatrolIntervalMinutes(intervalMinutes)
+	var slots []int
+	for _, session := range [][2]int{{9*60 + 40, 11*60 + 30}, {13*60 + 10, 15 * 60}} {
+		for minute := session[0]; minute < session[1]; minute += intervalMinutes {
+			slots = append(slots, minute)
+		}
+	}
+	return slots
+}
 
 type State struct {
 	Phase       Phase
@@ -35,6 +44,7 @@ type State struct {
 }
 
 type Slot struct {
+	RunAt       time.Time
 	Key         string
 	Phase       Phase
 	SessionDate string
@@ -76,7 +86,7 @@ func PhaseAt(now time.Time) State {
 
 // DueSlot 返回现在应当执行的一次巡查。盘中只返回最近一个已到期的计划时点：
 // 服务中途启动时只补跑一次，不会把错过的时点逐个重放。
-func DueSlot(now time.Time) (Slot, bool) {
+func DueSlot(now time.Time, intervalMinutes int) (Slot, bool) {
 	local := now.In(foundation.AStockLocation)
 	state := PhaseAt(local)
 	minutes := minuteOfDay(local)
@@ -87,14 +97,15 @@ func DueSlot(now time.Time) (Slot, bool) {
 		}
 	case PhaseIntraday:
 		due := -1
-		for _, slot := range intradaySlots {
+		for _, slot := range intradaySlots(intervalMinutes) {
 			if minutes >= slot {
 				due = slot
 			}
 		}
 		if due >= 0 {
 			key := clockText(due)
-			return Slot{Key: key, Phase: PhaseIntraday, SessionDate: state.SessionDate, Label: "盘中巡查 " + key}, true
+			return Slot{Key: key, Phase: PhaseIntraday, SessionDate: state.SessionDate, Label: "盘中巡查 " + key,
+				RunAt: time.Date(local.Year(), local.Month(), local.Day(), due/60, due%60, 0, 0, foundation.AStockLocation)}, true
 		}
 	case PhasePostClose:
 		if minutes >= postCloseMinutes {
@@ -109,7 +120,7 @@ func DueSlot(now time.Time) (Slot, bool) {
 }
 
 // NextRun 返回下一次计划巡查的时间与名称，用于状态条展示。
-func NextRun(now time.Time) (time.Time, string) {
+func NextRun(now time.Time, intervalMinutes int) (time.Time, string) {
 	local := now.In(foundation.AStockLocation)
 	for offset := 0; offset < 10; offset++ {
 		day := time.Date(local.Year(), local.Month(), local.Day()+offset, 0, 0, 0, 0, foundation.AStockLocation)
@@ -120,7 +131,7 @@ func NextRun(now time.Time) (time.Time, string) {
 		var candidates []candidate
 		if foundation.IsAStockTradingDay(day) {
 			candidates = append(candidates, candidate{preOpenRunMinutes, "盘前巡查"})
-			for _, slot := range intradaySlots {
+			for _, slot := range intradaySlots(intervalMinutes) {
 				candidates = append(candidates, candidate{slot, "盘中巡查 " + clockText(slot)})
 			}
 			candidates = append(candidates, candidate{postCloseMinutes, "盘后复盘"})

@@ -73,14 +73,17 @@ type ReviewSourceProfile struct {
 }
 
 type Values struct {
-	AgentRuntime       string           `json:"agent_runtime,omitempty"`
-	LLM                LLM              `json:"llm"`
-	LLMProfiles        []LLMProfile     `json:"llm_profiles,omitempty"`
-	ActiveLLMProfileID string           `json:"active_llm_profile_id,omitempty"`
-	Credentials        Credentials      `json:"credentials"`
-	ReviewAutomation   ReviewAutomation `json:"review_automation"`
-	Notifications      Notifications    `json:"notifications"`
-	UpdatedAt          time.Time        `json:"updated_at,omitempty"`
+	CockpitPatrolIntervalMinutes   int              `json:"cockpit_patrol_interval_minutes"`
+	CockpitPatrolIntervalChangedAt time.Time        `json:"cockpit_patrol_interval_changed_at,omitempty"`
+	CockpitAutoPatrolEnabled       bool             `json:"cockpit_auto_patrol_enabled"`
+	AgentRuntime                   string           `json:"agent_runtime,omitempty"`
+	LLM                            LLM              `json:"llm"`
+	LLMProfiles                    []LLMProfile     `json:"llm_profiles,omitempty"`
+	ActiveLLMProfileID             string           `json:"active_llm_profile_id,omitempty"`
+	Credentials                    Credentials      `json:"credentials"`
+	ReviewAutomation               ReviewAutomation `json:"review_automation"`
+	Notifications                  Notifications    `json:"notifications"`
+	UpdatedAt                      time.Time        `json:"updated_at,omitempty"`
 }
 
 type Store struct {
@@ -157,6 +160,7 @@ func (s *Store) load() error {
 	if err := json.Unmarshal(data, &s.values); err != nil {
 		return fmt.Errorf("decode settings: %w", err)
 	}
+	s.values.CockpitPatrolIntervalMinutes = NormalizeCockpitPatrolIntervalMinutes(s.values.CockpitPatrolIntervalMinutes)
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(data, &raw) == nil {
 		if _, exists := raw["review_automation"]; !exists {
@@ -227,7 +231,9 @@ func llmFromProfile(profile LLMProfile, responseTimeoutSeconds int) LLM {
 
 func defaultValues() Values {
 	return Values{
-		Notifications: Notifications{Events: NotificationEvents{StockResearch: true, PortfolioInspection: true, TaskFailed: true}},
+		CockpitPatrolIntervalMinutes: DefaultCockpitPatrolIntervalMinutes,
+		CockpitAutoPatrolEnabled:     true,
+		Notifications:                Notifications{Events: NotificationEvents{StockResearch: true, PortfolioInspection: true, TaskFailed: true}},
 		ReviewAutomation: ReviewAutomation{Profiles: []ReviewSourceProfile{
 			{ID: "wechat-default", Source: "wechat", Name: "微信公众号默认配置", SyncHour: 7, AutoAnalyze: true, Enabled: true},
 			{ID: "xueqiu-default", Source: "xueqiu", Name: "雪球默认配置", BaseURL: "https://xueqiu.com", SyncHour: 7, AutoAnalyze: true, Enabled: true},

@@ -7,6 +7,43 @@ import (
 	"testing"
 )
 
+func TestAutoPatrolDefaultsAndPersistence(t *testing.T) {
+	for _, legacy := range []string{"", `{}`, `{"llm":{"model":"existing-model"}}`, `{"cockpit_patrol_interval_minutes":0}`, `{"cockpit_patrol_interval_minutes":-5}`} {
+		t.Run(legacy, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			if legacy != "" {
+				if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !store.Snapshot().CockpitAutoPatrolEnabled || store.Snapshot().CockpitPatrolIntervalMinutes != 30 {
+				t.Fatal("new and legacy settings should keep automatic patrol enabled with a 30-minute interval")
+			}
+			originalModel := store.Snapshot().LLM.Model
+			for _, enabled := range []bool{false, true} {
+				if _, err := store.Update(func(values *Values) error {
+					values.CockpitAutoPatrolEnabled = enabled
+					values.CockpitPatrolIntervalMinutes = 15
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				store, err = Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := store.Snapshot(); got.CockpitAutoPatrolEnabled != enabled || got.CockpitPatrolIntervalMinutes != 15 || got.LLM.Model != originalModel {
+					t.Fatal("automatic patrol setting or existing model changed after restart")
+				}
+			}
+		})
+	}
+}
+
 func TestStorePersistsSecretsWithPrivatePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "settings.json")
 	store, err := Open(path)

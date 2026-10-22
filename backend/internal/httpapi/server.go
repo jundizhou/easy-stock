@@ -791,6 +791,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)
 	s.mux.HandleFunc("GET /api/v1/cockpit/status", s.cockpitStatus)
+	s.mux.HandleFunc("PUT /api/v1/cockpit/auto-patrol", s.cockpitAutoPatrolUpdate)
 	s.mux.HandleFunc("GET /api/v1/cockpit/facts", s.cockpitFacts)
 	s.mux.HandleFunc("GET /api/v1/cockpit/briefs", s.cockpitBriefs)
 	s.mux.HandleFunc("GET /api/v1/cockpit/briefs/{id}", s.cockpitBrief)

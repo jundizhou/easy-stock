@@ -20,6 +20,7 @@ import {
 	stripLeadingTitle,
 	patrolPhaseLabel,
 	patrolPhases,
+	patrolIntervalOptions,
 	sessionIntradayBriefs,
 	TIMELINE_FOLD_LIMIT,
 } from '../lib/cockpit-patrol';
@@ -551,6 +552,11 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 	const nextRunLabel = patrol.status?.next_run_label || '';
 	const nextRun = nextRunLabel.includes(nextRunTime) ? nextRunLabel : [nextRunTime, nextRunLabel].filter(Boolean).join(' · ') || '--';
 	const runPhase: PatrolPhaseKey = followPhase;
+	const autoPatrolKnown = typeof patrol.status?.auto_patrol_enabled === 'boolean';
+	const autoPatrolEnabled = patrol.status?.auto_patrol_enabled === true;
+	const scheduleText = !autoPatrolKnown ? '正在读取巡查计划…' : autoPatrolEnabled
+		? `下次 ${nextRun}`
+		: patrol.running ? '已关闭，当前巡查继续完成' : '已关闭，可手动巡查';
 
 	if (!config) return null;
 
@@ -564,7 +570,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 						<div>
 							<strong><Bot size={16} aria-hidden="true" />AI 自动巡查</strong>
 							<small>
-								会话 {sessionDate || '--'}{patrol.status && !patrol.status.trading_day ? ' · 休市' : ''} · 下次 {nextRun}
+								会话 {sessionDate || '--'}{patrol.status && !patrol.status.trading_day ? ' · 休市' : ''} · {scheduleText}
 							</small>
 						</div>
 					</div>
@@ -580,6 +586,36 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 						</button>
 					</div>
 				</header>
+
+				<div className="patrol-auto-settings">
+					<button
+						type="button"
+						role="switch"
+						aria-label="AI 自动巡查"
+						aria-checked={autoPatrolEnabled}
+						aria-busy={patrol.savingAutoPatrol}
+						className="patrol-auto-toggle"
+						disabled={!autoPatrolKnown || patrol.savingAutoPatrol}
+						title="关闭后暂停定时巡查，已开始的巡查继续完成，仍可手动触发"
+						onClick={() => void patrol.saveAutoPatrol({ enabled: !autoPatrolEnabled })}
+					>
+						<span className="patrol-auto-track" aria-hidden="true"><span /></span>
+						{patrol.savingAutoPatrol ? '保存中…' : !autoPatrolKnown ? '读取中…' : autoPatrolEnabled ? '自动巡查已开' : '自动巡查已关'}
+					</button>
+					<label className="patrol-interval">
+						<span>盘中间隔</span>
+						<select
+							aria-label="自动巡查时间间隔"
+							value={patrol.status?.interval_minutes ?? 30}
+							disabled={!autoPatrolKnown || !patrol.status?.interval_minutes || patrol.savingAutoPatrol}
+							title="上午 09:40、下午 13:10 起按间隔巡查；修改后从下一个计划时点生效"
+							onChange={(event) => void patrol.saveAutoPatrol({ interval_minutes: Number(event.target.value) })}
+						>
+							{patrolIntervalOptions.map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}
+						</select>
+					</label>
+					<small>午间休市不安排新巡查</small>
+				</div>
 
 				<div className="patrol-tabs" role="tablist" aria-label="巡查阶段">
 					{/* 选中态用白色滑块平移表示（档位等分），与行情总览的分段控件同一套视觉。 */}
@@ -640,7 +676,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 
 				{!selected && (
 					<p className="patrol-empty">
-						{patrol.loading ? '正在读取巡查记录…' : `暂无${patrolPhaseLabel(activePhase)}巡查记录，计划时间到达后自动生成。`}
+						{patrol.loading ? '正在读取巡查记录…' : `暂无${patrolPhaseLabel(activePhase)}巡查记录，${autoPatrolEnabled ? '计划时间到达后自动生成' : '可点击上方按钮手动巡查'}。`}
 					</p>
 				)}
 

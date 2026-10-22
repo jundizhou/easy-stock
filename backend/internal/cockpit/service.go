@@ -9,11 +9,15 @@ import (
 	"sync"
 	"time"
 
+	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/foundation"
 )
 
 var (
-	ErrBusy = errors.New("已有巡查正在运行，请稍后再试")
+	ErrBusy                  = errors.New("已有巡查正在运行，请稍后再试")
+	errAutoPatrolDisabled    = errors.New("自动巡查已关闭")
+	errNoDueSlot             = errors.New("暂无到期巡查")
+	ErrInvalidPatrolInterval = errors.New("巡查间隔必须为 5、10、15、30 或 60 分钟")
 )
 
 // Narrator 由 AI 运行时实现。Available 为 false 时只保留事实，不调用模型。
@@ -23,16 +27,19 @@ type Narrator interface {
 }
 
 type Status struct {
-	Phase       Phase      `json:"phase"`
-	SessionDate string     `json:"session_date"`
-	TradingDay  bool       `json:"trading_day"`
-	NextRunAt   *time.Time `json:"next_run_at,omitempty"`
-	NextRunName string     `json:"next_run_label,omitempty"`
-	Running     bool       `json:"running"`
-	AIAvailable bool       `json:"ai_available"`
+	IntervalMinutes   int        `json:"interval_minutes"`
+	AutoPatrolEnabled bool       `json:"auto_patrol_enabled"`
+	Phase             Phase      `json:"phase"`
+	SessionDate       string     `json:"session_date"`
+	TradingDay        bool       `json:"trading_day"`
+	NextRunAt         *time.Time `json:"next_run_at,omitempty"`
+	NextRunName       string     `json:"next_run_label,omitempty"`
+	Running           bool       `json:"running"`
+	AIAvailable       bool       `json:"ai_available"`
 }
 
 type Service struct {
+	settings *appsettings.Store
 	store    *Store
 	feed     Feed
 	narrator Narrator
@@ -44,22 +51,40 @@ type Service struct {
 	busy bool
 }
 
-func NewService(store *Store, feed Feed, narrator Narrator, logger *log.Logger) *Service {
-	return &Service{store: store, feed: feed, narrator: narrator, logger: logger, timeout: 6 * time.Minute, now: time.Now}
+func NewService(store *Store, feed Feed, narrator Narrator, logger *log.Logger, settings *appsettings.Store) *Service {
+	return &Service{store: store, feed: feed, narrator: narrator, logger: logger, settings: settings, timeout: 6 * time.Minute, now: time.Now}
+}
+
+// SetAutoPatrolEnabled 与启动巡查共用锁：保存成功后不再启动新的定时巡查。
+// 已经开始的巡查继续完成，手动巡查不受此开关限制。
+func (s *Service) SetAutoPatrolEnabled(enabled bool) error {
+	return s.UpdateAutoPatrol(&enabled, nil)
+}
+
+// 修改间隔从下一个时点生效，持久化生效时间以避免重启后补跑旧时点。
+func (s *Service) UpdateAutoPatrol(enabled *bool, intervalMinutes *int) error {
+	if intervalMinutes != nil && !appsettings.ValidCockpitPatrolIntervalMinutes(*intervalMinutes) {
+		return ErrInvalidPatrolInterval
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.settings.Update(func(values *appsettings.Values) error {
+		if enabled != nil {
+			values.CockpitAutoPatrolEnabled = *enabled
+		}
+		if intervalMinutes != nil && values.CockpitPatrolIntervalMinutes != *intervalMinutes {
+			values.CockpitPatrolIntervalMinutes = *intervalMinutes
+			values.CockpitPatrolIntervalChangedAt = s.now()
+		}
+		return nil
+	})
+	return err
 }
 
 // Tick 由调度器周期调用：到达计划时点且本会话尚未巡查时启动一次。
 func (s *Service) Tick() {
-	now := s.now()
-	slot, ok := DueSlot(now)
-	if !ok {
-		return
-	}
-	if s.store.HasKey(slot.SessionDate + "|" + slot.Key) {
-		return
-	}
-	if _, err := s.launch(slot, "scheduled", now); err != nil && !errors.Is(err, ErrBusy) {
-		s.logf("level=warn event=cockpit_patrol_start_failed slot=%s error=%q", slot.Label, err.Error())
+	if _, err := s.launch(Slot{}, "scheduled", s.now()); err != nil && !errors.Is(err, ErrBusy) && !errors.Is(err, errAutoPatrolDisabled) && !errors.Is(err, errNoDueSlot) {
+		s.logf("level=warn event=cockpit_patrol_start_failed error=%q", err.Error())
 	}
 }
 
@@ -87,9 +112,11 @@ func (s *Service) Status() Status {
 	state := PhaseAt(now)
 	s.mu.Lock()
 	running := s.busy
+	settings := s.settings.Snapshot()
 	s.mu.Unlock()
-	status := Status{Phase: state.Phase, SessionDate: state.SessionDate, TradingDay: state.TradingDay, Running: running, AIAvailable: s.narratorAvailable()}
-	if at, name := NextRun(now); !at.IsZero() {
+	interval := appsettings.NormalizeCockpitPatrolIntervalMinutes(settings.CockpitPatrolIntervalMinutes)
+	status := Status{AutoPatrolEnabled: settings.CockpitAutoPatrolEnabled, IntervalMinutes: interval, Phase: state.Phase, SessionDate: state.SessionDate, TradingDay: state.TradingDay, Running: running, AIAvailable: s.narratorAvailable()}
+	if at, name := NextRun(now, interval); settings.CockpitAutoPatrolEnabled && !at.IsZero() {
 		status.NextRunAt = &at
 		status.NextRunName = name
 	}
@@ -102,6 +129,20 @@ func (s *Service) Store() *Store {
 
 func (s *Service) launch(slot Slot, trigger string, now time.Time) (Brief, error) {
 	s.mu.Lock()
+	if trigger == "scheduled" {
+		settings := s.settings.Snapshot()
+		if !settings.CockpitAutoPatrolEnabled {
+			s.mu.Unlock()
+			return Brief{}, errAutoPatrolDisabled
+		}
+		// 在与配置更新相同的锁内决定计划，避免按刚失效的间隔启动巡查。
+		var ok bool
+		slot, ok = DueSlot(now, settings.CockpitPatrolIntervalMinutes)
+		if !ok || (slot.Phase == PhaseIntraday && !slot.RunAt.After(settings.CockpitPatrolIntervalChangedAt)) || s.store.HasKey(slot.SessionDate+"|"+slot.Key) {
+			s.mu.Unlock()
+			return Brief{}, errNoDueSlot
+		}
+	}
 	if s.busy {
 		s.mu.Unlock()
 		return Brief{}, ErrBusy
