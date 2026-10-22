@@ -85,8 +85,10 @@ func parseThemeLibraryClock(value string) (int, int, error) {
 	return parsed.Hour(), parsed.Minute(), nil
 }
 
-// nextThemeLibrarySlot returns the first trading-day slot strictly after now.
+// nextThemeLibrarySlot returns the first trading-day slot strictly after now,
+// interpreting the configured clock in the exchange's time zone.
 func nextThemeLibrarySlot(now time.Time, hour int, minute int) time.Time {
+	now = now.In(foundation.AStockLocation)
 	for offset := 0; offset < 14; offset++ {
 		day := now.AddDate(0, 0, offset)
 		slot := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, now.Location())
@@ -100,6 +102,7 @@ func nextThemeLibrarySlot(now time.Time, hour int, minute int) time.Time {
 // lastThemeLibrarySlot returns the most recent trading-day slot at or before now,
 // or the zero time when none is found within two weeks.
 func lastThemeLibrarySlot(now time.Time, hour int, minute int) time.Time {
+	now = now.In(foundation.AStockLocation)
 	for offset := 0; offset < 14; offset++ {
 		day := now.AddDate(0, 0, -offset)
 		slot := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, now.Location())
