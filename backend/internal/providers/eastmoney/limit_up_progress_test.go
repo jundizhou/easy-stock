@@ -63,7 +63,9 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 	c := NewClient(WithTopicBaseURL(server.URL))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	partial := make(chan []foundation.LimitUpEvent, 8)
+	// Only the first update is consumed below; leave room for every day so
+	// longer trading stretches cannot block the publisher before it finishes.
+	partial := make(chan []foundation.LimitUpEvent, lookback)
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.ProgressiveRecentLimitUps(ctx, lookback, func(events []foundation.LimitUpEvent) { partial <- events })
@@ -78,8 +80,13 @@ func TestProgressiveHistoryPublishesRecentDayBeforeSlowHistory(t *testing.T) {
 		t.Fatal("fast current day blocked on old history")
 	}
 	close(gate)
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("history did not finish after releasing older requests")
 	}
 	if peak.Load() > 3 || peak.Load() < 2 {
 		t.Fatalf("unexpected parallelism %d", peak.Load())
