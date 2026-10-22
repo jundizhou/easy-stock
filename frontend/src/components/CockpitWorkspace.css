@@ -1,0 +1,808 @@
+/* 今日驾驶舱：桌面端工作台布局。
+   骨架与系统其他工作台一致：顶部状态条 + 主区（自己滚动）+ 右侧盯盘栏（自己滚动）。
+   字号只取 typography.css 的刻度：
+     --fs-metric 26  仅用于单个大指标（持仓健康分）
+     --fs-heading 16 KPI 数字、叙述小标题
+     --fs-subtitle 14 面板标题、状态条数值、阅读正文
+     --fs-body 12     表格、列表、按钮、标签
+     --fs-desc/caption 11 说明、时间、表头
+   圆角：状态条 8px（同 .market-strip），面板 12px（同 .limit-panel），内嵌块 8px。 */
+
+.cockpit {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	gap: 12px;
+	min-width: 0;
+	height: 100%;
+	color: var(--theme-text);
+}
+
+/* ---------- 顶部状态条 ---------- */
+
+.cockpit-statusbar {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+	align-items: stretch;
+	min-width: 0;
+	min-height: 56px;
+	padding: 0 16px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, #ffffff);
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+}
+
+.cockpit-status-lead {
+	display: grid;
+	align-content: center;
+	gap: 3px;
+	min-width: 0;
+	padding-right: 22px;
+}
+
+.cockpit-eyebrow {
+	color: var(--theme-blue);
+	font-size: var(--fs-caption);
+	font-weight: 700;
+	letter-spacing: var(--tracking-eyebrow);
+	line-height: var(--lh-tight);
+	text-transform: uppercase;
+}
+
+/* 待处理项：数字是这格的主读数，文案退到次要层级；没有待办时整句降为说明文字。 */
+.cockpit-status-lead strong {
+	font-weight: 700;
+	line-height: var(--lh-tight);
+}
+
+.cockpit-status-lead strong.is-pending {
+	display: flex;
+	align-items: baseline;
+	gap: 5px;
+}
+
+.cockpit-status-lead strong.is-pending em {
+	color: var(--theme-amber);
+	font-family: var(--font-num);
+	font-size: var(--fs-title);
+	font-style: normal;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.cockpit-status-lead strong.is-pending span {
+	color: var(--theme-text);
+	font-size: var(--fs-body);
+	font-weight: 600;
+}
+
+.cockpit-status-lead strong.is-clear {
+	color: var(--theme-muted);
+	font-size: var(--fs-body);
+	font-weight: 600;
+}
+
+/* 五个读数格平均分宽：态势与四项读数各占 1fr，右侧只留更新时间与刷新按钮。 */
+.cockpit-pulse {
+	display: contents;
+}
+
+.cockpit-pulse > div {
+	display: grid;
+	align-content: center;
+	gap: 2px;
+	min-width: 0;
+	padding: 0 16px;
+	border-left: 1px solid var(--line-soft);
+}
+
+.cockpit-pulse dt {
+	color: var(--muted);
+	font-size: var(--fs-body);
+	line-height: var(--lh-tight);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cockpit-pulse dd {
+	margin: 0;
+	font-family: var(--font-num);
+	font-size: var(--fs-subtitle);
+	font-weight: 700;
+	line-height: var(--lh-tight);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cockpit-status-actions {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding-left: 16px;
+	border-left: 1px solid var(--line-soft);
+}
+
+.cockpit-status-actions small {
+	color: var(--theme-subtle);
+	font-size: var(--fs-desc);
+	white-space: nowrap;
+}
+
+.cockpit-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: var(--theme-muted);
+	cursor: pointer;
+}
+
+.cockpit-icon-button:hover {
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+}
+
+/* ---------- 主体：主区 + 盯盘栏 ---------- */
+
+.cockpit-body {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+	gap: 12px;
+	min-height: 0;
+	min-width: 0;
+}
+
+.cockpit-center,
+.cockpit-rail {
+	display: grid;
+	gap: 12px;
+	align-content: start;
+	min-height: 0;
+	min-width: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	/* 底部桌面状态条会压住滚动区末尾，留出呼吸位，避免最后一张卡的链接被遮住。 */
+	padding-right: 4px;
+	padding-bottom: 46px;
+}
+
+/* ---------- 面板 ---------- */
+
+.cockpit-card,
+.cockpit-modules {
+	min-width: 0;
+	padding: 12px 16px 14px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, #ffffff);
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+}
+
+.cockpit-card {
+	position: relative;
+	display: grid;
+	gap: 10px;
+}
+
+/* 持仓健康：整卡加大内边距与分区间距，视觉不再拥挤（横向内边距保持 16px，避免挤压条形宽度）。 */
+.cockpit-card.is-roomy {
+	gap: 18px;
+	padding: 16px 16px 18px;
+}
+
+.cockpit-card header,
+.cockpit-card-title,
+.cockpit-section-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.cockpit-card header {
+	justify-content: space-between;
+	min-height: 22px;
+}
+
+.cockpit-card header svg,
+.cockpit-section-title svg {
+	color: var(--theme-muted);
+}
+
+.cockpit-card h3,
+.cockpit-section-title h3 {
+	margin: 0;
+	font-size: var(--fs-subtitle);
+	font-weight: 700;
+}
+
+.cockpit-card header small {
+	color: var(--theme-subtle);
+	font-size: var(--fs-desc);
+	white-space: nowrap;
+}
+
+.cockpit-card header small.is-error {
+	color: var(--theme-amber);
+}
+
+.cockpit-card-body {
+	min-width: 0;
+}
+
+/* 整卡可点跳转：不显示跳转字样，指针与悬停描边暗示可点。 */
+.cockpit-card.is-clickable {
+	cursor: pointer;
+	transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.cockpit-card.is-clickable:hover {
+	border-color: var(--theme-blue-line, var(--theme-blue));
+	box-shadow: 0 2px 10px var(--theme-shadow, rgba(31, 49, 70, 0.1));
+}
+
+.cockpit-card.is-clickable:focus-visible {
+	outline: 2px solid var(--theme-blue-solid, var(--theme-blue));
+	outline-offset: 2px;
+}
+
+.cockpit-muted {
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--fs-body);
+	line-height: var(--lh-snug);
+}
+
+/* ---------- 盯盘栏内容 ---------- */
+
+.cockpit-attention-list,
+.cockpit-source-list,
+.cockpit-brief-scope {
+	display: grid;
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.cockpit-attention-list button {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	gap: 8px;
+	align-items: center;
+	width: 100%;
+	padding: 8px 10px;
+	border: 1px solid var(--line-soft);
+	border-left-width: 3px;
+	border-radius: 8px;
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.cockpit-attention-list button:disabled {
+	cursor: default;
+}
+
+.cockpit-attention-list li.level-danger button {
+	border-left-color: var(--theme-red-solid);
+}
+
+.cockpit-attention-list li.level-warn button {
+	border-left-color: var(--theme-amber-solid);
+}
+
+.cockpit-attention-list li.level-info button {
+	border-left-color: var(--theme-green-solid);
+}
+
+/* 等级标签沿用系统的状态胶囊：11px / 700 / 999 圆角。 */
+.cockpit-level {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 26px;
+	min-height: 20px;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: var(--theme-amber-soft);
+	color: var(--theme-amber);
+	font-size: var(--fs-caption);
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.level-danger .cockpit-level {
+	background: var(--theme-red-soft);
+	color: var(--theme-red);
+}
+
+.level-info .cockpit-level {
+	background: var(--theme-green-soft);
+	color: var(--theme-green);
+}
+
+.cockpit-attention-text {
+	display: grid;
+	gap: 1px;
+	min-width: 0;
+}
+
+.cockpit-attention-text strong,
+.cockpit-attention-text small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cockpit-attention-text strong {
+	font-size: var(--fs-body);
+	font-weight: 700;
+}
+
+.cockpit-attention-text small,
+.cockpit-attention-list em {
+	color: var(--muted);
+	font-size: var(--fs-desc);
+	font-style: normal;
+}
+
+/* 简报是单行动作条：标题与按钮同在卡头，高度只留按钮本身。 */
+.cockpit-brief {
+	padding: 10px 16px 11px;
+}
+
+.cockpit-card-body:empty {
+	display: none;
+}
+
+/* 主按钮与系统按钮同一规格：34 高、8px 圆角、12px 字。 */
+.cockpit-primary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	justify-self: start;
+	min-height: 34px;
+	padding: 0 14px;
+	border: 1px solid var(--theme-blue-line);
+	border-radius: 8px;
+	background: var(--theme-blue-solid);
+	color: var(--theme-on-emphasis, #fff);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.cockpit-primary:hover:not(:disabled) {
+	border-color: var(--theme-blue-solid);
+	filter: brightness(1.05);
+}
+
+.cockpit-primary:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.cockpit-emotion-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 12px;
+	font-size: var(--fs-body);
+}
+
+.cockpit-emotion-head strong {
+	font-size: var(--fs-title);
+	line-height: var(--lh-tight);
+}
+
+.cockpit-emotion-head span {
+	color: var(--theme-muted);
+	font-size: var(--fs-body);
+}
+
+.cockpit-emotion-head b {
+	margin-right: 1px;
+	color: var(--theme-text);
+	font-family: var(--font-num);
+	font-weight: 700;
+}
+
+/* 情绪走势：渐变面积 + 平滑曲线；指针扫过时出竖线、游标点与读数气泡。 */
+.cockpit-spark {
+	position: relative;
+	margin-top: 10px;
+	color: var(--theme-blue);
+}
+
+.cockpit-spark svg {
+	display: block;
+	width: 100%;
+	height: 164px;
+	overflow: visible;
+	touch-action: pan-y;
+	cursor: crosshair;
+}
+
+.cockpit-spark-line {
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-dasharray: 720;
+	stroke-dashoffset: 720;
+	animation: cockpit-spark-draw 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes cockpit-spark-draw {
+	to {
+		stroke-dashoffset: 0;
+	}
+}
+
+.cockpit-spark-guide {
+	stroke: var(--line);
+	stroke-width: 1;
+	stroke-dasharray: 3 3;
+}
+
+.cockpit-spark-dot {
+	fill: currentColor;
+	stroke: var(--theme-surface, #fff);
+	stroke-width: 1.5;
+}
+
+.cockpit-spark-halo {
+	fill: currentColor;
+	opacity: 0.18;
+	transform-origin: center;
+	animation: cockpit-spark-pulse 2.4s ease-out infinite;
+}
+
+@keyframes cockpit-spark-pulse {
+	0% { opacity: 0.28; transform: scale(0.7); }
+	70% { opacity: 0; transform: scale(1.35); }
+	100% { opacity: 0; transform: scale(1.35); }
+}
+
+/* 游标读数固定在曲线下方一行：不遮挡曲线，也避免气泡在窄侧栏里出界。 */
+.cockpit-spark-read {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	margin: 6px 0 0;
+	color: var(--theme-muted);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-tight);
+}
+
+.cockpit-spark-read time {
+	font-family: var(--font-num);
+	font-variant-numeric: tabular-nums;
+}
+
+.cockpit-spark-read strong {
+	color: var(--theme-text);
+	font-family: var(--font-num);
+	font-size: var(--fs-body);
+	font-weight: 700;
+}
+
+.cockpit-spark-read span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.cockpit-spark-halo {
+		animation: none;
+	}
+
+	.cockpit-spark-line {
+		stroke-dasharray: none;
+		stroke-dashoffset: 0;
+		animation: none;
+	}
+}
+
+.cockpit-health {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 4px;
+}
+
+.cockpit-health > strong {
+	font-family: var(--font-num);
+	font-size: var(--fs-metric);
+	line-height: var(--lh-metric);
+}
+
+.cockpit-health > div {
+	display: grid;
+	gap: 1px;
+	font-size: var(--fs-body);
+}
+
+.cockpit-health span {
+	color: var(--muted);
+}
+
+.cockpit-health em {
+	font-style: normal;
+	font-weight: 700;
+}
+
+/* 健康分维度：名称 / 分数 / 进度条 / 权重，四列对齐，悬停浮出该维度的扣分原因。 */
+.cockpit-dims {
+	display: grid;
+	gap: 9px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.cockpit-dims li {
+	display: grid;
+	grid-template-columns: 88px 24px minmax(0, 1fr) 28px;
+	gap: 8px;
+	align-items: center;
+	margin: 0 -4px;
+	padding: 5px 8px;
+	border-radius: 8px;
+	font-size: var(--fs-body);
+	transition: background-color 0.14s ease;
+}
+
+.cockpit-dims li:hover {
+	background: var(--theme-surface-soft, var(--surface-2));
+}
+
+.cockpit-dims li > span {
+	overflow: hidden;
+	color: var(--theme-muted);
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.cockpit-dims li > b {
+	color: var(--theme-text);
+	font-family: var(--font-num);
+	font-size: var(--fs-body);
+	font-weight: 700;
+	text-align: right;
+}
+
+.cockpit-dims li > i {
+	display: block;
+	height: 7px;
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--surface-3);
+}
+
+.cockpit-dims li > i > b {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cockpit-dims .is-good {
+	background: var(--theme-green);
+}
+
+.cockpit-dims .is-mid {
+	background: var(--theme-amber);
+}
+
+.cockpit-dims .is-poor {
+	background: var(--theme-red);
+}
+
+.cockpit-dims li > small {
+	color: var(--theme-subtle);
+	font-size: var(--fs-desc);
+	text-align: right;
+}
+
+.cockpit-source-list li {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	font-size: var(--fs-body);
+}
+
+.cockpit-source-list small {
+	color: var(--muted);
+	font-size: var(--fs-desc);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cockpit-summary {
+	display: -webkit-box;
+	margin: 0;
+	overflow: hidden;
+	color: var(--muted);
+	font-size: var(--fs-body);
+	line-height: var(--lh-body);
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+}
+
+/* 主要风险：只留一条真实存在的风险文本，两行收口，全文在悬停提示里。
+   上方用分割线与能量条数据区分隔（分割线加在文字块上，不影响条形宽度）。 */
+.cockpit-risk {
+	display: -webkit-box;
+	margin: 12px 0 0;
+	padding-top: 10px;
+	border-top: 1px solid var(--line-soft);
+	overflow: hidden;
+	color: var(--muted);
+	font-size: var(--fs-body);
+	line-height: 1.55;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+
+.cockpit-risk span {
+	margin-right: 6px;
+	color: var(--theme-amber);
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+/* 评分来源说明：跟随内容流排在卡片末尾右对齐，上方再一条分割线收尾。
+   small 默认是行内元素，行内元素的 margin/padding/border-top 不占布局，
+   必须显式转成块级，否则这条分割线既不上移也不显形。 */
+.cockpit-score-note {
+	display: block;
+	margin: 10px 0 0;
+	padding-top: 8px;
+	border-top: 1px solid var(--line-soft);
+	color: var(--theme-subtle);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-tight);
+	text-align: right;
+}
+
+/* 模块入口：侧栏内的按钮栅格，规格同系统导航按钮（34 高 / 8px 圆角 / 12px）。 */
+.cockpit-modules {
+	display: grid;
+	gap: 10px;
+}
+
+.cockpit-section-title {
+	min-height: 22px;
+}
+
+.cockpit-module-list {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.cockpit-module-list button {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	min-height: 34px;
+	padding: 0 10px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: var(--theme-blue);
+	font-size: var(--fs-body);
+	text-align: left;
+	cursor: pointer;
+}
+
+.cockpit-module-list button:hover {
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+}
+
+.cockpit-module-list span {
+	overflow: hidden;
+	color: var(--theme-text);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cockpit .is-up,
+.cockpit .tone-up {
+	color: var(--theme-red);
+}
+
+.cockpit .is-down,
+.cockpit .tone-down {
+	color: var(--theme-green);
+}
+
+.cockpit-pulse dd.is-warn {
+	color: var(--theme-amber);
+}
+
+/* 窗口不够宽时退回单列文档流：由页面整体滚动，避免两栏被压扁。 */
+@media (max-width: 1100px) {
+	.cockpit {
+		height: auto;
+		grid-template-rows: auto;
+	}
+
+	.cockpit-statusbar {
+		grid-template-columns: minmax(0, 1fr) auto;
+		row-gap: 10px;
+		padding: 12px 16px;
+	}
+
+	.cockpit-status-lead {
+		grid-area: 1 / 1 / 2 / 2;
+		padding-right: 0;
+	}
+
+	.cockpit-status-actions {
+		grid-area: 1 / 2 / 2 / 3;
+		align-self: center;
+		border-left: 0;
+		padding-left: 0;
+	}
+
+	/* 收起态下状态条改回两行：读数重新成为独立网格。 */
+	.cockpit-pulse {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-area: 2 / 1 / 3 / 3;
+		border-top: 1px solid var(--line-soft);
+		padding-top: 10px;
+	}
+
+	.cockpit-pulse > div:first-child {
+		border-left: 0;
+		padding-left: 0;
+	}
+
+	.cockpit-body {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.cockpit-center,
+	.cockpit-rail {
+		overflow: visible;
+		padding-right: 0;
+	}
+}
+
+@media (max-width: 720px) {
+	.cockpit-pulse {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		row-gap: 10px;
+	}
+
+	.cockpit-pulse > div:nth-child(odd) {
+		border-left: 0;
+		padding-left: 0;
+	}
+
+	/* 小屏顶栏只保留刷新按钮，更新时间仍可在各面板标题里看到。 */
+	.cockpit-status-actions small {
+		display: none;
+	}
+
+	.cockpit-module-list {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

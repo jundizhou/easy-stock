@@ -27,6 +27,14 @@ func main() {
 	stockResearchDBPath := os.Getenv("A_STOCK_RESEARCH_DB")
 	marketEmotionDBPath := os.Getenv("A_STOCK_MARKET_EMOTION_DB")
 	themeRadarDBPath := os.Getenv("A_STOCK_THEME_RADAR_DB")
+	themeLibraryDBPath := os.Getenv("A_STOCK_THEME_LIBRARY_DB")
+	themeLibraryRefreshAt := strings.TrimSpace(os.Getenv("A_STOCK_THEME_LIBRARY_REFRESH_AT"))
+	if themeLibraryRefreshAt == "" {
+		themeLibraryRefreshAt = "20:00"
+	}
+	if strings.EqualFold(themeLibraryRefreshAt, "off") {
+		themeLibraryRefreshAt = ""
+	}
 	sectorFlowSampleDBPath := os.Getenv("A_STOCK_SECTOR_FLOW_SAMPLE_DB")
 	settingsPath := os.Getenv("A_STOCK_SETTINGS_PATH")
 	masteryCacheDir := os.Getenv("A_STOCK_MASTERY_CACHE")
@@ -51,6 +59,9 @@ func main() {
 	}
 	if themeRadarDBPath == "" {
 		themeRadarDBPath = dataPath(dataDir, "theme-radar.db")
+	}
+	if themeLibraryDBPath == "" {
+		themeLibraryDBPath = dataPath(dataDir, "theme-library.db")
 	}
 	if sectorFlowSampleDBPath == "" {
 		sectorFlowSampleDBPath = dataPath(dataDir, "sector-flow-samples.db")
@@ -105,6 +116,8 @@ func main() {
 		RemoteDailyReviewURL:     os.Getenv("A_STOCK_DAILY_REVIEW_BASE_URL"),
 		MarketEmotionDBPath:      marketEmotionDBPath,
 		ThemeRadarDBPath:         themeRadarDBPath,
+		ThemeLibraryDBPath:       themeLibraryDBPath,
+		ThemeLibraryRefreshAt:    themeLibraryRefreshAt,
 		SectorFlowSampleDBPath:   sectorFlowSampleDBPath,
 		SectorFlowSampleInterval: sectorFlowSampleInterval(),
 		DuanxianxiaBaseURL:       os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
@@ -127,6 +140,8 @@ func main() {
 	go server.RunSectorFlowSampler(ctx)
 	go server.RunMasteryScheduler(ctx)
 	go server.RunPortfolioScheduler(ctx)
+	go server.RunCockpitPatrol(ctx)
+	go server.RunThemeLibraryDailyRefresh(ctx)
 	httpServer := &http.Server{Addr: addr, Handler: server}
 	go func() {
 		<-ctx.Done()

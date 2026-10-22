@@ -15,6 +15,7 @@ import (
 
 	"easy-stock/backend/internal/agent"
 	"easy-stock/backend/internal/appsettings"
+	"easy-stock/backend/internal/cockpit"
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
@@ -37,6 +38,7 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 	"easy-stock/backend/internal/strategy/inflection"
 	"easy-stock/backend/internal/themeindex"
+	"easy-stock/backend/internal/themelibrary"
 )
 
 type Server struct {
@@ -48,6 +50,8 @@ type Server struct {
 	etfKLinePrimary          RawKLineProvider
 	etfKLineFallback         RawKLineProvider
 	ladderThemeAI            *ladderThemeAI
+	cockpit                  *cockpit.Service
+	cockpitLive              cockpitLiveFacts
 	mux                      *http.ServeMux
 	token                    string
 	realtimeProvider         RealtimeProvider
@@ -103,6 +107,8 @@ type Server struct {
 	masteryLibrary           *methodology.Library
 	marketEmotionStore       *marketemotion.Store
 	themeRadarStore          *duanxianxia.Store
+	themeLibrary             *themelibrary.Store
+	themeLibraryRefreshAt    string
 	themeProgress            *themeProgressCache
 	startupError             error
 	logger                   *log.Logger
@@ -279,6 +285,14 @@ func NewServer(config any) *Server {
 			cfg.Logger.Printf("level=warn event=startup feature=market-data task=sector_flow_sampler error=%q", runtimelog.Redact(err.Error()))
 		}
 	}
+	if cfg.ThemeLibraryStore == nil && strings.TrimSpace(cfg.ThemeLibraryDBPath) != "" {
+		store, err := themelibrary.Open(cfg.ThemeLibraryDBPath)
+		if err == nil {
+			cfg.ThemeLibraryStore = store
+		} else {
+			cfg.Logger.Printf("level=warn event=startup feature=market-data task=theme_library error=%q", runtimelog.Redact(err.Error()))
+		}
+	}
 	if cfg.PortfolioStore == nil {
 		store, err := portfolioinspection.OpenStore(cfg.PortfolioDBPath)
 		if err == nil {
@@ -412,6 +426,8 @@ func NewServer(config any) *Server {
 		usageGateway:             usageGateway,
 		masteryLibrary:           cfg.MasteryLibrary,
 		marketEmotionStore:       cfg.MarketEmotionStore,
+		themeLibrary:             cfg.ThemeLibraryStore,
+		themeLibraryRefreshAt:    cfg.ThemeLibraryRefreshAt,
 		startupError:             errors.Join(startupErrors...),
 		logger:                   cfg.Logger,
 		tokenUsage:               tokenUsage,
@@ -481,6 +497,7 @@ func NewServer(config any) *Server {
 			KLines:  history.load,
 		})
 	}
+	s.cockpit = s.newCockpitPatrolService(cfg.SettingsPath, cfg.Logger)
 	s.routes()
 	return s
 }
@@ -541,6 +558,9 @@ func (s *Server) Close() error {
 	}
 	if s.themeRadarStore != nil {
 		closeErrors = append(closeErrors, s.themeRadarStore.Close())
+	}
+	if s.themeLibrary != nil {
+		closeErrors = append(closeErrors, s.themeLibrary.Close())
 	}
 	return errors.Join(closeErrors...)
 }
@@ -662,6 +682,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/market/sector-flows", s.marketSectorFlowsHandler)
 	s.mux.HandleFunc("GET /api/v1/market/sector-flow-intraday", s.marketSectorFlowIntradayHandler)
 	s.mux.HandleFunc("GET /api/v1/market/sector-price-intraday", s.marketSectorPriceIntradayHandler)
+	s.mux.HandleFunc("GET /api/v1/market/theme-library", s.themeLibraryListHandler)
+	s.mux.HandleFunc("GET /api/v1/market/theme-library/{id}", s.themeLibraryDetailHandler)
 	s.mux.HandleFunc("GET /api/v1/market/margin-balance", s.marketMarginBalanceHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard", s.marketBillboardHandler)
 	s.mux.HandleFunc("GET /api/v1/market/billboard/detail", s.marketBillboardDetailHandler)
@@ -768,6 +790,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/settings/notifications/test", s.settingsNotificationsTest)
 	s.mux.HandleFunc("GET /api/v1/ai/ws", s.aiChatWebSocket)
 	s.mux.HandleFunc("POST /api/v1/strategy/inflections/evaluate", s.inflectionEvaluate)
+	s.mux.HandleFunc("GET /api/v1/cockpit/status", s.cockpitStatus)
+	s.mux.HandleFunc("GET /api/v1/cockpit/facts", s.cockpitFacts)
+	s.mux.HandleFunc("GET /api/v1/cockpit/briefs", s.cockpitBriefs)
+	s.mux.HandleFunc("GET /api/v1/cockpit/briefs/{id}", s.cockpitBrief)
+	s.mux.HandleFunc("POST /api/v1/cockpit/briefs", s.cockpitRun)
 	s.mux.HandleFunc("GET /api/v1/ws/stream", s.stream)
 }
 

@@ -37,6 +37,9 @@ desktop/.cache/
 backend/tmp/
 backend/bin/
 backend/server
+# BigAMap raw responses archived by cmd/theme-library-import; the curated snapshot
+# lives in backend/internal/themelibrary/seed.json and is embedded into the binary.
+backend/data/theme-library/raw/
 
 # Hermes and model/provider credentials.
 **/hermes-home/
@@ -44,6 +47,11 @@ backend/server
 **/.env
 **/.env.*
 !**/.env.example
+
+# 本地工作区工具目录与临时产物，不入库。
+.workbuddy/
+.openchamber/
+_inspect_*/
 
 # Private keys and signing credentials must never be committed.
 *.pem

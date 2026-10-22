@@ -71,6 +71,58 @@ func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.
 	for _, item := range definitions {
 		secids = append(secids, item.SecID)
 	}
+	definitionsBySecID := make(map[string]marketIndexDefinition, len(definitions))
+	for _, item := range definitions {
+		definitionsBySecID[item.SecID] = item
+	}
+	first, err := c.fetchIndexQuotes(ctx, secids, definitionsBySecID)
+	if err != nil {
+		return nil, foundation.SourceMeta{}, err
+	}
+	items := first.items
+	// 东财批量行情偶发只返回部分条目（日经225、韩国KOSPI、台湾加权最常见），
+	// 表现为巡查快照里这几个指数时有时无。对缺失的 secid 补抓一次，
+	// 仍缺就按已有条目返回，不把整组指数判为失败。
+	if len(items) < len(definitions) {
+		got := make(map[string]bool, len(items))
+		for _, item := range items {
+			got[item.SecID] = true
+		}
+		missing := make([]string, 0, len(definitions)-len(items))
+		for _, item := range definitions {
+			if !got[item.SecID] {
+				missing = append(missing, item.SecID)
+			}
+		}
+		if len(missing) > 0 {
+			if retry, retryErr := c.fetchIndexQuotes(ctx, missing, definitionsBySecID); retryErr == nil {
+				// 补抓结果里可能仍混有已有条目（上游不按请求裁剪），按 SecID 去重合并。
+				for _, item := range retry.items {
+					if !got[item.SecID] {
+						items = append(items, item)
+						got[item.SecID] = true
+					}
+				}
+			}
+		}
+	}
+	order := map[string]int{}
+	for index, item := range definitions {
+		order[item.ID] = index
+	}
+	sort.SliceStable(items, func(i, j int) bool { return order[items[i].ID] < order[items[j].ID] })
+	if len(items) == 0 {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("eastmoney returned no index snapshots")
+	}
+	return items, first.meta, nil
+}
+
+type indexQuoteBatch struct {
+	items []foundation.MarketIndexSnapshot
+	meta  foundation.SourceMeta
+}
+
+func (c *Client) fetchIndexQuotes(ctx context.Context, secids []string, definitionsBySecID map[string]marketIndexDefinition) (indexQuoteBatch, error) {
 	endpoint := c.quoteBaseURL + "/api/qt/ulist.np/get"
 	params := url.Values{}
 	params.Set("fltt", "2")
@@ -85,16 +137,12 @@ func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.
 		} `json:"data"`
 	}
 	if err := c.getJSONWithRetry(ctx, requestURL, &payload); err != nil {
-		return nil, foundation.SourceMeta{}, err
+		return indexQuoteBatch{}, err
 	}
 	if payload.RC != 0 {
-		return nil, foundation.SourceMeta{}, fmt.Errorf("eastmoney index rc=%d", payload.RC)
+		return indexQuoteBatch{}, fmt.Errorf("eastmoney index rc=%d", payload.RC)
 	}
 	meta := foundation.SourceMeta{Source: "eastmoney:index", SourceURL: requestURL, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds()}
-	definitionsBySecID := make(map[string]marketIndexDefinition, len(definitions))
-	for _, item := range definitions {
-		definitionsBySecID[item.SecID] = item
-	}
 	items := make([]foundation.MarketIndexSnapshot, 0, len(payload.Data.Diff))
 	for _, raw := range payload.Data.Diff {
 		secid := fmt.Sprintf("%d.%s", int(asFloat(raw["f13"])), asString(raw["f12"]))
@@ -110,15 +158,7 @@ func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.
 			Status: indexStatus(tradeTime, time.Now()), Meta: meta,
 		})
 	}
-	order := map[string]int{}
-	for index, item := range definitions {
-		order[item.ID] = index
-	}
-	sort.SliceStable(items, func(i, j int) bool { return order[items[i].ID] < order[items[j].ID] })
-	if len(items) == 0 {
-		return nil, foundation.SourceMeta{}, fmt.Errorf("eastmoney returned no index snapshots")
-	}
-	return items, meta, nil
+	return indexQuoteBatch{items: items, meta: meta}, nil
 }
 
 func (c *Client) MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error) {

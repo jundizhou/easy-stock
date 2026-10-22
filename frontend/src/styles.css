@@ -5124,6 +5124,26 @@ a:focus-visible {
 .workspace-ai .topbar,
 .workspace-ai .data-footer { width: 100%; }
 
+/* 今日驾驶舱是桌面工作台：窗口固定，只有主区与盯盘栏各自滚动。
+   窄窗口下退回普通文档流（见 CockpitWorkspace.css 的同断点规则）。 */
+@media (min-width: 1101px) {
+	.workspace-frame.workspace-cockpit {
+		height: 100dvh;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.workspace-cockpit > .app-shell {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+		min-height: 0;
+		padding: 14px 20px 20px;
+		overflow: hidden;
+	}
+
+	.workspace-cockpit > .app-sidebar { height: 100%; }
+}
+
 .ai-chat-workspace {
 	display: grid;
 	grid-template-columns: 250px minmax(0, 1fr);
@@ -7345,7 +7365,20 @@ a:focus-visible {
 .market-flow-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .market-flow-summary.market-margin-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
-.market-data-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #ffffff); }
+.market-data-table {
+	overflow-x: auto;
+	overflow-y: auto;
+	max-height: calc(100vh - 320px);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, #ffffff);
+}
+
+.market-data-table > header {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+}
 .market-data-table > header,
 .market-data-table > article { display: grid; align-items: center; gap: 8px; min-width: 900px; padding: 8px 12px; }
 .market-data-table > header { min-height: 35px; background: var(--theme-surface-soft, #f7f9fc); color: var(--theme-muted, #8390a0); font-size: var(--fs-desc); }
