@@ -193,6 +193,8 @@ func sinaKLineScale(period string) string {
 		return "240"
 	case "week", "weekly", "102", "1200":
 		return "1200"
+	case "month", "monthly", "103", "7200":
+		return "7200"
 	case "1", "5", "15", "30", "60":
 		return period
 	default:
