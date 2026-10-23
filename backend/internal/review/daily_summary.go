@@ -193,7 +193,7 @@ func (a *Automation) getSummaryForWindow(ctx context.Context, window reviewFresh
 	}
 	// A prompt-version change means the old cache does not satisfy the current
 	// author-first aggregation rules. Hide it so the next click regenerates it.
-	if summary.PromptVersion != dailySummaryPromptVersion || summary.FreshnessRule != window.Rule || !summary.WindowStart.Equal(window.Start) || !summary.WindowEnd.Equal(window.End) {
+	if summary.PromptVersion != dailySummaryPromptVersion || !summary.WindowStart.Equal(window.Start) || !summary.WindowEnd.Equal(window.End) {
 		return nil, nil
 	}
 	return &summary, nil
@@ -227,7 +227,7 @@ func (a *Automation) getSummaryJobForWindow(ctx context.Context, window reviewFr
 	if err != nil {
 		return DailySummaryJob{}, err
 	}
-	if !job.WindowStart.IsZero() && (!job.WindowStart.Equal(window.Start) || !job.WindowEnd.Equal(window.End) || job.FreshnessRule != window.Rule) {
+	if !job.WindowStart.IsZero() && (!job.WindowStart.Equal(window.Start) || !job.WindowEnd.Equal(window.End)) {
 		if job.Status == "running" {
 			window = reviewFreshnessWindow{TradeDate: job.TradeDate, Start: job.WindowStart, End: job.WindowEnd, Rule: job.FreshnessRule}
 		} else {

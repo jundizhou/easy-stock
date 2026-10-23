@@ -419,6 +419,32 @@ func (s *Store) GetDailySummary(ctx context.Context, tradeDate string) (DailySum
 	return summary, nil
 }
 
+func (s *Store) ListDailySummaries(ctx context.Context, limit, offset int) ([]DailySummaryHistoryItem, int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM review_daily_summaries`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT trade_date,article_count,author_count,generated_at FROM review_daily_summaries ORDER BY trade_date DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]DailySummaryHistoryItem, 0)
+	for rows.Next() {
+		var item DailySummaryHistoryItem
+		var generatedAt string
+		if err := rows.Scan(&item.TradeDate, &item.ArticleCount, &item.AuthorCount, &generatedAt); err != nil {
+			return nil, 0, err
+		}
+		item.GeneratedAt, err = time.Parse(time.RFC3339, generatedAt)
+		if err != nil {
+			return nil, 0, fmt.Errorf("decode daily review summary generation time: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
 func (s *Store) LatestDailySummaryBefore(ctx context.Context, beforeDate string) (DailySummary, error) {
 	var content string
 	query := `SELECT content_json FROM review_daily_summaries`

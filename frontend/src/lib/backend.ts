@@ -2036,6 +2036,8 @@ export type ReviewDailySummary = {
 	generation_errors?: string[];
 };
 
+export type ReviewDailySummaryHistoryItem = Pick<ReviewDailySummary, 'trade_date' | 'article_count' | 'author_count' | 'generated_at'>;
+
 export type ReviewDailySummaryJob = {
 	trade_date: string;
 	window_start?: string;

@@ -753,6 +753,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/schedule", s.reviewScheduleGet)
 	s.mux.HandleFunc("PUT /api/v1/reviews/daily-summary/schedule", s.reviewScheduleSave)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary", s.reviewDailySummaryGet)
+	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/history", s.reviewDailySummaryHistory)
 	s.mux.HandleFunc("POST /api/v1/reviews/daily-summary/anonymize", s.reviewDailySummaryAnonymize)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/window", s.reviewDailySummaryWindow)
 	s.mux.HandleFunc("GET /api/v1/reviews/daily-summary/status", s.reviewDailySummaryStatus)

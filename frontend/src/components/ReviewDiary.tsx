@@ -28,6 +28,8 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 import { ReviewSchedulePanel } from './ReviewSchedulePanel';
+import { ReviewSummaryHistory } from './ReviewSummaryHistory';
+import { useReviewSummaryHistory } from '../lib/use-review-summary-history';
 import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
 import { applyTheme } from '../lib/theme';
 
@@ -84,6 +86,8 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	const [notice, setNotice] = useState('');
 	const [error, setError] = useState('');
 	const [summaryWindow, setSummaryWindow] = useState<SummaryWindowDraft | null>(null);
+	const summaryHistory = useReviewSummaryHistory(config, dailySummary, refreshKey);
+	const visibleDailySummary = summaryHistory.summary;
 
 	const loadDiary = useCallback(async () => {
 		if (!config) return;
@@ -147,18 +151,10 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	const dailySummaryRunning = dailySummaryJob?.status === 'running';
 	const dailyValidationRunning = dailyValidationJob?.status === 'running';
 
- const viewScheduledSummary = async (start: string, end: string) => {
-  if (!config) return;
-  setError('');
-  try {
-   const [summary, job] = await Promise.all([
-    requestJSON<{ data: ReviewDailySummary | null }>(config, summaryWindowQuery(start, end, '/api/v1/reviews/daily-summary')),
-    requestJSON<{ data: ReviewDailySummaryJob }>(config, summaryWindowQuery(start, end, '/api/v1/reviews/daily-summary/status')),
-   ]);
-   setDailySummary(summary.data); setDailySummaryJob(job.data); setReviewView('summary');
-   if (!summary.data && job.data.status !== 'running') setNotice('本次定时复盘尚无可用结果，可查看任务状态后重试');
-  } catch (cause) { setError(cause instanceof Error ? cause.message : '读取定时复盘结果失败'); }
- };
+	const viewSavedSummary = (date: string) => {
+		summaryHistory.selectDate(date);
+		setReviewView('summary');
+	};
 
 	const loadDailyValidationResult = useCallback(async (summaryDate = '') => {
 		if (!config) return null;
@@ -182,7 +178,8 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 					const summaryPayload = await requestJSON<{ data: ReviewDailySummary | null }>(config, summaryPath);
 					if (!active) return;
 					setDailySummary(summaryPayload.data || null);
-					setNotice(payload.data.status === 'partial' ? '总结已部分完成，成功生成的内容已保留，可查看结果或重新生成' : '今日大V观点总结已完成并缓存，可随时查看结果');
+					summaryHistory.refresh();
+					setNotice(payload.data.status === 'partial' ? '总结已部分完成，成功内容已保存在本机，可在历史复盘中查看' : '综合复盘已完成，结果已保存在本机，可在历史复盘中查看');
 				} else if (payload.data.status === 'failed') {
 					setNotice('');
 				}
@@ -194,7 +191,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 		void poll();
 		const timer = window.setInterval(() => void poll(), 3000);
 		return () => { active = false; window.clearInterval(timer); };
-	}, [config, dailySummaryJob?.window_end, dailySummaryJob?.window_start, dailySummaryRunning]);
+	}, [config, dailySummaryJob?.window_end, dailySummaryJob?.window_start, dailySummaryRunning, summaryHistory.refresh]);
 
 	useEffect(() => {
 		if (!config || !dailyValidationRunning) return;
@@ -305,6 +302,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 			const payload = await requestJSON<{ data: ReviewAuthorDeleteResult }>(config, `/api/v1/reviews/authors/${encodeURIComponent(author.id)}?source=${encodeURIComponent(author.source)}`, { method: 'DELETE' });
 			setDailySummary(null);
 			setDailySummaryJob(null);
+			summaryHistory.reset();
 			setDailyValidation(null);
 			setDailyValidationJob(null);
 			if (activeAuthor === author.id) {
@@ -378,7 +376,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 			const payload = await requestJSON<{ data: ReviewDailySummaryJob }>(config, '/api/v1/reviews/daily-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: regenerate, window_start: toRFC3339(chosenWindow.start), window_end: toRFC3339(chosenWindow.end) }) });
 			setDailySummaryJob(payload.data);
 			if (payload.data.status === 'succeeded' && payload.data.summary_available) {
-				setReviewView('summary');
+				viewSavedSummary(payload.data.trade_date);
 				setNotice('今日观点总结已从本机缓存加载');
 				window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
 			} else {
@@ -479,31 +477,34 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 				</div>
 			</header>
 
-			<ReviewSchedulePanel config={config} onOpenSettings={onOpenNotificationSettings} onView={(start, end) => void viewScheduledSummary(start, end)} />
+			<ReviewSchedulePanel config={config} onOpenSettings={onOpenNotificationSettings} onView={(start) => viewSavedSummary(toDateTimeLocal(new Date(start)).slice(0, 10))} />
 
 			<nav className="review-view-tabs" aria-label="复盘日记视图">
 				<button type="button" className={reviewView === 'library' ? 'active' : ''} onClick={() => setReviewView('library')}><BookOpen size={16} /><span><strong>原文资料</strong><small>{total} 篇本地文章</small></span></button>
 				<button type="button" className={reviewView === 'summary' ? 'active' : ''} onClick={() => setReviewView('summary')}><BrainCircuit size={16} /><span><strong>AI总结</strong><small>结论、情景与验证</small></span></button>
 				<button type="button" className={reviewView === 'validation' ? 'active' : ''} onClick={() => void openDailyValidation()}><ListChecks size={16} /><span><strong>昨日验证</strong><small>{dailyValidationRunning ? '正在核验盘面' : dailyValidation ? `${Number.isFinite(Number(dailyValidation.score)) ? Number(dailyValidation.score).toFixed(1) : '—'} 分 · ${dailyValidation.verification_date || '—'}` : '用今日盘面核对观点'}</small></span></button>
-				<button type="button" className={reviewView === 'authors' ? 'active' : ''} onClick={() => setReviewView('authors')}><Users size={16} /><span><strong>作者观点</strong><small>{dailySummary?.author_views?.length || 0} 位作者观点卡</small></span></button>
+				<button type="button" className={reviewView === 'authors' ? 'active' : ''} onClick={() => setReviewView('authors')}><Users size={16} /><span><strong>作者观点</strong><small>{visibleDailySummary?.author_views?.length || 0} 位作者观点卡</small></span></button>
 			</nav>
 
-			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { setReviewView('summary'); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => { const fallback = fallbackSummaryWindow(); setSummaryWindow({ start: dailySummaryJob.window_start ? toDateTimeLocal(new Date(dailySummaryJob.window_start)) : fallback.start, end: dailySummaryJob.window_end ? toDateTimeLocal(new Date(dailySummaryJob.window_end)) : fallback.end }); }} />}
+			<ReviewSummaryHistory {...summaryHistory} onSelect={viewSavedSummary} onPage={summaryHistory.setOffset} onRetry={summaryHistory.refresh} />
+
+			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { viewSavedSummary(dailySummaryJob.trade_date); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => { const fallback = fallbackSummaryWindow(); setSummaryWindow({ start: dailySummaryJob.window_start ? toDateTimeLocal(new Date(dailySummaryJob.window_start)) : fallback.start, end: dailySummaryJob.window_end ? toDateTimeLocal(new Date(dailySummaryJob.window_end)) : fallback.end }); }} />}
 			{dailyValidationJob && dailyValidationJob.status !== 'idle' && <DailyValidationJobPanel job={dailyValidationJob} onView={() => void openDailyValidation()} onRetry={() => void startDailyValidation(true)} />}
 
 			{error && <div className="review-error"><ShieldAlert size={16} /><span>{error}</span>{!isWechatListUnavailableMessage(error) && <button type="button" onClick={() => void loadDiary()}>刷新页面</button>}</div>}
 			{notice && <div className="review-notice"><Sparkles size={15} /><span>{notice}</span></div>}
 
-			{reviewView === 'summary' && (dailySummary
-				? <DailyViewpointSummary config={config} summary={dailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => setSummaryWindow({ start: toDateTimeLocal(new Date(dailySummary.window_start)), end: toDateTimeLocal(new Date(dailySummary.window_end)) })} onShowAuthors={() => setReviewView('authors')} />
+			{(reviewView === 'summary' || reviewView === 'authors') && summaryHistory.loadingSummary && <div className="review-empty" role="status"><RefreshCw className="spin" size={20} /><strong>正在读取已保存的复盘…</strong></div>}
+			{reviewView === 'summary' && !summaryHistory.loadingSummary && (visibleDailySummary
+				? <DailyViewpointSummary key={visibleDailySummary.trade_date} config={config} summary={visibleDailySummary} regenerating={summarizingDaily || dailySummaryRunning} onRegenerate={() => setSummaryWindow({ start: toDateTimeLocal(new Date(visibleDailySummary.window_start)), end: toDateTimeLocal(new Date(visibleDailySummary.window_end)) })} onShowAuthors={() => setReviewView('authors')} />
 				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} />)}
 
 			{reviewView === 'validation' && (dailyValidation
 				? <DailyValidationView validation={dailyValidation} refreshing={validatingDaily || dailyValidationRunning} onRefresh={() => void startDailyValidation(true)} />
 				: <DailyValidationEmpty running={validatingDaily || dailyValidationRunning} hasSummary={!!dailySummary} onValidate={() => void startDailyValidation(false)} onOpenSummary={() => setReviewView('summary')} />)}
 
-			{reviewView === 'authors' && (dailySummary?.author_views?.length
-				? <AuthorViewpointLibrary views={dailySummary.author_views} tradeDate={dailySummary.trade_date} />
+			{reviewView === 'authors' && !summaryHistory.loadingSummary && (visibleDailySummary?.author_views?.length
+				? <AuthorViewpointLibrary views={visibleDailySummary.author_views} tradeDate={visibleDailySummary.trade_date} />
 				: <ReviewSummaryEmpty running={!!dailySummaryRunning} onGenerate={openSummaryWindow} onOpenLibrary={() => setReviewView('library')} authors />)}
 
 			{reviewView === 'library' && <>
@@ -587,7 +588,7 @@ function DailySummaryJobPanel({ job, onView, onRetry }: { job: ReviewDailySummar
 	const stageLabel = job.stage === 'preparing' ? '筛选有效文章' : job.stage === 'authors' ? '归纳作者观点' : job.stage === 'finalizing' ? '生成跨作者共识' : partial ? '总结部分完成' : succeeded ? '总结已完成' : '任务未完成';
 	return <section className={`daily-summary-job ${job.status}`} id="daily-summary-job">
 		<div className="daily-summary-job-icon">{running ? <RefreshCw className="spin" size={22} /> : succeeded ? <Sparkles size={22} /> : <ShieldAlert size={22} />}</div>
-		<div className="daily-summary-job-copy"><span>AI 总结任务 · {stageLabel}</span><strong>{running ? '总结耗时较长，可以先去浏览其他内容' : partial ? '成功内容已保留，失败阶段可重新生成' : succeeded ? '结果已生成并缓存在本机' : '本次总结已停止'}</strong><p>{job.error || job.message}</p>{running && <div className="daily-summary-job-progress"><i style={{ width: `${progress}%` }} /><small>{job.total_authors > 0 ? `${job.completed_authors}/${job.total_authors} 位作者` : '正在准备文章'} · {progress}%</small></div>}</div>
+		<div className="daily-summary-job-copy"><span>AI 总结任务 · {stageLabel}</span><strong>{running ? '总结耗时较长，可以先去浏览其他内容' : partial ? '成功内容已保存在本机，可在历史复盘中查看' : succeeded ? '结果已保存在本机，可在历史复盘中查看' : '本次总结已停止'}</strong><p>{job.error || job.message}</p>{running && <div className="daily-summary-job-progress"><i style={{ width: `${progress}%` }} /><small>{job.total_authors > 0 ? `${job.completed_authors}/${job.total_authors} 位作者` : '正在准备文章'} · {progress}%</small></div>}</div>
 		<div className="daily-summary-job-actions">{job.summary_available && <button type="button" onClick={onView}>查看结果</button>}{!running && !succeeded && <button type="button" onClick={onRetry}>重新生成</button>}{running && <small>离开此页面不会中断</small>}</div>
 	</section>;
 }

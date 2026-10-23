@@ -285,7 +285,58 @@ func (s *Server) reviewAnalyzePost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": post})
 }
 
+func (s *Server) reviewDailySummaryHistory(w http.ResponseWriter, r *http.Request) {
+	if s.reviewStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "复盘日记存储不可用")
+		return
+	}
+	limit, err := positiveQueryInt(r, "limit", 30, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	offset, err := nonNegativeQueryInt(r, "offset", 0)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	items, total, err := s.reviewStore.ListDailySummaries(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items, "total": total, "limit": limit, "offset": offset})
+}
+
 func (s *Server) reviewDailySummaryGet(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("trade_date") {
+		tradeDate := strings.TrimSpace(r.URL.Query().Get("trade_date"))
+		if _, err := time.Parse("2006-01-02", tradeDate); err != nil {
+			writeError(w, http.StatusBadRequest, "trade_date 必须是 YYYY-MM-DD 日期")
+			return
+		}
+		if r.URL.Query().Has("window_start") || r.URL.Query().Has("window_end") {
+			writeError(w, http.StatusBadRequest, "trade_date 不能与时间窗口同时提供")
+			return
+		}
+		if s.reviewStore == nil {
+			writeError(w, http.StatusServiceUnavailable, "复盘日记存储不可用")
+			return
+		}
+		// Saved reviews are documents, even when they no longer qualify as a
+		// generation cache for the current window or prompt version.
+		summary, err := s.reviewStore.GetDailySummary(r.Context(), tradeDate)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "该日期暂无已保存的复盘")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": summary})
+		return
+	}
 	if s.reviewAutomation == nil {
 		writeError(w, http.StatusServiceUnavailable, "AI总结服务不可用")
 		return
