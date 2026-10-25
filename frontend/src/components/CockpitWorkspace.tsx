@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useId, useMemo, useState } from 'react';
 import type { BackendConfig, MarketEmotionHistory, MarketEmotionPoint, MarketIndexSnapshot, PortfolioInspectionJob, SourceHealth } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
+import { sourceHealthSummary } from '../lib/source-health';
 import { pollShortTermProgress } from '../lib/short-term-progress';
 import {
 	type AttentionItem,
@@ -211,8 +212,9 @@ export function CockpitWorkspace({ config, refreshKey, onNavigate, onAskAI, onRe
 	const inspection = latestInspection(inspections.data);
 	const conclusion = inspection?.report?.conclusion;
 	const dimensions = (conclusion?.dimensions ?? []).filter((dimension) => Number.isFinite(dimension.score));
-	const healthyCount = (sources.data || []).filter((source) => source.ok).length;
-	const sourceTotal = sources.data?.length || 0;
+	const sourceSummary = sourceHealthSummary(sources.data || []);
+	const healthyCount = sourceSummary.healthy;
+	const sourceTotal = sourceSummary.total;
 	const updatedAt = [indexes, emotion, inspections, sources].map((item) => item.receivedAt).filter(Boolean).sort().pop() || '';
 
 	return (
@@ -246,7 +248,7 @@ export function CockpitWorkspace({ config, refreshKey, onNavigate, onAskAI, onRe
 					</div>
 					<div>
 						<dt>数据源</dt>
-						<dd className={sourceTotal && healthyCount < sourceTotal ? 'is-warn' : ''}>{sourceTotal ? `${healthyCount}/${sourceTotal}` : '--'}</dd>
+						<dd className={sourceSummary.failed.length ? 'is-warn' : ''} title={sourceSummary.unknown ? `${sourceSummary.unknown} 个数据源尚未检测` : '已启用数据源的轻量接口探测结果'}>{sourceTotal ? `${healthyCount}/${sourceTotal}` : '--'}</dd>
 					</div>
 				</dl>
 

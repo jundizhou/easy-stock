@@ -59,25 +59,41 @@ function startBackend({ command, args, cwd, addr, token, extraEnv }) {
     cwd,
     env: buildBackendEnv({ addr, token, extraEnv }),
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
 }
 
-async function waitForHealth(backendUrl, timeoutMS = 15000) {
+async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
   const startedAt = Date.now();
   let lastError;
-  while (Date.now() - startedAt < timeoutMS) {
-    try {
-      const response = await fetch(new URL('/api/health', backendUrl));
-      if (response.ok) {
-        return;
+  let processError;
+  const controller = new AbortController();
+  const onError = (error) => { processError = error; controller.abort(); };
+  const onExit = (code, signal) => onError(new Error(`本地后台服务已退出（${signal || `退出码 ${code}`}），请检查 backend.log`));
+  child?.once('error', onError);
+  child?.once('exit', onExit);
+  try {
+    if (child && child.exitCode !== null && child.exitCode !== undefined) onExit(child.exitCode);
+    while (Date.now() - startedAt < timeoutMS) {
+      if (processError) throw processError;
+      try {
+        const remaining = Math.max(1, timeoutMS - (Date.now() - startedAt));
+        const response = await fetch(new URL('/api/health', backendUrl), { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(remaining)]) });
+        if (processError) throw processError;
+        if (response.ok) return;
+        lastError = new Error(`health status ${response.status}`);
+      } catch (error) {
+        if (processError) throw processError;
+        lastError = error;
       }
-      lastError = new Error(`health status ${response.status}`);
-    } catch (error) {
-      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(0, timeoutMS - (Date.now() - startedAt)))));
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    throw lastError || new Error('backend health check timed out');
+  } finally {
+    child?.removeListener('error', onError);
+    child?.removeListener('exit', onExit);
+    controller.abort();
   }
-  throw lastError || new Error('backend health check timed out');
 }
 
 module.exports = {

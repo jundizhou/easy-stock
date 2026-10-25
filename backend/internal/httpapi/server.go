@@ -113,6 +113,7 @@ type Server struct {
 	startupError             error
 	logger                   *log.Logger
 	tokenUsage               *tokenUsageStore
+	sourceHealth             *sourceHealthCache
 }
 
 // eastMoneyDesktopOptions 接入桌面端提供的东财能力：浏览器会话（nid18）与 push2 转发桥。
@@ -378,6 +379,7 @@ func NewServer(config any) *Server {
 		})
 	}
 	s := &Server{
+		sourceHealth:            newSourceHealthCache(cfg.DuanxianxiaBaseURL, eastMoneyClient, sinaClient, tencentClient, clsClient),
 		etfUnderlyingFinancials: cfg.ETFUnderlyingFinancials, etfUnderlyingValuation: cfg.ETFUnderlyingValuation,
 		etfDirectionMarket: cfg.ETFDirectionMarket, etfExecution: cfg.ETFExecution, etfProvider: cfg.ETF, etfKLinePrimary: cfg.ETFKLinePrimary, etfKLineFallback: cfg.ETFKLineFallback,
 		mux:                      http.NewServeMux(),
@@ -809,17 +811,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"sources": []foundation.SourceHealth{
-			{ID: "duanxianxia", Name: "短线侠 / 开盘啦", Category: "theme,leaders,limit-up,concept", OK: true, CheckedAt: time.Now()},
-			{ID: "eastmoney", Name: "东方财富", Category: "quote,kline,f10,report", OK: true, CheckedAt: time.Now()},
-			{ID: "sina", Name: "新浪财经", Category: "quote,kline,money-flow", OK: true, CheckedAt: time.Now()},
-			{ID: "tencent", Name: "腾讯财经", Category: "quote,index,hk", OK: true, CheckedAt: time.Now()},
-			{ID: "cls", Name: "财联社", Category: "news,calendar", OK: true, CheckedAt: time.Now()},
-			{ID: "tradingview", Name: "TradingView", Category: "news", OK: true, CheckedAt: time.Now()},
-			{ID: "tushare", Name: "Tushare", Category: "basic,daily,index", OK: false, Message: "requires token", CheckedAt: time.Now()},
-		},
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"sources": s.sourceHealth.load(r.Context())})
 }
 
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {

@@ -69,7 +69,7 @@ export function useReviewSummaryHistory(config: BackendConfig | null, currentSum
 	}, [refresh]);
 
 	return {
-		summary, items, total, offset, pageSize, selectedDate, loading,
+		summary, items, total, offset, pageSize, selectedDate, displayDate, loading,
 		loadingSummary: !summary && !summaryError && (loading || !!displayDate),
 		error: summaryError || listError,
 		selectDate, setOffset, refresh, reset,

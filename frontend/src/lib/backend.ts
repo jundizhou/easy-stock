@@ -266,8 +266,10 @@ export type SourceHealth = {
   name: string;
   category: string;
   ok: boolean;
+	enabled?: boolean;
+	status?: 'healthy' | 'unhealthy' | 'unknown' | 'disabled';
   message?: string;
-  checked_at: string;
+  checked_at?: string;
 };
 
 export type SourceMeta = {
@@ -2151,6 +2153,8 @@ export type ReviewDailyValidationJob = {
 	updated_at?: string;
 	completed_at?: string;
 	result_available: boolean;
+	ready_at?: string;
+	can_start?: boolean;
 };
 
 export async function resolveBackendConfig(input: ResolveInput = {}): Promise<BackendConfig> {

@@ -18,6 +18,50 @@ import (
 
 const dailyValidationPromptVersion = "daily-viewpoint-validation-v1"
 
+type dailyValidationRun struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func DailyValidationWindow(summaryDate string) (string, time.Time, error) {
+	day, err := time.ParseInLocation("2006-01-02", summaryDate, shanghaiLocation())
+	if err != nil {
+		return "", time.Time{}, errors.New("summary_date 必须是 YYYY-MM-DD")
+	}
+	verificationDay := nextTradingDay(day)
+	return verificationDay.Format("2006-01-02"), verificationDay.Add(15 * time.Hour), nil
+}
+
+func ValidateDailyValidationSnapshot(summaryDate string, snapshot DailyValidationSnapshot) error {
+	date, readyAt, err := DailyValidationWindow(summaryDate)
+	if err != nil {
+		return err
+	}
+	if snapshot.TradeDate != date {
+		return fmt.Errorf("当前可用行情为 %s，与核验日 %s 不符；请使用核验日收盘数据", snapshot.TradeDate, date)
+	}
+	if !snapshot.CapturedAt.IsZero() && snapshot.CapturedAt.Before(readyAt) {
+		return fmt.Errorf("核验日 %s 尚未收盘，不能使用盘中快照验证", date)
+	}
+	if snapshot.Intraday != nil && snapshot.Intraday.TradeDate != "" && snapshot.Intraday.TradeDate != date {
+		return fmt.Errorf("盘面快照日期 %s 与核验日 %s 不符", snapshot.Intraday.TradeDate, date)
+	}
+	if snapshot.LimitUp.CurrentTradeDate != "" && snapshot.LimitUp.CurrentTradeDate != date {
+		return fmt.Errorf("涨停梯队日期 %s 与核验日 %s 不符", snapshot.LimitUp.CurrentTradeDate, date)
+	}
+	for _, index := range snapshot.Indexes {
+		if index.TradeDate != "" && index.TradeDate != date {
+			return fmt.Errorf("指数 %s 行情日期 %s 与核验日 %s 不符", index.Name, index.TradeDate, date)
+		}
+	}
+	for _, stock := range snapshot.Stocks {
+		if stock.TradeDate != "" && stock.TradeDate != date {
+			return fmt.Errorf("个股 %s 行情日期 %s 与核验日 %s 不符", stock.Name, stock.TradeDate, date)
+		}
+	}
+	return nil
+}
+
 // DailyValidationCollector lets the HTTP layer collect provider-specific
 // market data without coupling the review package to every market provider.
 type DailyValidationCollector func(context.Context, DailySummary) (DailyValidationSnapshot, error)
@@ -37,26 +81,79 @@ func (a *Automation) GetDailyValidation(ctx context.Context, summaryDate string)
 	if err != nil {
 		return nil, err
 	}
+	date, _, err := DailyValidationWindow(summaryDate)
+	if err != nil || validation.VerificationDate != date || ValidateDailyValidationSnapshot(summaryDate, validation.Snapshot) != nil {
+		return nil, sql.ErrNoRows
+	}
 	return &validation, nil
 }
 
 func (a *Automation) GetDailyValidationJob(ctx context.Context, summaryDate string) (DailyValidationJob, error) {
+	return a.getDailyValidationJob(ctx, strings.TrimSpace(summaryDate), time.Now())
+}
+
+func (a *Automation) getDailyValidationJob(ctx context.Context, summaryDate string, now time.Time) (DailyValidationJob, error) {
 	if a == nil || a.store == nil {
 		return DailyValidationJob{}, errors.New("复盘日记存储不可用")
 	}
-	job, err := a.store.GetDailyValidationJob(ctx, strings.TrimSpace(summaryDate))
-	if err == nil {
-		return job, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	date, readyAt, err := DailyValidationWindow(summaryDate)
+	if err != nil {
 		return DailyValidationJob{}, err
 	}
-	return DailyValidationJob{
-		SummaryDate: strings.TrimSpace(summaryDate),
-		Status:      "idle",
-		Stage:       "idle",
-		Message:     "尚未生成昨日复盘验证",
-	}, nil
+	if _, err := a.store.GetDailySummary(ctx, summaryDate); errors.Is(err, sql.ErrNoRows) {
+		return DailyValidationJob{SummaryDate: summaryDate, Status: "idle", Stage: "missing_summary", Message: "该日期没有已保存的 AI 复盘总结"}, nil
+	} else if err != nil {
+		return DailyValidationJob{}, err
+	}
+	a.dailyValidationMu.Lock()
+	defer a.dailyValidationMu.Unlock()
+	job, err := a.store.GetDailyValidationJob(ctx, summaryDate)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return DailyValidationJob{}, err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		job = DailyValidationJob{SummaryDate: summaryDate, Status: "idle", Stage: "idle", Message: "该验证尚未运行，点击开始验证"}
+	}
+	validation, validationErr := a.GetDailyValidation(ctx, summaryDate)
+	if validationErr != nil && !errors.Is(validationErr, sql.ErrNoRows) {
+		return DailyValidationJob{}, validationErr
+	}
+	job.ResultAvailable = validation != nil
+	if job.Status == "running" {
+		run := a.dailyValidationRunning[summaryDate]
+		if run == nil || run.ctx.Err() != nil || now.Sub(job.UpdatedAt) > 15*time.Minute {
+			if run != nil {
+				run.cancel()
+				delete(a.dailyValidationRunning, summaryDate)
+			}
+			if validation != nil && !validation.GeneratedAt.Before(job.StartedAt) {
+				job.Status, job.Stage, job.Message = "succeeded", "completed", "验证结果已保存到本机"
+				job.CompletedAt = validation.GeneratedAt
+			} else {
+				job.Status, job.Stage = "failed", "interrupted"
+				job.Error = "上次验证已中断或超时，请重新验证"
+				job.Message, job.CompletedAt = job.Error, now.UTC()
+			}
+			job.UpdatedAt = now.UTC()
+			if _, err := a.store.SaveDailyValidationJob(ctx, job); err != nil {
+				return DailyValidationJob{}, err
+			}
+		}
+	}
+	if (job.Status == "idle" || job.Status == "succeeded") && validation != nil {
+		job.Status, job.Stage, job.Message = "succeeded", "completed", "验证结果已保存到本机"
+		job.Error = ""
+		job.CompletedAt = validation.GeneratedAt
+	} else if job.Status == "succeeded" {
+		job.Status, job.Stage, job.Message = "idle", "idle", "验证已完成，但本机缓存不可用，请重新验证"
+	}
+	job.VerificationDate, job.ReadyAt = date, readyAt
+	job.CanStart = !now.Before(readyAt) && job.Status != "running"
+	if now.Before(readyAt) && job.Status != "running" && validation == nil {
+		job.Status, job.Stage = "waiting", "waiting"
+		job.Message = fmt.Sprintf("核验日 %s（%s）15:00 收盘后可开始验证", date, []string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}[readyAt.Weekday()])
+	}
+	return job, nil
 }
 
 func (a *Automation) StartDailyValidation(ctx context.Context, summaryDate string, force bool, collector DailyValidationCollector) (DailyValidationJob, error) {
@@ -74,8 +171,11 @@ func (a *Automation) StartDailyValidation(ctx context.Context, summaryDate strin
 	if err != nil {
 		return DailyValidationJob{}, fmt.Errorf("读取昨日 AI 总结失败: %w", err)
 	}
+	if _, err := a.GetDailyValidationJob(ctx, summaryDate); err != nil {
+		return DailyValidationJob{}, err
+	}
 	if !force {
-		if validation, validationErr := a.store.GetDailyValidation(ctx, summaryDate); validationErr == nil {
+		if validation, validationErr := a.GetDailyValidation(ctx, summaryDate); validationErr == nil {
 			return DailyValidationJob{
 				SummaryDate:      validation.SummaryDate,
 				VerificationDate: validation.VerificationDate,
@@ -85,53 +185,76 @@ func (a *Automation) StartDailyValidation(ctx context.Context, summaryDate strin
 				UpdatedAt:        validation.GeneratedAt,
 				CompletedAt:      validation.GeneratedAt,
 				ResultAvailable:  true,
+				CanStart:         true,
 			}, nil
 		}
+	}
+	verificationDate, readyAt, err := DailyValidationWindow(summaryDate)
+	if err != nil {
+		return DailyValidationJob{}, err
+	}
+	if time.Now().Before(readyAt) {
+		return DailyValidationJob{}, fmt.Errorf("核验日 %s 15:00 收盘后可开始验证", verificationDate)
 	}
 
 	a.dailyValidationMu.Lock()
 	if a.dailyValidationRunning == nil {
-		a.dailyValidationRunning = map[string]bool{}
+		a.dailyValidationRunning = map[string]*dailyValidationRun{}
 	}
-	if a.dailyValidationRunning[summaryDate] {
+	if a.dailyValidationRunning[summaryDate] != nil {
 		a.dailyValidationMu.Unlock()
 		return a.GetDailyValidationJob(ctx, summaryDate)
 	}
-	a.dailyValidationRunning[summaryDate] = true
-	a.dailyValidationMu.Unlock()
+	runCtx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	run := &dailyValidationRun{ctx: runCtx, cancel: cancel}
+	a.dailyValidationRunning[summaryDate] = run
+	defer a.dailyValidationMu.Unlock()
 
 	now := time.Now().UTC()
 	job := DailyValidationJob{
-		SummaryDate: summaryDate,
-		Status:      "running",
-		Stage:       "collecting",
-		Message:     "正在采集验证日盘面数据",
-		StartedAt:   now,
-		UpdatedAt:   now,
+		SummaryDate:      summaryDate,
+		Status:           "running",
+		Stage:            "collecting",
+		Message:          "正在采集验证日盘面数据",
+		StartedAt:        now,
+		UpdatedAt:        now,
+		VerificationDate: verificationDate,
+		ReadyAt:          readyAt,
 	}
 	if _, err := a.store.SaveDailyValidationJob(ctx, job); err != nil {
-		a.markDailyValidationStopped(summaryDate)
+		cancel()
+		delete(a.dailyValidationRunning, summaryDate)
 		return DailyValidationJob{}, err
 	}
-	go a.runDailyValidation(summary, collector)
+	go a.runDailyValidation(summary, collector, run, job)
 	return job, nil
 }
 
-func (a *Automation) markDailyValidationStopped(summaryDate string) {
-	a.dailyValidationMu.Lock()
-	delete(a.dailyValidationRunning, summaryDate)
-	a.dailyValidationMu.Unlock()
-}
-
-func (a *Automation) runDailyValidation(summary DailySummary, collector DailyValidationCollector) {
-	defer a.markDailyValidationStopped(summary.TradeDate)
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
-	defer cancel()
+func (a *Automation) runDailyValidation(summary DailySummary, collector DailyValidationCollector, run *dailyValidationRun, job DailyValidationJob) {
+	defer func() {
+		run.cancel()
+		a.dailyValidationMu.Lock()
+		if a.dailyValidationRunning[summary.TradeDate] == run {
+			delete(a.dailyValidationRunning, summary.TradeDate)
+		}
+		a.dailyValidationMu.Unlock()
+	}()
+	ctx := run.ctx
 	updateJob := func(job DailyValidationJob) {
-		_, _ = a.store.SaveDailyValidationJob(context.Background(), job)
+		a.dailyValidationMu.Lock()
+		defer a.dailyValidationMu.Unlock()
+		if a.dailyValidationRunning[summary.TradeDate] == run {
+			_, _ = a.store.SaveDailyValidationJob(context.Background(), job)
+			if job.Status == "failed" || job.Status == "succeeded" {
+				delete(a.dailyValidationRunning, summary.TradeDate)
+				run.cancel()
+			}
+		}
 	}
-	job, _ := a.store.GetDailyValidationJob(context.Background(), summary.TradeDate)
 	snapshot, err := collector(ctx, summary)
+	if err == nil {
+		err = ValidateDailyValidationSnapshot(summary.TradeDate, snapshot)
+	}
 	if err != nil {
 		job.Status = "failed"
 		job.Stage = "failed"
@@ -166,7 +289,13 @@ func (a *Automation) runDailyValidation(summary DailySummary, collector DailyVal
 	}
 	validation.Score, validation.Coverage, validation.CorrectCount, validation.PartialCount, validation.WrongCount, validation.UnverifiedCount = scoreValidation(validation)
 	validation.GeneratedAt = time.Now().UTC()
+	a.dailyValidationMu.Lock()
+	if a.dailyValidationRunning[summary.TradeDate] != run || ctx.Err() != nil {
+		a.dailyValidationMu.Unlock()
+		return
+	}
 	if _, err := a.store.SaveDailyValidation(context.Background(), validation); err != nil {
+		a.dailyValidationMu.Unlock()
 		job.Status = "failed"
 		job.Stage = "failed"
 		job.Error = err.Error()
@@ -176,6 +305,7 @@ func (a *Automation) runDailyValidation(summary DailySummary, collector DailyVal
 		updateJob(job)
 		return
 	}
+	a.dailyValidationMu.Unlock()
 	job.Status = "succeeded"
 	job.Stage = "completed"
 	job.Message = "昨日复盘验证已完成并缓存"

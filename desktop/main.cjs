@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const {
   findFreePort,
@@ -35,6 +35,7 @@ const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs
 const { UpdateManager } = require('./update-manager.cjs');
 const { resolveUpdateFeed } = require('./update-feed.cjs');
 const { createRotatingLogger } = require('./runtime-logger.cjs');
+const { startDesktopWindow } = require('./startup.cjs');
 
 app.setName('easy-stock');
 const defaultUserDataPath = app.getPath('userData');
@@ -68,6 +69,7 @@ process.on('uncaughtExceptionMonitor', (error, origin) => desktopLogger.event('e
 process.on('unhandledRejection', (reason) => desktopLogger.event('error', 'runtime', 'unhandled rejection', reason));
 
 let backendProcess;
+let mainWindow;
 let backendConfig;
 let xueqiuBrowserBridge;
 let xueqiuBrowserBridgeConfig;
@@ -165,27 +167,13 @@ async function bootBackend() {
 	backendProcess.once('error', (error) => desktopLogger.event('error', 'backend-process', 'process error', error));
 	backendProcess.once('exit', (code, signal) => desktopLogger.event(app.isQuitting ? 'info' : 'error', 'backend-process', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`));
 
-  await waitForHealth(backendUrl);
+  await waitForHealth(backendUrl, 15000, backendProcess);
   backendConfig = { backendUrl, token };
 	desktopLogger.event('info', 'backend-process', 'ready');
   return backendConfig;
 }
 
 async function createWindow() {
-  await Promise.all([
-    bootXueqiuBrowserBridge(),
-    bootTaogubaBrowserBridge(),
-    bootEastmoneySessionBridge(),
-    bootEastmoneyPush2Bridge(),
-    bootWechatService().catch((error) => {
-      wechatServiceError = error.message || String(error);
-			desktopLogger.event('error', 'wechat-service', 'startup failed', error);
-      if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
-      wechatServiceProcess = undefined;
-      wechatServiceConfig = undefined;
-    }),
-  ]);
-  await bootBackend();
 	const windowIcon = path.join(__dirname, 'assets', 'easy-stock.png');
 
   const window = new BrowserWindow({
@@ -204,6 +192,8 @@ async function createWindow() {
       webviewTag: true,
     },
   });
+  mainWindow = window;
+  window.on('closed', () => { if (mainWindow === window) mainWindow = undefined; });
   if (process.platform === 'win32') {
     window.webContents.on('dom-ready', () => {
       window.webContents.executeJavaScript("document.documentElement.classList.add('desktop-titlebar-overlay')").catch(() => {});
@@ -234,15 +224,35 @@ async function createWindow() {
 		desktopLogger.event('error', 'renderer', `process gone reason=${details.reason} exit_code=${details.exitCode}`);
 	});
 
-  const rendererURL = process.env.ELECTRON_RENDERER_URL;
-  if (rendererURL) {
-    await window.loadURL(rendererURL);
-    return;
-  }
-  const frontendPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'resources', 'frontend', 'dist', 'index.html')
-    : path.resolve(__dirname, '..', 'frontend', 'dist', 'index.html');
-  await window.loadFile(frontendPath);
+  await startDesktopWindow({
+    window,
+    logDirectory: runtimeLogDirectory,
+    boot: async () => {
+      await Promise.all([
+        bootXueqiuBrowserBridge(),
+        bootTaogubaBrowserBridge(),
+        bootEastmoneySessionBridge(),
+        bootEastmoneyPush2Bridge(),
+        bootWechatService().catch((error) => {
+          wechatServiceError = error.message || String(error);
+          desktopLogger.event('error', 'wechat-service', 'startup failed', error);
+          if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
+          wechatServiceProcess = undefined;
+          wechatServiceConfig = undefined;
+        }),
+      ]);
+      if (!window.isDestroyed() && !app.isQuitting) await bootBackend();
+    },
+    load: async () => {
+      const rendererURL = process.env.ELECTRON_RENDERER_URL;
+      if (rendererURL) return window.loadURL(rendererURL);
+      const frontendPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'resources', 'frontend', 'dist', 'index.html')
+        : path.resolve(__dirname, '..', 'frontend', 'dist', 'index.html');
+      return window.loadFile(frontendPath);
+    },
+    onError: (error) => desktopLogger.event('error', 'runtime', 'window startup failed', error),
+  });
 }
 
 function killChildTree(child) {
@@ -725,6 +735,7 @@ app.whenReady().then(() => {
   }
   createWindow().catch((error) => {
 		desktopLogger.event('error', 'runtime', 'window startup failed', error);
+    dialog.showErrorBox('easy-stock 启动失败', `无法打开应用窗口，请检查日志目录：${runtimeLogDirectory}\n${error.message || String(error)}`);
     app.quit();
   });
 });

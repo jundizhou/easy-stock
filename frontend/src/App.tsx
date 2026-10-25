@@ -31,6 +31,7 @@ import {
 	WalletCards,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sourceHealthSummary, sourceStatusLabel } from './lib/source-health';
 import {
 	BackendConfig,
 	KLine,
@@ -128,6 +129,7 @@ export function App() {
 	const [selectedSymbol, setSelectedSymbol] = useState('');
 	const [liveQuotes, setLiveQuotes] = useState<QuoteLookup>({});
 	const [sources, setSources] = useState<SourceHealth[]>([]);
+	const sourceSummary = sourceHealthSummary(sources);
 	const [streamStatus, setStreamStatus] = useState('实时流待命');
 	const [configError, setConfigError] = useState('');
 	const [themeRefreshKey, setThemeRefreshKey] = useState(0);
@@ -478,22 +480,22 @@ export function App() {
 				<div
 					className="source-health-summary"
 					tabIndex={0}
-					aria-label={`数据源状态，${sources.filter((source) => source.ok).length} 个正常，${sources.filter((source) => !source.ok).length} 个异常`}
+					aria-label={`数据源状态，${sourceSummary.healthy} 个探测通过，${sourceSummary.failed.length} 个异常，${sourceSummary.unknown} 个未检测`}
 				>
 					<Database size={16} aria-hidden="true" />
 					<span>数据源</span>
-					<strong>{sources.filter((source) => source.ok).length}/{sources.length || '--'}</strong>
+					<strong>{sourceSummary.healthy}/{sourceSummary.total || '--'}</strong>
 					<div className="source-health-popover" role="tooltip">
 						<header>
-							<div><strong>数据源状态</strong><span>查看当前可用情况</span></div>
-							<em>{sources.filter((source) => source.ok).length} 正常 · {sources.filter((source) => !source.ok).length} 异常</em>
+							<div><strong>数据源状态</strong><span>轻量接口探测 · 缓存 1 分钟 · 预留源不计入</span></div>
+							<em>{sourceSummary.healthy} 通过 · {sourceSummary.failed.length} 异常 · {sourceSummary.unknown} 未检测</em>
 						</header>
 						<div className="source-health-list">
 							{sources.map((source) => (
 								<div className={source.ok ? 'healthy' : 'unhealthy'} key={source.id}>
 									<i aria-hidden="true" />
 									<span><strong>{source.name}</strong><small>{sourceCategoryLabel(source.category)}</small></span>
-									<em>{source.ok ? '正常' : sourceHealthMessage(source.message)}</em>
+									<em>{sourceStatusLabel(source)}</em>
 								</div>
 							))}
 							{!sources.length && !sourcesError && <p>数据源状态加载中…</p>}
@@ -955,12 +957,6 @@ function sourceCategoryLabel(category: string) {
 		daily: '日线',
 	};
 	return category.split(',').map((item) => labels[item.trim()] || item.trim()).filter(Boolean).join(' · ');
-}
-
-function sourceHealthMessage(message?: string) {
-	if (!message) return '异常';
-	if (message === 'requires token') return '需要 Token';
-	return message;
 }
 
 function formatSourceStrength(value?: number) {

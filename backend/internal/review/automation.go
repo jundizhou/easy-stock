@@ -50,7 +50,7 @@ type Automation struct {
 	dailySummaryCompleted  func(DailySummaryJob, *DailySummary)
 	dailyMarketProvider    DailyMarketProvider
 	dailyValidationMu      sync.Mutex
-	dailyValidationRunning map[string]bool
+	dailyValidationRunning map[string]*dailyValidationRun
 }
 
 // SetDailyMarketProvider wires the optional overnight market snapshot into the
@@ -85,7 +85,7 @@ func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Sto
 		taogubaBridgeURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("A_STOCK_TAOGUBA_BROWSER_BRIDGE_URL")), "/"),
 		taogubaBridgeToken:     strings.TrimSpace(os.Getenv("A_STOCK_TAOGUBA_BROWSER_BRIDGE_TOKEN")),
 		browserBridgeClient:    &bridgeClient,
-		dailyValidationRunning: map[string]bool{},
+		dailyValidationRunning: map[string]*dailyValidationRun{},
 	}
 }
 

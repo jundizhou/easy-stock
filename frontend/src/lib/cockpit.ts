@@ -1,4 +1,5 @@
 import type { MarketEmotionHistory, MarketEmotionPoint, MarketIndexSnapshot, PortfolioInspectionJob, SourceHealth } from './backend';
+import { isSourceFailure, sourceHealthSummary } from './source-health';
 
 export type CockpitTarget = 'market' | 'limit-up' | 'themes' | 'portfolio-inspection' | 'stock-ai' | 'reviews' | 'mastery' | 'ai' | 'token-usage';
 
@@ -127,7 +128,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 		}
 	}
 
-	const failedSources = (input.sources || []).filter((source) => !source.ok);
+	const failedSources = (input.sources || []).filter(isSourceFailure);
 	if (failedSources.length) {
 		items.push({
 			id: 'sources-failed',
@@ -159,8 +160,9 @@ export function buildCockpitBriefPrompt(input: CockpitInput, attention: Attentio
 	if (conclusion) {
 		lines.push(`持仓：健康分 ${conclusion.health_score}，风险等级 ${conclusion.risk_level}，主要风险：${(conclusion.primary_risks || []).slice(0, 3).join('；') || '无'}`);
 	}
-	const failed = (input.sources || []).filter((source) => !source.ok).map((source) => source.name);
-	lines.push(`数据源：${(input.sources || []).length - failed.length}/${(input.sources || []).length || '--'} 正常${failed.length ? `，异常：${failed.join('、')}` : ''}`);
+	const sourceSummary = sourceHealthSummary(input.sources || []);
+	const failed = sourceSummary.failed.map((source) => source.name);
+	lines.push(`数据源：${sourceSummary.healthy}/${sourceSummary.total || '--'} 探测通过${sourceSummary.unknown ? `，${sourceSummary.unknown} 个未检测` : ''}${failed.length ? `，异常：${failed.join('、')}` : ''}`);
 	const alerts = attention.filter((item) => item.level !== 'info').map((item) => `[${item.level === 'danger' ? '高' : '中'}] ${item.title}`);
 	lines.push(`需要处理：${alerts.length ? alerts.join('；') : '无'}`);
 

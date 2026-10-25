@@ -64,8 +64,10 @@ type SourceHealth struct {
 	Name      string    `json:"name"`
 	Category  string    `json:"category"`
 	OK        bool      `json:"ok"`
+	Enabled   bool      `json:"enabled"`
+	Status    string    `json:"status"`
 	Message   string    `json:"message,omitempty"`
-	CheckedAt time.Time `json:"checked_at"`
+	CheckedAt time.Time `json:"checked_at,omitzero"`
 }
 
 type Board struct {

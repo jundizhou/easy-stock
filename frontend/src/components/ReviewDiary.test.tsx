@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { isTomorrowOutlookDegraded, visibleUSMarketSummary } from './ReviewDiary';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { DailyValidationEmpty, isTomorrowOutlookDegraded, visibleUSMarketSummary } from './ReviewDiary';
+
+describe('daily validation empty states', () => {
+	it('keeps the summary accessible while waiting for Monday close', () => {
+		const html = renderToStaticMarkup(<DailyValidationEmpty running={false} hasSummary job={{ summary_date: '2026-10-23', verification_date: '2026-10-26', status: 'waiting', stage: 'waiting', message: '核验日 2026-10-26（周一）15:00 收盘后可开始验证', result_available: false, can_start: false }} onValidate={() => {}} onOpenSummary={() => {}} />);
+		expect(html).toContain('2026-10-26');
+		expect(html).toContain('等待核验日收盘');
+		expect(html).toContain('disabled=""');
+		expect(html).toContain('查看 AI 总结');
+		expect(html).not.toContain('先生成一份昨日 AI 总结');
+	});
+	it('always provides an exit when a summary is unavailable', () => {
+		const html = renderToStaticMarkup(<DailyValidationEmpty running={false} hasSummary={false} job={null} onValidate={() => {}} onOpenSummary={() => {}} />);
+		expect(html).toContain('查看 AI 总结');
+		expect(html).not.toContain('已完成');
+	});
+});
 
 describe('visibleUSMarketSummary', () => {
 	it('removes internal data-source diagnostics and duplicate impact analysis', () => {

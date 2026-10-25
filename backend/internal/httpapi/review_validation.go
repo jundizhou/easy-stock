@@ -35,16 +35,17 @@ func (s *Server) reviewDailyValidation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	validation, validationErr := s.reviewAutomation.GetDailyValidation(r.Context(), summaryDate)
-	if validationErr != nil && !errors.Is(validationErr, sql.ErrNoRows) {
-		writeError(w, http.StatusInternalServerError, validationErr.Error())
-		return
-	}
 	job, jobErr := s.reviewAutomation.GetDailyValidationJob(r.Context(), summaryDate)
 	if jobErr != nil {
 		writeError(w, http.StatusInternalServerError, jobErr.Error())
 		return
 	}
+	validation, validationErr := s.reviewAutomation.GetDailyValidation(r.Context(), summaryDate)
+	if validationErr != nil && !errors.Is(validationErr, sql.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, validationErr.Error())
+		return
+	}
+	job.ResultAvailable = validation != nil
 	writeJSON(w, http.StatusOK, map[string]any{"data": validation, "summary_date": summaryDate, "job": job})
 }
 
@@ -222,6 +223,9 @@ func (s *Server) collectDailyValidationSnapshot(ctx context.Context, summary rev
 	}
 
 	for _, item := range indexes {
+		if item.Market != "" && item.Market != "CN" {
+			continue
+		}
 		snapshot.Indexes = append(snapshot.Indexes, review.DailyValidationIndex{ID: item.ID, Name: item.Name, ChangePercent: item.ChangePercent, TradeDate: item.Meta.TradeDate, Source: item.Meta.Source})
 	}
 	for _, item := range industries {
@@ -270,7 +274,11 @@ func (s *Server) collectDailyValidationSnapshot(ctx context.Context, summary rev
 		snapshot.TradeDate = snapshot.Indexes[0].TradeDate
 	}
 	if snapshot.TradeDate == "" {
-		snapshot.TradeDate = time.Now().In(shanghaiLocation).Format("2006-01-02")
+		return review.DailyValidationSnapshot{}, errors.New("行情未提供交易日期，无法确认核验日")
+	}
+	if emotionTradeDate != "" && emotionTradeDate != snapshot.TradeDate {
+		snapshot.Emotion = nil
+		snapshot.DataQuality = append(snapshot.DataQuality, "历史情绪日期与核验日不符，已排除历史情绪数据")
 	}
 
 	symbols := resolveValidationSymbols(summary, catalog)
@@ -290,6 +298,9 @@ func (s *Server) collectDailyValidationSnapshot(ctx context.Context, summary rev
 	}
 	if snapshot.Emotion == nil && len(snapshot.Themes) == 0 && len(snapshot.Indexes) == 0 && len(snapshot.Stocks) == 0 {
 		return review.DailyValidationSnapshot{}, errors.New("没有采集到足够的验证日盘面数据")
+	}
+	if err := review.ValidateDailyValidationSnapshot(summary.TradeDate, snapshot); err != nil {
+		return review.DailyValidationSnapshot{}, err
 	}
 	return snapshot, nil
 }

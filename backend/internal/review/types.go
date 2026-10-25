@@ -500,4 +500,6 @@ type DailyValidationJob struct {
 	UpdatedAt        time.Time `json:"updated_at,omitempty"`
 	CompletedAt      time.Time `json:"completed_at,omitempty"`
 	ResultAvailable  bool      `json:"result_available"`
+	ReadyAt          time.Time `json:"ready_at,omitempty"`
+	CanStart         bool      `json:"can_start"`
 }
