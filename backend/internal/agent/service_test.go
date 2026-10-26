@@ -108,7 +108,7 @@ func TestPreparedConfigurationRollback(t *testing.T) {
 	s := testService(t)
 	before := s.configurationID()
 	key := "new-secret"
-	finish, err := s.PrepareSettings(appsettings.Values{AgentRuntime: Codex, ActiveLLMProfileID: "profile", LLM: appsettings.LLM{Provider: "custom", BaseURL: "https://new.example/v1", Model: "new", APIMode: "responses"}}, nil, &key)
+	finish, err := s.PrepareSettings(appsettings.Values{AgentRuntime: Codex, ActiveLLMProfileID: "profile", LLM: appsettings.LLM{Provider: "custom", BaseURL: "https://new.example/v1", Model: "new", APIMode: "responses"}}, nil, &key, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,7 @@ Webhook 含有机器人访问凭据，与签名密钥一样仅保存在权限为
 ## 接口与实现参考
 
 - `GET /api/v1/settings/notifications`：读取脱敏配置。
-- `PUT /api/v1/settings`：支持 `notifications` 字段，与其他设置在同一次更新中保存；省略时保留原通知配置。
+- `PUT /api/v1/settings`：支持 `notifications` 字段，与其他设置在同一次更新中保存；省略时保留原通知配置。可同时携带 `agent_settings`（与 Skill/MCP 独立接口的更新结构一致），由运行时配置事务统一提交或回滚；响应中的 `agent_settings` 返回脱敏后的已保存配置，省略更新时为 `null`。
 - `PUT /api/v1/settings/notifications`：单独更新通知配置，省略的字段保持原值；与模型配置互不依赖。
 - `POST /api/v1/settings/notifications/reveal`：按用户操作读取指定渠道的已保存 Webhook 或密钥，响应禁止缓存。
 - `POST /api/v1/settings/notifications/test`：测试指定渠道，可传入未保存的配置。

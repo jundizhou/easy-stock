@@ -157,15 +157,15 @@ func (s *Server) settingsAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "读取现有 Hermes 设置: "+err.Error())
 		return
 	}
-	if request.ReasoningEffort != nil && len(current.Reasoning.Options) > 0 && !current.Reasoning.Allows(strings.ToLower(strings.TrimSpace(*request.ReasoningEffort))) {
-		writeError(w, http.StatusBadRequest, "当前模型或接口不支持该思考选项，请刷新后重试")
+	settings, err := applyAgentSettings(current, request)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, agent.ErrReasoningContextChanged) {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
 		return
 	}
-	if request.ReasoningContext != nil && *request.ReasoningContext != current.ReasoningContext {
-		writeError(w, http.StatusConflict, agent.ErrReasoningContextChanged.Error())
-		return
-	}
-	settings := mergeAgentSettings(current, request)
 	if err := gateway.SyncAgentSettings(settings); err != nil {
 		if errors.Is(err, agent.ErrReasoningContextChanged) {
 			writeError(w, http.StatusConflict, err.Error())
@@ -520,6 +520,16 @@ func buildAgentSettingsView(settings agent.AgentSettings) agentSettingsView {
 		view.MCPServers = append(view.MCPServers, item)
 	}
 	return view
+}
+
+func applyAgentSettings(current agent.AgentSettings, request agentSettingsUpdateRequest) (agent.AgentSettings, error) {
+	if request.ReasoningEffort != nil && len(current.Reasoning.Options) > 0 && !current.Reasoning.Allows(strings.ToLower(strings.TrimSpace(*request.ReasoningEffort))) {
+		return current, errors.New("当前模型或接口不支持该思考选项，请刷新后重试")
+	}
+	if request.ReasoningContext != nil && *request.ReasoningContext != current.ReasoningContext {
+		return current, agent.ErrReasoningContextChanged
+	}
+	return mergeAgentSettings(current, request), nil
 }
 
 func mergeAgentSettings(current agent.AgentSettings, request agentSettingsUpdateRequest) agent.AgentSettings {

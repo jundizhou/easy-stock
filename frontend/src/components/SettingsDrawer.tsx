@@ -25,10 +25,11 @@ import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLM
 import { llmBaseURLForAPIMode, llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
+import { useAgentSettings } from '../lib/agent-settings';
 import { SettingsSection } from './SettingsSection';
 import { NotificationSettingsPanel } from './NotificationSettingsPanel';
 import { notificationsDraft, notificationsUpdate, notificationSettingsChangedEvent, type NotificationsDraft } from '../lib/notifications';
-import type { NotificationSettings } from '../lib/backend';
+import type { AgentSettings, NotificationSettings } from '../lib/backend';
 
 type Props = {
 	config: BackendConfig | null;
@@ -56,6 +57,7 @@ const emptySecrets = (): Record<SecretKey, string> => ({
 });
 
 export function SettingsDrawer({ config, open, initialSection, onClose, onSaved }: Props) {
+	const agent = useAgentSettings(config, open);
 	const [settings, setSettings] = useState<AppSettings | null>(null);
 	const [notifications, setNotifications] = useState<NotificationsDraft | null>(null);
 	const [notificationRevision, setNotificationRevision] = useState(0);
@@ -110,14 +112,17 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		updateSectionFocused.current = true;
 	}, [open, initialSection, state]);
 
+	const saving = state === 'saving' || testState === 'testing' || agent.busy || notificationTesting;
+	const closeSettings = () => { if (!saving) onClose(); };
+
 	useEffect(() => {
-		if (!open) return;
+		if (!open || saving) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === 'Escape') onClose();
 		};
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
-	}, [onClose, open]);
+	}, [onClose, open, saving]);
 
 	useEffect(() => {
 		if (!open || !config) return;
@@ -440,7 +445,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	};
 
 	const saveNotifications = async () => {
-		if (!config || !notifications || state === 'saving' || notificationTesting) return;
+		if (!config || !notifications || saving) return;
 		setState('saving');
 		setMessage('');
 		try {
@@ -468,11 +473,15 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 			const current = profile.id === activeLLMProfileID ? { ...profile, name: profileName.trim(), provider, base_url: baseURL.trim(), model: model.trim(), api_mode: apiMode } : profile;
 			return { id: current.id, name: current.name.trim(), provider: current.provider, base_url: current.base_url.trim(), model: current.model.trim(), api_mode: current.api_mode, api_key: (profileKeyValues[current.id] || '').trim() || undefined, clear_api_key: clearProfileKeys.has(current.id) };
 		});
-		const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', {
+		const payload = await requestJSON<{ data: AppSettings; agent_settings?: AgentSettings }>(config, '/api/v1/settings', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ notifications: notificationsUpdate(notifications), agent_runtime: agentRuntime, llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
+			body: JSON.stringify({ agent_settings: agent.dirty ? agent.update : undefined, notifications: notificationsUpdate(notifications), agent_runtime: agentRuntime, llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
 		});
+		if (agent.dirty) {
+			if (!payload.agent_settings) throw new Error('保存响应缺少 Skill/MCP 配置，请重新读取确认');
+			agent.acceptSaved(payload.agent_settings);
+		}
 		setSettings(payload.data);
 		loadNotifications(payload.data.notifications);
 		window.dispatchEvent(new Event(notificationSettingsChangedEvent));
@@ -494,11 +503,11 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
-		if (!config || !notifications || state === 'saving' || notificationTesting) return;
+		if (!config || !notifications || saving) return;
 		setState('saving');
 		setMessage('');
 		try {
-			await persistSettings();
+			await agent.run(async () => { await persistSettings(); });
 			setState('saved');
 			setMessage('保存成功');
 			onSaved?.();
@@ -510,13 +519,13 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	};
 
 	const testConnection = async () => {
-		if (!config || !notifications || state === 'saving' || notificationTesting) return;
+		if (!config || !notifications || saving) return;
 		setState('saving');
 		setMessage('正在保存设置并通过 Agent 调用模型探针');
 		setTestState('testing');
 		setTestResult(null);
 		try {
-			await persistSettings();
+			await agent.run(async () => { await persistSettings(); });
 			const payload = await requestJSON<{ data: LLMConnectionTestResult }>(config, '/api/v1/settings/llm/test', { method: 'POST' });
 			setTestResult(payload.data);
 			setTestState('success');
@@ -545,17 +554,18 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	if (!open) return null;
 
 	return (
-		<div className="settings-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+		<div className="settings-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}>
 			<aside className="settings-drawer" role="dialog" aria-modal="true" aria-label="系统设置">
 				<header className="settings-header">
 					<div><span>AI RUNTIME</span><h2>系统设置</h2><p>管理运行引擎、共享模型、数据源与钉钉和飞书机器人</p></div>
-					<button type="button" onClick={onClose} aria-label="关闭设置"><X size={20} /></button>
+					<button type="button" onClick={closeSettings} disabled={saving} aria-label="关闭设置"><X size={20} /></button>
 				</header>
 
 				{state === 'loading' && <div className="settings-loading"><LoaderCircle className="spin" size={22} /><span>读取本机设置</span></div>}
 				{state !== 'loading' && (
 					<form className="settings-form" onSubmit={save}>
-						<AgentSettingsPanel config={config} open={open} />
+						<fieldset className="settings-form-fields" disabled={saving}>
+						<AgentSettingsPanel config={config} open={open} agent={agent} disabled={saving} />
 
 						<SettingsSection title="大模型和运行时配置" description="对话、个股研究、复盘与持仓检查使用同一个引擎选择，模型、Skills 和 MCP 共用一套设置。" icon={<Bot size={18} />}>
 							<div className="runtime-selector">
@@ -592,7 +602,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 							<label className="settings-timeout-field"><span>模型响应等待时间（秒）</span><input type="number" min={30} max={3600} step={30} value={responseTimeoutSeconds} onChange={(event) => setResponseTimeoutSeconds(Number(event.target.value) || defaultResponseTimeoutSeconds)} /><small>默认 300 秒，范围 30–3600 秒；模型长时间无响应时将等待更久再重试。</small></label>
 							<div className={`llm-connection-test ${testState}`}>
 								<div><PlugZap size={17} /><span><strong>{testState === 'success' ? 'Agent 模型连接可用' : testState === 'error' ? '连接测试未通过' : testState === 'testing' ? 'Agent 正在请求模型' : 'Agent 真实模型探针'}</strong><small>{testResult ? `${testResult.runtime === 'codex' ? 'Codex' : 'Hermes'} · ${testResult.model} · ${testResult.api_mode} · ${testResult.latency_ms}ms · ${testResult.response}` : '自动检测会发送一次简短的 Responses 请求；密钥或网络错误会保留原设置。保存后可测试当前引擎。'}</small></span></div>
-								<button type="button" onClick={testConnection} disabled={!config || !notifications || notificationTesting || state === 'saving' || testState === 'testing'}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>
+								<button type="button" onClick={testConnection} disabled={!config || !notifications || !agent.ready || agent.loading || saving}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>
 							</div>
 						</SettingsSection>
 
@@ -631,9 +641,10 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 
 						<footer className="settings-footer">
 							<div className={`settings-message ${state}`} role={state === 'error' ? 'alert' : 'status'}>{state === 'saved' && <CheckCircle2 size={15} />}{state === 'error' && <CircleAlert size={15} />}<span>{message || '留空的模型密钥会保留已保存的值。'}</span></div>
-							<button type="button" onClick={onClose}>取消</button>
-							<button type="submit" className="settings-save" disabled={!config || !notifications || notificationTesting || state === 'saving' || testState === 'testing'}>{state === 'saving' ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存设置</button>
+							<button type="button" onClick={closeSettings} disabled={saving}>取消</button>
+							<button type="submit" className="settings-save" disabled={!config || !notifications || !agent.ready || agent.loading || saving}>{state === 'saving' ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存设置</button>
 						</footer>
+						</fieldset>
 					</form>
 				)}
 			</aside>

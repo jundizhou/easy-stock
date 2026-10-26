@@ -41,6 +41,7 @@ beforeEach(() => {
 	};
 	vi.mocked(requestJSON).mockReset();
 	vi.mocked(requestJSON).mockImplementation(async (_config, path, options) => {
+		if (path === '/api/v1/settings/agent') return { data: { skills: [], mcp_servers: [], reasoning_effort: 'medium' } };
 		if (path.startsWith('/api/v1/portfolio-schedules/')) return { data: null };
 		if (path === '/api/v1/settings/notifications/test') return { data: { message: '测试通知已发送' } };
 		if (options?.method === 'PUT') {
@@ -95,6 +96,7 @@ describe('notification settings save flow (issue #37)', () => {
 		fireEvent.click(dialog.getAllByRole('button', { name: '测试发送' })[0]);
 		await dialog.findByText('测试通知已发送');
 		expect(saved.notifications!.feishu.webhook.configured).toBe(false);
+		await waitFor(() => expect(dialog.getByRole('button', { name: '保存设置' }).matches(':disabled')).toBe(false));
 		fireEvent.click(dialog.getByRole('button', { name: '保存设置' }));
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		expect(globalSaveBody().notifications).toMatchObject({

@@ -1,22 +1,20 @@
 import { CheckCircle2, CircleAlert, ExternalLink, LoaderCircle, Network, Plus, Puzzle, Save, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BackendConfig, AgentSettings, AgentInstalledSkill, AgentMCPServerSetting, AgentSkillMarketEntry, AgentSkillMarketSource, AgentSkillSetting, SecretSettingStatus } from '../lib/backend';
+import type { BackendConfig, AgentSettings, AgentInstalledSkill, AgentSkillMarketEntry, AgentSkillMarketSource } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
 import { SettingsSection } from './SettingsSection';
+import { nextID, type AgentSettingsController, type MCPDraft, type SecretEntryDraft } from '../lib/agent-settings';
+export { splitMCPArgs } from '../lib/agent-settings';
 
-type Props = { config: BackendConfig | null; open: boolean };
-type SecretEntryDraft = { id: string; key: string; value: string; configured: boolean; masked?: string; remove: boolean };
-type MCPDraft = Omit<AgentMCPServerSetting, 'env' | 'headers' | 'args'> & { id: string; originalName: string; argsText: string; env: SecretEntryDraft[]; headers: SecretEntryDraft[] };
+type Props = { config: BackendConfig | null; open: boolean; agent: AgentSettingsController; disabled: boolean };
 
-
-let draftSequence = 0;
-const nextID = (prefix: string) => `${prefix}-${Date.now()}-${++draftSequence}`;
-
-export function AgentSettingsPanel({ config, open }: Props) {
-	const [skills, setSkills] = useState<AgentSkillSetting[]>([]);
-	const [servers, setServers] = useState<MCPDraft[]>([]);
+export function AgentSettingsPanel({ config, open, agent, disabled }: Props) {
+	const skills = agent.draft?.skills || [];
+	const servers = agent.draft?.servers || [];
+	const setSkills = (update: (current: typeof skills) => typeof skills) => agent.setDraft((current) => current && ({ ...current, skills: update(current.skills) }));
+	const setServers = (update: (current: MCPDraft[]) => MCPDraft[]) => agent.setDraft((current) => current && ({ ...current, servers: update(current.servers) }));
 	const [search, setSearch] = useState('');
-	const [state, setState] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('idle');
+	const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 	const [message, setMessage] = useState('');
 	const [gitURL, setGitURL] = useState('');
 	const [marketSkills, setMarketSkills] = useState<AgentSkillMarketEntry[]>([]);
@@ -28,20 +26,6 @@ export function AgentSettingsPanel({ config, open }: Props) {
 	useEffect(() => {
 		if (!open || !config) return;
 		let cancelled = false;
-		setState('loading');
-		setMessage('');
-		requestJSON<{ data: AgentSettings }>(config, '/api/v1/settings/agent')
-			.then(({ data }) => {
-				if (cancelled) return;
-				setSkills(data.skills || []);
-				setServers((data.mcp_servers || []).map(toMCPDraft));
-				setState('idle');
-			})
-			.catch((error) => {
-				if (cancelled) return;
-				setState('error');
-				setMessage(error instanceof Error ? error.message : '读取 Skill/MCP 设置失败');
-			});
 		requestJSON<{ data: AgentSkillMarketEntry[] }>(config, '/api/v1/settings/agent/skills/market')
 			.then(({ data }) => { if (!cancelled) setMarketSkills(data || []); })
 			.catch(() => { if (!cancelled) setMarketSkills([]); });
@@ -71,22 +55,23 @@ export function AgentSettingsPanel({ config, open }: Props) {
 	}]);
 
 	const importSkills = async (files: FileList | null) => {
-		if (!config || !files?.length) return;
+		if (!config || !agent.ready || agent.busy || disabled || !files?.length) return;
 		setState('saving');
 		setMessage('正在导入 Skill…');
 		try {
-			const form = new FormData();
-			Array.from(files).forEach((file) => {
-				const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-				form.append('files', file, file.name);
-				form.append('paths', relativePath);
+			await agent.run(async () => {
+				const form = new FormData();
+				Array.from(files).forEach((file) => {
+					const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+					form.append('files', file, file.name);
+					form.append('paths', relativePath);
+				});
+				const payload = await requestJSON<{ data: AgentInstalledSkill[] }>(config, '/api/v1/settings/agent/skills/import', { method: 'POST', body: form });
+				const imported = payload.data || [];
+				await agent.refreshSkills();
+				setState('saved');
+				setMessage(`已导入 ${imported.length} 个 Skill，请在列表中确认启用状态。`);
 			});
-			const payload = await requestJSON<{ data: AgentInstalledSkill[] }>(config, '/api/v1/settings/agent/skills/import', { method: 'POST', body: form });
-			const imported = payload.data || [];
-			const refreshed = await requestJSON<{ data: AgentSettings }>(config, '/api/v1/settings/agent');
-			setSkills(refreshed.data.skills || []);
-			setState('saved');
-			setMessage(`已导入 ${imported.length} 个 Skill，请在列表中确认启用状态。`);
 		} catch (error) {
 			setState('error');
 			setMessage(error instanceof Error ? error.message : '导入 Skill 失败');
@@ -106,43 +91,44 @@ export function AgentSettingsPanel({ config, open }: Props) {
 	};
 
 	const installGitSkillURL = async (url: string) => {
-		if (!config || !url.trim()) return;
+		if (!config || !agent.ready || agent.busy || disabled || !url.trim()) return;
 		setState('saving');
 		setDownloadProgress({ downloaded: 0, total: 0, bytesPerSecond: 0, url: '' });
 		setMessage('正在连接 GitHub…');
 		try {
-			const response = await fetch(new URL('/api/v1/settings/agent/skills/install-git?progress=1', config.backendUrl), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}) }, body: JSON.stringify({ url: url.trim() }) });
-			if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
-			const reader = response.body?.getReader();
-			if (!reader) throw new Error('浏览器不支持读取下载进度');
-			const decoder = new TextDecoder();
-			let pending = '';
-			let installed: AgentInstalledSkill[] = [];
-			while (true) {
-				const { value, done } = await reader.read();
-				pending += decoder.decode(value || new Uint8Array(), { stream: !done });
-				const lines = pending.split('\n');
-				pending = lines.pop() || '';
-				for (const line of lines) {
-					if (!line.trim()) continue;
-					const event = JSON.parse(line) as { type: string; url?: string; downloaded?: number; total?: number; bytes_per_second?: number; data?: AgentInstalledSkill[]; error?: string };
-					if (event.type === 'started') setDownloadProgress((current) => ({ downloaded: current?.downloaded || 0, total: current?.total || 0, bytesPerSecond: current?.bytesPerSecond || 0, url: event.url || current?.url || '' }));
-					if (event.type === 'progress') {
-						setDownloadProgress((current) => ({ downloaded: event.downloaded || 0, total: event.total || 0, bytesPerSecond: event.bytes_per_second || 0, url: current?.url || '' }));
-						const percent = event.total && event.total > 0 ? ` ${Math.min(100, Math.round((event.downloaded || 0) * 100 / event.total))}%` : '';
-						setMessage(`正在下载 GitHub Skill…${percent} · ${formatTransferRate(event.bytes_per_second || 0)}`);
+			await agent.run(async () => {
+				const response = await fetch(new URL('/api/v1/settings/agent/skills/install-git?progress=1', config.backendUrl), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}) }, body: JSON.stringify({ url: url.trim() }) });
+				if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+				const reader = response.body?.getReader();
+				if (!reader) throw new Error('浏览器不支持读取下载进度');
+				const decoder = new TextDecoder();
+				let pending = '';
+				let installed: AgentInstalledSkill[] = [];
+				while (true) {
+					const { value, done } = await reader.read();
+					pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+					const lines = pending.split('\n');
+					pending = lines.pop() || '';
+					for (const line of lines) {
+						if (!line.trim()) continue;
+						const event = JSON.parse(line) as { type: string; url?: string; downloaded?: number; total?: number; bytes_per_second?: number; data?: AgentInstalledSkill[]; error?: string };
+						if (event.type === 'started') setDownloadProgress((current) => ({ downloaded: current?.downloaded || 0, total: current?.total || 0, bytesPerSecond: current?.bytesPerSecond || 0, url: event.url || current?.url || '' }));
+						if (event.type === 'progress') {
+							setDownloadProgress((current) => ({ downloaded: event.downloaded || 0, total: event.total || 0, bytesPerSecond: event.bytes_per_second || 0, url: current?.url || '' }));
+							const percent = event.total && event.total > 0 ? ` ${Math.min(100, Math.round((event.downloaded || 0) * 100 / event.total))}%` : '';
+							setMessage(`正在下载 GitHub Skill…${percent} · ${formatTransferRate(event.bytes_per_second || 0)}`);
+						}
+						if (event.type === 'processing') setMessage('下载完成，正在安装 Skill…');
+						if (event.type === 'error') throw new Error(event.error || '安装 GitHub Skill 失败');
+						if (event.type === 'complete') installed = event.data || [];
 					}
-					if (event.type === 'processing') setMessage('下载完成，正在安装 Skill…');
-					if (event.type === 'error') throw new Error(event.error || '安装 GitHub Skill 失败');
-					if (event.type === 'complete') installed = event.data || [];
+					if (done) break;
 				}
-				if (done) break;
-			}
-			const refreshed = await requestJSON<{ data: AgentSettings }>(config, '/api/v1/settings/agent');
-			setSkills(refreshed.data.skills || []);
-			setGitURL('');
-			setState('saved');
-			setMessage(`已从 GitHub 安装 ${installed.length} 个 Skill。`);
+				await agent.refreshSkills();
+				setGitURL('');
+				setState('saved');
+				setMessage(`已从 GitHub 安装 ${installed.length} 个 Skill。`);
+			});
 		} catch (error) {
 			setState('error');
 			setMessage(error instanceof Error ? error.message : '安装 GitHub Skill 失败');
@@ -154,16 +140,17 @@ export function AgentSettingsPanel({ config, open }: Props) {
 	const marketInstalled = (entry: AgentSkillMarketEntry) => skills.some((skill) => skill.name === entry.path.split('/').pop());
 
 	const deleteSkill = async (name: string) => {
-		if (!config) return;
+		if (!config || !agent.ready || agent.busy || disabled) return;
 		if (!window.confirm(`确定删除 Skill「${name}」？将同时移除本机 Skill 文件。`)) return;
 		setState('saving');
 		setMessage('');
 		try {
-			await requestJSON(config, '/api/v1/settings/agent/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-			const refreshed = await requestJSON<{ data: AgentSettings }>(config, '/api/v1/settings/agent');
-			setSkills(refreshed.data.skills || []);
-			setState('saved');
-			setMessage(`已删除 Skill「${name}」。`);
+			await agent.run(async () => {
+				await requestJSON(config, '/api/v1/settings/agent/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+				await agent.refreshSkills();
+				setState('saved');
+				setMessage(`已删除 Skill「${name}」。`);
+			});
 		} catch (error) {
 			setState('error');
 			setMessage(error instanceof Error ? error.message : '删除 Skill 失败');
@@ -171,22 +158,20 @@ export function AgentSettingsPanel({ config, open }: Props) {
 	};
 
 	const save = async () => {
-		if (!config) return;
+		if (!config || !agent.ready || agent.busy || disabled) return;
 		setState('saving');
 		setMessage('');
 		try {
-			const payload = await requestJSON<{ data: AgentSettings }>(config, '/api/v1/settings/agent', {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					skills: skills.map(({ name, enabled }) => ({ name, enabled })),
-					mcp_servers: servers.map(toMCPUpdate),
-				}),
+			await agent.run(async () => {
+				const payload = await requestJSON<{ data: AgentSettings }>(config, '/api/v1/settings/agent', {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(agent.update),
+				});
+				agent.acceptSaved(payload.data);
+				setState('saved');
+				setMessage('Skill 与 MCP 设置已同步到本机 Agent；MCP 会自动重新加载。');
 			});
-			setSkills(payload.data.skills || []);
-			setServers((payload.data.mcp_servers || []).map(toMCPDraft));
-			setState('saved');
-			setMessage('Skill 与 MCP 设置已同步到本机 Agent；MCP 会自动重新加载。');
 		} catch (error) {
 			setState('error');
 			setMessage(error instanceof Error ? error.message : '保存 Skill/MCP 设置失败');
@@ -195,7 +180,9 @@ export function AgentSettingsPanel({ config, open }: Props) {
 
 	return (
 		<SettingsSection className="agent-agent-settings" title="Skill 与 MCP" description="控制 Agent 可加载的本机技能，并连接 stdio、Streamable HTTP 或 SSE MCP Server。" icon={<Puzzle size={18} />} onKeyDown={(event) => { if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault(); }}>
-			{state === 'loading' ? <div className="agent-settings-loading"><LoaderCircle className="spin" size={18} />读取 Agent 能力配置</div> : <>
+			{agent.loadError && <div role="alert" className="agent-settings-load-error"><span>{agent.loadError}</span><button type="button" disabled={agent.loading || agent.busy || disabled} onClick={() => void agent.retry()}>重试读取 Skill/MCP</button></div>}
+			<fieldset className="agent-settings-fields" disabled={!agent.ready || agent.loading || agent.busy || disabled}>
+			{agent.loading ? <div className="agent-settings-loading"><LoaderCircle className="spin" size={18} />读取 Agent 能力配置</div> : <>
 				<div className="agent-settings-block">
 					<div className="agent-settings-heading"><div><strong>Skills</strong><span>{enabledSkillCount}/{skills.length} 个已启用</span></div><div className="agent-settings-heading-actions"><label><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill" /></label><button type="button" onClick={() => directoryInput.current?.click()}><Plus size={14} />导入目录</button><button type="button" onClick={() => zipInput.current?.click()}><Plus size={14} />导入 ZIP</button><input ref={directoryInput} type="file" hidden multiple {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} onChange={(event) => void importSkills(event.target.files)} /><input ref={zipInput} type="file" hidden accept=".zip,application/zip" onChange={(event) => void importSkills(event.target.files)} /></div></div>
 					<div className="skill-git-import"><input value={gitURL} onChange={(event) => setGitURL(event.target.value)} placeholder="GitHub 仓库地址，例如 https://github.com/openai/skills" /><button type="button" disabled={!gitURL.trim() || state === 'saving'} onClick={() => void installGitSkill()}><Plus size={14} />从 GitHub 安装</button>{gitURL.trim() && <a className="skill-git-link" href={gitURL.trim()} target="_blank" rel="noreferrer" title="打开 GitHub 页面"><ExternalLink size={14} />查看页面</a>}</div>
@@ -216,7 +203,9 @@ export function AgentSettingsPanel({ config, open }: Props) {
 					</div>
 				</div>
 			</>}
-			<div className={`agent-settings-footer ${state}`}><span>{state === 'saved' ? <CheckCircle2 size={14} /> : state === 'error' ? <CircleAlert size={14} /> : <ShieldCheck size={14} />}{message || 'MCP 环境变量和请求头按密钥处理，页面不会取回已保存的原文。'}</span><button type="button" onClick={() => void save()} disabled={!config || state === 'loading' || state === 'saving'}>{state === 'saving' ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}保存 Skill/MCP</button></div>
+			{agent.dirty && <p className="settings-field-note" role="status">Skill/MCP 配置已修改，点击“保存设置”或“仅保存 Skill/MCP”后生效。</p>}
+			<div className={`agent-settings-footer ${state}`}><span>{state === 'saved' ? <CheckCircle2 size={14} /> : state === 'error' ? <CircleAlert size={14} /> : <ShieldCheck size={14} />}{message || 'MCP 环境变量和请求头按密钥处理，页面不会取回已保存的原文。'}</span><button type="button" onClick={() => void save()} disabled={!config || !agent.ready || agent.loading || agent.busy || disabled}>{state === 'saving' ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}仅保存 Skill/MCP</button></div>
+			</fieldset>
 		</SettingsSection>
 	);
 }
@@ -242,10 +231,6 @@ function SecretMapEditor({ label, entries, onChange, onAdd, onRemove }: { label:
 	return <div className="mcp-secret-map"><div><span>{label}</span><button type="button" onClick={onAdd}><Plus size={12} />添加</button></div>{entries.map((entry) => <div className={`mcp-secret-row ${entry.remove ? 'removed' : ''}`} key={entry.id}><input value={entry.key} onChange={(event) => onChange(entry.id, { key: event.target.value })} placeholder="KEY" disabled={entry.configured} /><input type="password" value={entry.value} onChange={(event) => onChange(entry.id, { value: event.target.value, remove: false })} placeholder={entry.configured ? `${entry.masked || '已配置'}（留空保留）` : 'VALUE'} disabled={entry.remove} /><button type="button" onClick={() => onRemove(entry.id)} aria-label={entry.remove ? `撤销删除 ${entry.key}` : `删除 ${entry.key || label}`}>{entry.remove ? '撤销' : <Trash2 size={13} />}</button></div>)}</div>;
 }
 
-function toMCPDraft(server: AgentMCPServerSetting): MCPDraft {
-	return { ...server, id: nextID('mcp'), originalName: server.name, transport: server.transport || 'stdio', argsText: (server.args || []).join('\n'), env: toSecretDrafts(server.env, 'env'), headers: toSecretDrafts(server.headers, 'header') };
-}
-
 function formatBytes(value: number): string {
 	if (!value || value < 1024) return `${Math.max(0, Math.round(value || 0))} B`;
 	const units = ['KB', 'MB', 'GB'];
@@ -257,30 +242,4 @@ function formatBytes(value: number): string {
 
 function formatTransferRate(value: number): string {
 	return value > 0 ? `${formatBytes(value)}/s` : '速度计算中';
-}
-
-function toSecretDrafts(values: Record<string, SecretSettingStatus> | undefined, prefix: string): SecretEntryDraft[] {
-	return Object.entries(values || {}).map(([key, status]) => ({ id: nextID(prefix), key, value: '', configured: status.configured, masked: status.masked, remove: false }));
-}
-
-export function splitMCPArgs(value: string): string[] {
-	return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-}
-
-function protectedMapUpdate(entries: SecretEntryDraft[]) {
-	const updates: Record<string, string> = {};
-	const clear: string[] = [];
-	for (const entry of entries) {
-		const key = entry.key.trim();
-		if (!key) continue;
-		if (entry.remove) clear.push(key);
-		else if (entry.value.trim()) updates[key] = entry.value.trim();
-	}
-	return { updates, clear };
-}
-
-function toMCPUpdate(server: MCPDraft) {
-	const env = protectedMapUpdate(server.env);
-	const headers = protectedMapUpdate(server.headers);
-	return { name: server.name.trim(), original_name: server.originalName, enabled: server.enabled, transport: server.transport, command: (server.command || '').trim(), args: splitMCPArgs(server.argsText), env: env.updates, clear_env: env.clear, url: (server.url || '').trim(), headers: headers.updates, clear_headers: headers.clear, timeout: server.timeout || 0, connect_timeout: server.connect_timeout || 0, supports_parallel_tool_calls: Boolean(server.supports_parallel_tool_calls) };
 }

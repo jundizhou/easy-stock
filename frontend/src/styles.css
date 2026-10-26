@@ -3506,6 +3506,9 @@ a:focus-visible {
 .agent-settings-footer > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto; min-height: 36px; padding: 0 12px; border: 1px solid var(--theme-blue-line, #2476d2); border-radius: 8px; background: var(--theme-blue-solid, #2476d2); color: var(--theme-on-emphasis, #ffffff); font-size: var(--fs-body); font-weight: 700; cursor: pointer; }
 .agent-settings-footer > button:hover:not(:disabled) { background: var(--theme-blue-solid, #1d67ba); }
 .agent-settings-footer > button:disabled { opacity: .55; cursor: default; }
+.settings-form-fields, .agent-settings-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.settings-form-fields, .agent-settings-fields { display: grid; align-content: start; gap: 16px; }
+.agent-settings-load-error { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--theme-red, #bc303a); }
 .agent-settings-footer.saved { border-color: var(--theme-green-line, #b9dfd0); background: var(--theme-surface-soft, #f1fbf7); }
 .agent-settings-footer.saved > span,
 .agent-settings-footer.saved > span > svg { color: var(--theme-green, #167653); }

@@ -11,7 +11,7 @@ import (
 // PrepareSettings holds the runtime selection lock until the settings store
 // commits. Failed projections or persistence restore both files and memory.
 // On restart, settings.json remains authoritative for the active profile/runtime.
-func (s *Service) PrepareSettings(next appsettings.Values, keys map[string]*string, activeKey *string) (func(bool) error, error) {
+func (s *Service) PrepareSettings(next appsettings.Values, keys map[string]*string, activeKey *string, updateAgent func(AgentSettings) (AgentSettings, error)) (func(bool) error, error) {
 	s.mu.Lock()
 	finish, err := s.configurationRollback()
 	if err != nil {
@@ -36,7 +36,18 @@ func (s *Service) PrepareSettings(next appsettings.Values, keys map[string]*stri
 	if key, ok := keys[next.ActiveLLMProfileID]; ok {
 		activeKey = key
 	}
-	if err = s.HermesRuntime.SyncLLMProfile(next.LLM, next.ActiveLLMProfileID, activeKey); err == nil {
+	err = s.HermesRuntime.SyncLLMProfile(next.LLM, next.ActiveLLMProfileID, activeKey)
+	if err == nil && updateAgent != nil {
+		var current AgentSettings
+		current, err = s.HermesRuntime.AgentSettings()
+		if err == nil {
+			current, err = updateAgent(current)
+		}
+		if err == nil {
+			err = s.HermesRuntime.SyncAgentSettings(current)
+		}
+	}
+	if err == nil {
 		err = s.codex.SyncConfiguration()
 	}
 	if err != nil {
