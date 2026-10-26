@@ -2,15 +2,79 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/notification"
 )
+
+func TestSettingsSaveIncludesNotificationsAndPreservesSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s := NewServer(Config{SettingsPath: path})
+	defer s.Close()
+	input := `{"llm":{"response_timeout_seconds":600},"notifications":{"feishu":{"enabled":true,"webhook":"https://open.feishu.cn/open-apis/bot/v2/hook/private-issue37","secret":"private-signature","keyword":"研究"},"dingtalk":{"enabled":false},"events":{"task_failed":false}}}`
+	rec := notificationRequest(s, http.MethodPut, "/api/v1/settings", input)
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "private-") {
+		t.Fatalf("global save failed or leaked credentials: %d %s", rec.Code, rec.Body.String())
+	}
+	var response struct{ Data settingsView }
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Data.Notifications.Feishu.Enabled || !response.Data.Notifications.Feishu.Webhook.Configured || !response.Data.Notifications.Feishu.Secret.Configured || response.Data.Notifications.Events.TaskFailed {
+		t.Fatalf("unexpected notification status: %+v", response.Data.Notifications)
+	}
+	reopened, err := appsettings.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := reopened.Snapshot()
+	if saved.LLM.ResponseTimeoutSeconds != 600 || saved.Notifications.Feishu.Secret != "private-signature" || saved.Notifications.Feishu.Keyword != "研究" || !saved.Notifications.Events.StockResearch {
+		t.Fatal("global save did not persist settings and notifications together")
+	}
+	// Saving unrelated settings and masked fields must preserve existing credentials.
+	for _, body := range []string{`{"llm":{"response_timeout_seconds":300}}`, `{"notifications":{"feishu":{"webhook":"","secret":""}}}`} {
+		rec = notificationRequest(s, http.MethodPut, "/api/v1/settings", body)
+		if rec.Code != 200 || s.settingsStore.Snapshot().Notifications != saved.Notifications {
+			t.Fatalf("credentials changed: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	rec = notificationRequest(s, http.MethodPut, "/api/v1/settings", `{"notifications":{"feishu":{"enabled":false},"dingtalk":{"enabled":false}}}`)
+	if rec.Code != 200 || s.settingsStore.Snapshot().Notifications.Feishu.Enabled || s.settingsStore.Snapshot().Notifications.Dingtalk.Enabled {
+		t.Fatal("disabled state was not saved")
+	}
+	rec = notificationRequest(s, http.MethodPut, "/api/v1/settings", `{"notifications":{"feishu":{"enabled":false,"clear_webhook":true,"clear_secret":true}}}`)
+	if rec.Code != 200 || s.settingsStore.Snapshot().Notifications.Feishu.Webhook != "" || s.settingsStore.Snapshot().Notifications.Feishu.Secret != "" {
+		t.Fatal("explicit clearing failed")
+	}
+}
+
+func TestSettingsNotificationsValidationIsAtomic(t *testing.T) {
+	s := NewServer(Config{SettingsPath: filepath.Join(t.TempDir(), "settings.json")})
+	defer s.Close()
+	before := s.settingsStore.Snapshot()
+	for _, body := range []string{
+		`{"llm":{"response_timeout_seconds":600},"notifications":{"feishu":{"enabled":true}}}`,
+		`{"notifications":{"feishu":{"keyword":"valid"},"dingtalk":{"webhook":"https://127.0.0.1/private-token"}}}`,
+		`{"notifications":{"feishu":{"keyword":"line\nbreak"}}}`,
+		`{"notifications":{"feishu":{"private-token":true}}}`,
+		`{"agent_runtime":"codex","notifications":{"feishu":{"keyword":"must-not-persist"}}}`,
+	} {
+		rec := notificationRequest(s, http.MethodPut, "/api/v1/settings", body)
+		if rec.Code != 400 || strings.Contains(rec.Body.String(), "private-token") {
+			t.Fatalf("invalid save accepted or leaked credential: %d %s", rec.Code, rec.Body.String())
+		}
+		if !reflect.DeepEqual(before, s.settingsStore.Snapshot()) {
+			t.Fatal("failed save partially updated settings")
+		}
+	}
+}
 
 type fakeNotificationSender struct {
 	calls   int

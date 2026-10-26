@@ -1,7 +1,7 @@
 import { Bell, CheckCircle2, CircleAlert, Eye, EyeOff, LoaderCircle, Save, Send, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { BackendConfig, NotificationSettings, requestJSON } from '../lib/backend';
-import { emptyNotifications, notificationSettingsChangedEvent, notificationDraft, notificationUpdate, NotificationChannel, NotificationDraft } from '../lib/notifications';
+import { BackendConfig, requestJSON } from '../lib/backend';
+import { notificationUpdate, NotificationChannel, NotificationDraft, NotificationsDraft } from '../lib/notifications';
 import { SettingsSection } from './SettingsSection';
 
 const channelDefinitions = {
@@ -9,60 +9,32 @@ const channelDefinitions = {
 	dingtalk: { label: '钉钉', placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=…', help: '在钉钉群机器人管理中添加自定义机器人，复制 Webhook；使用加签时填写 SEC 开头的密钥。' },
 };
 
-export function NotificationSettingsPanel({ config }: { config: BackendConfig | null }) {
-	const [drafts, setDrafts] = useState<Record<NotificationChannel, NotificationDraft>>(() => {
-		const values = emptyNotifications();
-		return { feishu: notificationDraft(values.feishu), dingtalk: notificationDraft(values.dingtalk) };
-	});
-	const [revision, setRevision] = useState(0);
- const [events, setEvents] = useState(emptyNotifications().events);
-	const [state, setState] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading');
-	const [loaded, setLoaded] = useState(false);
-	const [message, setMessage] = useState('');
+type Props = {
+	config: BackendConfig | null;
+	draft: NotificationsDraft;
+	revision: number;
+	disabled: boolean;
+	onChange: (draft: NotificationsDraft) => void;
+	onSave: () => void;
+	onTestingChange: (testing: boolean) => void;
+};
+
+export function NotificationSettingsPanel({ config, draft: drafts, revision, disabled, onChange, onSave, onTestingChange }: Props) {
+	const events = drafts.events;
 	const [testing, setTesting] = useState<NotificationChannel | null>(null);
 	const [testResults, setTestResults] = useState<Partial<Record<NotificationChannel, { ok: boolean; message: string }>>>({});
-
-	const loadValues = (values: NotificationSettings) => {
-  setRevision((value) => value + 1);
-		setDrafts({ feishu: notificationDraft(values.feishu), dingtalk: notificationDraft(values.dingtalk) });
-		setEvents(values.events);
-	};
-
+	useEffect(() => { setTestResults({}); }, [revision]);
 	useEffect(() => {
-		if (!config) return;
-		let cancelled = false;
-		setState('loading');
-		setLoaded(false);
-		requestJSON<{ data: NotificationSettings }>(config, '/api/v1/settings/notifications')
-			.then(({ data }) => { if (!cancelled) { loadValues(data); setState('ready'); setLoaded(true); } })
-			.catch((error) => { if (!cancelled) { setState('error'); setMessage(error instanceof Error ? error.message : '读取通知配置失败'); } });
-		return () => { cancelled = true; };
-	}, [config]);
+		onTestingChange(testing !== null);
+		return () => onTestingChange(false);
+	}, [testing, onTestingChange]);
 
-	const busy = state === 'loading' || state === 'saving' || testing !== null;
+	const busy = disabled || testing !== null;
 	const update = (channel: NotificationChannel, patch: Partial<NotificationDraft>) => {
-		setDrafts((current) => ({ ...current, [channel]: { ...current[channel], ...patch } }));
-		setMessage('');
+		onChange({ ...drafts, [channel]: { ...drafts[channel], ...patch } });
 		setTestResults((current) => ({ ...current, [channel]: undefined }));
 	};
-	const save = async () => {
-		if (!config) return;
-		setState('saving');
-		setMessage('');
-		try {
-			const { data } = await requestJSON<{ data: NotificationSettings }>(config, '/api/v1/settings/notifications', {
-				method: 'PUT', headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ feishu: notificationUpdate(drafts.feishu), dingtalk: notificationUpdate(drafts.dingtalk), events }),
-			});
-			loadValues(data);
-			setState('ready');
-			setMessage('通知配置已保存');
-   window.dispatchEvent(new Event(notificationSettingsChangedEvent));
-		} catch (error) {
-			setState('error');
-			setMessage(error instanceof Error ? error.message : '保存通知配置失败');
-		}
-	};
+	const setEvents = (events: NotificationsDraft['events']) => onChange({ ...drafts, events });
 	const test = async (channel: NotificationChannel) => {
 		if (!config) return;
 		setTesting(channel);
@@ -87,14 +59,13 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
  };
 
 	return <SettingsSection title="钉钉与飞书机器人" description="通过飞书、钉钉群机器人接收个股研究和持仓巡检结果。" icon={<Bell size={18} />}>
-		{state === 'loading' && <div className="agent-settings-loading"><LoaderCircle className="spin" size={18} />读取通知配置</div>}
-		<fieldset className="notification-settings-fields" disabled={!loaded || busy}>
+		<fieldset className="notification-settings-fields" disabled={!config || busy}>
 			{(['feishu', 'dingtalk'] as const).map((channel) => {
 				const definition = channelDefinitions[channel];
 				const draft = drafts[channel];
 				const result = testResults[channel];
 				return <article className="notification-channel-card" key={channel}>
-					<header><div><strong>{definition.label}机器人</strong><small>{draft.webhook.configured && !draft.clear_webhook ? '已配置 Webhook' : '尚未配置 Webhook'}</small></div><label className="notification-toggle"><input type="checkbox" checked={draft.enabled} onChange={(event) => update(channel, { enabled: event.target.checked })} /><span>启用通知</span></label></header>
+					<header><div><strong>{definition.label}机器人</strong><small>{draft.clear_webhook ? 'Webhook 待清除' : draft.webhook_value.trim() ? 'Webhook 修改待保存' : draft.webhook.configured ? '已配置 Webhook' : '尚未配置 Webhook'}</small></div><label className="notification-toggle"><input type="checkbox" checked={draft.enabled} onChange={(event) => update(channel, { enabled: event.target.checked })} /><span>启用通知</span></label></header>
 					<p>{definition.help}</p>
 					<NotificationSecretField key={`${channel}-webhook-${revision}`} readSavedValue={(signal) => readSavedValue(channel, 'webhook', signal)} label={`${definition.label} Webhook`} value={draft.webhook_value} configured={draft.webhook.configured} clearing={draft.clear_webhook} placeholder={definition.placeholder} onChange={(value) => update(channel, { webhook_value: value, clear_webhook: false })} onClear={() => update(channel, { clear_webhook: !draft.clear_webhook, webhook_value: '', enabled: false })} />
 					<NotificationSecretField key={`${channel}-secret-${revision}`} readSavedValue={(signal) => readSavedValue(channel, 'secret', signal)} label={`${definition.label}签名密钥（可选）`} value={draft.secret_value} configured={draft.secret.configured} clearing={draft.clear_secret} placeholder="未开启签名校验时留空" onChange={(value) => update(channel, { secret_value: value, clear_secret: false })} onClear={() => update(channel, { clear_secret: !draft.clear_secret, secret_value: '' })} />
@@ -104,8 +75,8 @@ export function NotificationSettingsPanel({ config }: { config: BackendConfig | 
 			})}
 			<div className="notification-events"><strong>通知事件</strong><label className="notification-toggle"><input type="checkbox" checked={events.stock_research} onChange={(event) => setEvents({ ...events, stock_research: event.target.checked })} /><span>个股 AI 研究完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.portfolio_inspection} onChange={(event) => setEvents({ ...events, portfolio_inspection: event.target.checked })} /><span>手动持仓 AI 巡检完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.task_failed} onChange={(event) => setEvents({ ...events, task_failed: event.target.checked })} /><span>同时提醒所选任务失败或未完成</span></label></div>
 		</fieldset>
-		<p className="settings-field-note">两个机器人默认勾选启用，填写 Webhook 并保存后生效。Webhook 和签名密钥仅保存在本机，留空保留原值。个股研究和持仓巡检均发送完整 Markdown 结果（不含具体证据），失败或未完成时发送已生成结果，长报告自动分段；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
-		<div className={`agent-settings-footer ${state === 'error' ? 'error' : ''}`}><span role={state === 'error' ? 'alert' : 'status'}>{message || '通知配置单独保存，两个渠道可同时启用。'}</span><button type="button" onClick={() => void save()} disabled={!config || !loaded || busy}>{state === 'saving' ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}保存通知配置</button></div>
+		<p className="settings-field-note">填写 Webhook、勾选启用通知并保存后生效；两个渠道可同时启用，关闭状态也会保留。Webhook 和签名密钥仅保存在本机，留空保留原值。个股研究和持仓巡检均发送完整 Markdown 结果（不含具体证据），失败或未完成时发送已生成结果，长报告自动分段；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
+		<div className="agent-settings-footer"><span>通知配置会随右下角“保存设置”一起保存，也可单独保存。</span><button type="button" onClick={onSave} disabled={!config || busy}><Save size={15} />仅保存通知配置</button></div>
 	</SettingsSection>;
 }
 

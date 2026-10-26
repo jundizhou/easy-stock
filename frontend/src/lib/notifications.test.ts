@@ -2,14 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { emptyNotifications, notificationDraft, notificationUpdate } from './notifications';
 
 describe('notification credential updates', () => {
- it('defaults unconfigured robots to checked but does not enable an empty webhook on save', () => {
-  expect(emptyNotifications().feishu.enabled).toBe(true);
-  expect(emptyNotifications().dingtalk.enabled).toBe(true);
+ it('preserves disabled robots even when they have no webhook', () => {
+  expect(emptyNotifications().feishu.enabled).toBe(false);
+  expect(emptyNotifications().dingtalk.enabled).toBe(false);
   const draft = notificationDraft({ ...emptyNotifications().feishu, enabled: false });
-  expect(draft.enabled).toBe(true);
+  expect(draft.enabled).toBe(false);
   expect(notificationUpdate(draft).enabled).toBe(false);
   draft.webhook_value = 'https://open.feishu.cn/open-apis/bot/v2/hook/example';
+  expect(notificationUpdate(draft).enabled).toBe(false);
+  draft.enabled = true;
   expect(notificationUpdate(draft).enabled).toBe(true);
+ });
+ it('keeps an explicit enable request so the server can report a missing webhook', () => {
+  const draft = notificationDraft(emptyNotifications().feishu);
+  draft.enabled = true;
+  expect(notificationUpdate(draft).enabled).toBe(true);
+  draft.clear_webhook = true;
+  expect(notificationUpdate(draft).enabled).toBe(false);
  });
  it('preserves a configured robot that was explicitly disabled', () => {
   const draft = notificationDraft({ ...emptyNotifications().dingtalk, enabled: false, webhook: { configured: true } });

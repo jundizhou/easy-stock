@@ -92,9 +92,10 @@ type reviewSourceProfileUpdate struct {
 }
 
 type settingsUpdateRequest struct {
-	AgentRuntime       *string             `json:"agent_runtime"`
-	LLMProfiles        *[]llmProfileUpdate `json:"llm_profiles"`
-	ActiveLLMProfileID *string             `json:"active_llm_profile_id"`
+	Notifications      *notificationsUpdate `json:"notifications"`
+	AgentRuntime       *string              `json:"agent_runtime"`
+	LLMProfiles        *[]llmProfileUpdate  `json:"llm_profiles"`
+	ActiveLLMProfileID *string              `json:"active_llm_profile_id"`
 	LLM                struct {
 		Provider               *string `json:"provider"`
 		BaseURL                *string `json:"base_url"`
@@ -126,7 +127,8 @@ func (s *Server) settingsUpdate(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	var request settingsUpdateRequest
 	if err := decoder.Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid settings request: "+err.Error())
+		// A decoder error may echo a credential supplied as an unknown field.
+		writeError(w, http.StatusBadRequest, "设置请求格式无效")
 		return
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
@@ -167,6 +169,13 @@ func (s *Server) settingsUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values, err := s.settingsStore.UpdatePrepared(func(values *appsettings.Values) error {
+		if request.Notifications != nil {
+			var err error
+			values.Notifications, err = applyNotifications(values.Notifications, *request.Notifications)
+			if err != nil {
+				return err
+			}
+		}
 		previousModel, previousRuntime := values.LLM, values.AgentRuntime
 		if request.AgentRuntime != nil {
 			values.AgentRuntime = *request.AgentRuntime
@@ -324,6 +333,10 @@ func (s *Server) settingsUpdate(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
+		if errors.Is(err, errInvalidNotifications) {
+			writeError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), errInvalidNotifications.Error()+": "))
+			return
+		}
 		if errors.Is(err, agent.ErrModelProtocolUnsupported) || strings.Contains(err.Error(), "运行引擎") || strings.Contains(err.Error(), "运行时不可用") || errors.Is(err, agent.ErrProtocolUnconfirmed) {
 			status = http.StatusBadRequest
 		}

@@ -51,6 +51,33 @@ type notificationEventsUpdate struct {
 	TaskFailed          *bool `json:"task_failed"`
 }
 
+var errInvalidNotifications = errors.New("invalid notifications")
+
+// Both save endpoints use the same validation inside the settings transaction.
+func applyNotifications(values appsettings.Notifications, update notificationsUpdate) (appsettings.Notifications, error) {
+	var err error
+	values.Feishu, err = applyNotificationChannel("feishu", values.Feishu, update.Feishu)
+	if err != nil {
+		return values, fmt.Errorf("%w: 飞书：%s", errInvalidNotifications, err)
+	}
+	values.Dingtalk, err = applyNotificationChannel("dingtalk", values.Dingtalk, update.Dingtalk)
+	if err != nil {
+		return values, fmt.Errorf("%w: 钉钉：%s", errInvalidNotifications, err)
+	}
+	if update.Events != nil {
+		if update.Events.StockResearch != nil {
+			values.Events.StockResearch = *update.Events.StockResearch
+		}
+		if update.Events.PortfolioInspection != nil {
+			values.Events.PortfolioInspection = *update.Events.PortfolioInspection
+		}
+		if update.Events.TaskFailed != nil {
+			values.Events.TaskFailed = *update.Events.TaskFailed
+		}
+	}
+	return values, nil
+}
+
 func buildNotificationsView(values appsettings.Notifications) notificationsView {
 	channelView := func(cfg appsettings.NotificationChannel) notificationChannelView {
 		return notificationChannelView{Enabled: cfg.Enabled, Webhook: secretSettingStatus{Configured: cfg.Webhook != ""}, Secret: secretSettingStatus{Configured: cfg.Secret != ""}, Keyword: cfg.Keyword}
@@ -113,33 +140,14 @@ func (s *Server) settingsNotificationsUpdate(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	invalid := errors.New("invalid notifications")
 	values, err := s.settingsStore.Update(func(values *appsettings.Values) error {
 		var err error
-		values.Notifications.Feishu, err = applyNotificationChannel("feishu", values.Notifications.Feishu, request.Feishu)
-		if err != nil {
-			return fmt.Errorf("%w: %s", invalid, err)
-		}
-		values.Notifications.Dingtalk, err = applyNotificationChannel("dingtalk", values.Notifications.Dingtalk, request.Dingtalk)
-		if err != nil {
-			return fmt.Errorf("%w: %s", invalid, err)
-		}
-		if request.Events != nil {
-			if request.Events.StockResearch != nil {
-				values.Notifications.Events.StockResearch = *request.Events.StockResearch
-			}
-			if request.Events.PortfolioInspection != nil {
-				values.Notifications.Events.PortfolioInspection = *request.Events.PortfolioInspection
-			}
-			if request.Events.TaskFailed != nil {
-				values.Notifications.Events.TaskFailed = *request.Events.TaskFailed
-			}
-		}
-		return nil
+		values.Notifications, err = applyNotifications(values.Notifications, request)
+		return err
 	})
 	if err != nil {
-		if errors.Is(err, invalid) {
-			writeError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), invalid.Error()+": "))
+		if errors.Is(err, errInvalidNotifications) {
+			writeError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), errInvalidNotifications.Error()+": "))
 		} else {
 			writeError(w, http.StatusInternalServerError, "保存通知配置失败")
 		}

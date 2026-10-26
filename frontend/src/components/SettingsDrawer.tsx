@@ -27,6 +27,8 @@ import { AppUpdatePanel } from './AppUpdatePanel';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { SettingsSection } from './SettingsSection';
 import { NotificationSettingsPanel } from './NotificationSettingsPanel';
+import { notificationsDraft, notificationsUpdate, notificationSettingsChangedEvent, type NotificationsDraft } from '../lib/notifications';
+import type { NotificationSettings } from '../lib/backend';
 
 type Props = {
 	config: BackendConfig | null;
@@ -55,6 +57,9 @@ const emptySecrets = (): Record<SecretKey, string> => ({
 
 export function SettingsDrawer({ config, open, initialSection, onClose, onSaved }: Props) {
 	const [settings, setSettings] = useState<AppSettings | null>(null);
+	const [notifications, setNotifications] = useState<NotificationsDraft | null>(null);
+	const [notificationRevision, setNotificationRevision] = useState(0);
+	const [notificationTesting, setNotificationTesting] = useState(false);
 	const [agentRuntime, setAgentRuntime] = useState('hermes');
 	const [llmProfiles, setLLMProfiles] = useState<LLMProfile[]>([]);
 	const [activeLLMProfileID, setActiveLLMProfileID] = useState('');
@@ -119,6 +124,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		let cancelled = false;
 		modelFetchSequence.current += 1;
 		setState('loading');
+		setNotifications(null);
 		setMessage('');
 		setTestState('idle');
 		setTestResult(null);
@@ -130,6 +136,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 			.then((payload) => {
 				if (cancelled) return;
 				setSettings(payload.data);
+				loadNotifications(payload.data.notifications);
 		setAgentRuntime(payload.data.agent_runtime || 'hermes');
 				const modelProfiles = normalizeLLMProfiles(payload.data);
 				setLLMProfiles(modelProfiles);
@@ -422,8 +429,37 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		return payload.data.api_key;
 	};
 
+	const loadNotifications = (values: NotificationSettings | undefined) => {
+		setNotifications(values ? notificationsDraft(values) : null);
+		setNotificationRevision((value) => value + 1);
+	};
+	const changeNotifications = (draft: NotificationsDraft) => {
+		setNotifications(draft);
+		setState('idle');
+		setMessage('通知配置已修改，尚未保存。');
+	};
+
+	const saveNotifications = async () => {
+		if (!config || !notifications || state === 'saving' || notificationTesting) return;
+		setState('saving');
+		setMessage('');
+		try {
+			const { data } = await requestJSON<{ data: NotificationSettings }>(config, '/api/v1/settings/notifications', {
+				method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(notificationsUpdate(notifications)),
+			});
+			loadNotifications(data);
+			setState('saved');
+			setMessage('通知配置已保存，其他设置修改仍需点击“保存设置”。');
+			window.dispatchEvent(new Event(notificationSettingsChangedEvent));
+		} catch (error) {
+			setState('error');
+			setMessage(error instanceof Error ? error.message : '保存通知配置失败');
+		}
+	};
+
 	const persistSettings = async () => {
 		if (!config) throw new Error('后端尚未连接');
+		if (!notifications) throw new Error('通知配置尚未读取成功，请重新打开设置后重试');
 		const credentials: Record<string, string> = {};
 		for (const key of ['tushare_token', 'ths_cookie', 'xueqiu_cookie', 'eastmoney_cookie'] as SecretKey[]) {
 			if (secrets[key].trim()) credentials[key] = secrets[key].trim();
@@ -435,9 +471,11 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		const payload = await requestJSON<{ data: AppSettings }>(config, '/api/v1/settings', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ agent_runtime: agentRuntime, llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
+			body: JSON.stringify({ notifications: notificationsUpdate(notifications), agent_runtime: agentRuntime, llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
 		});
 		setSettings(payload.data);
+		loadNotifications(payload.data.notifications);
+		window.dispatchEvent(new Event(notificationSettingsChangedEvent));
 		setAgentRuntime(payload.data.agent_runtime || 'hermes');
 		const savedProfiles = normalizeLLMProfiles(payload.data);
 		setLLMProfiles(savedProfiles);
@@ -456,7 +494,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
-		if (!config) return;
+		if (!config || !notifications || state === 'saving' || notificationTesting) return;
 		setState('saving');
 		setMessage('');
 		try {
@@ -472,7 +510,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	};
 
 	const testConnection = async () => {
-		if (!config) return;
+		if (!config || !notifications || state === 'saving' || notificationTesting) return;
 		setState('saving');
 		setMessage('正在保存设置并通过 Agent 调用模型探针');
 		setTestState('testing');
@@ -554,7 +592,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 							<label className="settings-timeout-field"><span>模型响应等待时间（秒）</span><input type="number" min={30} max={3600} step={30} value={responseTimeoutSeconds} onChange={(event) => setResponseTimeoutSeconds(Number(event.target.value) || defaultResponseTimeoutSeconds)} /><small>默认 300 秒，范围 30–3600 秒；模型长时间无响应时将等待更久再重试。</small></label>
 							<div className={`llm-connection-test ${testState}`}>
 								<div><PlugZap size={17} /><span><strong>{testState === 'success' ? 'Agent 模型连接可用' : testState === 'error' ? '连接测试未通过' : testState === 'testing' ? 'Agent 正在请求模型' : 'Agent 真实模型探针'}</strong><small>{testResult ? `${testResult.runtime === 'codex' ? 'Codex' : 'Hermes'} · ${testResult.model} · ${testResult.api_mode} · ${testResult.latency_ms}ms · ${testResult.response}` : '自动检测会发送一次简短的 Responses 请求；密钥或网络错误会保留原设置。保存后可测试当前引擎。'}</small></span></div>
-								<button type="button" onClick={testConnection} disabled={!config || state === 'saving' || testState === 'testing'}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>
+								<button type="button" onClick={testConnection} disabled={!config || !notifications || notificationTesting || state === 'saving' || testState === 'testing'}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>
 							</div>
 						</SettingsSection>
 
@@ -580,7 +618,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 							<SecretField label="东方财富 Cookie" secretKey="eastmoney_cookie" status={settings?.credentials.eastmoney_cookie} value={secrets.eastmoney_cookie} clearing={clearSecrets.has('eastmoney_cookie')} onChange={updateSecret} onClear={toggleClear} hint="当前公共行情不需要，预留登录态接口" />
 						</SettingsSection>
 
-						<div ref={notificationSectionRef}><NotificationSettingsPanel config={config} /></div>
+						<div ref={notificationSectionRef}>{notifications ? <NotificationSettingsPanel revision={notificationRevision} config={config} draft={notifications} disabled={state === 'saving' || testState === 'testing'} onChange={changeNotifications} onSave={() => void saveNotifications()} onTestingChange={setNotificationTesting} /> : <p role="alert">通知配置未读取成功，请重新打开设置后重试。</p>}</div>
 
 						<div ref={updateSectionRef}><AppUpdatePanel /></div>
 
@@ -594,7 +632,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 						<footer className="settings-footer">
 							<div className={`settings-message ${state}`} role={state === 'error' ? 'alert' : 'status'}>{state === 'saved' && <CheckCircle2 size={15} />}{state === 'error' && <CircleAlert size={15} />}<span>{message || '留空的模型密钥会保留已保存的值。'}</span></div>
 							<button type="button" onClick={onClose}>取消</button>
-							<button type="submit" className="settings-save" disabled={!config || state === 'saving' || testState === 'testing'}>{state === 'saving' ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存设置</button>
+							<button type="submit" className="settings-save" disabled={!config || !notifications || notificationTesting || state === 'saving' || testState === 'testing'}>{state === 'saving' ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存设置</button>
 						</footer>
 					</form>
 				)}
