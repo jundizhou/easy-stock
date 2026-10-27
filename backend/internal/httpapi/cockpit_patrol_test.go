@@ -141,7 +141,20 @@ func TestCockpitIndexQuotesSplitByMarket(t *testing.T) {
 
 func TestCockpitEndpointsReportRealStateWithoutFabrication(t *testing.T) {
 	settingsPath := filepath.Join(t.TempDir(), "settings.json")
-	server := NewServer(Config{SettingsPath: settingsPath, StrictPersistence: false})
+	// Exercise the real endpoint and patrol service with local market fixtures.
+	// Live providers can outlast cleanup on CI even when the endpoint is correct.
+	rows, _ := cockpitTemperatureRows(time.Now())
+	server := NewServer(Config{
+		SettingsPath: settingsPath, StrictPersistence: false,
+		MarketOverview:  &fakeMarketOverviewProvider{},
+		MonitorSnapshot: chainFakeSnapshot{rows: rows},
+		News:            stockAnalysisNews{},
+		LimitUp:         fakeLimitUpLadderProvider{},
+		MarketPools:     &countingMarketPoolProvider{},
+		Realtime:        fakeRealtimeProvider{},
+		KLinePrimary:    &countingEmotionKLineProvider{},
+		KLineFallback:   &countingEmotionKLineProvider{},
+	})
 	defer server.Close()
 	// The manual endpoint starts a background task. Finish it before TempDir cleanup.
 	defer func() {
