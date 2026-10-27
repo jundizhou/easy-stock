@@ -1,21 +1,17 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const MIN_HERMES_AGENT_VERSION = '0.21.3';
-const requestedHermesVersion = process.env.HERMES_AGENT_VERSION || MIN_HERMES_AGENT_VERSION;
-const requestedHermesVersionParts = requestedHermesVersion.split('.').map(Number);
-const minimumHermesVersionParts = MIN_HERMES_AGENT_VERSION.split('.').map(Number);
-const versionIsAtLeastMinimum = requestedHermesVersionParts.length === 3
-	&& requestedHermesVersionParts.every(Number.isFinite)
-	&& requestedHermesVersionParts[0] >= minimumHermesVersionParts[0]
-	&& (requestedHermesVersionParts[0] > minimumHermesVersionParts[0]
-		|| requestedHermesVersionParts[1] > minimumHermesVersionParts[1]
-		|| (requestedHermesVersionParts[1] === minimumHermesVersionParts[1] && requestedHermesVersionParts[2] >= minimumHermesVersionParts[2]));
-export const HERMES_AGENT_VERSION = versionIsAtLeastMinimum ? requestedHermesVersion : MIN_HERMES_AGENT_VERSION;
-export const HERMES_AGENT_TAG = (versionIsAtLeastMinimum && process.env.HERMES_AGENT_TAG) || 'v2026.9.14';
-export const HERMES_AGENT_SOURCE = process.env.HERMES_AGENT_SOURCE
-	|| `https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz`;
+export const HERMES_AGENT_VERSION = '0.22.5';
+export const HERMES_AGENT_TAG = 'v0.22.5';
+export const HERMES_AGENT_SOURCE = `https://codeload.github.com/NousResearch/hermes-agent/tar.gz/refs/tags/${HERMES_AGENT_TAG}`;
+export const HERMES_SOURCE_SHA256 = 'a8f67e5ec14fea681acef6cc7ff1553f002bb6101fd2df22bfdd4b7eecc54eb2';
+export const HERMES_SOURCE_FILES = {
+	'hermes_cli/__init__.py': '6a4ab05b8621ec1cd66a5abbe30fa32ed5bddddea95903036da01f0af1af94ce',
+	'tui_gateway/entry.py': 'e58c125e3b5d7b2cfd310cd9d63f77590baa170cba2eb7ce589eb7e7e82b5736',
+	'pyproject.toml': '68325d6717bd4ebc3a7b015c5150bea4d5600c612259b9b7393e964caa828761',
+};
 
 export function hermesRuntimePython(runtimeRoot, platform = process.platform) {
 	return platform === 'win32'
@@ -37,83 +33,104 @@ export function prepareHermesRuntime({
 	uv = process.env.UV || 'uv',
 } = {}) {
 	if (!runtimeRoot) throw new Error('runtimeRoot is required');
-	fs.rmSync(runtimeRoot, { recursive: true, force: true });
+	runtimeRoot = path.resolve(runtimeRoot);
 	fs.mkdirSync(path.dirname(runtimeRoot), { recursive: true });
-
+	const staging = fs.mkdtempSync(path.join(path.dirname(runtimeRoot), '.hermes-build-'));
+	const builtRoot = path.join(staging, 'runtime');
 	let mode = 'installed';
-	if (sourcePath) {
-		const resolvedSource = path.resolve(sourcePath);
-		if (!fs.existsSync(resolvedSource)) throw new Error(`Hermes runtime source not found: ${resolvedSource}`);
-		fs.cpSync(resolvedSource, runtimeRoot, { recursive: true });
-		rewriteCopiedSymlinks(runtimeRoot, resolvedSource);
-		mode = 'copied';
-	} else {
-		if (platform !== process.platform || arch !== process.arch) {
-			throw new Error('Hermes runtime must be prepared on the target platform and architecture');
+	try {
+		if (sourcePath) {
+			const resolvedSource = path.resolve(sourcePath);
+			if (!fs.existsSync(resolvedSource)) throw new Error(`Hermes runtime source not found: ${resolvedSource}`);
+			fs.cpSync(resolvedSource, builtRoot, { recursive: true });
+			rewriteCopiedSymlinks(builtRoot, resolvedSource);
+			mode = 'copied';
+		} else {
+			if (platform !== process.platform || arch !== process.arch) throw new Error('Hermes runtime must be prepared on the target platform and architecture');
+			fs.mkdirSync(builtRoot, { recursive: true });
+			const archive = path.join(staging, 'hermes.tar.gz');
+			if (process.env.HERMES_AGENT_ARCHIVE) fs.copyFileSync(process.env.HERMES_AGENT_ARCHIVE, archive);
+			else run('curl', ['-fsSL', '--retry', '4', '--retry-delay', '2', '--retry-all-errors', HERMES_AGENT_SOURCE, '-o', archive], staging);
+			const digest = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+			if (digest !== HERMES_SOURCE_SHA256) throw new Error('Hermes source archive checksum mismatch');
+			const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+			if (listing.status !== 0 || listing.stdout.split('\n').filter(Boolean).some((entry) => entry.startsWith('/') || entry.includes('\\') || entry.split('/').includes('..'))) throw new Error('Unsafe Hermes source archive');
+			const sourceRoot = path.join(builtRoot, 'source');
+			fs.mkdirSync(sourceRoot);
+			run('tar', ['-xzf', archive, '-C', sourceRoot, '--strip-components=1'], staging);
+			assertNoExternalSymlinks(sourceRoot);
+			const stamp = { schemaVersion: 2, commit: 'bf0203a794a', baseVersion: HERMES_AGENT_VERSION, displayVersion: HERMES_AGENT_VERSION, distance: 0, source: 'build', distribution: 'desktop-app', updateMechanism: 'external', payload: 'bootstrap' };
+			fs.writeFileSync(path.join(sourceRoot, 'install-stamp.json'), JSON.stringify(stamp) + '\n');
+			run(uv, ['venv', path.join(builtRoot, 'venv'), '--python', '3.14', '--managed-python', '--relocatable', '--link-mode', 'copy'], staging);
+			const venvPython = hermesVenvPython(builtRoot, platform);
+			const requirements = path.join(staging, 'requirements.txt');
+			run(uv, ['export', '--locked', '--no-emit-project', '--no-dev', '--extra', 'all', '--extra', 'anthropic', '--format', 'requirements-txt', '--output-file', requirements, '--quiet'], sourceRoot);
+			// The lock contains intentional overrides (e.g. Pillow); install the
+			// complete pinned set without re-resolving those upstream overrides.
+			run(uv, ['pip', 'install', '--python', venvPython, '--link-mode', 'copy', '--no-deps', '--require-hashes', '-r', requirements], staging);
+			if (platform === 'win32') {
+				const site = path.join(builtRoot, 'venv', 'Lib', 'site-packages');
+				fs.writeFileSync(path.join(site, 'hermes-source.pth'), '../../../source\n');
+			}
+			vendorRuntimePython(builtRoot, platform);
 		}
-		fs.mkdirSync(runtimeRoot, { recursive: true });
-		run(uv, ['venv', path.join(runtimeRoot, 'venv'), '--python', process.env.HERMES_RUNTIME_PYTHON || '3.11', '--managed-python', '--relocatable', '--link-mode', 'copy'], runtimeRoot);
-		const venvPython = hermesVenvPython(runtimeRoot, platform);
-		// 0.21.x is published from GitHub releases but is not available on PyPI.
-		// Install the exact tagged source archive so the desktop build follows the
-		// GitHub release instead of silently falling back to the older PyPI package.
-		const requestedPackage = process.env.HERMES_AGENT_PACKAGE || '';
-		const packageVersionMatch = requestedPackage.match(/==\s*(\d+)\.(\d+)\.(\d+)/);
-		const packageVersionIsSupported = !packageVersionMatch || versionAtLeast(
-			packageVersionMatch.slice(1).map(Number), minimumHermesVersionParts,
-		);
-		const packageSpec = requestedPackage && packageVersionIsSupported
-			? requestedPackage
-			: `hermes-agent[all] @ ${HERMES_AGENT_SOURCE}`;
-		run(uv, ['pip', 'install', '--python', venvPython, '--link-mode', 'copy', packageSpec], runtimeRoot, { HERMES_NIX_BUILD: '1' });
-		vendorRuntimePython(runtimeRoot, platform);
+		removePythonCaches(builtRoot);
+		assertNoExternalSymlinks(builtRoot);
+		materializeSymlinks(builtRoot);
+		const manifest = { schema_version: 2, package: 'hermes-agent', version: HERMES_AGENT_VERSION, source: HERMES_AGENT_SOURCE, source_sha256: HERMES_SOURCE_SHA256, mode, target_platform: platform, target_arch: arch, created_at: new Date().toISOString() };
+		fs.writeFileSync(path.join(builtRoot, 'runtime-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+		verifyHermesPython(builtRoot);
+		const previous = path.join(staging, 'previous');
+		const hadPrevious = fs.existsSync(runtimeRoot);
+		if (hadPrevious) fs.renameSync(runtimeRoot, previous);
+		try {
+			fs.renameSync(builtRoot, runtimeRoot);
+		} catch (error) {
+			if (hadPrevious) fs.renameSync(previous, runtimeRoot);
+			throw error;
+		}
+		return manifest;
+	} finally {
+		fs.rmSync(staging, { recursive: true, force: true });
 	}
-
-	removePythonCaches(runtimeRoot);
-	assertNoExternalSymlinks(runtimeRoot);
-	materializeSymlinks(runtimeRoot);
-	const python = hermesRuntimePython(runtimeRoot, platform);
-	if (!fs.existsSync(python)) throw new Error(`Hermes runtime Python not found: ${python}`);
-	run(python, ['-c', 'import hermes_cli, tui_gateway'], runtimeRoot, { PYTHONNOUSERSITE: '1' });
-	const installedVersion = readHermesVersion(python, runtimeRoot);
-	if (installedVersion !== HERMES_AGENT_VERSION) {
-		throw new Error(`Hermes runtime installed ${installedVersion}; expected ${HERMES_AGENT_VERSION}. Refusing to package a different version.`);
-	}
-	const manifest = {
-		schema_version: 1,
-		package: 'hermes-agent',
-		version: installedVersion,
-		source: HERMES_AGENT_SOURCE,
-		mode,
-		target_platform: platform,
-		target_arch: arch,
-		created_at: new Date().toISOString(),
-	};
-	fs.writeFileSync(path.join(runtimeRoot, 'runtime-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-	return manifest;
 }
 
-function versionAtLeast(actual, minimum) {
-	for (let index = 0; index < minimum.length; index += 1) {
-		if (actual[index] !== minimum[index]) return actual[index] > minimum[index];
+export function verifyHermesSource(runtimeRoot, expectedFiles = HERMES_SOURCE_FILES) {
+	for (const [name, expected] of Object.entries(expectedFiles)) {
+		const file = path.join(runtimeRoot, 'source', name);
+		if (!fs.existsSync(file) || createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== expected) throw new Error(`Hermes source verification failed: ${name}`);
 	}
-	return true;
+	const stamp = JSON.parse(fs.readFileSync(path.join(runtimeRoot, 'source', 'install-stamp.json'), 'utf8'));
+	if (stamp.baseVersion !== HERMES_AGENT_VERSION) throw new Error(`Hermes source version ${stamp.baseVersion}; expected ${HERMES_AGENT_VERSION}`);
+	return stamp.baseVersion;
 }
 
-function readHermesVersion(python, cwd) {
-	const script = 'import importlib.metadata as metadata; print(metadata.version("hermes-agent"))';
-	const result = spawnSync(python, ['-c', script], {
-		cwd,
-		encoding: 'utf8',
-		env: { ...process.env, PYTHONNOUSERSITE: '1' },
-	});
+export function verifyHermesPython(runtimeRoot, expectedFiles = HERMES_SOURCE_FILES) {
+	verifyHermesSource(runtimeRoot, expectedFiles);
+	const script = `
+import json, sys
+from pathlib import Path
+output = sys.stdout
+import hermes_cli, tui_gateway, tui_gateway.entry
+root = Path(sys.argv[1]).resolve() / "source"
+for module in (hermes_cli, tui_gateway, tui_gateway.entry):
+    if not Path(module.__file__).resolve().is_relative_to(root):
+        raise RuntimeError(f"Hermes module outside bundled source: {module.__file__}")
+if sys.version_info[:2] != (3, 14):
+    raise RuntimeError(f"Hermes requires Python 3.14; found {sys.version}")
+if hermes_cli.__version__ != sys.argv[2]:
+    raise RuntimeError(f"Hermes version {hermes_cli.__version__}; expected {sys.argv[2]}")
+print(json.dumps({"version": hermes_cli.__version__}), file=output)
+`;
+	const env = { ...process.env, PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1' };
+	delete env.PYTHONPATH;
+	delete env.PYTHONHOME;
+	delete env.VIRTUAL_ENV;
+	const args = [...(process.platform === 'win32' ? ['-I'] : []), '-c', script, path.resolve(runtimeRoot), HERMES_AGENT_VERSION];
+	const result = spawnSync(hermesRuntimePython(runtimeRoot), args, { cwd: runtimeRoot, encoding: 'utf8', env, timeout: 60_000 });
 	if (result.error) throw result.error;
-	if (result.status !== 0) {
-		throw new Error(`Unable to read Hermes version: ${(result.stderr || '').trim() || `python exited with status ${result.status}`}`);
-	}
-	const version = (result.stdout || '').trim();
-	if (!version) throw new Error('Hermes runtime did not report an installed version');
-	return version;
+	if (result.status !== 0) throw new Error(`Bundled Hermes verification failed: ${(result.stderr || result.stdout || '').trim() || `exit status ${result.status}`}`);
+	return JSON.parse(result.stdout.trim());
 }
 
 function vendorRuntimePython(runtimeRoot, platform) {
@@ -139,7 +156,7 @@ function vendorRuntimePython(runtimeRoot, platform) {
 	rewriteCopiedSymlinks(bundledRoot, sourceRoot);
 	fs.rmSync(python, { force: true });
 	fs.symlinkSync(path.relative(path.dirname(python), path.join(bundledRoot, 'bin', path.basename(sourcePython))), python);
-	for (const alias of ['python3', 'python3.11']) {
+	for (const alias of ['python3', 'python3.14']) {
 		const aliasPath = path.join(path.dirname(python), alias);
 		fs.rmSync(aliasPath, { force: true });
 		fs.symlinkSync('python', aliasPath);
@@ -247,15 +264,16 @@ function writeVenvPythonLauncher(runtimeRoot, entryPath, target) {
 		entry.isDirectory() && entry.name.startsWith('python') && fs.existsSync(path.join(libRoot, entry.name, 'site-packages'))
 	));
 	if (!pythonLib) throw new Error('Hermes virtual environment site-packages directory not found');
-	const pythonRelative = path.relative(binRoot, target).split(path.sep).join('/');
+	const pythonRelative = path.relative(fs.realpathSync(binRoot), target).split(path.sep).join('/');
 	const sitePackagesRelative = path.relative(binRoot, path.join(libRoot, pythonLib.name, 'site-packages')).split(path.sep).join('/');
+	const sourceRelative = path.relative(binRoot, path.join(runtimeRoot, 'source')).split(path.sep).join('/');
 	const script = [
 		'#!/bin/sh',
 		'SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
 		'if [ -n "$PYTHONPATH" ]; then',
-		'  PYTHONPATH="$SCRIPT_DIR/' + sitePackagesRelative + ':$PYTHONPATH"',
+		'  PYTHONPATH="$SCRIPT_DIR/' + sourceRelative + ':$SCRIPT_DIR/' + sitePackagesRelative + ':$PYTHONPATH"',
 		'else',
-		'  PYTHONPATH="$SCRIPT_DIR/' + sitePackagesRelative + '"',
+		'  PYTHONPATH="$SCRIPT_DIR/' + sourceRelative + ':$SCRIPT_DIR/' + sitePackagesRelative + '"',
 		'fi',
 		'export PYTHONPATH',
 		'exec "$SCRIPT_DIR/' + pythonRelative + '" "$@"',

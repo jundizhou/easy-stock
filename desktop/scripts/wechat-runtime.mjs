@@ -46,6 +46,13 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 	fs.writeFileSync(path.join(targetRoot, 'easy-stock-wechat-runtime.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 	fs.writeFileSync(path.join(targetRoot, 'EASY_STOCK_SOURCE_NOTICE.md'), sourceNotice());
 
+	prepareWechatDependencies({ runtimeRoot: resolvedRuntimeRoot, sourceRoot: targetRoot, uv });
+	return manifest;
+}
+
+export function prepareWechatDependencies({ runtimeRoot, sourceRoot, uv = process.env.UV || 'uv' }) {
+	const resolvedRuntimeRoot = path.resolve(runtimeRoot);
+	const targetRoot = path.resolve(sourceRoot);
 	const python = hermesRuntimePython(resolvedRuntimeRoot);
 	if (process.platform === 'win32') {
 		run(uv, ['pip', 'install', '--target', runtimeSitePackages(resolvedRuntimeRoot), '--python', python, '--link-mode', 'copy', ...pythonDependencies], resolvedRuntimeRoot);
@@ -59,7 +66,6 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 		ENABLE_MCP: '0',
 		SKIP_BACKGROUND_TASKS: '1',
 	});
-	return manifest;
 }
 
 function runtimeSitePackages(runtimeRoot) {

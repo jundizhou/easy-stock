@@ -60,6 +60,20 @@ def describe(config, metadata=None, supplement=None):
     # native profile translation whenever it already emits the right schema.
     if supplement and supplement.get("source") != "unknown":
         values = [o["value"] for o in supplement["options"]]
+        if mode == "codex_responses" and provider == "openai":
+            # Hermes 0.22 applies a route-specific clamp to official OpenAI
+            # Responses requests. Do not offer a level it would silently change.
+            try:
+                from hermes_cli import __version__ as hermes_version
+                from agent.transports.codex import _codex_efforts_for_route
+                version = tuple(int(part) for part in hermes_version.split(".")[:2])
+                if version >= (0, 22):
+                    supported = _codex_efforts_for_route(model, base, is_codex_backend=False)
+                    values = [value for value in values if value in supported]
+            except (ImportError, ValueError):
+                pass  # Compatibility with the previously bundled Hermes.
+            if not values:
+                return result
         if mode == "anthropic_messages":
             from agent.anthropic_adapter import _thinking_kwargs
             if supplement.get("wire") == "anthropic_budget":

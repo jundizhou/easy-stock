@@ -106,7 +106,7 @@ Codex 的 TOML 是生成文件：
 
 ## 安装和开发
 
-`desktop/codex-runtime-lock.json` 固定 Codex **0.159.0** 的各平台原生 npm 归档及 SHA-512 摘要。
+`desktop/codex-runtime-lock.json` 固定 Codex **0.164.0** 的各平台原生 npm 归档及 SHA-512 摘要。
 
 当前桌面发布矩阵保持：macOS arm64、macOS x64、Windows x64。每个安装包只包含对应平台架构的 Codex；完整保留上游 `bin/`、辅助程序和资源目录，并携带 LICENSE / NOTICE。Linux 与 Windows arm64 的锁信息供扩展使用，不代表已有完整桌面发行支持。
 

@@ -19,13 +19,13 @@
 | 智谱 GLM-5.3-FlashX | 关闭、low、high、max |
 | 智谱 GLM-5.2 | 关闭、high、max（不重复展示映射到相同效果的兼容值） |
 | 智谱 GLM-5.1、5、5-Turbo、5V-Turbo、4.7、4.6、4.5 | 开关 |
-| OpenAI GPT-5 | minimal、low、medium、high |
+| OpenAI GPT-5 | low、medium、high（Hermes 会将 minimal 映射为 low） |
 | OpenAI GPT-5.1 | none、low、medium、high |
 | OpenAI GPT-5.2、GPT-5.5 | none、low、medium、high、xhigh |
 
 文档补充匹配明确列出的官方日期快照，不将其扩展到 Pro、未知版本或代理别名。智谱补充仅适用于官方 Chat Completions 路由。
 
-其他能力复用内置 Hermes（当前 0.21.3）：
+其他能力复用内置 Hermes（当前 0.22.5）：
 
 | 服务商 | 实现 |
 | --- | --- |
@@ -66,7 +66,7 @@ GLM、DeepSeek、Kimi 和 GPT Chat 的参数转换复用原生 provider；Respon
 仓库根目录运行内置 Hermes 的请求构建集成测试（不联网、不调用付费模型）：
 
 ```sh
-desktop/resources/hermes-runtime/venv/bin/python -B backend/internal/hermes/reasoning_launcher_test.py
+desktop/resources/hermes-runtime/venv/bin/python -B backend/internal/agent/reasoning_launcher_test.py
 ```
 
 设置 `HERMES_TEST_PYTHON` 为内置 Python 的绝对路径后运行后端测试，还会验证 Go 到 Python 的真实能力发现链路。Hermes 升级时必须重跑这些测试，验证扩展点与能力函数仍兼容。

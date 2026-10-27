@@ -126,7 +126,8 @@ class NativeReasoningTests(unittest.TestCase):
         for value in ['low','high','max']:
             body = self.request(value)
             self.assertEqual(body['reasoning_effort'],value)
-            self.assertEqual(body['extra_body']['thinking'], {'type':'enabled'})
+            self.assertEqual(body['extra_body']['thinking']['type'], 'enabled')
+            self.assertFalse(body['extra_body']['thinking'].get('clear_thinking', False))
 
     def test_glm_responses_uses_native_reasoning_object(self):
         self.configure('glm-5.3-flash','https://open.bigmodel.cn/api/v1','codex_responses',values=['low','high','max'],wire='openai_responses')
@@ -146,8 +147,12 @@ class NativeReasoningTests(unittest.TestCase):
         self.assertEqual(self.request('none')['extra_body'], {'enable_thinking':False})
 
     def test_gpt_responses_minimal_and_explicit_none(self):
-        self.configure('gpt-5','https://api.openai.com/v1','codex_responses',values=['minimal','low','medium','high'],wire='openai_responses')
-        self.assertEqual(self.request('minimal')['reasoning']['effort'],'minimal')
+        levels = self.configure('gpt-5','https://api.openai.com/v1','codex_responses',values=['minimal','low','medium','high'],wire='openai_responses')
+        # The new Hermes transport clamps minimal to low on the official route.
+        if 'minimal' not in levels:
+            self.assertEqual(self.request('low')['reasoning']['effort'], 'low')
+        else:
+            self.assertEqual(self.request('minimal')['reasoning']['effort'], 'minimal')
         self.configure('gpt-5.6-sol','https://api.openai.com/v1','codex_responses')
         self.assertEqual(self.cap['wire'],'openai_responses')
         body = self.request('none',request_overrides={'extra_body':{'reasoning':{'effort':'none'}}})
@@ -173,7 +178,8 @@ class NativeReasoningTests(unittest.TestCase):
         self.configure('glm-4.7','https://open.bigmodel.cn/api/paas/v4',values=['none','enabled'],wire='glm')
         body = self.request('medium')
         self.assertNotIn('reasoning_effort',body)
-        self.assertEqual(body['extra_body']['thinking'],{'type':'enabled'})
+        self.assertEqual(body['extra_body']['thinking']['type'], 'enabled')
+        self.assertFalse(body['extra_body']['thinking'].get('clear_thinking', False))
 
     def test_anthropic_metadata_intersects_native_adapter(self):
         self.assertEqual(self.configure('claude-opus-4-6','https://api.anthropic.com/v1','anthropic_messages',values=['low','high','xhigh','max'],wire='anthropic'),['low','high','max'])
