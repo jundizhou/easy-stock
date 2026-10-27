@@ -7,6 +7,9 @@ import { emptyNotifications, notificationSettingsChangedEvent } from '../lib/not
 import { SettingsDrawer } from './SettingsDrawer';
 import { PortfolioSchedulePanel } from './PortfolioSchedulePanel';
 
+// Full drawer interactions can exceed Vitest's default timeout on loaded runners.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock('../lib/backend', async (importOriginal) => ({ ...await importOriginal<typeof import('../lib/backend')>(), requestJSON: vi.fn() }));
 vi.mock('./AgentSettingsPanel', () => ({ AgentSettingsPanel: () => null }));
 vi.mock('./AppUpdatePanel', () => ({ AppUpdatePanel: () => null }));
