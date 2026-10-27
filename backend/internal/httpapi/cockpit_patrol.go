@@ -24,13 +24,68 @@ const cockpitPatrolInterval = 30 * time.Second
 // 只打一次上游，避免把指数、资金、快讯这些接口按客户端数量放大。
 const cockpitFactsTTL = 25 * time.Second
 
+const cockpitTemperatureCacheTTL = 3 * time.Minute
+
+// 只保留已通过温度计算校验的快照，供实时卡片与 AI 巡查共同使用。
+// 独立加锁，避免实时事实采集持有 cockpitLiveFacts.mu 时递归锁定。
+type cockpitTemperatureCache struct {
+	mu     sync.Mutex
+	latest *cockpit.Temperature
+}
+
+func (c *cockpitTemperatureCache) resolve(rows []foundation.MarketSnapshotRow, meta foundation.SourceMeta, snapshotErr error, now time.Time) (*cockpit.Temperature, error) {
+	temperature, err := cockpit.CalculateTemperature(rows, meta, now)
+	if err == nil && snapshotErr == nil {
+		if !temperature.Stale {
+			c.mu.Lock()
+			if c.latest == nil || temperature.FetchedAt >= c.latest.FetchedAt {
+				cached := *temperature
+				c.latest = &cached
+			}
+			c.mu.Unlock()
+		}
+		return temperature, nil
+	}
+	err = errors.Join(snapshotErr, err)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// SharedMarketSnapshot 也可能返回最近一次完整行情及刷新错误。
+	// 它的原始抓取时间仍须满足同一天、同模型、三分钟内的限制。
+	cached := c.latest
+	if usableCockpitTemperatureCache(temperature, now) && (cached == nil || temperature.FetchedAt > cached.FetchedAt) {
+		cached = temperature
+		complete := *temperature
+		c.latest = &complete
+	}
+	if !usableCockpitTemperatureCache(cached, now) {
+		return nil, err
+	}
+	result := *cached
+	result.Stale = true
+	result.Warning = "行情刷新失败，使用 " + result.FetchedAt + " 抓取的缓存快照（最多保留 3 分钟）：" + err.Error()
+	return &result, err
+}
+
+func usableCockpitTemperatureCache(value *cockpit.Temperature, now time.Time) bool {
+	if value == nil || value.Model != cockpit.TemperatureModel || value.TradeDate != now.In(foundation.AStockLocation).Format("2006-01-02") {
+		return false
+	}
+	fetchedAt, err := time.Parse(time.RFC3339, value.FetchedAt)
+	return err == nil && !fetchedAt.After(now) && now.Sub(fetchedAt) <= cockpitTemperatureCacheTTL
+}
+
 // cockpitLiveFacts 缓存最近一次实时采集结果。收紧到 25 秒仍能保证图上数据是「此刻」，
 // 阶段变化（盘前→盘中）会立即作废缓存，避免沿用上一阶段少了盘中字段。
 type cockpitLiveFacts struct {
-	mu    sync.Mutex
-	at    time.Time
-	phase cockpit.Phase
-	facts cockpit.Facts
+	mu          sync.Mutex
+	at          time.Time
+	phase       cockpit.Phase
+	facts       cockpit.Facts
+	temperature cockpitTemperatureCache
+	// carry 是最近一次非空的资金榜与快讯：上游在盘前/休市时段返回空列表时兜底展示，
+	// 避免题材涨跌、资金流向卡在盘面上消失。carry 跨阶段保留，重启后从巡查记录回种。
+	carry  cockpit.Facts
+	seeded bool
 }
 
 // cockpitNarrator 把 AI 叙述接到统一 Agent 运行时。驾驶舱巡查不需要工具，
@@ -78,6 +133,15 @@ func (s *Server) newCockpitPatrolService(settingsPath string, logger *log.Logger
 
 func (s *Server) cockpitFeed() cockpit.Feed {
 	var feed cockpit.Feed
+	if s.monitor != nil {
+		feed.Temperature = func(ctx context.Context) (*cockpit.Temperature, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			rows, meta, snapshotErr := s.monitor.SharedMarketSnapshot(ctx)
+			return s.cockpitLive.temperature.resolve(rows, meta, snapshotErr, time.Now())
+		}
+	}
 	if s.marketOverview != nil {
 		feed.Overseas = func(ctx context.Context) ([]cockpit.IndexQuote, error) {
 			items, _, err := s.marketOverview.MarketIndexes(ctx, "global")
@@ -169,7 +233,20 @@ func (s *Server) cockpitFeed() cockpit.Feed {
 			if err != nil {
 				return nil, err
 			}
-			return cockpitIntraday(buildMarketEmotionIntraday(ladder, history.Latest)), nil
+			snapshot := buildMarketEmotionIntraday(ladder, history.Latest)
+			// 炸板/跌停池只对「今天」有意义；收盘正式分已生成后不再重复取池。
+			// 取不到时快照照常返回，评分自动跳过相关因子，不把缺失当成 0。
+			dailyReady := history.Latest != nil && history.Latest.TradeDate == ladder.Current.TradeDate
+			if ladder.Current.TradeDate != "" && ladder.SessionStatus != "最近交易日" && !dailyReady {
+				pools, poolErr := s.marketEmotion.loadIntradayPools(ctx, ladder.Current.TradeDate)
+				if poolErr != nil {
+					log.Printf("cockpit intraday pools %s: %v", ladder.Current.TradeDate, poolErr)
+				}
+				snapshot = applyIntradayPools(snapshot, pools, poolErr == nil)
+			} else {
+				snapshot = applyIntradayPools(snapshot, marketEmotionSidePools{}, false)
+			}
+			return cockpitIntraday(snapshot), nil
 		}
 	}
 	return feed
@@ -213,20 +290,40 @@ func cockpitEmotion(point *marketemotion.Snapshot) *cockpit.Emotion {
 		FinalBreakRate: point.Raw.FinalBreakRate,
 		MaxStreak:      point.Raw.MaxStreak,
 		FirstBoard:     point.Raw.FirstBoardCount,
+		Scores: cockpit.Scores{
+			Heat:      point.Scores.Heat,
+			Profit:    point.Scores.Profit,
+			Structure: point.Scores.Structure,
+			Total:     point.Scores.Total,
+		},
 	}
 }
 
 func cockpitIntraday(snapshot marketemotion.IntradaySnapshot) *cockpit.IntradayView {
 	return &cockpit.IntradayView{
-		Status:            snapshot.Status,
-		Breadth:           snapshot.Breadth,
-		Summary:           snapshot.Summary,
-		RiskScore:         snapshot.RiskScore,
-		LimitUp:           snapshot.Metrics.LimitUpCount,
-		MaxStreak:         snapshot.Metrics.CurrentMaxStreak,
-		PreviousMaxStreak: snapshot.Metrics.PreviousMaxStreak,
-		HighDownRate:      snapshot.Metrics.HighDownRate,
-		HighWeakRate:      snapshot.Metrics.HighWeakRate,
+		TradeDate:             snapshot.TradeDate,
+		SessionStatus:         snapshot.SessionStatus,
+		Status:                snapshot.Status,
+		Breadth:               snapshot.Breadth,
+		Summary:               snapshot.Summary,
+		RiskScore:             snapshot.RiskScore,
+		LimitUp:               snapshot.Metrics.LimitUpCount,
+		MaxStreak:             snapshot.Metrics.CurrentMaxStreak,
+		PreviousMaxStreak:     snapshot.Metrics.PreviousMaxStreak,
+		HighDownRate:          snapshot.Metrics.HighDownRate,
+		HighWeakRate:          snapshot.Metrics.HighWeakRate,
+		Broken:                snapshot.Metrics.BrokenCount,
+		LimitDown:             snapshot.Metrics.LimitDownCount,
+		SealRate:              snapshot.SealRate,
+		PreviousLimitUpReturn: snapshot.Metrics.PreviousLimitUpReturn,
+		PoolAvailable:         snapshot.Metrics.PoolAvailable,
+		ScoreAvailable:        snapshot.ScoreAvailable,
+		Scores: cockpit.Scores{
+			Heat:      snapshot.Scores.Heat,
+			Profit:    snapshot.Scores.Profit,
+			Structure: snapshot.Scores.Structure,
+			Total:     snapshot.Scores.Total,
+		},
 	}
 }
 
@@ -310,18 +407,32 @@ func (s *Server) cockpitFacts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "驾驶舱巡查服务不可用")
 		return
 	}
-	state := cockpit.PhaseAt(time.Now())
+	now := time.Now()
+	state := cockpit.PhaseAt(now)
 	live := &s.cockpitLive
 	live.mu.Lock()
 	defer live.mu.Unlock()
-	if !live.at.IsZero() && live.phase == state.Phase && time.Since(live.at) < cockpitFactsTTL {
+	temperatureExpired := false
+	for _, source := range live.facts.Sources {
+		if source.Name == "市场温度" && !source.OK && live.facts.Temperature != nil && !usableCockpitTemperatureCache(live.facts.Temperature, now) {
+			temperatureExpired = true
+			break
+		}
+	}
+	if !live.at.IsZero() && live.phase == state.Phase && now.Sub(live.at) < cockpitFactsTTL && !temperatureExpired {
 		writeJSON(w, http.StatusOK, cockpitFactsPayload(state, live.at, live.facts))
 		return
 	}
 	// 用后台上下文采集：客户端中途断开不应把半份结果写进缓存。
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	facts := cockpit.CollectFacts(ctx, state.Phase, s.cockpitFeed())
+	if !live.seeded {
+		// 首次采集前先从持久化的巡查记录回种兜底数据，覆盖服务重启后的空窗。
+		live.carry = cockpit.SeedCarryFromBriefs(s.cockpit.Store().List("", 40))
+		live.seeded = true
+	}
+	facts := cockpit.CarryOverBoards(live.carry, cockpit.CollectFacts(ctx, state.Phase, s.cockpitFeed()))
+	live.carry = facts
 	live.at, live.phase, live.facts = time.Now(), state.Phase, facts
 	writeJSON(w, http.StatusOK, cockpitFactsPayload(state, live.at, facts))
 }

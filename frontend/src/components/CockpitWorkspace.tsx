@@ -79,7 +79,7 @@ function stateLabel<T>(resource: CockpitResource<T>) {
 
 // 面板外壳沿用系统工作台的写法：标题栏 + 内容区，内容区自己滚动。
 // 有 onOpen 时整卡可点跳转，不再显示右下角的跳转字样按钮。
-function Card({ title, icon, resource, onOpen, openLabel, children, className = '', action }: { title: string; icon: ReactNode; resource?: CockpitResource<unknown>; onOpen?: () => void; openLabel?: string; children: ReactNode; className?: string; action?: ReactNode }) {
+function Card({ title, icon, resource, onOpen, openLabel, children, className = '', action, sourceLabel }: { title: string; icon: ReactNode; resource?: CockpitResource<unknown>; onOpen?: () => void; openLabel?: string; children: ReactNode; className?: string; action?: ReactNode; sourceLabel?: string }) {
 	return (
 		<section
 			className={`cockpit-card ${className}${onOpen ? ' is-clickable' : ''}`.trim()}
@@ -97,7 +97,7 @@ function Card({ title, icon, resource, onOpen, openLabel, children, className = 
 			<header>
 				<div className="cockpit-card-title">{icon}<h3>{title}</h3></div>
 				{action}
-				{resource && <small className={resource.state === 'error' && !resource.data ? 'is-error' : ''}>{stateLabel(resource)}</small>}
+				{resource && <small className={resource.state === 'error' && !resource.data ? 'is-error' : ''}>{resource.state === 'error' && !resource.data ? stateLabel(resource) : (sourceLabel || stateLabel(resource))}</small>}
 			</header>
 			<div className="cockpit-card-body">{children}</div>
 		</section>
@@ -238,12 +238,12 @@ export function CockpitWorkspace({ config, refreshKey, onNavigate, onAskAI, onRe
 						<dt>{headIndex?.name || '核心指数'}</dt>
 						<dd className={headIndex ? (headIndex.change_percent >= 0 ? 'is-up' : 'is-down') : ''}>{headIndex ? formatPercent(headIndex.change_percent) : '--'}</dd>
 					</div>
-					<div>
-						<dt>涨停 / 跌停</dt>
+					<div title={latest ? `数据截至 ${latest.trade_date} 收盘` : undefined}>
+						<dt>涨停 / 跌停<span className="cockpit-asof">收盘</span></dt>
 						<dd>{raw ? `${raw.limit_up_count} / ${raw.limit_down_count}` : '--'}</dd>
 					</div>
-					<div>
-						<dt>情绪阶段</dt>
+					<div title={latest ? `数据截至 ${latest.trade_date} 收盘` : undefined}>
+						<dt>情绪阶段<span className="cockpit-asof">收盘</span></dt>
 						<dd className={`tone-${emotionPhaseTone(latest?.phase)}`}>{latest?.phase || '--'}</dd>
 					</div>
 					<div>
@@ -307,7 +307,7 @@ export function CockpitWorkspace({ config, refreshKey, onNavigate, onAskAI, onRe
 						)}
 					</Card>
 
-					<Card title="短线情绪" icon={<Flame size={17} aria-hidden="true" />} resource={emotion} onOpen={() => onNavigate('limit-up')} openLabel="短线连板">
+					<Card title="短线情绪" icon={<Flame size={17} aria-hidden="true" />} resource={emotion} sourceLabel={latest ? `${latest.trade_date} 收盘` : undefined} onOpen={() => onNavigate('limit-up')} openLabel="短线连板">
 						{latest ? (
 							<>
 								<div className="cockpit-emotion-head">

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -128,6 +129,67 @@ func (c *Client) StockFundFlows(ctx context.Context, sortKey string, limit int) 
 	}
 	if len(items) == 0 {
 		return nil, foundation.SourceMeta{}, fmt.Errorf("sina returned no stock money-flow rows")
+	}
+	return items, meta, nil
+}
+
+// StockFundFlowsBySymbols filters the complete snapshot, so a watched stock does
+// not need to appear in a top-200 ranking. The HTTP layer caches each symbol set.
+func (c *Client) StockFundFlowsBySymbols(ctx context.Context, symbols []string) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+	wanted := make(map[string]bool, len(symbols))
+	for _, symbol := range symbols {
+		normalized, err := foundation.NormalizeSymbol(symbol)
+		if err != nil || len(normalized.RawCode) != 6 {
+			return nil, foundation.SourceMeta{}, fmt.Errorf("invalid stock symbol %q", symbol)
+		}
+		wanted[normalized.Canonical] = true
+	}
+	if len(wanted) == 0 || len(wanted) > 200 {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("symbols must contain between 1 and 200 stocks")
+	}
+	params := url.Values{"page": {"1"}, "num": {"10000"}, "sort": {"symbol"}, "asc": {"1"}, "bankuai": {""}, "shichang": {""}}
+	requestURL := c.moneyFlowBaseURL + "?" + params.Encode()
+	start := time.Now()
+	var rawItems []stockMoneyFlowItem
+	if err := c.getMoneyFlowJSON(ctx, requestURL, &rawItems); err != nil {
+		return nil, foundation.SourceMeta{}, err
+	}
+	if len(rawItems) == 0 {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("sina returned no stock money-flow snapshot")
+	}
+	meta := foundation.SourceMeta{Source: "sina:stock-money-flow", SourceURL: requestURL, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds()}
+	items := make([]foundation.MarketFundFlow, 0, len(wanted))
+	for _, raw := range rawItems {
+		normalized, err := foundation.NormalizeSymbol(sinaString(raw.Symbol))
+		if err != nil || !wanted[normalized.Canonical] || !isAStockMoneyFlowSymbol(normalized.Sina) {
+			continue
+		}
+		item := foundation.MarketFundFlow{Dimension: "stock", Code: normalized.RawCode, Symbol: normalized.Canonical, Name: sinaString(raw.Name), Meta: meta}
+		fields := []struct {
+			name  string
+			raw   any
+			value *float64
+			scale float64
+		}{
+			{"price", raw.Trade, &item.Price, 1}, {"change_percent", raw.ChangeRatio, &item.ChangePercent, 100},
+			{"inflow", raw.Inflow, &item.Inflow, 1}, {"outflow", raw.Outflow, &item.Outflow, 1},
+			{"net_inflow", raw.NetInflow, &item.NetInflow, 1}, {"net_inflow_ratio", raw.NetRatio, &item.NetInflowRatio, 100},
+			{"main_inflow", raw.MainInflow, &item.MainInflow, 1}, {"main_outflow", raw.MainOutflow, &item.MainOutflow, 1},
+			{"main_net_inflow", raw.MainNet, &item.MainNetInflow, 1}, {"main_net_inflow_ratio", raw.MainRatio, &item.MainNetInflowRatio, 100},
+			{"retail_inflow", raw.RetailIn, &item.RetailInflow, 1}, {"retail_outflow", raw.RetailOut, &item.RetailOutflow, 1},
+			{"retail_net_inflow", raw.RetailNet, &item.RetailNetInflow, 1}, {"retail_net_inflow_ratio", raw.RetailRatio, &item.RetailNetRatio, 100},
+		}
+		for _, field := range fields {
+			value, parseErr := strconv.ParseFloat(sinaString(field.raw), 64)
+			value *= field.scale
+			if parseErr != nil || math.IsNaN(value) || math.IsInf(value, 0) || (field.name == "price" && value <= 0) {
+				continue
+			}
+			*field.value = value
+			item.Meta.AvailableFields = append(item.Meta.AvailableFields, field.name)
+		}
+		items = append(items, item)
+		delete(wanted, normalized.Canonical)
 	}
 	return items, meta, nil
 }

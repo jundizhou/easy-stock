@@ -1,0 +1,147 @@
+/* 系统风格确认弹窗。替代 window.confirm 的原生灰框：
+   遮罩 + 卡片、跟随亮暗主题、危险动作用红色主按钮。
+   层级压在个股右键菜单（9000）之上，避免同时出现时被盖住。 */
+
+.confirm-dialog-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 9200;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: rgba(15, 23, 42, .38);
+	backdrop-filter: blur(2px);
+	animation: confirm-fade-in .14s ease-out;
+}
+
+.confirm-dialog-overlay.is-leaving {
+	animation: confirm-fade-out .12s ease-in forwards;
+}
+
+@keyframes confirm-fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+@keyframes confirm-fade-out {
+	from { opacity: 1; }
+	to { opacity: 0; }
+}
+
+.confirm-dialog {
+	width: min(460px, 100%);
+	padding: 20px 20px 16px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 2px 8px rgba(15, 23, 42, .10), 0 24px 60px rgba(15, 23, 42, .28);
+	color: var(--text);
+	animation: confirm-pop .16s cubic-bezier(.2, .9, .3, 1.1);
+}
+
+.confirm-dialog-overlay.is-leaving .confirm-dialog {
+	animation: none;
+}
+
+@keyframes confirm-pop {
+	from { opacity: 0; transform: translateY(8px) scale(.97); }
+	to { opacity: 1; transform: none; }
+}
+
+.confirm-dialog > header {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+/* 图标底色跟随语义：普通是蓝、危险是红，扫一眼就知道这次要小心。 */
+.confirm-dialog-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 30px;
+	height: 30px;
+	border-radius: 9px;
+	background: var(--theme-blue-soft, #e8f1fd);
+	color: var(--theme-blue, #175ea9);
+}
+
+.confirm-dialog.is-danger .confirm-dialog-icon {
+	background: var(--theme-red-soft, #fbe9ea);
+	color: var(--theme-red, #c4313b);
+}
+
+.confirm-dialog > header h2 {
+	margin: 0;
+	padding-top: 4px;
+	font-size: var(--fs-body);
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.confirm-dialog > p {
+	margin: 0 0 18px;
+	padding-left: 40px;
+	color: var(--theme-muted);
+	font-size: var(--fs-body);
+	line-height: 1.65;
+	/* 正文里的 \n 要真的换行：原生 confirm 做不到这点，是它最烦人的地方之一。 */
+	white-space: pre-line;
+	overflow-wrap: anywhere;
+}
+
+.confirm-dialog > footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.confirm-dialog > footer button {
+	min-width: 78px;
+	padding: 8px 16px;
+	border-radius: 8px;
+	font-size: var(--fs-body);
+	font-weight: 600;
+	cursor: pointer;
+	transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+}
+
+.confirm-dialog-cancel {
+	border: 1px solid var(--line);
+	background: var(--theme-surface, var(--surface));
+	color: var(--theme-muted);
+}
+
+.confirm-dialog-cancel:hover,
+.confirm-dialog-cancel:focus-visible {
+	border-color: var(--theme-blue-line, #c7d9ed);
+	color: var(--text);
+	outline: none;
+}
+
+.confirm-dialog-ok {
+	border: 1px solid var(--theme-blue, #175ea9);
+	background: var(--theme-blue, #175ea9);
+	color: #fff;
+}
+
+.confirm-dialog-ok:hover,
+.confirm-dialog-ok:focus-visible {
+	background: var(--theme-blue-solid, #0d4f94);
+	border-color: var(--theme-blue-solid, #0d4f94);
+	outline: none;
+}
+
+.confirm-dialog-ok.is-danger {
+	border-color: var(--theme-red, #c4313b);
+	background: var(--theme-red, #c4313b);
+}
+
+.confirm-dialog-ok.is-danger:hover,
+.confirm-dialog-ok.is-danger:focus-visible {
+	background: var(--theme-red-solid, #9e3e4a);
+	border-color: var(--theme-red-solid, #9e3e4a);
+}

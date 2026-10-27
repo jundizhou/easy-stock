@@ -2,6 +2,7 @@ import { Activity, AlertTriangle, ArrowDown, ArrowDownUp, ArrowUp, Check, Loader
 import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BackendConfig, SectorFlowRank, SectorFlowSeries, SectorPriceSeries, SourceMeta } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
+import { useTableSort } from '../lib/table-tools';
 import {
 	SECTOR_FLOW_CHART_MODES,
 	SECTOR_FLOW_DIMENSIONS,
@@ -58,9 +59,8 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 	const [state, setState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
 	const [query, setQuery] = useState('');
-	const [period, setPeriod] = useState<SectorFlowPeriod>('main');
-	const [sortKey, setSortKey] = useState<SectorFlowSortKey>('main');
-	const [sortDirection, setSortDirection] = useState<SectorFlowSortDirection>('desc');
+	const [sortState, setSortState] = useTableSort('sector-flow-ranks', { key: 'main' as SectorFlowSortKey | 'name', direction: 'desc' as SectorFlowSortDirection, period: 'main' as SectorFlowPeriod });
+	const { key: sortKey, direction: sortDirection, period } = sortState;
 	const [selectedOnly, setSelectedOnly] = useState(false);
 	// 曲线区口径：资金曲线（亿元）与板块价格分时（%）量纲不同，用切换而不是同图叠加。
 	const [chartMode, setChartMode] = useState<SectorFlowChartMode>('fund');
@@ -208,26 +208,23 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 	}, [selection, setSelection]);
 
 	const visibleRanks = useMemo(
-		() => visibleSectorFlowRanks(ranks, { query, selectedOnly, selection, sortKey, direction: sortDirection, period }),
+		() => {
+			const visible = visibleSectorFlowRanks(ranks, { query, selectedOnly, selection, sortKey: sortKey === 'name' ? period : sortKey, direction: sortDirection, period });
+			return sortKey === 'name' ? visible.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') * (sortDirection === 'asc' ? 1 : -1)) : visible;
+		},
 		[ranks, query, selectedOnly, selection, sortKey, sortDirection, period],
 	);
 
 	// 点击表头：先切排序字段（默认从大到小），再次点击同一字段切换升/降序，升序即可看净流出榜。
-	const changeSort = useCallback((key: SectorFlowSortKey) => {
-		if (key === sortKey) {
-			setSortDirection((current) => (current === 'desc' ? 'asc' : 'desc'));
-			return;
-		}
-		setSortKey(key);
-		setSortDirection('desc');
-	}, [sortKey]);
+	const changeSort = useCallback((key: SectorFlowSortKey | 'name') => {
+		setSortState((current) => ({ ...current, key, direction: key === current.key ? current.direction === 'desc' ? 'asc' : 'desc' : key === 'name' ? 'asc' : 'desc' }));
+	}, [setSortState]);
 
 	// 资金口径滑动按钮：切换列表资金列（当日/5日/10日），并默认按该口径排序，排序方向保持用户当前选择。
 	// 占比排序（'ratio'）本身也跟随口径，切换后保持按占比排，不跳回金额排序。
 	const selectPeriod = useCallback((next: SectorFlowPeriod) => {
-		setPeriod(next);
-		setSortKey((current) => (current === 'ratio' ? 'ratio' : next));
-	}, []);
+		setSortState((current) => ({ ...current, period: next, key: current.key === 'ratio' ? 'ratio' : next }));
+	}, [setSortState]);
 
 	const periodOption = SECTOR_FLOW_PERIODS.find((item) => item.id === period) || SECTOR_FLOW_PERIODS[0];
 	const periodIndex = Math.max(0, SECTOR_FLOW_PERIODS.findIndex((item) => item.id === period));
@@ -361,9 +358,9 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 					</header>
 
 					{state === 'error' ? <div className="sector-flow-state"><AlertTriangle size={22} aria-hidden="true" /><strong>数据加载失败</strong><span>{error || '请稍后重试'}</span></div> : (
-						<div className="sector-flow-table" role="table" aria-label="板块资金流排名">
+						<div className="sector-flow-table" role="table" aria-label="板块资金流排名" data-tt-grid="sector-flow-ranks" data-tt-sort-mode="react" data-tt-labels="name|ratio|net|change">
 							<div className="sector-flow-table-head" role="row">
-								<span role="columnheader">板块名称</span>
+								<SortHeader label="板块名称" active={sortKey === 'name'} direction={sortKey === 'name' ? sortDirection : undefined} onClick={() => changeSort('name')} />
 								<SortHeader
 									label={ratioLabel}
 									title={ratioTitle}
@@ -386,7 +383,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 									onClick={() => changeSort('change')}
 								/>
 							</div>
-							<div className="sector-flow-table-body" role="rowgroup">
+							<div className="sector-flow-table-body" role="rowgroup" data-tt-body>
 								{state === 'loading' && !ranks.length ? Array.from({ length: 10 }, (_, index) => <i key={index} className="sector-flow-skeleton" />) : null}
 								{visibleRanks.map((item, index) => {
 									const selected = selection.includes(item.code);
@@ -398,6 +395,7 @@ export function SectorFlowWorkspace({ config, refreshKey, onAskAI }: Props) {
 											key={item.code}
 											type="button"
 											role="row"
+											data-tt-row
 											className={`sector-flow-row ${selected ? 'selected' : ''}`}
 											onClick={() => toggleSelection(item.code)}
 											aria-selected={selected}

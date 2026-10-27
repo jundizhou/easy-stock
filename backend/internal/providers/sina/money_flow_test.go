@@ -2,8 +2,10 @@ package sina
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -50,5 +52,60 @@ func TestSectorFundFlowsParsesIndustryAndThemeFields(t *testing.T) {
 	item := items[0]
 	if item.Code != "gn_gfgn" || item.ChangePercent < 2.89 || item.NetInflow < 3_600_000_000 || item.LeaderSymbol != "002248.SZ" || item.LeaderChange < 10 || meta.Source != "sina:theme-money-flow" {
 		t.Fatalf("item=%+v meta=%+v", item, meta)
+	}
+}
+
+func TestStockFundFlowsBySymbolsIncludesUnrankedAndSTStocks(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("num") != "10000" || r.URL.Query().Get("sort") != "symbol" {
+			t.Errorf("must request complete snapshot: %s", r.URL.RawQuery)
+		}
+		rows := make([]map[string]any, 250)
+		for index := range rows {
+			rows[index] = map[string]any{"symbol": "sz300308", "name": "unrelated", "netamount": "999"}
+		}
+		rows = append(rows,
+			map[string]any{"symbol": "sh600000", "name": "ST watched", "trade": "10", "changeratio": "-0.02", "netamount": "-10000", "r0_net": "-20000", "r0_ratio": "-0.1", "r3_net": "0", "r3_ratio": "0"},
+			map[string]any{"symbol": "sh600000", "netamount": "555"})
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer upstream.Close()
+	client := NewClient(WithMoneyFlowBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+	items, _, err := client.StockFundFlowsBySymbols(context.Background(), []string{"600000.SH", "sh600000", "000001.SZ"})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	item := items[0]
+	if item.Symbol != "600000.SH" || item.NetInflow != -10000 || item.MainNetInflowRatio != -10 || item.ChangePercent != -2 || item.RetailNetInflow != 0 {
+		t.Fatalf("wrong source values: %+v", item)
+	}
+	if !slices.Contains(item.Meta.AvailableFields, "retail_net_inflow") || slices.Contains(item.Meta.AvailableFields, "net_inflow_ratio") {
+		t.Fatalf("real zero and missing field were conflated: %+v", item.Meta)
+	}
+}
+
+func TestStockFundFlowsBySymbolsMarksInvalidNumbersUnavailable(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"symbol":"sz000001","trade":"0","changeratio":"0","netamount":null,"ratioamount":"","r0_net":"--","r0_ratio":"NaN","r3_net":false,"r3_ratio":"Inf"}]`))
+	}))
+	defer upstream.Close()
+	client := NewClient(WithMoneyFlowBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+	items, _, err := client.StockFundFlowsBySymbols(context.Background(), []string{"000001.SZ"})
+	if err != nil || len(items) != 1 || len(items[0].Meta.AvailableFields) != 1 || items[0].Meta.AvailableFields[0] != "change_percent" {
+		t.Fatalf("invalid numbers advertised as data: items=%+v err=%v", items, err)
+	}
+}
+
+func TestStockFundFlowsBySymbolsEmptySnapshotIsAnError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[]`)) }))
+	defer upstream.Close()
+	client := NewClient(WithMoneyFlowBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+	if _, _, err := client.StockFundFlowsBySymbols(context.Background(), []string{"000001.SZ"}); err == nil {
+		t.Fatal("empty upstream must not replace a successful cached snapshot")
+	}
+	for _, symbols := range [][]string{nil, {"bad"}, {"12345.SH"}} {
+		if _, _, err := client.StockFundFlowsBySymbols(context.Background(), symbols); err == nil {
+			t.Fatalf("invalid symbols accepted: %v", symbols)
+		}
 	}
 }

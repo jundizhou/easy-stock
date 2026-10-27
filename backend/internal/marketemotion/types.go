@@ -97,22 +97,36 @@ type IntradayMetrics struct {
 	LimitUpCount      int     `json:"limit_up_count"`
 	BoardCount        int     `json:"board_count"`
 	FirstBoardCount   int     `json:"first_board_count"`
+	// 以下三项来自当日炸板池/跌停池与昨日涨停股实时行情，盘中随时在变。
+	BrokenCount               int     `json:"broken_count"`
+	LimitDownCount            int     `json:"limit_down_count"`
+	PreviousLimitUpReturn     float64 `json:"previous_limit_up_return"`
+	PreviousLimitUpQuoteCount int     `json:"previous_limit_up_quote_count"`
+	PreviousBoardReturn       float64 `json:"previous_board_return"`
+	PreviousBoardQuoteCount   int     `json:"previous_board_quote_count"`
+	// PoolAvailable 区分「炸板/跌停为 0」与「池子没取到」，避免把缺数据当成 0。
+	PoolAvailable bool `json:"pool_available"`
 }
 
 type IntradaySnapshot struct {
-	TradeDate      string          `json:"trade_date"`
-	BaseTradeDate  string          `json:"base_trade_date,omitempty"`
-	SessionStatus  string          `json:"session_status"`
-	Status         string          `json:"status"`
-	Breadth        string          `json:"breadth"`
-	Summary        string          `json:"summary"`
-	RiskScore      float64         `json:"risk_score"`
-	Confidence     string          `json:"confidence"`
-	Metrics        IntradayMetrics `json:"metrics"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	NextRefreshAt  time.Time       `json:"next_refresh_at"`
-	CacheTTLSecond int             `json:"cache_ttl_seconds"`
-	Stale          bool            `json:"stale"`
+	TradeDate     string          `json:"trade_date"`
+	BaseTradeDate string          `json:"base_trade_date,omitempty"`
+	SessionStatus string          `json:"session_status"`
+	Status        string          `json:"status"`
+	Breadth       string          `json:"breadth"`
+	Summary       string          `json:"summary"`
+	RiskScore     float64         `json:"risk_score"`
+	Confidence    string          `json:"confidence"`
+	Metrics       IntradayMetrics `json:"metrics"`
+	// SealRate = 涨停 /（涨停 + 炸板）；Scores 是盘中口径的 0–100 情绪分，
+	// 与收盘模型的三个维度同名同权重，但因子只用盘中能实时拿到的数据。
+	SealRate       float64   `json:"seal_rate"`
+	Scores         Scores    `json:"scores"`
+	ScoreAvailable bool      `json:"score_available"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	NextRefreshAt  time.Time `json:"next_refresh_at"`
+	CacheTTLSecond int       `json:"cache_ttl_seconds"`
+	Stale          bool      `json:"stale"`
 }
 
 type History struct {

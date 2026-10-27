@@ -546,7 +546,7 @@ function HotStockSidebar({ data, state, error, activeSymbol, collapsed, onToggle
 }
 
 function HotStockRow({ stock, index, active, onSelect }: { stock: HotStockRankEntry; index: number; active: boolean; onSelect: (symbol: string) => void }) {
-	return <button type="button" className={`${active ? 'active' : ''} ${index < 3 ? 'top' : ''}`.trim()} onClick={() => onSelect(stock.symbol)}>
+	return <button type="button" className={`${active ? 'active' : ''} ${index < 3 ? 'top' : ''}`.trim()} data-stock-row="hot" data-symbol={stock.symbol} data-name={stock.name} onClick={() => onSelect(stock.symbol)}>
 		<i>{String(index + 1).padStart(2, '0')}</i>
 		<span><strong>{stock.name}</strong><small>{stock.code} · {stockMarketLabel(stock.symbol)}</small></span>
 		<em>

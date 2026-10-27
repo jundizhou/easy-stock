@@ -105,6 +105,13 @@
 	white-space: nowrap;
 }
 
+/* 收盘口径标记：同一行里指数是实时的，涨停与情绪阶段是上一交易日收盘值。 */
+.cockpit-asof {
+	margin-left: 5px;
+	font-size: var(--fs-caption);
+	color: var(--theme-subtle);
+}
+
 .cockpit-pulse dd {
 	margin: 0;
 	font-family: var(--font-num);

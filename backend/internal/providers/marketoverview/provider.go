@@ -36,15 +36,35 @@ type IndexFallback interface {
 	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
 }
 
+// IndexSeriesProvider 只提供指数走势：新浪没有批量指数快照，
+// 但它的日线通道能补上「东财 + 腾讯都挂了」的那一段。
+type IndexSeriesProvider interface {
+	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
+}
+
 type Provider struct {
 	primary          Primary
 	indexFallback    IndexFallback
+	indexFallback2   IndexSeriesProvider
 	industryProvider IndustryMomentumProvider
 	fundFlowProvider FundFlowProvider
 }
 
-func New(primary Primary, indexFallback IndexFallback, industryProvider IndustryMomentumProvider, fundFlowProvider FundFlowProvider) *Provider {
-	return &Provider{primary: primary, indexFallback: indexFallback, industryProvider: industryProvider, fundFlowProvider: fundFlowProvider}
+// Option 让调用方按需追加备用通道，避免把构造签名撑成四个位置参数。
+type Option func(*Provider)
+
+// WithSecondaryIndexFallback 追加第三路指数走势通道（东财 → 腾讯 → 新浪）：
+// 偏离值计算强依赖基准指数，单一路径抖动就会让整块异动页失去数据。
+func WithSecondaryIndexFallback(fallback IndexSeriesProvider) Option {
+	return func(p *Provider) { p.indexFallback2 = fallback }
+}
+
+func New(primary Primary, indexFallback IndexFallback, industryProvider IndustryMomentumProvider, fundFlowProvider FundFlowProvider, opts ...Option) *Provider {
+	provider := &Provider{primary: primary, indexFallback: indexFallback, industryProvider: industryProvider, fundFlowProvider: fundFlowProvider}
+	for _, opt := range opts {
+		opt(provider)
+	}
+	return provider
 }
 
 func (p *Provider) MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
@@ -65,19 +85,40 @@ func (p *Provider) MarketIndexes(ctx context.Context, scope string) ([]foundatio
 
 func (p *Provider) MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error) {
 	series, err := p.primary.MarketIndexSeries(ctx, id, period, limit)
-	if err == nil || p.indexFallback == nil {
-		return series, err
+	if err == nil {
+		return series, nil
 	}
-	fallback, fallbackErr := p.indexFallback.MarketIndexSeries(ctx, id, period, limit)
-	if fallbackErr != nil {
-		return foundation.MarketIndexSeries{}, fmt.Errorf("primary index series failed: %v; fallback failed: %w", err, fallbackErr)
+	reasons := fmt.Sprintf("东方财富指数走势不可用: %v", err)
+	fallbacks := make([]struct {
+		label  string
+		series IndexSeriesProvider
+	}, 0, 2)
+	if p.indexFallback != nil {
+		fallbacks = append(fallbacks, struct {
+			label  string
+			series IndexSeriesProvider
+		}{"腾讯 K 线", p.indexFallback})
 	}
-	fallback.Meta.FallbackReason = "东方财富指数走势不可用，已切换腾讯 K 线"
-	fallback.Index.Meta = fallback.Meta
-	for index := range fallback.Lines {
-		fallback.Lines[index].Meta = fallback.Meta
+	if p.indexFallback2 != nil {
+		fallbacks = append(fallbacks, struct {
+			label  string
+			series IndexSeriesProvider
+		}{"新浪指数通道", p.indexFallback2})
 	}
-	return fallback, nil
+	for _, fallback := range fallbacks {
+		result, fallbackErr := fallback.series.MarketIndexSeries(ctx, id, period, limit)
+		if fallbackErr != nil {
+			reasons += "; " + fallbackErr.Error()
+			continue
+		}
+		result.Meta.FallbackReason = "东方财富指数走势不可用，已切换" + fallback.label
+		result.Index.Meta = result.Meta
+		for lineIndex := range result.Lines {
+			result.Lines[lineIndex].Meta = result.Meta
+		}
+		return result, nil
+	}
+	return foundation.MarketIndexSeries{}, fmt.Errorf("index series unavailable: %s", reasons)
 }
 
 func (p *Provider) IndustryMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {
@@ -116,6 +157,17 @@ func (p *Provider) MarketFundFlows(ctx context.Context, dimension string, sortKe
 		fallbackItems[index].Meta = fallbackMeta
 	}
 	return fallbackItems, fallbackMeta, nil
+}
+
+// Symbol lookups must not silently fall back to a limited ranking.
+func (p *Provider) StockFundFlowsBySymbols(ctx context.Context, symbols []string) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+	provider, ok := p.fundFlowProvider.(interface {
+		StockFundFlowsBySymbols(context.Context, []string) ([]foundation.MarketFundFlow, foundation.SourceMeta, error)
+	})
+	if !ok {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("stock fund-flow symbol lookup is unavailable")
+	}
+	return provider.StockFundFlowsBySymbols(ctx, symbols)
 }
 
 func (p *Provider) USSectorMomentum(ctx context.Context, limit int) ([]foundation.MarketUSSectorMomentum, foundation.SourceMeta, error) {

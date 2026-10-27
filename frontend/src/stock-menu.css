@@ -1,0 +1,157 @@
+/* 个股右键菜单：跟随指针弹出的操作面板。
+   走暗色/亮色一套变量，与站内其它浮层（选择器、抽屉）保持同一套观感。
+   排版目标：一屏内看清「是谁 + 能做什么」，所以名称字号抬到正文档、
+   代码降为辅助信息，每个动作都配图标与一句副标题。 */
+
+.stock-context-menu {
+	position: fixed;
+	z-index: 9000;
+	/* 宽度贴近内容：图标 26 + 间距 9 + 文案，外加两侧 10/6 的内边距。
+	   此前 236px 起步导致右侧留一大片空，视觉上像没排满。 */
+	width: max-content;
+	min-width: 196px;
+	max-width: 252px;
+	padding: 6px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, var(--surface));
+	/* 双层阴影：近距离一层收边、远距离一层托底，浮层才不会像贴纸。 */
+	box-shadow: 0 2px 6px rgba(15, 23, 42, .08), 0 18px 44px rgba(15, 23, 42, .20);
+	color: var(--text);
+	font-size: var(--fs-body);
+	-webkit-font-smoothing: antialiased;
+	animation: stock-menu-in .12s ease-out;
+}
+
+@keyframes stock-menu-in {
+	from { opacity: 0; transform: translateY(-4px) scale(.98); }
+	to { opacity: 1; transform: none; }
+}
+
+.stock-context-head {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 9px 11px 10px;
+	margin-bottom: 4px;
+	border-bottom: 1px solid var(--line-soft);
+}
+
+.stock-context-head strong {
+	/* 名称是这一屏最该被认出来的信息，字号比正文大一档、字重拉满。 */
+	font-size: var(--fs-body);
+	font-weight: 700;
+	line-height: 1.25;
+	letter-spacing: .01em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.stock-context-head small {
+	/* 代码是索引信息：等宽、灰色，和名称形成层级而不是竞争。 */
+	color: var(--theme-muted);
+	font-family: var(--font-num);
+	font-size: var(--fs-desc);
+	font-variant-numeric: tabular-nums;
+	letter-spacing: .02em;
+}
+
+.stock-context-item {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	width: 100%;
+	padding: 8px 10px;
+	border: 0;
+	border-radius: 8px;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background .12s ease;
+}
+
+/* 图标固定成一个小方块，四行的文字起点因此对齐，不会随图标形状漂。 */
+.stock-context-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 26px;
+	height: 26px;
+	border-radius: 7px;
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: var(--theme-muted);
+}
+
+.stock-context-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.stock-context-copy > span {
+	font-weight: 600;
+	line-height: 1.25;
+}
+
+.stock-context-copy > em {
+	color: var(--theme-muted);
+	font-size: var(--fs-desc);
+	font-style: normal;
+	line-height: 1.35;
+}
+
+.stock-context-item:hover,
+.stock-context-item:focus-visible {
+	background: var(--theme-surface-soft, var(--surface-2));
+	outline: none;
+}
+
+.stock-context-item:hover .stock-context-icon,
+.stock-context-item:focus-visible .stock-context-icon {
+	background: var(--theme-surface, var(--surface));
+	color: var(--theme-blue, var(--blue));
+}
+
+/* 删除关注是破坏性动作：常驻红色，不靠悬停才提示。 */
+.stock-context-item.is-danger .stock-context-copy > span {
+	color: var(--theme-red, #c4313b);
+}
+
+.stock-context-item.is-danger .stock-context-icon {
+	color: var(--theme-red, #c4313b);
+}
+
+.stock-context-item.is-danger:hover,
+.stock-context-item:focus-visible.is-danger {
+	background: var(--theme-red-soft, #fbe9ea);
+}
+
+/* 「加入关注」这类写入动作结束时给一句回执，避免点了没反馈。 */
+.stock-menu-notice {
+	position: fixed;
+	left: 50%;
+	bottom: 28px;
+	z-index: 9100;
+	padding: 10px 18px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 2px 6px rgba(15, 23, 42, .08), 0 10px 28px rgba(15, 23, 42, .18);
+	color: var(--text);
+	font-size: var(--fs-body);
+	font-weight: 500;
+	opacity: 0;
+	transform: translate(-50%, 8px);
+	transition: opacity .18s ease, transform .18s ease;
+	pointer-events: none;
+}
+
+.stock-menu-notice.is-open {
+	opacity: 1;
+	transform: translate(-50%, 0);
+}

@@ -8,6 +8,9 @@ import '@fontsource/inter/latin-700.css';
 import './typography.css';
 import './styles.css';
 import './theme.css';
+import './table-tools.css';
+import './stock-menu.css';
+import './confirm-dialog.css';
 
 if (/Electron\//.test(navigator.userAgent) && /Windows/.test(navigator.userAgent)) {
 	document.documentElement.classList.add('desktop-titlebar-overlay');

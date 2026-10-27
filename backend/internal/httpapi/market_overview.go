@@ -138,6 +138,45 @@ func (s *Server) marketFlowsHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if raw, present := r.URL.Query()["symbols"]; present {
+		if dimension != "stock" {
+			writeError(w, http.StatusBadRequest, "symbols is only supported for stock flows")
+			return
+		}
+		symbols, symbolErr := foundation.SplitSymbols(strings.Join(raw, ","))
+		if symbolErr != nil {
+			writeError(w, http.StatusBadRequest, symbolErr.Error())
+			return
+		}
+		unique := make(map[string]bool, len(symbols))
+		for _, symbol := range symbols {
+			if len(strings.Split(symbol, ".")[0]) != 6 {
+				writeError(w, http.StatusBadRequest, "symbols must contain A-share stock codes")
+				return
+			}
+			unique[symbol] = true
+		}
+		if len(unique) > 200 {
+			writeError(w, http.StatusBadRequest, "symbols must contain at most 200 stocks")
+			return
+		}
+		symbols = symbols[:0]
+		for symbol := range unique {
+			symbols = append(symbols, symbol)
+		}
+		sort.Strings(symbols)
+		provider, ok := s.marketOverview.(interface {
+			StockFundFlowsBySymbols(context.Context, []string) ([]foundation.MarketFundFlow, foundation.SourceMeta, error)
+		})
+		if !ok {
+			writeError(w, http.StatusServiceUnavailable, "stock fund-flow symbol lookup is unavailable")
+			return
+		}
+		marketOverviewList(s, w, r, "flows:stock:symbols:"+strings.Join(symbols, ","), func(ctx context.Context) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+			return provider.StockFundFlowsBySymbols(ctx, symbols)
+		})
+		return
+	}
 	marketOverviewList(s, w, r, fmt.Sprintf("flows:%s:%s:%d", dimension, sortKey, limit), func(ctx context.Context) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
 		return s.marketOverview.MarketFundFlows(ctx, dimension, sortKey, limit)
 	})

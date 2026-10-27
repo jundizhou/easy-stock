@@ -17,6 +17,8 @@ type SourceMeta struct {
 }
 
 type Quote struct {
+	// Book is the provider's visible best bid/ask, in shares. Nil means unavailable.
+	Book      *QuoteBook      `json:"book,omitempty"`
 	Valuation *StockValuation `json:"valuation,omitempty"`
 	// Session totals from the quote provider; zero means unavailable or no trades.
 	Volume        float64    `json:"volume,omitempty"`
@@ -32,6 +34,13 @@ type Quote struct {
 	ChangePercent float64    `json:"change_percent"`
 	TradeTime     time.Time  `json:"trade_time,omitempty"`
 	Meta          SourceMeta `json:"meta"`
+}
+
+type QuoteBook struct {
+	BidPrice    float64 `json:"bid_price"`
+	BidQuantity int     `json:"bid_quantity"`
+	AskPrice    float64 `json:"ask_price"`
+	AskQuantity int     `json:"ask_quantity"`
 }
 
 type KLine struct {

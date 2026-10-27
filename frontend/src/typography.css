@@ -58,3 +58,16 @@ strong,
 b {
   font-weight: 700;
 }
+
+/* Financial list data shares the existing bold weight; expanded content and
+   cells containing form controls keep their own typography. */
+.stock-table > tbody > tr > td:not([colspan]):not(:has(button, input, select, textarea)),
+:is(.trading-table-wrap, .trading-universe-table) > table > tbody > tr > td:not([colspan]):not(:has(button, input, select, textarea)),
+:is(.market-data-table, .market-kline-table) > article > :not(:first-child) {
+  font-weight: 700;
+}
+
+/* Secondary codes and descriptions keep their original visual hierarchy. */
+:where(.stock-table, .trading-table-wrap, .trading-universe-table, .market-data-table) small {
+  font-weight: 400;
+}

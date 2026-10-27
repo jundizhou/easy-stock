@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,7 +23,10 @@ type Client struct {
 	moneyFlowBaseURL       string
 	sectorMoneyFlowBaseURL string
 	financialBaseURL       string
-	httpClient             *http.Client
+	// listBaseURL 是全市场列表（Market_Center.getHQNodeData）的入口，
+	// 监控引擎在拿不到东财 clist 时用它兜底取全市场快照。
+	listBaseURL string
+	httpClient  *http.Client
 }
 
 type Option func(*Client)
@@ -59,6 +63,13 @@ func WithSectorMoneyFlowBaseURL(baseURL string) Option {
 	}
 }
 
+// WithListBaseURL 换掉全市场列表的入口，测试用本地假上游时指定。
+func WithListBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.listBaseURL = strings.TrimRight(baseURL, "/")
+	}
+}
+
 func NewClient(opts ...Option) *Client {
 	c := &Client{
 		baseURL:                "https://hq.sinajs.cn",
@@ -66,6 +77,7 @@ func NewClient(opts ...Option) *Client {
 		moneyFlowBaseURL:       "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_ssggzj",
 		sectorMoneyFlowBaseURL: "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_bkzj_bk",
 		financialBaseURL:       "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+		listBaseURL:            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData",
 		httpClient:             &http.Client{Timeout: 10 * time.Second},
 	}
 	for _, opt := range opts {
@@ -325,6 +337,7 @@ func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.Sou
 		}
 		tradeTime, _ := time.ParseInLocation("2006-01-02 15:04:05", fields[30]+" "+fields[31], time.FixedZone("Asia/Shanghai", 8*3600))
 		quotes = append(quotes, foundation.Quote{
+			Book:          parseRealtimeBook(fields),
 			Symbol:        symbol.Canonical,
 			Volume:        volume,
 			Amount:        amount,
@@ -344,4 +357,29 @@ func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.Sou
 		return nil, fmt.Errorf("sina returned no quotes")
 	}
 	return quotes, nil
+}
+
+// Sina level-one quantity fields are shares (not lots). Missing/malformed book
+// stays nil; a valid zero ask represents no visible offer, not a missing feed.
+func parseRealtimeBook(fields []string) *foundation.QuoteBook {
+	if len(fields) <= 21 {
+		return nil
+	}
+	values := make([]float64, 4)
+	for i, index := range []int{10, 11, 20, 21} {
+		v, err := strconv.ParseFloat(strings.TrimSpace(fields[index]), 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return nil
+		}
+		values[i] = v
+	}
+	for _, i := range []int{0, 2} {
+		if math.Trunc(values[i]) != values[i] || values[i] > float64(1<<53) {
+			return nil
+		}
+	}
+	if (values[0] > 0 && values[1] <= 0) || (values[2] > 0 && values[3] <= 0) {
+		return nil
+	}
+	return &foundation.QuoteBook{BidQuantity: int(values[0]), BidPrice: values[1], AskQuantity: int(values[2]), AskPrice: values[3]}
 }

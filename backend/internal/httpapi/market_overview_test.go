@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,85 @@ import (
 
 type fakeMarketOverviewProvider struct {
 	fail bool
+}
+
+type symbolMarketOverviewProvider struct {
+	fakeMarketOverviewProvider
+	calls   int
+	symbols []string
+}
+
+func (p *symbolMarketOverviewProvider) StockFundFlowsBySymbols(_ context.Context, symbols []string) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+	p.calls++
+	p.symbols = append([]string(nil), symbols...)
+	meta, err := p.source()
+	return []foundation.MarketFundFlow{{Symbol: symbols[0], NetInflow: -123, Meta: meta}}, meta, err
+}
+
+func TestMarketStockFlowSymbolQueriesNormalizeCacheAndKeepStaleEvidence(t *testing.T) {
+	provider := &symbolMarketOverviewProvider{}
+	server := NewServer(Config{MarketOverview: provider})
+	for _, path := range []string{
+		"/api/v1/market/flows?dimension=stock&symbols=sh600000,000001.SZ,600000.SH",
+		"/api/v1/market/flows?dimension=stock&symbols=000001,600000",
+	} {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"net_inflow":-123`) {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	if provider.calls != 1 || !slices.Equal(provider.symbols, []string{"000001.SZ", "600000.SH"}) {
+		t.Fatalf("not normalized or cache not reused: calls=%d symbols=%v", provider.calls, provider.symbols)
+	}
+	server.marketSnapshots.ttl = -time.Second
+	// Expire the existing entry, then verify failed refreshes keep source evidence.
+	server.marketSnapshots.mu.Lock()
+	for key, entry := range server.marketSnapshots.items {
+		entry.expiresAt = time.Now().Add(-time.Second)
+		server.marketSnapshots.items[key] = entry
+	}
+	server.marketSnapshots.mu.Unlock()
+	provider.fail = true
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/flows?dimension=stock&symbols=600000,000001", nil))
+	var result struct {
+		Meta foundation.SourceMeta `json:"meta"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil || rec.Code != http.StatusOK || !result.Meta.Stale {
+		t.Fatalf("missing stale evidence: status=%d body=%s err=%v", rec.Code, rec.Body.String(), err)
+	}
+}
+
+func TestMarketStockFlowSymbolQueriesValidateScopeAndCount(t *testing.T) {
+	provider := &symbolMarketOverviewProvider{}
+	server := NewServer(Config{MarketOverview: provider})
+	tooMany := make([]string, 201)
+	for index := range tooMany {
+		tooMany[index] = fmt.Sprintf("%06d.SH", 600000+index)
+	}
+	for _, path := range []string{
+		"/api/v1/market/flows?dimension=theme&symbols=600000",
+		"/api/v1/market/flows?dimension=stock&symbols=",
+		"/api/v1/market/flows?dimension=stock&symbols=bad",
+		"/api/v1/market/flows?dimension=stock&symbols=12345.SH",
+		"/api/v1/market/flows?dimension=stock&symbols=" + strings.Join(tooMany, ","),
+	} {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s status=%d", path, rec.Code)
+		}
+	}
+	if provider.calls != 0 {
+		t.Fatalf("invalid request reached provider %d times", provider.calls)
+	}
+	unsupported := NewServer(Config{MarketOverview: &fakeMarketOverviewProvider{}})
+	rec := httptest.NewRecorder()
+	unsupported.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/flows?dimension=stock&symbols=600000", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unsupported status=%d", rec.Code)
+	}
 }
 
 func (p *fakeMarketOverviewProvider) source() (foundation.SourceMeta, error) {

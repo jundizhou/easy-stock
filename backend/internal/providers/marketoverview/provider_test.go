@@ -41,6 +41,38 @@ func (failingPrimary) MarketReports(context.Context, string, string, string, str
 
 type fundFlowProvider struct{}
 
+type symbolFundFlowProvider struct {
+	fundFlowProvider
+	symbols []string
+	fail    bool
+}
+
+func (p *symbolFundFlowProvider) StockFundFlowsBySymbols(_ context.Context, symbols []string) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+	p.symbols = symbols
+	if p.fail {
+		return nil, foundation.SourceMeta{}, fmt.Errorf("symbol source unavailable")
+	}
+	meta := foundation.SourceMeta{Source: "test:symbol-flow"}
+	return []foundation.MarketFundFlow{{Symbol: symbols[0], MainNetInflow: -100, Meta: meta}}, meta, nil
+}
+
+func TestProviderStockFlowsBySymbolsPreservesValuesAndErrors(t *testing.T) {
+	upstream := &symbolFundFlowProvider{}
+	provider := New(failingPrimary{}, nil, nil, upstream)
+	items, meta, err := provider.StockFundFlowsBySymbols(context.Background(), []string{"600000.SH"})
+	if err != nil || len(items) != 1 || items[0].MainNetInflow != -100 || meta.Source != "test:symbol-flow" || len(upstream.symbols) != 1 {
+		t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+	}
+	upstream.fail = true
+	if _, _, err := provider.StockFundFlowsBySymbols(context.Background(), []string{"600000.SH"}); err == nil || !strings.Contains(err.Error(), "symbol source unavailable") {
+		t.Fatalf("source failure hidden by ranking fallback: %v", err)
+	}
+	unsupported := New(failingPrimary{}, nil, nil, fundFlowProvider{})
+	if _, _, err := unsupported.StockFundFlowsBySymbols(context.Background(), []string{"600000.SH"}); err == nil {
+		t.Fatal("ranking-only provider must not pretend to support symbol queries")
+	}
+}
+
 func (fundFlowProvider) MarketFundFlows(_ context.Context, dimension string, _ string, _ int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
 	meta := foundation.SourceMeta{Source: "sina:" + dimension + "-money-flow"}
 	return []foundation.MarketFundFlow{{Dimension: dimension, Symbol: "300308.SZ", Name: "样本资金", Meta: meta}}, meta, nil

@@ -6,6 +6,7 @@ type UsagePeriod = 'day' | 'month';
 
 const moduleLabels: Record<string, string> = {
 	'ai-chat': 'AI 对话',
+	'cockpit-patrol': 'AI总控台巡检',
 	'stock-analysis': '个股分析',
 	'portfolio-inspection': '持仓 AI 巡检',
 	'review-diary': '大V复盘日记',
@@ -124,7 +125,7 @@ export function TokenUsageWorkspace({ config, refreshKey }: { config: BackendCon
 
 			<section className="token-usage-panel token-usage-table-panel">
 				<header><div><span>明细记录</span><strong>{period === 'day' ? '每日 Token 消耗' : '每月 Token 消耗'}</strong></div><small>{from} 至 {to} · 估算值不并入总量</small></header>
-				{rows.length ? <div className="token-usage-data-table"><div className="token-usage-data-row token-usage-data-head"><span>日期</span><span>功能模块</span><span>模型</span><span>输入</span><span>输出</span><span>真实总量</span><span>估算</span></div>{rows.slice().reverse().map((row) => <div className="token-usage-data-row" key={`${row.date}-${row.module}-${row.model}-${row.runtime || "legacy"}`}><span>{row.date}</span><span>{moduleLabels[row.module] || row.module}</span><span>{row.model || '未知'}{row.runtime ? ` · ${row.runtime === 'codex' ? 'Codex' : 'Hermes'}` : ''}</span><span>{formatNumber(row.prompt_tokens)}</span><span>{formatNumber(row.completion_tokens)}</span><strong>{formatNumber(row.total_tokens)}</strong><span className="token-usage-estimated">{row.estimated_total_tokens > 0 ? formatNumber(row.estimated_total_tokens) : '—'}</span></div>)}</div> : <EmptyUsage />}
+				{rows.length ? <div className="token-usage-data-table" data-tt-grid="token-usage"><div className="token-usage-data-row token-usage-data-head"><span>日期</span><span>功能模块</span><span>模型</span><span>输入</span><span>输出</span><span>真实总量</span><span>估算</span></div>{rows.slice().reverse().map((row) => <div className="token-usage-data-row" data-tt-row key={`${row.date}-${row.module}-${row.model}-${row.runtime || "legacy"}`}><span>{row.date}</span><span>{moduleLabels[row.module] || row.module}</span><span>{row.model || '未知'}{row.runtime ? ` · ${row.runtime === 'codex' ? 'Codex' : 'Hermes'}` : ''}</span><span data-tt-value={row.prompt_tokens}>{formatNumber(row.prompt_tokens)}</span><span data-tt-value={row.completion_tokens}>{formatNumber(row.completion_tokens)}</span><strong data-tt-value={row.total_tokens}>{formatNumber(row.total_tokens)}</strong><span data-tt-value={row.estimated_total_tokens > 0 ? row.estimated_total_tokens : ''} className="token-usage-estimated">{row.estimated_total_tokens > 0 ? formatNumber(row.estimated_total_tokens) : '—'}</span></div>)}</div> : <EmptyUsage />}
 			</section>
 		</section>
 	);

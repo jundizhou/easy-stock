@@ -1042,12 +1042,25 @@ func standardListParams(limit int) url.Values {
 }
 
 func findMarketIndex(id string) (marketIndexDefinition, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(id))
 	for _, item := range marketIndexCatalog {
-		if item.ID == strings.ToLower(strings.TrimSpace(id)) {
+		if item.ID == normalized {
 			return item, true
 		}
 	}
+	// 异动口径的 A 股基准指数：主板用 A 股指数而不是上证指数/深证成指，
+	// 创业板用综指。只用于指数走势查询，不进 MarketIndexes 的列表。
+	if item, ok := benchmarkIndexAliases[normalized]; ok {
+		return item, true
+	}
 	return marketIndexDefinition{}, false
+}
+
+var benchmarkIndexAliases = map[string]marketIndexDefinition{
+	"sse_a":        {ID: "sse_a", SecID: "1.000003", Name: "上证A股指数", Region: "中国", Market: "CN", Currency: "CNY"},
+	"szse_a":       {ID: "szse_a", SecID: "0.399107", Name: "深证A股指数", Region: "中国", Market: "CN", Currency: "CNY"},
+	"chinext_comp": {ID: "chinext_comp", SecID: "0.399102", Name: "创业板综指", Region: "中国", Market: "CN", Currency: "CNY"},
+	"bse50":        {ID: "bse50", SecID: "0.899050", Name: "北证50", Region: "中国", Market: "CN", Currency: "CNY"},
 }
 
 func indexStatus(tradeTime, now time.Time) string {

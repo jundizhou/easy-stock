@@ -220,6 +220,12 @@
 	color: var(--theme-green);
 }
 
+/* 总开关颜色语义：绿色=开启，黄色=关闭，胶囊与滑块轨道保持一致。 */
+.patrol-ai.is-off {
+	background: var(--theme-amber-soft);
+	color: var(--theme-amber);
+}
+
 /* 主动作按钮：与系统 .refresh-data-button 同规格（34 高 / 8px 圆角 / 12px）。 */
 .patrol-run {
 	display: inline-flex;
@@ -244,6 +250,80 @@
 .patrol-run:disabled {
 	opacity: 0.55;
 	cursor: not-allowed;
+}
+
+/* 状态与开关共用外框，高度及圆角与右侧巡查按钮一致。 */
+.patrol-auto-control {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 34px;
+	padding: 0 8px;
+	border: 1px solid var(--theme-red-line);
+	border-radius: 8px;
+	background: var(--theme-red-soft);
+}
+
+.patrol-auto-control:has(.patrol-auto.is-on) {
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+}
+
+.patrol-auto-control .patrol-ai {
+	padding: 0;
+	background: transparent;
+	color: var(--theme-red);
+}
+
+.patrol-auto-control:has(.patrol-auto.is-on) .patrol-ai {
+	color: var(--theme-blue);
+}
+
+.patrol-auto {
+	display: inline-flex;
+	align-items: center;
+	padding: 4px;
+	border: 0;
+	background: none;
+	cursor: pointer;
+}
+
+.patrol-auto:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.patrol-auto-track {
+	position: relative;
+	display: inline-block;
+	width: 32px;
+	height: 18px;
+	border-radius: 5px;
+	/* 关闭为红色，开启为蓝色，与整组外框保持一致。 */
+	background: var(--theme-red-soft);
+	border: 1px solid var(--theme-red-line);
+	transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.patrol-auto-knob {
+	position: absolute;
+	top: 1px;
+	left: 1px;
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	background: var(--theme-red);
+	transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.patrol-auto.is-on .patrol-auto-track {
+	background: var(--theme-blue-soft);
+	border-color: var(--theme-blue-line);
+}
+
+.patrol-auto.is-on .patrol-auto-knob {
+	transform: translateX(14px);
+	background: var(--theme-blue);
 }
 
 .patrol-error,
@@ -734,6 +814,20 @@
 	font-weight: 600;
 }
 
+/* 「昨收」标记：盘中看到的是上一交易日的日线快照，用琥珀色与普通标签区分。 */
+.patrol-badge.is-warn {
+	background: color-mix(in srgb, var(--theme-amber) 14%, transparent);
+	color: var(--theme-amber);
+	font-weight: 700;
+}
+
+/* 「盘中试算」标记：口径与收盘正式分不同，用蓝色与收盘/昨收区分。 */
+.patrol-badge.is-live {
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+	font-weight: 700;
+}
+
 /* 资金流向卡的维度开关：与行情总览的分段控件（.sector-flow-tabs）同一套视觉——
    浅底槽 + 白色选中胶囊滑块，选中字变蓝加粗，滑块平移过渡。
    头部用三栏网格让开关与「资金流向」标题同一行且水平居中。 */
@@ -925,6 +1019,20 @@
 	align-items: end;
 }
 
+/* 涨停梯队与情绪周期同排：情绪卡更高时把多出来的高度给柱形图，
+   柱子始终落在卡片底部，而不是在下方留一片空白。 */
+.patrol-fact.is-ladder {
+	align-content: stretch;
+}
+
+.patrol-fact.is-ladder .ladder {
+	align-items: stretch;
+}
+
+.patrol-fact.is-ladder .ladder-col {
+	grid-template-rows: auto minmax(88px, 1fr) auto;
+}
+
 .ladder-hero {
 	display: grid;
 	gap: 2px;
@@ -996,7 +1104,7 @@
 	font-size: var(--fs-desc);
 }
 
-/* 情绪构成：环形图，中心读情绪分，右侧列出数量与占比。 */
+/* 市场温度：圆环与三行统计并排，环色沿温度刻度连续变化。 */
 .emotion {
 	display: grid;
 	grid-template-columns: auto minmax(0, 1fr);
@@ -1006,8 +1114,8 @@
 
 .emotion-donut {
 	position: relative;
-	width: 108px;
-	height: 108px;
+	width: 132px;
+	height: 132px;
 }
 
 .emotion-donut svg {
@@ -1025,16 +1133,19 @@
 	stroke: var(--surface-3);
 }
 
-.emotion-donut circle.tone-up {
-	stroke: var(--theme-red);
+.emotion-donut .emotion-value {
+	stroke-linecap: round;
 }
 
-.emotion-donut circle.tone-down {
-	stroke: var(--theme-green);
+.temperature-gradient {
+	width: 100%;
+	height: 100%;
+	background: conic-gradient(from 0deg, var(--theme-green) 0deg, var(--theme-red) 360deg);
 }
 
-.emotion-donut circle.tone-warn {
-	stroke: var(--theme-amber);
+.emotion-tick {
+	stroke: var(--line-strong);
+	stroke-width: 1.4;
 }
 
 .emotion-center {
@@ -1059,51 +1170,97 @@
 	font-size: var(--fs-caption);
 }
 
-.emotion-legend {
+.emotion-dims {
 	display: grid;
-	gap: 7px;
+	gap: 9px;
 	margin: 0;
 	padding: 0;
 	list-style: none;
 	font-size: var(--fs-body);
+	cursor: help;
 }
 
-.emotion-legend li {
+.emotion-dims li {
 	display: grid;
-	grid-template-columns: 8px minmax(0, 1fr) 34px 44px;
+	grid-template-columns: 26px minmax(0, 1fr) 26px 30px;
 	gap: 8px;
 	align-items: center;
 }
 
-.emotion-legend i {
-	width: 8px;
-	height: 8px;
-	border-radius: 2px;
+.emotion-dims.is-temperature {
+	gap: 5px;
 }
 
-.emotion-legend i.tone-up {
-	background: var(--theme-red);
+.emotion-dims.is-temperature li {
+	grid-template-columns: 5em minmax(0, 1fr) 48px 14px;
+	padding: 3px 0;
 }
 
-.emotion-legend i.tone-down {
-	background: var(--theme-green);
+.emotion-dims.is-temperature strong.is-up,
+.emotion-dims.is-temperature i b.is-up {
+	color: var(--theme-red);
 }
 
-.emotion-legend i.tone-warn {
-	background: var(--theme-amber);
+.emotion-dims.is-temperature strong.is-down,
+.emotion-dims.is-temperature i b.is-down {
+	color: var(--theme-green);
 }
 
-.emotion-legend strong {
+.emotion-dims.is-temperature i {
+	position: relative;
+	grid-column: 2;
+	grid-row: 1;
+	height: 6px;
+}
+
+.emotion-dims.is-temperature i b {
+	position: absolute;
+	top: 0;
+	background: currentColor;
+	color: var(--theme-red);
+}
+
+.emotion-dims.is-temperature i.is-signed::after {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 50%;
+	width: 1px;
+	background: var(--line-strong);
+	content: '';
+}
+
+.emotion-dims li > span {
+	color: var(--theme-muted);
+	white-space: nowrap;
+}
+
+.emotion-dims i {
+	display: block;
+	height: 5px;
+	border-radius: 999px;
+	background: var(--surface-3);
+	overflow: hidden;
+}
+
+.emotion-dims i b {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--theme-blue);
+}
+
+.emotion-dims strong {
 	font-family: var(--font-num);
 	font-weight: 700;
 	text-align: right;
 	font-variant-numeric: tabular-nums;
 }
 
-.emotion-legend em {
-	color: var(--theme-muted);
+.emotion-dims em {
+	color: var(--theme-subtle);
 	font-family: var(--font-num);
-	font-size: var(--fs-desc);
+	font-size: var(--fs-caption);
 	font-style: normal;
 	font-variant-numeric: tabular-nums;
 	text-align: right;
@@ -1124,6 +1281,90 @@
 	font-family: var(--font-num);
 	font-size: var(--fs-body);
 	font-variant-numeric: tabular-nums;
+}
+
+.emotion-notes.is-counts {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0;
+}
+
+.emotion-notes.is-counts > span {
+	display: grid;
+	gap: 4px;
+	padding: 2px 8px;
+	text-align: center;
+}
+
+.emotion-notes.is-counts > span + span {
+	border-left: 1px solid var(--line-soft);
+}
+
+.emotion-notes.is-counts strong {
+	margin-left: 0;
+	font-weight: 700;
+}
+
+/* 第二行放输入因子（昨涨停表现、高位风险），字号再降一档，避免抢走总分。 */
+.emotion-notes.is-sub {
+	gap: 14px;
+	padding-top: 0;
+	border-top: 0;
+	color: var(--theme-subtle);
+	font-size: var(--fs-caption);
+}
+
+.emotion-notes.is-sub strong {
+	font-size: var(--fs-desc);
+}
+
+.emotion-notes strong.is-up {
+	color: var(--theme-red);
+}
+
+.emotion-notes strong.is-down {
+	color: var(--theme-green);
+}
+
+.emotion-notes .is-missing {
+	margin-left: auto;
+	color: var(--theme-amber);
+}
+
+/* 今日盘中补充行：日线快照还没生成时，用这一行给出今天的真实连板读数。
+   浅琥珀底表示「临时口径」，与上面收盘口径的圆环区分开。 */
+.emotion-live {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 14px;
+	margin-top: 2px;
+	padding: 6px 10px;
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--theme-amber) 9%, transparent);
+	color: var(--theme-muted);
+	font-size: var(--fs-desc);
+	line-height: 1.2;
+}
+
+.emotion-live-tag {
+	color: var(--theme-amber);
+	font-weight: 700;
+}
+
+.emotion-live b {
+	margin-left: 4px;
+	color: var(--theme-text);
+	font-family: var(--font-num);
+	font-size: var(--fs-body);
+	font-variant-numeric: tabular-nums;
+}
+
+.emotion-live em {
+	margin-left: auto;
+	font-style: normal;
+	font-size: var(--fs-caption);
+	color: var(--theme-subtle);
 }
 
 /* 盘中判断：状态标签 + 风险分，比率做成带刻度线的仪表条，底部一行连板背景。 */
@@ -1572,7 +1813,6 @@
 
 .index-list li,
 .tornado-side li,
-.emotion-legend li,
 .ladder-col {
 	transition: background-color 0.14s ease;
 }
@@ -1599,25 +1839,9 @@
 	color: var(--theme-blue);
 }
 
-/* 环形图：悬停整体压暗，指针所在扇区加粗并恢复亮度。 */
-.emotion-donut circle:not(.emotion-track) {
-	cursor: pointer;
-	transition: stroke-width 0.16s ease, opacity 0.16s ease;
-}
-
-.emotion-donut:hover circle:not(.emotion-track) {
-	opacity: 0.45;
-}
-
-.emotion-donut circle:not(.emotion-track):hover {
-	opacity: 1;
-	stroke-width: 14;
-}
-
-.emotion-legend li {
-	margin: 0 -4px;
-	padding: 2px 4px;
-	border-radius: 6px;
+/* 圆环与维度条在刷新时平滑增长，悬停不再按扇区加粗。 */
+.emotion-value {
+	transition: stroke-dasharray 0.45s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.2s ease;
 }
 
 .meter strong {
@@ -1649,8 +1873,8 @@
 /* 叙述放在事实之前并默认收起：先看到结论，再往下用图表核对依据。 */
 .patrol-narrative-block {
 	display: grid;
-	gap: 10px;
-	padding: 14px 16px 16px;
+	gap: 14px;
+	padding: 16px;
 	border: 1px solid var(--line-soft);
 	border-radius: 10px;
 	background: var(--theme-surface-soft, var(--surface-2));
@@ -1674,6 +1898,10 @@
 .patrol-narrative-title svg {
 	flex: none;
 	color: var(--theme-blue);
+}
+
+.patrol-narrative-title .patrol-verify {
+	margin-inline-start: 4px;
 }
 
 .patrol-narrative-block h4 {
@@ -1722,11 +1950,12 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 6px;
+	gap: 6px 8px;
 	margin: 0;
+	padding-top: 2px;
 	color: var(--theme-muted);
 	font-size: var(--fs-desc);
-	line-height: var(--lh-tight);
+	line-height: var(--lh-snug);
 }
 
 .patrol-narrative-sources em {
@@ -1739,10 +1968,199 @@
 	font-style: normal;
 }
 
-/* 收起态：只露首个小标题与第一段，正文收三行；结构与全文一致，展开不跳版。 */
+/* 叙述内的状态摘要条 + 四项要点卡；收起时保留市场状态和数据缺口。 */
+.nv-snapshot {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	margin: 0;
+}
+
+.nv-snapshot > div {
+	display: grid;
+	align-content: start;
+	gap: 8px;
+	min-width: 0;
+	padding: 12px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--theme-surface, #ffffff);
+}
+
+.nv-snapshot > .nv-snapshot-item {
+	gap: 8px;
+	padding: 12px;
+	border-radius: 10px;
+	box-shadow: 0 1px 3px var(--theme-shadow, rgba(30, 52, 78, 0.04));
+}
+
+.nv-snapshot > .is-market {
+	position: relative;
+	grid-column: 1 / -1;
+	padding: 12px 14px;
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+}
+
+.nv-snapshot dt {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	color: var(--theme-text);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	line-height: var(--lh-tight);
+}
+
+.nv-snapshot-icon {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 7px;
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+}
+
+.nv-snapshot .is-risk .nv-snapshot-icon {
+	background: var(--theme-amber-soft);
+	color: var(--theme-amber);
+}
+
+.nv-snapshot dt.nv-market-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.nv-snapshot dd {
+	margin: 0;
+	color: var(--theme-text);
+	font-size: var(--fs-subtitle);
+	line-height: var(--lh-snug);
+	overflow-wrap: anywhere;
+}
+
+.nv-snapshot-item dd {
+	padding-inline-start: 0;
+	line-height: 1.6;
+}
+
+.nv-snapshot-item .nv-tag {
+	margin: 2px 4px;
+}
+
+.nv-snapshot .is-market dd {
+	display: grid;
+	gap: 6px;
+}
+
+.nv-market-state {
+	font-size: var(--fs-title);
+	font-weight: 700;
+	line-height: 1.6;
+	text-wrap: wrap;
+	overflow-wrap: break-word;
+}
+
+.nv-market-evidence {
+	color: var(--theme-muted);
+	font-size: var(--fs-body);
+}
+
+.nv-market-state .nv-tag,
+.nv-market-evidence .nv-tag {
+	margin-inline: 5px;
+}
+
+.nv-snapshot-footer {
+	display: grid;
+	justify-items: end;
+	padding-top: 10px;
+	border-top: 1px dashed var(--line-soft);
+	text-align: right;
+}
+
+.nv-snapshot-footer .nv-p.is-note {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+/* 依据与免责声明共用底部一行，窄容器里的来源标签可横向浏览。 */
+.patrol-narrative-block:has(.nv-snapshot-footer) {
+	grid-template-columns: minmax(0, 1fr) max-content;
+	grid-auto-flow: row dense;
+}
+
+.patrol-narrative-block:has(.nv-snapshot-footer) > header,
+.patrol-narrative-block:has(.nv-snapshot-footer) > .patrol-narrative > .nv > :not(.nv-snapshot-footer) {
+	grid-column: 1 / -1;
+}
+
+.patrol-narrative-block:has(.nv-snapshot-footer) > .patrol-narrative,
+.patrol-narrative-block:has(.nv-snapshot-footer) > .patrol-narrative > .nv {
+	display: contents;
+}
+
+.patrol-narrative-block .nv-snapshot-footer {
+	grid-column: 2;
+	align-self: center;
+	padding-top: 0;
+	border-top: 0;
+	white-space: nowrap;
+}
+
+.patrol-narrative-block > .patrol-narrative-sources {
+	grid-column: 1;
+	align-self: center;
+	flex-wrap: nowrap;
+	min-width: 0;
+	padding-top: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+	white-space: nowrap;
+}
+
+.patrol-narrative-block > .patrol-narrative-sources > * {
+	flex: none;
+}
+
+.nv-snapshot-gap {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 8px;
+	margin: 0;
+	padding: 8px 10px;
+	border: 1px solid var(--theme-amber-line, var(--line-soft));
+	border-radius: 8px;
+	background: var(--theme-amber-soft);
+	color: var(--theme-amber);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-snug);
+	overflow-wrap: anywhere;
+}
+
+@container patrol (max-width: 520px) {
+	.nv-snapshot {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* 收起态：只露首个小标题与第一段，正文收三行；结构与全文一致，展开不跳版。
+   max-height 是兜底：列表条数多时靠它截断，否则预览会和全文一样长，按钮看起来就没反应。 */
 .patrol-narrative.is-preview {
 	display: grid;
 	gap: 8px;
+	max-height: 320px;
+	overflow: hidden;
 }
 
 .patrol-narrative.is-preview .nv-p {

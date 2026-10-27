@@ -35,6 +35,7 @@ import {
 } from '../lib/backend';
 import { activePortfolioPlan, addPortfolioPlan, portfolioDraftChangedEvent, portfolioDraftStorageKey, portfolioDraftToHoldingsWithAssets, portfolioPlansStorageKey, portfolioProfiles, readPortfolioPlans, removePortfolioPlan, renamePortfolioPlan, selectPortfolioPlan, writePortfolioDraft, type PortfolioPlans } from '../lib/portfolio-draft';
 import { applyPortfolioOptimization } from '../lib/apply-portfolio-optimization';
+import { syncMonitorInspectionHoldings } from '../lib/monitor';
 import { PortfolioSchedulePanel } from './PortfolioSchedulePanel';
 import { PortfolioPlanPicker } from './PortfolioPlanPicker';
 import { PortfolioInspectionHistoryItem } from './PortfolioInspectionHistoryItem';
@@ -86,6 +87,24 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	const totalWeight = useMemo(() => draft.holdings.reduce((total, item) => total + item.weight, 0), [draft.holdings]);
 	const running = job?.status === 'running';
 	const mutationBusy = starting || applying || Boolean(deletingID);
+
+	// 监控中心的「巡检持仓」作用域读的是后端存的清单，而巡检组合只存在
+	// 浏览器本地：草稿一变就推一份过去，否则监控会按上次的清单跑，
+	// 用户在监控里看到的持仓和这里对不上。失败不打扰巡检本身。
+	const syncedHoldingsRef = useRef('');
+	useEffect(() => {
+		if (!config) return;
+		const holdings = draft.holdings
+			.filter((item) => item.symbol.trim())
+			.map((item) => ({ symbol: item.symbol.trim(), name: item.name.trim() }));
+		const signature = JSON.stringify(holdings);
+		if (signature === syncedHoldingsRef.current) return;
+		const timer = window.setTimeout(() => {
+			syncedHoldingsRef.current = signature;
+			void syncMonitorInspectionHoldings(config, holdings).catch(() => { /* 监控侧不可用不挡巡检 */ });
+		}, 600);
+		return () => window.clearTimeout(timer);
+	}, [config, draft.holdings]);
 
 	useEffect(() => {
 		const controller = new AbortController();
