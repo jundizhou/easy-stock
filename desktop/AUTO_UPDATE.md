@@ -22,7 +22,7 @@ Without signing credentials, CI can still produce packages for smoke testing, bu
 
 ## Release procedure
 
-Every release must be made by pushing a tag matching `desktop/package.json`, or by manually running the `Desktop Release` workflow with an existing tag. After all builds pass, one GitHub publishing job uploads and verifies both installation and update assets.
+Every release must be made by pushing a tag matching `desktop/package.json`, or by manually running the `Desktop Release` workflow with an existing tag. For runtime upgrades, run the workflow with `build_only: true` and the intended version tag first. This checks out the selected workflow commit, builds and verifies all three platforms, and leaves publication disabled even if every check passes. After all builds pass, one GitHub publishing job uploads and verifies both installation and update assets.
 
 The workflow performs these checks:
 

@@ -59,7 +59,7 @@ export function prepareHermesRuntime({
 			fs.mkdirSync(sourceRoot);
 			run('tar', ['-xzf', archive, '-C', sourceRoot, '--strip-components=1'], staging);
 			assertNoExternalSymlinks(sourceRoot);
-			const stamp = { schemaVersion: 2, commit: 'bf0203a794a', baseVersion: HERMES_AGENT_VERSION, displayVersion: HERMES_AGENT_VERSION, distance: 0, source: 'build', distribution: 'desktop-app', updateMechanism: 'external', payload: 'bootstrap' };
+			const stamp = { schemaVersion: 2, commit: 'bf0203a794a07aac3ff764972ab9087baa4e4f4e', baseVersion: HERMES_AGENT_VERSION, displayVersion: HERMES_AGENT_VERSION, distance: 0, source: 'build', distribution: 'desktop-app', updateMechanism: 'external', payload: 'bootstrap' };
 			fs.writeFileSync(path.join(sourceRoot, 'install-stamp.json'), JSON.stringify(stamp) + '\n');
 			run(uv, ['venv', path.join(builtRoot, 'venv'), '--python', '3.14', '--managed-python', '--relocatable', '--link-mode', 'copy'], staging);
 			const venvPython = hermesVenvPython(builtRoot, platform);
