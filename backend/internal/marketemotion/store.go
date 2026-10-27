@@ -91,6 +91,22 @@ func (s *Store) Upsert(ctx context.Context, snapshot Snapshot) error {
 	return nil
 }
 
+// DeleteBeforeVersion 清掉按旧模型算出的历史点。
+//
+// 情绪分是跨日比较用的量：模型换刻度后，旧点与新点不在同一把尺子上，
+// 留在曲线里就会画出并不存在的「情绪断层」。能重算的点在同步时已经覆盖，
+// 这里只是清掉超出事件窗口、无法重算的那几天。
+func (s *Store) DeleteBeforeVersion(ctx context.Context, version int) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM market_emotion_snapshots
+		WHERE CAST(json_extract(payload_json, '$.model_version') AS INTEGER) < ?
+	`, version)
+	if err != nil {
+		return 0, fmt.Errorf("delete stale market emotion snapshots: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (s *Store) List(ctx context.Context, limit int) ([]Snapshot, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 120

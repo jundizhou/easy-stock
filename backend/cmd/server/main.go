@@ -108,7 +108,12 @@ func main() {
 		CacheDir:   masteryCacheDir,
 		HermesHome: hermesHome,
 	})
+	monitorDBPath := os.Getenv("A_STOCK_MONITOR_DB")
+	if monitorDBPath == "" {
+		monitorDBPath = dataPath(dataDir, "monitor.db")
+	}
 	server := httpapi.NewServer(httpapi.Config{
+		MonitorDBPath:            monitorDBPath,
 		Token:                    os.Getenv("A_STOCK_TOKEN"),
 		ReviewDBPath:             reviewDBPath,
 		PortfolioDBPath:          portfolioDBPath,
@@ -141,6 +146,7 @@ func main() {
 	go server.RunMasteryScheduler(ctx)
 	go server.RunPortfolioScheduler(ctx)
 	go server.RunCockpitPatrol(ctx)
+	go server.RunMonitorEngine(ctx)
 	go server.RunThemeLibraryDailyRefresh(ctx)
 	httpServer := &http.Server{Addr: addr, Handler: server}
 	go func() {

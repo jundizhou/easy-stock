@@ -19,6 +19,7 @@ import (
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/monitor"
 	"easy-stock/backend/internal/notification"
 	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/portfoliooptimization"
@@ -42,6 +43,11 @@ import (
 )
 
 type Server struct {
+	monitor                  *monitor.Engine
+	monitorStore             *monitor.Store
+	monitorPreferences       *monitor.PreferencesStore
+	monitorNotifications     *notification.Dispatcher
+	stockSuggest             SymbolSuggester
 	etfDirectionMarket       ETFDirectionMarketProvider
 	etfUnderlyingFinancials  StockFinancialSupplementProvider
 	etfUnderlyingValuation   StockValuationProvider
@@ -221,7 +227,8 @@ func NewServer(config any) *Server {
 		cfg.IndustryStocks = tencentClient
 	}
 	if cfg.MarketOverview == nil {
-		cfg.MarketOverview = marketoverviewprovider.New(eastMoneyClient, tencentClient, tencentClient, sinaClient)
+		cfg.MarketOverview = marketoverviewprovider.New(eastMoneyClient, tencentClient, tencentClient, sinaClient,
+			marketoverviewprovider.WithSecondaryIndexFallback(sinaClient))
 	}
 	if cfg.SectorMap == nil {
 		mapper := sector.NewMapper(
@@ -379,6 +386,7 @@ func NewServer(config any) *Server {
 		})
 	}
 	s := &Server{
+		stockSuggest:            eastMoneyClient,
 		sourceHealth:            newSourceHealthCache(cfg.DuanxianxiaBaseURL, eastMoneyClient, sinaClient, tencentClient, clsClient),
 		etfUnderlyingFinancials: cfg.ETFUnderlyingFinancials, etfUnderlyingValuation: cfg.ETFUnderlyingValuation,
 		etfDirectionMarket: cfg.ETFDirectionMarket, etfExecution: cfg.ETFExecution, etfProvider: cfg.ETF, etfKLinePrimary: cfg.ETFKLinePrimary, etfKLineFallback: cfg.ETFKLineFallback,
@@ -469,6 +477,73 @@ func NewServer(config any) *Server {
 	s.notifications = notification.NewDispatcher(func(ctx context.Context, channel string, cfg appsettings.NotificationChannel, message notification.Message) error {
 		return s.notificationSender.Send(ctx, channel, cfg, message)
 	}, func() appsettings.Notifications { return s.settingsStore.Snapshot().Notifications }, cfg.Logger)
+	monitorStore := cfg.MonitorStore
+	var monitorStoreErr error
+	if monitorStore == nil {
+		monitorStore, monitorStoreErr = monitor.OpenStore(strings.TrimSpace(cfg.MonitorDBPath))
+	}
+	if monitorStoreErr != nil {
+		if cfg.StrictPersistence {
+			startupErrors = append(startupErrors, fmt.Errorf("open monitor database: %w", monitorStoreErr))
+		}
+		monitorStore, _ = monitor.OpenStore("")
+	}
+	s.monitorPreferences, monitorStoreErr = monitor.OpenPreferences(monitorStore)
+	s.monitorStore = monitorStore
+	if monitorStoreErr != nil {
+		startupErrors = append(startupErrors, fmt.Errorf("open monitor preferences: %w", monitorStoreErr))
+	}
+	s.monitorNotifications = notification.NewDispatcher(func(ctx context.Context, channel string, cfg appsettings.NotificationChannel, message notification.Message) error {
+		return s.notificationSender.Send(ctx, channel, cfg, message)
+	}, func() appsettings.Notifications {
+		values := s.settingsStore.Snapshot().Notifications
+		if s.monitorPreferences == nil || !s.monitorPreferences.Snapshot().NotifyEnabled {
+			values.Feishu.Enabled, values.Dingtalk.Enabled = false, false
+		}
+		return values
+	}, cfg.Logger)
+	notifier := func(ctx context.Context, event monitor.Event) (string, error) {
+		return s.NotifyMonitorAlert(ctx, event)
+	}
+	// 全市场快照按顺序取：东财 clist 为主，新浪全市场列表兜底。
+	// 单主源时 push2 一被网络拦掉，监控页就永久降级到持仓范围，
+	// 异动名单会一直空着——看起来像"数据逻辑有问题"，其实是没扫到市场。
+	snapshotProviders := make([]monitor.SnapshotProvider, 0, 2)
+	if cfg.MonitorSnapshot != nil {
+		snapshotProviders = append(snapshotProviders, cfg.MonitorSnapshot)
+	} else {
+		snapshotProviders = append(snapshotProviders, eastMoneyClient)
+	}
+	snapshotProviders = append(snapshotProviders, sinaClient)
+	cfg.MonitorSnapshot = newMonitorSnapshotChain(snapshotProviders...)
+	// 板块监控数据源：行情总览服务实现了完整板块能力时才注入，
+	// 自定义部署缺能力时对应维度安静沉默（engine 侧有 nil 防御）。
+	var sectorRank monitor.SectorRankProvider
+	if flow, ok := s.marketOverview.(SectorFlowProvider); ok {
+		sectorRank = flow
+	}
+	s.monitor = monitor.NewEngine(monitor.EngineConfig{
+		Store:              monitorStore,
+		Realtime:           cfg.Realtime,
+		Snapshot:           cfg.MonitorSnapshot,
+		KLine:              newKLineChain(cfg.KLinePrimary, cfg.KLineFallback),
+		Index:              cfg.MarketOverview,
+		Inspection:         monitorInspectionSource{server: s},
+		InspectionHoldings: monitorInspectionSource{server: s},
+		SectorRank:         sectorRank,
+		SectorIntraday:     monitorSectorIntradaySource{server: s},
+		SectorCatalog:      cfg.StockDirectory,
+		ThemeCatalog:       monitorThemeSource{server: s},
+		Settings: func() monitor.Settings {
+			if s.monitorPreferences == nil {
+				return monitor.DefaultSettings()
+			}
+			return s.monitorPreferences.Snapshot().Settings
+		},
+		Notify: notifier,
+		Logger: cfg.Logger,
+	})
+	s.startupError = errors.Join(startupErrors...)
 	s.stockResearch = stockanalysis.NewResearchServiceWithPreparation(cfg.StockResearchStore, s.runStockResearch, s.prepareStockResearch, s.notifyStockResearch)
 	s.portfolioInspection = portfolioinspection.NewService(cfg.PortfolioStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
 	s.portfolioInspection.ConfigureCompletion(s.notifyPortfolioInspection)
@@ -531,6 +606,12 @@ func (s *Server) Close() error {
 		s.portfolioScheduler.Close()
 	}
 	var closeErrors []error
+	if s.monitorStore != nil {
+		closeErrors = append(closeErrors, s.monitorStore.Close())
+	}
+	if s.monitorNotifications != nil {
+		s.monitorNotifications.Close()
+	}
 	if s.notifications != nil {
 		s.notifications.Close()
 	}
@@ -772,6 +853,39 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/reviews/posts/{id}/analyze", s.reviewAnalyzePost)
 	s.mux.HandleFunc("GET /api/v1/reviews/remote-daily/status", s.reviewRemoteDailyStatus)
 	s.mux.HandleFunc("POST /api/v1/reviews/remote-daily/sync", s.reviewRemoteDailySync)
+	s.mux.HandleFunc("GET /api/v1/monitor/overview", s.monitorOverview)
+	s.mux.HandleFunc("GET /api/v1/monitor/stream", s.monitorStreamHandler)
+	s.mux.HandleFunc("GET /api/v1/monitor/targets", s.monitorTargets)
+	s.mux.HandleFunc("PUT /api/v1/monitor/inspection-holdings", s.monitorSyncInspectionHoldings)
+	s.mux.HandleFunc("GET /api/v1/monitor/sectors", s.monitorSectors)
+	s.mux.HandleFunc("GET /api/v1/monitor/stock-suggest", s.monitorSuggest)
+	s.mux.HandleFunc("GET /api/v1/monitor/watchlist", s.monitorWatchlistList)
+	s.mux.HandleFunc("POST /api/v1/monitor/watchlist", s.monitorWatchlistAdd)
+	s.mux.HandleFunc("PATCH /api/v1/monitor/watchlist", s.monitorWatchlistUpdate)
+	s.mux.HandleFunc("DELETE /api/v1/monitor/watchlist", s.monitorWatchlistClear)
+	s.mux.HandleFunc("DELETE /api/v1/monitor/watchlist/{symbol}", s.monitorWatchlistRemove)
+	s.mux.HandleFunc("GET /api/v1/monitor/rules", s.monitorRulesList)
+	s.mux.HandleFunc("POST /api/v1/monitor/rules", s.monitorRuleCreate)
+	s.mux.HandleFunc("PUT /api/v1/monitor/rules/{id}", s.monitorRuleUpdate)
+	s.mux.HandleFunc("DELETE /api/v1/monitor/rules/{id}", s.monitorRuleDelete)
+	s.mux.HandleFunc("POST /api/v1/monitor/rules/{id}/toggle", s.monitorRuleToggle)
+	s.mux.HandleFunc("POST /api/v1/monitor/rules/test", s.monitorRuleTest)
+	s.mux.HandleFunc("POST /api/v1/monitor/rules/{id}/test", s.monitorRuleTest)
+	s.mux.HandleFunc("GET /api/v1/monitor/events", s.monitorEventsList)
+	s.mux.HandleFunc("DELETE /api/v1/monitor/events/{id}", s.monitorEventDelete)
+	s.mux.HandleFunc("DELETE /api/v1/monitor/events", s.monitorEventsClear)
+	s.mux.HandleFunc("GET /api/v1/monitor/abnormal", s.monitorAbnormal)
+	s.mux.HandleFunc("GET /api/v1/monitor/abnormal/calc", s.monitorAbnormalCalc)
+	s.mux.HandleFunc("GET /api/v1/monitor/radar", s.monitorRadar)
+	s.mux.HandleFunc("GET /api/v1/monitor/lots", s.monitorLotsList)
+	s.mux.HandleFunc("POST /api/v1/monitor/lots", s.monitorLotCreate)
+	s.mux.HandleFunc("PUT /api/v1/monitor/lots/{id}", s.monitorLotUpdate)
+	s.mux.HandleFunc("DELETE /api/v1/monitor/lots/{id}", s.monitorLotDelete)
+	s.mux.HandleFunc("POST /api/v1/monitor/lots/sync", s.monitorLotSync)
+	s.mux.HandleFunc("POST /api/v1/monitor/lots/{id}/detach", s.monitorLotDetach)
+	s.mux.HandleFunc("GET /api/v1/monitor/settings", s.monitorSettingsGet)
+	s.mux.HandleFunc("PUT /api/v1/monitor/settings", s.monitorSettingsUpdate)
+	s.mux.HandleFunc("GET /api/v1/monitor/runs", s.monitorRuns)
 	s.mux.HandleFunc("GET /api/v1/settings", s.settingsGet)
 	s.mux.HandleFunc("GET /api/v1/settings/token-usage", s.tokenUsageSummary)
 	s.mux.HandleFunc("GET /api/v1/settings/token-usage/calls", s.tokenUsageCalls)
@@ -1092,4 +1206,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Server) RunMonitorEngine(ctx context.Context) {
+	if s.monitor == nil {
+		return
+	}
+	s.logSchedulerLifecycle(ctx, "monitor", "engine", func() {
+		s.monitor.Run(ctx)
+	})
 }

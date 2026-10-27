@@ -341,3 +341,37 @@ func TestBuildMoveBoardRanksByChangePercent(t *testing.T) {
 		t.Fatal("empty input should produce no board")
 	}
 }
+
+func TestCarryOverBoardsKeepsLastKnownData(t *testing.T) {
+	prev := Facts{Industry: &FlowBoard{Inflow: []FlowItem{{Name: "银行"}}}, Concepts: &FlowBoard{Inflow: []FlowItem{{Name: "AI芯片"}}}, ConceptMoves: &FlowBoard{Inflow: []FlowItem{{Name: "WiFi"}}}, News: []NewsLine{{Title: "旧快讯"}}}
+	next := CarryOverBoards(prev, Facts{Industry: &FlowBoard{Inflow: []FlowItem{{Name: "新行业"}}}})
+	if next.Industry.Inflow[0].Name != "新行业" {
+		t.Fatal("fresh data must win")
+	}
+	if next.Concepts == nil || next.Concepts.Inflow[0].Name != "AI芯片" || next.ConceptMoves == nil || next.News == nil {
+		t.Fatalf("empty fields must carry over: %+v", next)
+	}
+}
+
+func TestSeedCarryFromBriefsPicksLatestAvailable(t *testing.T) {
+	old := Brief{ID: "old", Status: "ready", Facts: Facts{Concepts: &FlowBoard{Inflow: []FlowItem{{Name: "旧概念"}}}, News: []NewsLine{{Title: "旧快讯"}}}}
+	recent := Brief{ID: "new", Status: "ready", Facts: Facts{ConceptMoves: &FlowBoard{Inflow: []FlowItem{{Name: "新题材"}}}}}
+	carry := SeedCarryFromBriefs([]Brief{recent, old})
+	if carry.ConceptMoves == nil || carry.Concepts == nil || carry.News == nil {
+		t.Fatalf("seed should merge fields across briefs: %+v", carry)
+	}
+}
+
+func TestBuildFlowBoardReturnsNilForAllZeroSamples(t *testing.T) {
+	if BuildFlowBoard([]FlowItem{{Name: "A", NetInflow: 0}, {Name: "B", NetInflow: 0}}, 8) != nil {
+		t.Fatal("all-zero sample should be treated as no data")
+	}
+	if BuildMoveBoard([]FlowItem{{Name: "A", ChangePercent: 0}}, 5) != nil {
+		t.Fatal("all-flat sample should be treated as no data")
+	}
+	prev := Facts{Concepts: &FlowBoard{Inflow: []FlowItem{{Name: "昨日概念"}}}}
+	next := CarryOverBoards(prev, Facts{Concepts: &FlowBoard{}})
+	if next.Concepts == nil || next.Concepts.Inflow[0].Name != "昨日概念" {
+		t.Fatalf("empty board must carry over: %+v", next.Concepts)
+	}
+}

@@ -9,13 +9,14 @@ import {
 	Layers3,
 	Landmark,
 	LineChart,
+	Plus,
 	RefreshCw,
 	ShieldAlert,
 	TimerReset,
 	TrendingUp,
 	X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	BackendConfig,
 	KLine,
@@ -33,6 +34,8 @@ import {
 } from '../lib/backend';
 import { KLineChart } from './KLineChart';
 import { LadderThemeEntries, LadderThemeEntry, useLadderThemeAI } from '../lib/ladder-theme-ai';
+import { addMonitorWatch } from '../lib/monitor';
+import { isWatched, subscribeWatchlist } from '../lib/watchlist-registry';
 import { classifyBillboardSeat } from '../lib/billboard';
 import { latestTradingDayKLines } from '../lib/kline';
 import { ShortTermProgress } from '../lib/short-term-progress';
@@ -83,6 +86,18 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 	const [billboardDetail, setBillboardDetail] = useState<MarketBillboardDetail | null>(null);
 	const [billboardState, setBillboardState] = useState<BillboardState>('idle');
 	const [billboardError, setBillboardError] = useState('');
+	// 连板卡片上的「关注」按钮：写进关注仓，和右键菜单、关注仓页同一个入口。
+	// 已在关注仓的票不再显示按钮——否则同一只票「卡片上可加、右键却是删除」，
+	// 又变成两套互相矛盾的界面逻辑。订阅镜像，写入后卡片即时收敛。
+	const [watchTick, setWatchTick] = useState(0);
+	useEffect(() => subscribeWatchlist(() => setWatchTick((current) => current + 1)), []);
+	const addWatchFromLadder = useCallback((stock: LimitUpLadderStock) => {
+		if (!config) return;
+		void addMonitorWatch(config, { symbol: stock.symbol, name: stock.name, note: '' })
+			.then(() => setWatchTick((current) => current + 1))
+			.catch(() => { /* 失败时接口本身已记录，卡片不做额外提示 */ });
+	}, [config]);
+
 	const selectedKLineCache = useRef(new Map<string, KLine[]>());
 	const billboardCache = useRef(new Map<string, { item: MarketBillboardItem | null; detail: MarketBillboardDetail | null }>());
 	const current = useMemo(() => summarizeVisibleDay(data?.current, showST), [data?.current, showST]);
@@ -226,7 +241,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						<div><span>今日结构</span><h3>连板梯队</h3></div>
 						<small>按高度降序；同层优先无开板、早封板</small>
 					</div>
-					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows aiEntries={themeAI.entries} levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />}
+					{!data ? <div className={`limit-up-loading ${state === 'error' ? 'error' : ''}`} role="status">{state === 'error' ? <ShieldAlert size={24} /> : <RefreshCw className="spin" size={24} />}<strong>{state === 'error' ? '连板数据暂不可用' : '载入短线连板结构'}</strong><span>{error || '涨停池返回后立即显示，其他区域独立更新。'}</span>{state === 'error' && <button type="button" onClick={onRefresh}>重新加载</button>}</div> : <LadderRows aiEntries={themeAI.entries} levels={current.levels} tradeDate={current.tradeDate} onSelectStock={setSelectedStock} onAddWatch={addWatchFromLadder} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: current.tradeDate })} emptyText="当前涨停池没有可展示股票" />}
 				</section>
 
 				<aside className="limit-up-side-stack">
@@ -279,7 +294,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 						</button>
 					</div>
 				</div>
-				{previousExpanded && <div id="previous-ladder-content"><LadderRows aiEntries={themeAI.entries} levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} emptyText="暂无昨日梯队数据" /></div>}
+				{previousExpanded && <div id="previous-ladder-content"><LadderRows aiEntries={themeAI.entries} levels={previous.levels} tradeDate={previous.tradeDate} compact showCurrentChange onSelectStock={setSelectedStock} onAddWatch={addWatchFromLadder} onSelectBillboard={(stock) => setSelectedBillboard({ stock, tradeDate: previous.tradeDate })} emptyText="暂无昨日梯队数据" /></div>}
 			</section>
 
 			<footer className="limit-up-note">
@@ -451,7 +466,7 @@ function SummaryCard({ icon, label, value, detail, tone }: { icon: React.ReactNo
 	return <article className={`limit-summary-card ${tone}`}><div>{icon}<span>{label}</span></div><strong>{unit ? <>{unit[1]}<span className="num-unit">{unit[2]}</span></> : value}</strong><small>{detail}</small></article>;
 }
 
-function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onSelectBillboard, emptyText }: { aiEntries: LadderThemeEntries; levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
+function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrentChange = false, onSelectStock, onAddWatch, onSelectBillboard, emptyText }: { aiEntries: LadderThemeEntries; levels: LimitUpLadderLevel[]; tradeDate: string; compact?: boolean; showCurrentChange?: boolean; onSelectStock: (stock: LimitUpLadderStock) => void; onAddWatch?: (stock: LimitUpLadderStock) => void; onSelectBillboard: (stock: LimitUpLadderStock) => void; emptyText: string }) {
 	const [collapsedLevels, setCollapsedLevels] = useState<Set<number>>(() => new Set([1]));
 
 	if (!levels.length) {
@@ -484,7 +499,7 @@ function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrent
 						<ChevronDown size={17} aria-hidden="true" />
 					</summary>
 									<div className="limit-stock-grid">
-										{level.stocks.map((stock) => <LadderStockChip tradeDate={tradeDate} ai={aiEntries[stock.symbol]} stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
+										{level.stocks.map((stock) => <LadderStockChip tradeDate={tradeDate} ai={aiEntries[stock.symbol]} stock={stock} compact={compact} showCurrentChange={showCurrentChange} onSelect={() => onSelectStock(stock)} onAddWatch={onAddWatch} onSelectBillboard={() => onSelectBillboard(stock)} key={stock.symbol} />)}
 					</div>
 				</details>
 			))}
@@ -492,7 +507,7 @@ function LadderRows({ aiEntries, levels, tradeDate, compact = false, showCurrent
 	);
 }
 
-function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onSelect, onSelectBillboard }: { tradeDate: string; ai?: LadderThemeEntry; stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onSelectBillboard: () => void }) {
+function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onSelect, onAddWatch, onSelectBillboard }: { tradeDate: string; ai?: LadderThemeEntry; stock: LimitUpLadderStock; compact: boolean; showCurrentChange: boolean; onSelect: () => void; onAddWatch?: (stock: LimitUpLadderStock) => void; onSelectBillboard: () => void }) {
 	const [conceptsExpanded, setConceptsExpanded] = useState(false);
 	const concepts = [...new Set((stock.raw_concepts || []).flatMap(value => value.split(/[、,，;；]/)).map(value => value.trim()).filter(Boolean))];
 	const visibleConcepts = conceptsExpanded ? concepts : concepts.slice(0, 3);
@@ -505,7 +520,7 @@ function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onS
 		...(stock.theme_evidence || []),
 	].filter(Boolean).join('\n');
 	return (
-		<article className={`limit-stock-chip clickable ${stock.open_count > 0 ? 'reopened' : ''} ${stock.is_st ? 'st' : ''}`} title={`${tooltip}\n点击查看多周期行情`} role="button" tabIndex={0} onClick={onSelect} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(); } }}>
+		<article className={`limit-stock-chip clickable ${stock.open_count > 0 ? 'reopened' : ''} ${stock.is_st ? 'st' : ''}`} title={`${tooltip}\n点击查看多周期行情`} role="button" tabIndex={0} data-stock-row="limit-up" data-symbol={stock.symbol} data-name={stock.name} onClick={onSelect} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(); } }}>
 			<div className="limit-stock-title">
 				<strong>{stock.name}</strong>
 				{showCurrentChange && stock.current_change_percent != null && (
@@ -543,7 +558,19 @@ function LadderStockChip({ tradeDate, ai, stock, compact, showCurrentChange, onS
 				</details>}
 			</div>}
 			<div className="limit-stock-sub"><span>{stock.symbol}</span><em>{stock.industry || '暂无行业数据'}</em></div>
-			{!compact ? <div className="limit-stock-meta"><span>{formatClock(stock.first_limit_time)}</span><span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span><button type="button" className="limit-billboard-button" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button></div> : <button type="button" className="limit-billboard-button compact" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>}
+			{!compact ? <div className="limit-stock-meta">
+				<span>{formatClock(stock.first_limit_time)}</span>
+				<span>{stock.board_type || (stock.open_count ? `开板${stock.open_count}次` : '封板未开')}</span>
+				<div className="limit-stock-actions">
+					{onAddWatch && !isWatched(stock.symbol) && <button type="button" className="limit-watch-button" title="加入关注仓，持续跟踪" onClick={(event) => { event.stopPropagation(); onAddWatch(stock); }}><Plus size={12} aria-hidden="true" />关注</button>}
+					{onAddWatch && isWatched(stock.symbol) && <span className="limit-watch-button is-watched" title="已在关注仓，可通过右键菜单删除">已关注</span>}
+					<button type="button" className="limit-billboard-button" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>
+				</div>
+			</div> : <div className="limit-stock-actions compact">
+				{onAddWatch && !isWatched(stock.symbol) && <button type="button" className="limit-watch-button compact" title="加入关注仓" onClick={(event) => { event.stopPropagation(); onAddWatch(stock); }}><Plus size={11} aria-hidden="true" />关注</button>}
+				{onAddWatch && isWatched(stock.symbol) && <span className="limit-watch-button compact is-watched" title="已在关注仓">已关注</span>}
+				<button type="button" className="limit-billboard-button compact" onClick={(event) => { event.stopPropagation(); onSelectBillboard(); }}>龙虎榜</button>
+			</div>}
 		</article>
 	);
 }

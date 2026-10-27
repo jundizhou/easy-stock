@@ -13,7 +13,7 @@ func (s *Server) withCORS(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-A-Stock-Token, X-Request-ID")
 	w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 }
 
 func (s *Server) authorized(r *http.Request) bool {

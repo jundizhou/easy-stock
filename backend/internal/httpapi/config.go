@@ -11,6 +11,7 @@ import (
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/marketemotion"
 	"easy-stock/backend/internal/methodology"
+	"easy-stock/backend/internal/monitor"
 	"easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/sectorflowsample"
@@ -167,6 +168,9 @@ type ETFDirectionMarketProvider interface {
 }
 
 type Config struct {
+	MonitorDBPath            string
+	MonitorStore             *monitor.Store
+	MonitorSnapshot          monitor.SnapshotProvider
 	ETFDirectionMarket       ETFDirectionMarketProvider
 	ETFUnderlyingFinancials  StockFinancialSupplementProvider
 	ETFUnderlyingValuation   StockValuationProvider

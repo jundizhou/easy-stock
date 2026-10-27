@@ -29,6 +29,11 @@ type tokenUsageEntry struct {
 	EstimatedCompletion int    `json:"estimated_completion_tokens"`
 	EstimatedTotal      int    `json:"estimated_total_tokens"`
 }
+type tokenUsageFile struct {
+	Version int               `json:"version"`
+	Entries []tokenUsageEntry `json:"entries"`
+}
+
 type tokenUsageStore struct {
 	mu      sync.Mutex
 	path    string
@@ -69,6 +74,15 @@ func newTokenUsageStore(settingsPath string) *tokenUsageStore {
 							s.Entries[i].Module = "review-legacy"
 						}
 					}
+				}
+			} else {
+				// 解析失败时不要静默当成空库：那样下一次写入会把整份历史覆盖掉。
+				// 先留一份带时间戳的副本，出问题时还有东西可查。
+				backup := fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix())
+				if writeErr := os.WriteFile(backup, data, 0o600); writeErr != nil {
+					fmt.Printf("token usage: 备份损坏文件失败 %v\n", writeErr)
+				} else {
+					fmt.Printf("token usage: 文件损坏，已备份到 %s\n", backup)
 				}
 			}
 		}
@@ -114,9 +128,70 @@ func (s *tokenUsageStore) persist() {
 	if strings.TrimSpace(s.path) == "" {
 		return
 	}
+	// 写之前先合并磁盘上的最新版本。
+	//
+	// 之前这里是"把内存里的整份快照覆盖上去"，两次实例并存时（旧进程没退干净，
+	// 或同一份数据被两个进程打开）后写的那份会把先写的用量整段抹掉：
+	// 2026-10-21 上午 47 万输入 token 的"other"记录就是这么消失的，
+	// 11:20 还能读到，11:43 文件被另一次写入覆盖后就只剩 cockpit-patrol。
+	// 用量在同一 (日期,模块,模型,运行时) 下只增不减，所以逐字段取较大值：
+	// 既不会重复累加，也不会丢掉别人记的账。
+	if disk, err := s.readFile(); err == nil {
+		for _, entry := range disk.Entries {
+			if index := s.indexOf(entry); index >= 0 {
+				s.Entries[index].keepMax(entry)
+			} else if entry.Total > 0 || entry.EstimatedTotal > 0 {
+				s.Entries = append(s.Entries, entry)
+			}
+		}
+	}
 	data, _ := json.MarshalIndent(s, "", "  ")
 	_ = os.MkdirAll(filepath.Dir(s.path), 0o700)
-	_ = os.WriteFile(s.path, data, 0o600)
+	// 原子写：WriteFile 会先截断再写，读端在这一瞬间拿到半截 JSON，
+	// 解析失败就按空库处理，接着把自己那份写回去——历史就是这么丢的。
+	// 先写临时文件再改名，读端要么看到旧文件，要么看到完整的新文件。
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+	}
+}
+
+// indexOf 定位同一统计维度（日期 + 模块 + 模型 + 运行时）的条目。
+func (s *tokenUsageStore) indexOf(entry tokenUsageEntry) int {
+	for i := range s.Entries {
+		e := s.Entries[i]
+		if e.Date == entry.Date && e.Module == entry.Module && e.Model == entry.Model && e.Runtime == entry.Runtime {
+			return i
+		}
+	}
+	return -1
+}
+
+// keepMax 逐字段取较大值，用于合并另一实例写下的同一维度用量。
+func (e *tokenUsageEntry) keepMax(other tokenUsageEntry) {
+	e.Prompt = max(e.Prompt, other.Prompt)
+	e.Completion = max(e.Completion, other.Completion)
+	e.Total = max(e.Total, other.Total)
+	e.EstimatedPrompt = max(e.EstimatedPrompt, other.EstimatedPrompt)
+	e.EstimatedCompletion = max(e.EstimatedCompletion, other.EstimatedCompletion)
+	e.EstimatedTotal = max(e.EstimatedTotal, other.EstimatedTotal)
+}
+
+// readFile 读取并解析当前的用量文件，不触碰内存状态。
+// 用独立的落盘结构而不是 tokenUsageStore：后者带互斥锁，按值返回会复制锁。
+func (s *tokenUsageStore) readFile() (tokenUsageFile, error) {
+	var stored tokenUsageFile
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return stored, err
+	}
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return stored, err
+	}
+	return stored, nil
 }
 
 type tokenUsageGateway struct {

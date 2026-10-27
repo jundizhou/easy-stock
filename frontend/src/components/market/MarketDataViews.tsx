@@ -35,6 +35,7 @@ import type {
 import { classifyBillboardSeat } from '../../lib/billboard';
 import { formatArticleParagraphs, isIndentedParagraph } from '../../lib/article';
 import { formatFuturesOpeningHands } from '../../lib/futures-position';
+import { useTableSort } from '../../lib/table-tools';
 
 type DataState = 'idle' | 'loading' | 'ready' | 'error';
 type SortDirection = 'asc' | 'desc';
@@ -99,14 +100,14 @@ export function CoreIndexView({ indexes, selectedID, onSelect, series, seriesLoa
 					<MiniStat label="行情时间" value={formatDateTime(series?.index.trade_time || selected.trade_time)} />
 				</aside>
 			</div>
-			<div className="market-kline-table"><header><span>日期</span><span>开盘</span><span>最高</span><span>最低</span><span>收盘</span><span>涨跌</span></header>{lines.slice(-8).reverse().map((line) => <article key={line.time}><span>{formatDate(line.time)}</span><span>{formatPrice(line.open)}</span><span>{formatPrice(line.high)}</span><span>{formatPrice(line.low)}</span><strong>{formatPrice(line.close)}</strong><em className={toneClass(line.change_percent || 0)}>{formatPercent(line.change_percent || 0)}</em></article>)}</div>
+			<div className="market-kline-table" data-tt-grid="index-kline"><header><span>日期</span><span>开盘</span><span>最高</span><span>最低</span><span>收盘</span><span>涨跌</span></header>{lines.slice(-8).reverse().map((line) => <article key={line.time}><span data-tt-value={line.time}>{formatDate(line.time)}</span><span data-tt-value={line.open}>{formatPrice(line.open)}</span><span data-tt-value={line.high}>{formatPrice(line.high)}</span><span data-tt-value={line.low}>{formatPrice(line.low)}</span><strong data-tt-value={line.close}>{formatPrice(line.close)}</strong><em data-tt-value={line.change_percent ?? ''} className={toneClass(line.change_percent || 0)}>{formatPercent(line.change_percent || 0)}</em></article>)}</div>
 		</section> : <EmptyData title="暂无核心指数" detail="等待指数目录恢复。" />}
 	</div>;
 }
 
 export function IndustryMomentumView({ items, meta }: { items: MarketIndustryMomentum[]; meta: SourceMeta | null }) {
 	const [query, setQuery] = useState('');
-	const [sortState, setSortState] = useState<SortState>({ key: 'score', direction: 'desc' });
+	const [sortState, setSortState] = useTableSort<SortState>('industry-momentum', { key: 'score', direction: 'desc' });
 	const flowAvailable = hasField(meta, 'main_net_inflow');
 	const breadthAvailable = hasField(meta, 'rising_count') && hasField(meta, 'falling_count');
 	const leaderAvailable = hasField(meta, 'leader_name');
@@ -122,7 +123,7 @@ export function IndustryMomentumView({ items, meta }: { items: MarketIndustryMom
 	return <div className="market-data-view">
 		<SourceNotice meta={meta} />
 		<MarketFilter query={query} onQuery={setQuery}><span className="market-sort-hint">点击列名排序</span></MarketFilter>
-		{visible.length ? <div className="market-data-table momentum"><header>
+		{visible.length ? <div className="market-data-table momentum" data-tt-grid="industry-momentum" data-tt-sort-mode="react"><header>
 			<SortButton label="行业 / 领涨" active={sortState.key === 'name'} direction={sortState.direction} onClick={() => toggleSort('name', true, 'asc')} />
 			<SortButton label="动能" active={sortState.key === 'score'} direction={sortState.direction} onClick={() => toggleSort('score')} />
 			<SortButton label="当日" active={sortState.key === 'change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'change_percent')} onClick={() => toggleSort('change_percent', hasField(meta, 'change_percent'))} />
@@ -239,7 +240,7 @@ export function FuturesPositionView({ series, members, consensus, variety, onVar
 				<div className="market-futures-bars">{rows.slice(-30).map((row) => <article key={row.trade_date}><time>{formatMonthDay(row.trade_date)}</time><div><i className="long" style={{ width: `${Math.max(1, Math.abs(row.long_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.long_position)}</span></div><div><i className="short" style={{ width: `${Math.max(1, Math.abs(row.short_position) / maxPosition * 100)}%` }} /><span>{formatFuturesHands(row.short_position)}</span></div><strong className={toneClass(row.net_position)}>{formatFuturesHands(row.net_position)}</strong></article>)}</div>
 				<footer>共识统计采用 {consensus?.trade_date || latest.trade_date} 全部合约前20会员多空单口径（+ 多单，− 空单）；此处图表为主力合约持仓趋势参考。结算价 {latest.settle_price == null ? '--' : latest.settle_price.toFixed(2)} · 现货指数 {latest.index_close == null ? '--' : latest.index_close.toFixed(2)} · 基差 {latest.basis == null ? '--' : latest.basis.toFixed(2)}。</footer>
 			</section>
-			{members?.members?.length ? <section className="market-futures-members"><SourceNotice meta={memberMeta} /><header><div><span>TOP 20 MEMBERS</span><h3>{members.trade_date} 会员多空明细</h3></div><small>中金所成交持仓排名 · 主力合约参考</small></header><div className="market-data-table members"><header><span>排名</span><span>持买单会员</span><span>多单 / 增减</span><span>持卖单会员</span><span>空单 / 增减</span></header>{members.members.map((member) => <article key={`${member.contract}-${member.rank}`}><span>{member.rank}</span><strong>{member.long_name || '--'}</strong><span>{formatFuturesHands(member.long_position)} / {formatFuturesChangeShort(member.long_change)}</span><strong>{member.short_name || '--'}</strong><span>{formatFuturesHands(member.short_position)} / {formatFuturesChangeShort(member.short_change)}</span></article>)}</div></section> : null}
+			{members?.members?.length ? <section className="market-futures-members"><SourceNotice meta={memberMeta} /><header><div><span>TOP 20 MEMBERS</span><h3>{members.trade_date} 会员多空明细</h3></div><small>中金所成交持仓排名 · 主力合约参考</small></header><div className="market-data-table members" data-tt-grid="futures-members"><header><span>排名</span><span>持买单会员</span><span title="按多单持仓量排序">多单 / 增减</span><span>持卖单会员</span><span title="按空单持仓量排序">空单 / 增减</span></header>{members.members.map((member) => <article key={`${member.contract}-${member.rank}`}><span>{member.rank}</span><strong>{member.long_name || '--'}</strong><span data-tt-value={member.long_position}>{formatFuturesHands(member.long_position)} / {formatFuturesChangeShort(member.long_change)}</span><strong>{member.short_name || '--'}</strong><span data-tt-value={member.short_position}>{formatFuturesHands(member.short_position)} / {formatFuturesChangeShort(member.short_change)}</span></article>)}</div></section> : null}
 		</> : <EmptyData title="暂无机构多空单" detail="期指持仓通常在交易日盘后更新，请稍后刷新。" />}
 	</div>;
 }
@@ -314,10 +315,10 @@ function paddedExtent(values: number[]) {
 function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: SourceMeta | null }) {
 	const netAvailable = hasField(meta, 'net_inflow');
 	const fallbackMainAvailable = hasField(meta, 'main_net_inflow');
-	const [sortState, setSortState] = useState<SortState>({ key: 'net_value', direction: 'desc' });
+	const [sortState, setSortState] = useTableSort<SortState>('sector-fund-flow', { key: 'net_value', direction: 'desc' });
 	const sortedItems = useMemo(() => [...items].sort((a, b) => compareSortValues(sectorSortValue(a, sortState.key, meta), sectorSortValue(b, sortState.key, meta), sortState.direction)), [items, meta, sortState]);
 	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => { if (available) setSortState((current) => nextSortState(current, key, defaultDirection)); };
-	return <div className="market-data-table flow sector"><header>
+	return <div className="market-data-table flow sector" data-tt-grid="sector-fund-flow" data-tt-sort-mode="react"><header>
 		<SortButton label="名称 / 代码" active={sortState.key === 'name'} direction={sortState.direction} onClick={() => toggleSort('name', true, 'asc')} />
 		<SortButton label="均价" active={sortState.key === 'price'} direction={sortState.direction} disabled={!hasField(meta, 'price')} onClick={() => toggleSort('price', hasField(meta, 'price'))} />
 		<SortButton label="涨跌幅" active={sortState.key === 'change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'change_percent')} onClick={() => toggleSort('change_percent', hasField(meta, 'change_percent'))} />
@@ -343,10 +344,10 @@ function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: S
 }
 
 function StockFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: SourceMeta | null }) {
-	const [sortState, setSortState] = useState<SortState>({ key: 'net_inflow', direction: 'desc' });
+	const [sortState, setSortState] = useTableSort<SortState>('stock-fund-flow', { key: 'net_inflow', direction: 'desc' });
 	const sortedItems = useMemo(() => [...items].sort((a, b) => compareSortValues(stockSortValue(a, sortState.key, meta), stockSortValue(b, sortState.key, meta), sortState.direction)), [items, meta, sortState]);
 	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => { if (available) setSortState((current) => nextSortState(current, key, defaultDirection)); };
-	return <div className="market-data-table flow stock"><header>
+	return <div className="market-data-table flow stock" data-tt-grid="stock-fund-flow" data-tt-sort-mode="react"><header>
 		<SortButton label="名称 / 代码" active={sortState.key === 'name'} direction={sortState.direction} onClick={() => toggleSort('name', true, 'asc')} />
 		<SortButton label="价格" active={sortState.key === 'price'} direction={sortState.direction} disabled={!hasField(meta, 'price')} onClick={() => toggleSort('price', hasField(meta, 'price'))} />
 		<SortButton label="涨跌幅" active={sortState.key === 'change_percent'} direction={sortState.direction} disabled={!hasField(meta, 'change_percent')} onClick={() => toggleSort('change_percent', hasField(meta, 'change_percent'))} />
@@ -356,7 +357,12 @@ function StockFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: So
 		<SortButton label="主力净流入率" active={sortState.key === 'main_net_inflow_ratio'} direction={sortState.direction} disabled={!hasField(meta, 'main_net_inflow_ratio')} onClick={() => toggleSort('main_net_inflow_ratio', hasField(meta, 'main_net_inflow_ratio'))} />
 		<SortButton label="散户净流入" active={sortState.key === 'retail_net_inflow'} direction={sortState.direction} disabled={!hasField(meta, 'retail_net_inflow')} onClick={() => toggleSort('retail_net_inflow', hasField(meta, 'retail_net_inflow'))} />
 		<SortButton label="散户净流入率" active={sortState.key === 'retail_net_inflow_ratio'} direction={sortState.direction} disabled={!hasField(meta, 'retail_net_inflow_ratio')} onClick={() => toggleSort('retail_net_inflow_ratio', hasField(meta, 'retail_net_inflow_ratio'))} />
-	</header>{sortedItems.map((item, index) => <article key={`${item.dimension}-${item.code}`}>
+	</header>{sortedItems.map((item, index) => <article
+		key={`${item.dimension}-${item.code}`}
+		data-stock-row={item.symbol ? 'fund-flow' : undefined}
+		data-symbol={item.symbol || undefined}
+		data-name={item.symbol ? item.name : undefined}
+	>
 		<FlowIdentity item={item} index={index} />
 		<strong>{formatAvailable(item.price, hasField(meta, 'price'), formatPrice)}</strong>
 		<em className={availableTone(item.change_percent, hasField(meta, 'change_percent'))}>{formatAvailable(item.change_percent, hasField(meta, 'change_percent'), formatPercent)}</em>
@@ -410,7 +416,7 @@ export function BillboardView({ items, tradeDate, onTradeDate, meta, details, on
 			const expanded = expandedKeys.has(key);
 			const detailEntry = details[key];
 			const detailID = `billboard-seats-${index}`;
-			return <article className={expanded ? 'expanded' : ''} key={key}>
+			return <article className={expanded ? 'expanded' : ''} key={key} data-stock-row="billboard" data-symbol={item.symbol} data-name={item.name}>
 				<header className="market-billboard-card-header"><span><strong>{item.name}</strong><small>{item.symbol} · {item.trade_date}</small></span><em className={toneClass(item.change_percent)}>{formatPercent(item.change_percent)}</em></header>
 				<p>{item.reason || '未提供上榜原因'}</p>{item.summary && <blockquote>{item.summary}</blockquote>}
 				<footer><span>买入 <strong>{moneyCell(item.buy_amount)}</strong></span><span>卖出 <strong>{moneyCell(item.sell_amount)}</strong></span><span>净额 <strong className={toneClass(item.net_amount)}>{moneyCell(item.net_amount)}</strong></span><span>机构买方 <strong>{item.institution_buyers}</strong></span><span>换手 <strong>{formatPercent(item.turnover_rate)}</strong></span></footer>
@@ -419,8 +425,8 @@ export function BillboardView({ items, tradeDate, onTradeDate, meta, details, on
 					{detailEntry?.state === 'loading' && <div className="market-billboard-detail-state"><LoaderCircle className="spin" size={17} /><span>正在读取完整买卖五席</span></div>}
 					{detailEntry?.state === 'error' && <div className="market-billboard-detail-state error"><AlertTriangle size={17} /><span>{detailEntry.error || '席位明细加载失败'}</span><button type="button" onClick={() => onLoadDetail(item)}>重试</button></div>}
 					{detailEntry?.state === 'ready' && detailEntry.detail && <div className="market-billboard-seat-grid">
-						<BillboardSeatPanel title="买方五席" prefix="买" seats={detailEntry.detail.buy_seats} />
-						<BillboardSeatPanel title="卖方五席" prefix="卖" seats={detailEntry.detail.sell_seats} />
+							<BillboardSeatPanel tableID={`${key}-buy`} title="买方五席" prefix="买" seats={detailEntry.detail.buy_seats} />
+							<BillboardSeatPanel tableID={`${key}-sell`} title="卖方五席" prefix="卖" seats={detailEntry.detail.sell_seats} />
 					</div>}
 				</div>}
 			</article>;
@@ -428,28 +434,28 @@ export function BillboardView({ items, tradeDate, onTradeDate, meta, details, on
 	</div>;
 }
 
-function BillboardSeatPanel({ title, prefix, seats }: { title: string; prefix: '买' | '卖'; seats: MarketBillboardSeat[] }) {
+function BillboardSeatPanel({ tableID, title, prefix, seats }: { tableID: string; title: string; prefix: '买' | '卖'; seats: MarketBillboardSeat[] }) {
 	const seatByRank = new Map(seats.map((seat) => [seat.rank, seat]));
-	return <section className={`market-billboard-seat-panel ${prefix === '买' ? 'buy' : 'sell'}`}>
+	return <section className={`market-billboard-seat-panel ${prefix === '买' ? 'buy' : 'sell'}`} data-tt-grid={`billboard-seats-${tableID}`}>
 		<header><strong>{title}</strong><span>{prefix === '买' ? '按买入额排名' : '按卖出额排名'}</span></header>
-		<div className="market-billboard-seat-head"><span>排名 / 席位</span><span>买入</span><span>卖出</span><span>净额</span></div>
+		<div className="market-billboard-seat-head" data-tt-head><span title="按席位名称排序">排名 / 席位</span><span>买入</span><span>卖出</span><span>净额</span></div>
 		{Array.from({ length: 5 }, (_, index) => {
 			const rank = index + 1;
 			const seat = seatByRank.get(rank);
 			const label = seat ? classifyBillboardSeat(seat) : null;
 			return <article key={rank}>
-				<span className="market-seat-name"><i>{prefix}{rank}</i><span><strong title={seat?.name || '数据源未提供'}>{seat?.name || '数据源未提供'}</strong>{label && <small className={`market-seat-label ${label.kind}`} title={label.note}>{label.label}</small>}</span></span>
+				<span className="market-seat-name" data-tt-value={seat?.name ?? ''}><i>{prefix}{rank}</i><span><strong title={seat?.name || '数据源未提供'}>{seat?.name || '数据源未提供'}</strong>{label && <small className={`market-seat-label ${label.kind}`} title={label.note}>{label.label}</small>}</span></span>
 				<SeatAmount amount={seat?.buy_amount} ratio={seat?.buy_ratio} />
 				<SeatAmount amount={seat?.sell_amount} ratio={seat?.sell_ratio} />
-				<strong className={seat ? (seat.net_amount === 0 ? 'zero' : toneClass(seat.net_amount)) : 'zero'}>{seat ? moneyCell(seat.net_amount) : '--'}</strong>
+				<strong data-tt-value={seat?.net_amount ?? ''} className={seat ? (seat.net_amount === 0 ? 'zero' : toneClass(seat.net_amount)) : 'zero'}>{seat ? moneyCell(seat.net_amount) : '--'}</strong>
 			</article>;
 		})}
 	</section>;
 }
 
 function SeatAmount({ amount, ratio }: { amount?: number; ratio?: number }) {
-	if (amount === undefined) return <span className="market-seat-amount"><strong className="zero">--</strong></span>;
-	return <span className="market-seat-amount"><strong className={amount === 0 ? 'zero' : ''}>{moneyCell(amount)}</strong>{amount !== 0 && ratio !== undefined && ratio !== 0 && <small>{formatShare(ratio)}</small>}</span>;
+	if (amount === undefined) return <span className="market-seat-amount" data-tt-value=""><strong className="zero">--</strong></span>;
+	return <span className="market-seat-amount" data-tt-value={amount}><strong className={amount === 0 ? 'zero' : ''}>{moneyCell(amount)}</strong>{amount !== 0 && ratio !== undefined && ratio !== 0 && <small>{formatShare(ratio)}</small>}</span>;
 }
 
 function formatShare(value: number) {

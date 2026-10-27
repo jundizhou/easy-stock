@@ -15,11 +15,29 @@ export type PatrolStatus = {
 };
 
 export type PatrolIndexQuote = { name: string; code: string; price: number; change_percent: number; trade_time?: string };
+export type PatrolScores = { heat: number; profit: number; structure: number; total: number };
+export type PatrolTemperature = {
+	value: number; model: string; sample_count: number; up: number; down: number; flat: number;
+	up_percent: number; mean_change_percent: number; median_change_percent: number;
+	trade_date: string; fetched_at: string; source: string; session_status: string; stale: boolean; warning?: string;
+};
 export type PatrolEmotion = {
 	trade_date: string; score: number; phase: string; limit_up: number; limit_down: number; broken: number; final_break_rate: number; max_streak: number; first_board: number;
+	// 收盘快照的三个维度。旧后端没有该字段时保持 undefined，前端不画拆解。
+	scores?: PatrolScores;
 };
 export type PatrolIntraday = {
 	status: string; breadth: string; summary: string; risk_score: number; limit_up: number; max_streak: number; previous_max_streak: number; high_down_rate: number; high_weak_rate: number;
+	// 盘中情绪分：炸板/跌停/封板率与昨日涨停股实时表现参与计算。
+	trade_date?: string;
+	session_status?: string;
+	broken?: number;
+	limit_down?: number;
+	seal_rate?: number;
+	previous_limit_up_return?: number;
+	pool_available?: boolean;
+	score_available?: boolean;
+	scores?: PatrolScores;
 };
 export type PatrolLimitUp = {
 	trade_date: string; session_status: string; limit_up: number; board_count: number; first_board: number; max_streak: number; reopened_count: number;
@@ -33,6 +51,7 @@ export type PatrolFacts = {
 	overseas?: PatrolIndexQuote[];
 	cn_indexes?: PatrolIndexQuote[];
 	emotion?: PatrolEmotion;
+	temperature?: PatrolTemperature;
 	intraday?: PatrolIntraday;
 	limit_up?: PatrolLimitUp;
 	industry_flows?: PatrolFlowBoard;
@@ -84,6 +103,18 @@ export function clockText(iso?: string): string {
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) return '--';
 	return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// 实时采集只在盘中给出 intraday 读数，盘前/休市时段「盘中判断」卡会消失。
+// 回退到最近一次带盘中数据的巡查记录（盘中或盘后采集的都算），让卡片始终有占位内容，
+// 方便盘后复盘；label 标明快照来源时间，避免被误读成实时数据。
+export function latestIntradayFallback(briefs: PatrolBrief[]): { intraday: PatrolIntraday; label: string } | null {
+	for (const brief of briefs) {
+		const intraday = brief.status === 'ready' ? brief.facts?.intraday : undefined;
+		if (!intraday) continue;
+		return { intraday, label: `${brief.session_date} ${patrolPhaseLabel(brief.phase)}` };
+	}
+	return null;
 }
 
 // 同一阶段最近一次巡查：优先已完成的记录，运行中的记录只在没有完成结果时才显示。

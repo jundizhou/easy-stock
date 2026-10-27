@@ -1,11 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -187,5 +191,155 @@ func TestCockpitEndpointsReportRealStateWithoutFabrication(t *testing.T) {
 	}
 	if live.Code == http.StatusOK && !strings.Contains(live.Body.String(), `"facts"`) {
 		t.Fatalf("facts body = %s", live.Body.String())
+	}
+}
+
+func cockpitTemperatureRows(now time.Time) ([]foundation.MarketSnapshotRow, foundation.SourceMeta) {
+	rows := make([]foundation.MarketSnapshotRow, 1000)
+	for i := range rows {
+		rows[i] = foundation.MarketSnapshotRow{
+			Symbol: strconv.Itoa(600000+i) + ".SH", Price: 98, PreviousClose: 100,
+			Open: 100, Volume: 1000, TradeDate: now.In(foundation.AStockLocation).Format("2006-01-02"),
+		}
+	}
+	return rows, foundation.SourceMeta{Source: "test:temperature-snapshot", TradeDate: rows[0].TradeDate, FetchedAt: now}
+}
+
+func TestCockpitTemperatureCachePreservesRealFactsOnSourceFailure(t *testing.T) {
+	now := time.Date(2026, 10, 27, 14, 0, 0, 0, foundation.AStockLocation)
+	rows, meta := cockpitTemperatureRows(now)
+	var cache cockpitTemperatureCache
+	fresh, err := cache.resolve(rows, meta, nil, now)
+	if err != nil || fresh == nil || fresh.Stale || fresh.Value != 0 {
+		t.Fatalf("real zero temperature must be available: %+v, %v", fresh, err)
+	}
+	sourceErr := errors.New("snapshot EOF")
+	partial := meta
+	partial.Stale, partial.FallbackReason = true, sourceErr.Error()
+	var cached *cockpit.Temperature
+	facts := cockpit.CollectFacts(context.Background(), cockpit.PhaseIntraday, cockpit.Feed{
+		Temperature: func(context.Context) (*cockpit.Temperature, error) {
+			var err error
+			cached, err = cache.resolve(rows[:20], partial, sourceErr, now.Add(time.Minute))
+			return cached, err
+		},
+	})
+	if cached == nil || cached.Value != 0 || !cached.Stale || cached.FetchedAt != fresh.FetchedAt || cached.SampleCount != 1000 {
+		t.Fatalf("complete cached facts lost: %+v", cached)
+	}
+	if !strings.Contains(cached.Warning, fresh.FetchedAt) || !strings.Contains(cached.Warning, sourceErr.Error()) {
+		t.Fatalf("cache warning must retain provenance and error: %s", cached.Warning)
+	}
+	if facts.Temperature == nil || len(facts.Sources) != 1 || facts.Sources[0].OK {
+		t.Fatalf("cache must reach AI facts while source failure remains visible: %+v", facts)
+	}
+	if fresh.Stale || fresh.Warning != "" || cache.latest.Stale {
+		t.Fatal("fallback mutated successful snapshot")
+	}
+	cached.Value = 88
+	again, err := cache.resolve(nil, foundation.SourceMeta{}, sourceErr, now.Add(2*time.Minute))
+	if !errors.Is(err, sourceErr) || again == nil || again.Value != 0 {
+		t.Fatalf("consumer mutated shared cache: %+v, %v", again, err)
+	}
+	meta.FetchedAt = now.Add(2 * time.Minute)
+	for i := range rows {
+		rows[i].Price = 100
+	}
+	recovered, err := cache.resolve(rows, meta, nil, meta.FetchedAt)
+	if err != nil || recovered == nil || recovered.Stale || math.Abs(recovered.Value-50) > 1e-9 {
+		t.Fatalf("recovered source did not replace cache: %+v, %v", recovered, err)
+	}
+	again, _ = cache.resolve(nil, foundation.SourceMeta{}, sourceErr, now.Add(150*time.Second))
+	if again == nil || math.Abs(again.Value-50) > 1e-9 || again.FetchedAt != recovered.FetchedAt {
+		t.Fatalf("fallback did not use latest successful snapshot: %+v", again)
+	}
+}
+
+func TestCockpitTemperatureCacheRejectsUnusableFallbacks(t *testing.T) {
+	base := time.Date(2026, 10, 27, 23, 59, 0, 0, foundation.AStockLocation)
+	for _, scenario := range []string{"expired", "previous day", "different model", "future", "bad time", "no successful snapshot"} {
+		t.Run(scenario, func(t *testing.T) {
+			rows, meta := cockpitTemperatureRows(base)
+			var cache cockpitTemperatureCache
+			if _, err := cache.resolve(rows, meta, nil, base); err != nil {
+				t.Fatal(err)
+			}
+			now := base.Add(30 * time.Second)
+			switch scenario {
+			case "expired":
+				cache.latest.TradeDate = now.Format("2006-01-02")
+				cache.latest.FetchedAt = now.Add(-cockpitTemperatureCacheTTL - time.Nanosecond).Format(time.RFC3339Nano)
+			case "previous day":
+				now = base.Add(time.Minute)
+			case "different model":
+				cache.latest.Model = "other-model"
+			case "future":
+				cache.latest.FetchedAt = now.Add(time.Minute).Format(time.RFC3339)
+			case "bad time":
+				cache.latest.FetchedAt = "unavailable"
+			case "no successful snapshot":
+				cache.latest = nil
+			}
+			sourceErr := errors.New("snapshot unavailable")
+			got, err := cache.resolve(nil, foundation.SourceMeta{}, sourceErr, now)
+			if got != nil || !errors.Is(err, sourceErr) {
+				t.Fatalf("unusable cache was returned: %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestCockpitTemperatureCacheBoundsExistingSnapshotOnRefreshError(t *testing.T) {
+	base := time.Date(2026, 10, 27, 14, 0, 0, 0, foundation.AStockLocation)
+	rows, meta := cockpitTemperatureRows(base)
+	for _, age := range []time.Duration{cockpitTemperatureCacheTTL, cockpitTemperatureCacheTTL + time.Second} {
+		var cache cockpitTemperatureCache
+		got, err := cache.resolve(rows, meta, errors.New("refresh failed"), base.Add(age))
+		if err == nil || (got != nil) != (age <= cockpitTemperatureCacheTTL) {
+			t.Fatalf("cache age %s: %+v, %v", age, got, err)
+		}
+		if got != nil && (!got.Stale || got.FetchedAt != meta.FetchedAt.Format(time.RFC3339)) {
+			t.Fatalf("original snapshot time lost: %+v", got)
+		}
+		if got != nil {
+			again, _ := cache.resolve(nil, foundation.SourceMeta{}, errors.New("partial snapshot"), base.Add(age))
+			if again == nil || again.FetchedAt != got.FetchedAt {
+				t.Fatal("validated complete snapshot was not retained for subsequent partial responses")
+			}
+		}
+	}
+}
+
+func TestCockpitTemperatureFallbackExpiryBypassesLiveFactsCache(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		now := time.Now()
+		age := time.Minute
+		if expired {
+			age = cockpitTemperatureCacheTTL + time.Second
+		}
+		cached := &cockpit.Temperature{
+			Value: 0, Stale: true, Model: cockpit.TemperatureModel, SampleCount: 1000,
+			FetchedAt: now.Add(-age).Format(time.RFC3339), TradeDate: now.In(foundation.AStockLocation).Format("2006-01-02"),
+		}
+		server := &Server{cockpit: &cockpit.Service{}, cockpitLive: cockpitLiveFacts{
+			at: now, phase: cockpit.PhaseAt(now).Phase, seeded: true,
+			facts: cockpit.Facts{Temperature: cached, Sources: []cockpit.SourceResult{{Name: "市场温度", OK: false}}},
+		}}
+		recorder := httptest.NewRecorder()
+		server.cockpitFacts(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/cockpit/facts", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expired=%v: %s", expired, recorder.Body.String())
+		}
+		var result struct {
+			Data struct {
+				Facts cockpit.Facts `json:"facts"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if (result.Data.Facts.Temperature == nil) != expired {
+			t.Fatalf("expired=%v, live cache must respect fallback deadline: %s", expired, recorder.Body.String())
+		}
 	}
 }

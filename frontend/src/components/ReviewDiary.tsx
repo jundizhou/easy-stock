@@ -33,6 +33,7 @@ import { useReviewSummaryHistory } from '../lib/use-review-summary-history';
 import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
 import { applyTheme } from '../lib/theme';
 import { validationResultMessage } from '../lib/review-validation';
+import { confirmDialog } from './ConfirmDialog';
 
 type Props = {
 	config: BackendConfig | null;
@@ -290,7 +291,13 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 
 	const deletePost = async (post: ReviewPost) => {
 		if (!config || deletingPost || deletingAuthor) return;
-		if (!window.confirm(`确定删除《${post.title}》吗？\n\n本机保存的文章正文和这篇文章自身的 AI 提炼缓存都会一并删除。此操作不可撤销。`)) return;
+		const ok = await confirmDialog({
+			title: `删除《${post.title}》`,
+			message: '本机保存的文章正文和这篇文章自身的 AI 提炼缓存都会一并删除。此操作不可撤销。',
+			confirmText: '删除',
+			tone: 'danger',
+		});
+		if (!ok) return;
 		setDeletingPost(post.id); setError(''); setNotice('');
 		try {
 			await requestJSON(config, `/api/v1/reviews/posts/${post.id}`, { method: 'DELETE' });
@@ -305,7 +312,13 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 
 	const deleteAuthor = async (author: ReviewAuthor) => {
 		if (!config || deletingAuthor || deletingPost) return;
-		if (!window.confirm(`确定删除作者“${author.name}”吗？\n\n将永久删除本机保存的 ${author.post_count} 篇文章及其 AI 分析缓存，匹配的自动订阅也会一并删除，系统不会在后台自动恢复该作者。此操作不可撤销。`)) return;
+		const ok = await confirmDialog({
+			title: `删除作者「${author.name}」`,
+			message: `将永久删除本机保存的 ${author.post_count} 篇文章及其 AI 分析缓存，匹配的自动订阅也会一并删除，系统不会在后台自动恢复该作者。此操作不可撤销。`,
+			confirmText: '删除',
+			tone: 'danger',
+		});
+		if (!ok) return;
 		const authorKey = `${author.source}:${author.id}`;
 		setDeletingAuthor(authorKey); setError(''); setNotice('');
 		try {

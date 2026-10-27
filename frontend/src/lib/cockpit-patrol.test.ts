@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type PatrolBrief, TIMELINE_FOLD_LIMIT, foldTimeline, intradaySummary, latestBriefFor, narrativeNotice, sessionIntradayBriefs, stripLeadingTitle } from './cockpit-patrol';
+import { type PatrolBrief, TIMELINE_FOLD_LIMIT, foldTimeline, intradaySummary, latestBriefFor, latestIntradayFallback, narrativeNotice, sessionIntradayBriefs, stripLeadingTitle } from './cockpit-patrol';
 
 const facts = { sources: [] };
 const brief = (overrides: Partial<PatrolBrief>): PatrolBrief => ({
@@ -85,5 +85,25 @@ describe('intraday timeline folding', () => {
 		const folded = foldTimeline(many, TIMELINE_FOLD_LIMIT, false, 'b1');
 		expect(folded.visible[0].id).toBe('b1');
 		expect(folded.visible).toHaveLength(TIMELINE_FOLD_LIMIT + 1);
+	});
+});
+
+describe('latest intraday fallback', () => {
+	const base = { key: 'k', label: '', trigger: 'scheduled', narrative_status: '', facts: { sources: [] }, started_at: '' } as const;
+	const brief = (overrides: Partial<PatrolBrief>) => ({ ...base, ...overrides }) as PatrolBrief;
+
+	it('falls back to the most recent ready brief that carries an intraday snapshot', () => {
+		const briefs = [
+			brief({ id: 'a', phase: 'pre_open', session_date: '2026-10-21', status: 'ready', facts: { sources: [] } }),
+			brief({ id: 'b', phase: 'post_close', session_date: '2026-10-20', status: 'ready', started_at: '2026-10-20T15:10:00Z', facts: { sources: [], intraday: { status: '低位活跃', breadth: '', summary: '', risk_score: 40, limit_up: 54, max_streak: 6, previous_max_streak: 5, high_down_rate: 0.2, high_weak_rate: 0.3 } } }),
+		];
+		const fallback = latestIntradayFallback(briefs);
+		expect(fallback?.intraday.limit_up).toBe(54);
+		expect(fallback?.label).toBe('2026-10-20 盘后');
+	});
+
+	it('skips running or failed briefs and returns null when nothing carries intraday data', () => {
+		expect(latestIntradayFallback([])).toBeNull();
+		expect(latestIntradayFallback([brief({ id: 'a', phase: 'intraday', session_date: '2026-10-20', status: 'running', facts: { sources: [] } })])).toBeNull();
 	});
 });

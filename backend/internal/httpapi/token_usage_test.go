@@ -255,3 +255,62 @@ func TestLegacyTokenUsageInferencePreservesAmountsAndOriginalModule(t *testing.T
 		t.Fatalf("new unknown usage must not be inferred as a review: %+v", last)
 	}
 }
+
+// usageTotal 读取指定模块在当天记录里的总量。
+func usageTotal(store *tokenUsageStore, module string) int {
+	total := 0
+	for _, entry := range store.Entries {
+		if entry.Module == module {
+			total += entry.Total
+		}
+	}
+	return total
+}
+
+// 两个实例并存时，后写的那份不能把先写的用量抹掉。
+//
+// 2026-10-21 上午 47 万输入 token 就是这么消失的：11:20 还能读到 module=other
+// 的记录，11:43 文件被另一次写入覆盖后只剩下 cockpit-patrol。原因是 persist
+// 把内存里的整份快照覆盖上去，而旧进程的内存里根本没有新进程记的账。
+func TestTokenUsagePersistMergesStaleInstance(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	stale := newTokenUsageStore(path)
+	stale.add(tokenUsageRequest{Module: "monitor", Prompt: 1000, Completion: 100, Total: 1100})
+
+	fresh := newTokenUsageStore(path)
+	fresh.add(tokenUsageRequest{Module: "monitor", Prompt: 900, Completion: 90, Total: 990})
+	if got := usageTotal(newTokenUsageStore(path), "monitor"); got != 2090 {
+		t.Fatalf("两笔应累加为 2090，实际 %d", got)
+	}
+
+	// 陈旧实例继续记账：它内存里只有 1100，直接覆盖会退化成 1320。
+	stale.add(tokenUsageRequest{Module: "monitor", Prompt: 200, Completion: 20, Total: 220})
+	if got := usageTotal(newTokenUsageStore(path), "monitor"); got != 2090 {
+		t.Fatalf("陈旧实例写入后总量应保持 2090，实际 %d", got)
+	}
+}
+
+// 文件被写坏时不能静默当成空库：那样下一次写入会把整份历史清掉。
+func TestTokenUsageCorruptFileIsBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token-usage.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"entries":[`), 0o600); err != nil {
+		t.Fatalf("准备损坏文件失败：%v", err)
+	}
+	store := newTokenUsageStore(filepath.Join(dir, "settings.json"))
+	if len(store.Entries) != 0 {
+		t.Fatalf("损坏文件不应解析出条目，实际 %d", len(store.Entries))
+	}
+	matches, err := filepath.Glob(path + ".corrupt-*")
+	if err != nil {
+		t.Fatalf("查找备份失败：%v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("损坏文件应留一份备份，实际 %d 份", len(matches))
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatal("原子写完成后不应残留临时文件")
+	}
+}

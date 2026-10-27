@@ -29,6 +29,7 @@
 :root {
 	--theme-surface: #ffffff;
 	--theme-surface-soft: #f8fafc;
+	--theme-surface-3: #eaf0f7;
 	--theme-surface-strong: #0a1523;
 	--theme-glass: rgba(255, 255, 255, 0.96);
 	--theme-line: #d7dee8;
@@ -467,6 +468,21 @@ a:focus-visible {
 .sidebar-settings svg,
 .sidebar-toggle svg {
 	flex: 0 0 auto;
+}
+
+.nav-beta-badge {
+	margin-left: 8px;
+	padding: 1px 5px;
+	border: 1px solid var(--theme-blue-line, #4da3ff);
+	border-radius: 5px;
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1.4;
+	letter-spacing: 0.4px;
+	text-transform: uppercase;
+	color: var(--theme-blue, #4da3ff);
+	background: transparent;
+	opacity: 0.85;
 }
 
 .app-sidebar nav button:hover,
@@ -2531,6 +2547,7 @@ a:focus-visible {
 .data-footer {
 	display: flex;
 	justify-content: space-between;
+	flex-wrap: wrap;
 	gap: 12px;
 	max-width: 1840px;
 	margin: 10px auto 0;
@@ -2541,6 +2558,16 @@ a:focus-visible {
 
 .data-footer > div {
 	gap: 8px;
+	min-width: 0;
+}
+
+/* 数据源说明可能很长（监控/行情页），必须允许收缩与换行，
+ * 否则会把整页撑出横向滚动条、文字被视口裁掉。 */
+.data-footer > div svg { flex: none; }
+
+.data-footer > div span {
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 @media (min-width: 1600px) {
@@ -3016,6 +3043,56 @@ a:focus-visible {
 .limit-billboard-button:hover,
 .limit-billboard-button:focus-visible { border-color: var(--theme-blue-line, #2476d2); background: var(--theme-blue-soft, #e4f0ff); color: var(--theme-blue, #0d4f94); outline: none; }
 .limit-billboard-button.compact { justify-self: end; padding: 2px 8px; font-size: var(--fs-desc); }
+
+/* 连板卡片的操作区：关注 + 龙虎榜并排，右侧收口。
+   关注是主操作（把票收进自己的池子），所以用实心描边、比龙虎榜更显眼一档。 */
+.limit-stock-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.limit-stock-actions.compact {
+	justify-self: end;
+}
+
+.limit-watch-button {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	gap: 3px;
+	padding: 3px 9px;
+	border: 1px solid var(--theme-blue, #175ea9);
+	border-radius: 999px;
+	background: var(--theme-blue, #175ea9);
+	color: #fff;
+	font-size: var(--fs-caption);
+	font-weight: 700;
+	line-height: var(--lh-metric);
+	cursor: pointer;
+	transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+}
+
+.limit-watch-button:hover,
+.limit-watch-button:focus-visible {
+	background: var(--theme-blue-solid, #0d4f94);
+	border-color: var(--theme-blue-solid, #0d4f94);
+	outline: none;
+}
+
+.limit-watch-button:active { opacity: .85; }
+
+/* 已在关注仓：按钮收敛成静态标记，避免同一只票「卡片能加、右键却是删除」。 */
+.limit-watch-button.is-watched {
+	border-color: var(--line);
+	background: var(--surface-2, #eef3f8);
+	color: var(--muted);
+	font-weight: 600;
+	cursor: default;
+}
+
+.limit-watch-button.compact { padding: 2px 7px; font-size: var(--fs-desc); }
 
 .advance-list,
 .concept-heat-list { gap: 12px; }
@@ -7397,6 +7474,20 @@ a:focus-visible {
 .market-data-table > article { display: grid; align-items: center; gap: 8px; min-width: 900px; padding: 8px 12px; }
 .market-data-table > header { min-height: 35px; background: var(--theme-surface-soft, #f7f9fc); color: var(--theme-muted, #8390a0); font-size: var(--fs-desc); }
 .market-data-table > article { min-height: 52px; border-top: 1px solid var(--line-soft); color: var(--theme-muted, #68798d); font-family: var(--font-num); font-size: var(--fs-body); }
+/* 行情总览的列表行此前没有任何悬停反馈：鼠标扫过去毫无动静，
+   看不出哪一行是当前指的，也看不出这些行能点。这里补三件事：
+   悬停底色、鼠标移入左侧一条强调线、个股行给指针形状。 */
+.market-data-table > article { position: relative; transition: background .12s ease; }
+.market-data-table > article:hover { background: var(--theme-surface-soft, #f7f9fc); }
+/* 左侧强调线用伪元素画，不占布局宽度——否则整列会被挤歪 2px。 */
+.market-data-table > article::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: transparent; transition: background .12s ease; }
+.market-data-table > article:hover::before { background: var(--theme-blue-solid, #4d7fc9); }
+/* 个股行可以右键（加入关注 / AI 分析），给指针形状做提示。 */
+.market-data-table > article[data-stock-row] { cursor: context-menu; }
+/* 龙虎榜卡片：整卡可右键，悬停时抬一档边框色。 */
+.market-billboard-list > article { transition: border-color .12s ease, background .12s ease; }
+.market-billboard-list > article[data-stock-row] { cursor: context-menu; }
+.market-billboard-list > article[data-stock-row]:hover { background: var(--theme-surface-soft, #f7f9fc); }
 .market-data-table.momentum > header,
 .market-data-table.momentum > article { grid-template-columns: repeat(7, minmax(88px, 1fr)); }
 .market-data-table.flow.sector > header,
@@ -7768,6 +7859,40 @@ a:focus-visible {
 * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .is-scrolling { scrollbar-color: var(--scrollbar-thumb) transparent; }
 
+/* 全站滚动条默认是「透明、滚动时才显色」，页面上一般够用；
+   但**数据列表**不行：用户看到十几行就以为到底了，其实下面还有内容，
+   会误以为「数量不对」。所以这些容器改成常显一条细轨。
+   只给数据容器，不给整页，避免任何位置都挂一条灰线。 */
+.trading-table-wrap,
+.market-data-table,
+.stock-table-wrap,
+.monitor-radar-body .trading-table-wrap {
+	scrollbar-width: thin;
+	scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.trading-table-wrap::-webkit-scrollbar,
+.market-data-table::-webkit-scrollbar,
+.stock-table-wrap::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.trading-table-wrap::-webkit-scrollbar-track,
+.market-data-table::-webkit-scrollbar-track,
+.stock-table-wrap::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.trading-table-wrap::-webkit-scrollbar-thumb,
+.market-data-table::-webkit-scrollbar-thumb,
+.stock-table-wrap::-webkit-scrollbar-thumb {
+	border: 2px solid transparent;
+	border-radius: 99px;
+	background: var(--scrollbar-thumb);
+	background-clip: content-box;
+}
+
 /* Desktop shell: the window is a fixed frame; only the content area scrolls. */
 .desktop-titlebar::after { content: ""; position: absolute; top: 100%; right: 0; left: 0; height: 1px; background: var(--line-soft, #e6ebf1); }
 .desktop-titlebar-overlay,
@@ -7776,3 +7901,79 @@ a:focus-visible {
 .desktop-titlebar-overlay .app-shell { height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .desktop-titlebar-overlay .app-sidebar,
 .desktop-titlebar-overlay .app-sidebar * { user-select: none; -webkit-user-select: none; }
+
+/* ---------------------------------------------------------------- 全局触发提醒条
+   挂在 App 顶层，任何工作区都会从顶部滑下来。只做告知，落库由后端在触发时完成。 */
+.monitor-alert-toast {
+	position: fixed;
+	top: 48px;
+	left: 50%;
+	z-index: 1250;
+	/* 三列：左图标 / 中间文案（占满剩余、内容左对齐）/ 右操作。 */
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: center;
+	gap: 10px;
+	width: min(400px, calc(100vw - 24px));
+	padding: 8px 10px;
+	border: 1px solid var(--theme-line, #d7dee8);
+	border-radius: 12px;
+	background: var(--theme-surface, #ffffff);
+	box-shadow: 0 12px 32px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+	font-family: var(--font-ui);
+	animation: monitor-alert-in 260ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.monitor-alert-toast.critical { border-color: var(--theme-red-line, #edc7ca); }
+.monitor-alert-toast.leaving { animation: monitor-alert-out 240ms cubic-bezier(.4, 0, 1, 1) both; }
+
+@keyframes monitor-alert-in {
+	from { transform: translate(-50%, -170%); opacity: 0; }
+	to { transform: translate(-50%, 0); opacity: 1; }
+}
+@keyframes monitor-alert-out {
+	from { transform: translate(-50%, 0); opacity: 1; }
+	to { transform: translate(-50%, -170%); opacity: 0; }
+}
+
+.monitor-alert-icon { display: grid; place-items: center; justify-self: start; width: 26px; height: 26px; border-radius: 8px; background: var(--theme-amber-soft, #fffaf0); color: var(--theme-amber, #b9770e); }
+.monitor-alert-toast.critical .monitor-alert-icon { background: var(--theme-red-soft, #fff0f1); color: var(--theme-red, #c4313b); }
+
+.monitor-alert-body { display: grid; gap: 2px; justify-self: stretch; justify-items: start; align-content: center; min-width: 0; text-align: left; }
+.monitor-alert-body strong { display: flex; align-items: baseline; justify-content: flex-start; gap: 6px; font-size: var(--fs-body); line-height: var(--lh-tight); font-weight: 600; color: var(--theme-text, #172033); }
+.monitor-alert-body strong em { font-size: var(--fs-caption); font-style: normal; font-weight: 400; color: var(--theme-subtle, #7d899a); }
+
+/* 触发条件是这一条里最该被看见的信息，给它独立外框与底色，别和标题混在一起。 */
+.monitor-alert-body span {
+	justify-self: start;
+	max-width: 100%;
+	padding: 2px 7px;
+	border: 1px solid var(--theme-amber-line, #e6c3a0);
+	border-radius: 6px;
+	background: var(--theme-amber-soft, #fffaf0);
+	/* 说明文字压成中性灰，让被 <b> 包住的数值成为这一块里唯一的重色。 */
+	color: var(--theme-muted, #56657a);
+	font-size: var(--fs-caption);
+	font-weight: 500;
+	line-height: 1.35;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.monitor-alert-toast.critical .monitor-alert-body span { border-color: var(--theme-red-line, #edc7ca); background: var(--theme-red-soft, #fff0f1); color: var(--theme-red, #c4313b); }
+/* 数值再重一档：扫一眼就能拿到「涨了多少、阈值多少」。 */
+.monitor-alert-body span b { font-weight: 700; color: var(--theme-amber, #b9770e); }
+.monitor-alert-toast.critical .monitor-alert-body span b { color: var(--theme-red, #c4313b); }
+
+.monitor-alert-actions { display: flex; align-items: center; justify-self: end; gap: 6px; }
+.monitor-alert-action { flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border: 1px solid var(--theme-line, #d7dee8); border-radius: 8px; background: var(--theme-surface, #ffffff); color: var(--theme-text, #172033); font-size: var(--fs-body); font-weight: 600; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+.monitor-alert-action:hover { border-color: var(--theme-blue-line, #b8d2ef); background: var(--theme-blue-soft, #edf5ff); color: var(--theme-blue, #2476d2); }
+
+.monitor-alert-close { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--theme-line, #d7dee8); border-radius: 6px; background: transparent; color: var(--theme-subtle, #7d899a); cursor: pointer; }
+.monitor-alert-close:hover { background: var(--theme-surface-soft, #f8fafc); color: var(--theme-text, #172033); }
+.monitor-alert-action:focus-visible,
+.monitor-alert-close:focus-visible { outline: 2px solid var(--theme-blue, #2476d2); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+	.monitor-alert-toast,
+	.monitor-alert-toast.leaving { animation-duration: 1ms; }
+}

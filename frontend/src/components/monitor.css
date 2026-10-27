@@ -1,0 +1,4057 @@
+/* 监控中心：布局与状态色。
+ * 颜色/字号一律取本项目 theme.css + typography.css 的既有 token
+ * （--surface / --line / --text / --muted / --blue ...）；
+ * 不要引入 --card / --primary / --radius 这类本项目不存在的命名。 */
+
+.monitor-workspace {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	/* 与其他工作区（连板 / 巡检 / 行情）对齐：左右与顶部留白由 .app-shell 统一给，
+	   这里不再自己加，否则整页内容会比别的页面内缩一圈。
+	   本页锁高不滚动，底部要自己留出与页脚的距离（其他页面靠滚动末尾的间距）。 */
+	padding: 0 0 16px;
+	min-width: 0;
+	flex: 1 1 auto;
+	min-height: 0;
+	font-family: var(--font-ui);
+	font-size: var(--fs-body);
+}
+
+/* 视口自适应：监控页把高度锁进窗口，页面本身不再滚动；
+   左栏与面板内容超出窗口高度时，在模块内部出滚动条。 */
+html .app-shell:has(.monitor-workspace) {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+}
+
+html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
+	height: 100vh;
+}
+
+.desktop-titlebar-overlay .app-shell:has(.monitor-workspace) {
+	height: 100%;
+}
+
+/* ---------------------------------------------------------------- 分段控件 */
+
+.monitor-tabs {
+	display: inline-flex;
+	gap: 2px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 3px;
+	width: fit-content;
+	max-width: 100%;
+	overflow-x: auto;
+	background: var(--theme-surface-soft);
+	scrollbar-width: none;
+}
+
+/* 窄屏下四个页签会挤成竖排文字：禁止折行，超出就横向滚动。 */
+.monitor-tabs button {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+.monitor-tabs button,
+.monitor-logic-switch button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 13px;
+	border: 0;
+	background: transparent;
+	border-radius: 6px;
+	color: var(--muted);
+	cursor: pointer;
+	font-size: var(--fs-body);
+	line-height: 1.4;
+	transition: background .15s ease, color .15s ease;
+}
+
+.monitor-tabs button:hover,
+.monitor-logic-switch button:hover {
+	color: var(--theme-blue);
+	background: var(--theme-blue-soft);
+}
+
+.monitor-tabs button.active,
+.monitor-logic-switch button.active {
+	background: var(--theme-surface);
+	color: var(--theme-blue);
+	font-weight: 600;
+	box-shadow: 0 1px 3px var(--theme-shadow);
+}
+
+/* ---------------------------------------------------------------- 引擎状态条 */
+
+.monitor-events-layout {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.monitor-engine-strip {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+	padding: 11px 16px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	/* 提亮：顶部一条淡主题蓝渐变，整页起点不再是一块纯白/纯灰。 */
+	background: linear-gradient(180deg,
+		color-mix(in srgb, var(--blue) 6%, var(--theme-surface, var(--surface))),
+		var(--theme-surface, var(--surface)));
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+}
+
+.monitor-engine-main {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+
+.monitor-engine-dot {
+	position: relative;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--subtle);
+	flex: none;
+}
+
+.monitor-engine-dot.on {
+	background: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent);
+}
+
+.monitor-engine-strip strong {
+	font-size: var(--fs-subtitle);
+	font-weight: 700;
+	color: var(--text);
+}
+
+.monitor-engine-strip small {
+	color: var(--subtle);
+	font-size: var(--fs-caption);
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-engine-strip .monitor-engine-error {
+	color: var(--amber);
+	font-size: var(--fs-caption);
+}
+
+.monitor-strip-space {
+	flex: 1 1 12px;
+}
+
+/* ---------------------------------------------------------------- 指标卡 */
+
+.monitor-stat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+	gap: 10px;
+}
+
+.monitor-stat {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 12px 14px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+	min-width: 0;
+}
+
+.monitor-stat span {
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	color: var(--muted);
+	letter-spacing: .02em;
+}
+
+.monitor-stat strong {
+	font-size: var(--fs-display);
+	line-height: 1.15;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	color: var(--text);
+}
+
+.monitor-stat small {
+	font-size: var(--fs-desc);
+	color: var(--subtle);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monitor-stat.critical strong {
+	color: var(--up);
+}
+
+.monitor-stat.ready strong {
+	color: var(--blue);
+}
+
+/* ---------------------------------------------------------------- 快速开始 */
+
+.monitor-quickstart {
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	padding: 13px 16px;
+	/* 提亮：虚线框改主题蓝软底渐变，空态引导区更亮更"可点"。 */
+	border: 1px solid var(--theme-blue-line, var(--line));
+	border-radius: 12px;
+	background: linear-gradient(180deg, var(--theme-blue-soft, var(--surface)), var(--theme-surface, var(--surface)));
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+}
+
+.monitor-quickstart > header {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.monitor-quickstart > header strong {
+	font-size: var(--fs-subtitle);
+	font-weight: 700;
+	color: var(--text);
+}
+
+.monitor-quickstart > header span {
+	font-size: var(--fs-caption);
+	color: var(--subtle);
+}
+
+.monitor-preset-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+	gap: 8px;
+}
+
+.monitor-preset {
+	display: flex;
+	align-items: flex-start;
+	gap: 9px;
+	padding: 9px 11px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--surface-2);
+	text-align: left;
+	color: var(--text);
+	cursor: pointer;
+	transition: border-color .15s ease, background .15s ease;
+}
+
+.monitor-preset:hover {
+	border-color: var(--blue);
+	background: var(--surface-3);
+}
+
+.monitor-preset:disabled {
+	opacity: .55;
+	cursor: default;
+}
+
+.monitor-preset-icon {
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	flex: none;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--blue) 14%, transparent);
+	color: var(--blue);
+}
+
+.monitor-preset > div {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.monitor-preset strong {
+	font-size: var(--fs-body);
+	font-weight: 600;
+}
+
+.monitor-preset small {
+	font-size: var(--fs-desc);
+	color: var(--subtle);
+	line-height: 1.45;
+}
+
+/* ---------------------------------------------------------------- 双栏面板 */
+
+.monitor-events-layout-body {
+	display: grid;
+	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+	grid-template-rows: minmax(0, 1fr);
+	gap: 12px;
+	align-items: stretch;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+@media (max-width: 980px) {
+	.monitor-events-layout-body {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: none;
+		align-content: start;
+		overflow-y: auto;
+	}
+}
+
+.monitor-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+	padding: 0 16px 16px;
+	min-width: 0;
+}
+
+.monitor-panel > header {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 10px;
+	min-height: 50px;
+	margin: 0 -16px;
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--line-soft);
+}
+
+/* 面板定高内部滚动：表格区吃掉剩余高度自己滚（面板头保持固定），
+   表头 sticky 相对 wrap 生效，与交易台同款；滑块常显避免"内容被截断"的错觉。 */
+.monitor-workspace .monitor-panel {
+	min-height: 0;
+	overflow: hidden;
+}
+
+.monitor-panel > .trading-table-wrap {
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: none;
+	overflow: auto;
+	scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 标题块吸收剩余宽度，工具区/时间戳再靠右贴边；
+   这样图标、标题、右侧控件三段不会散开。 */
+.monitor-panel > header > div:not(.monitor-feed-tools) {
+	flex: 1 1 auto;
+}
+
+.monitor-panel > header > svg {
+	flex: none;
+	color: var(--blue);
+}
+
+.monitor-panel > header > div {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+/* 面板头右端的时间戳：与交易台的「现价更新于 …」同一位置同一层级。 */
+.monitor-panel-stamp {
+	margin-left: auto;
+	color: var(--subtle);
+	font-size: var(--fs-caption);
+	white-space: nowrap;
+}
+
+.monitor-panel > header strong {
+	font-size: var(--fs-subtitle);
+	font-weight: 700;
+	color: var(--text);
+}
+
+.monitor-panel > header small {
+	font-size: var(--fs-caption);
+	color: var(--subtle);
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-panel > header > .monitor-feed-tools {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	margin-left: auto;
+}
+
+/* ---------------------------------------------------------------- 空态 */
+
+.monitor-empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 160px;
+	margin: 12px;
+	padding: 22px 16px;
+	border: 1px dashed var(--line);
+	border-radius: 8px;
+	text-align: center;
+}
+
+.monitor-empty-state > svg {
+	color: var(--subtle);
+	opacity: .75;
+}
+
+.monitor-empty-state strong {
+	font-size: var(--fs-body);
+	color: var(--text);
+	font-weight: 600;
+}
+
+.monitor-empty-state span {
+	max-width: 340px;
+	font-size: var(--fs-caption);
+	color: var(--subtle);
+	line-height: 1.6;
+}
+
+.monitor-empty-state button {
+	margin-top: 4px;
+}
+
+.monitor-empty-actions {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-top: 4px;
+}
+
+.monitor-empty-actions button {
+	margin-top: 0;
+}
+
+/* ---------------------------------------------------------------- 列表 */
+
+.monitor-notify {
+	font-size: var(--fs-desc);
+	font-style: normal;
+}
+
+.monitor-notify.queued {
+	color: var(--blue);
+}
+
+.monitor-notify.pending,
+.monitor-notify.merged {
+	color: var(--muted);
+}
+
+.monitor-notify.failed {
+	color: var(--up);
+}
+
+/* ---------------------------------------------------------------- 触发记录 / 规则表
+   与模拟持仓同一套表格骨架；这里只补监控自己的单元格语义。 */
+
+.monitor-events-table,
+.monitor-rules-table {
+	min-width: 560px;
+}
+
+/* 规则表列宽走 CSS 类（不用内联 style）：内联宽度样式优先级最高、媒体查询盖不掉。
+   状态列并进名称之后只剩四列，四列等宽（各 25%），窗口变宽同比放大。 */
+/* 四列统一均分：不给哪一列写宽度，由 table-layout: fixed 平分剩余空间。
+   操作列的三个图标右对齐，宽一点也不会挤到边。 */
+.monitor-rules-table .col-rule { width: auto; }
+.monitor-rules-table .col-scope { width: auto; }
+.monitor-rules-table .col-trigger { width: auto; }
+.monitor-rules-table .col-actions { width: auto; }
+
+
+.monitor-events-table td,
+.monitor-rules-table td {
+	vertical-align: middle;
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-rules-table td:nth-child(3) {
+	white-space: nowrap;
+}
+
+/* 级别在「级别」列已有徽标，行首不再叠色带——
+   td:first-child 的内阴影会在面板左边缘拉出贯穿整表的竖条。 */
+
+/* 两行式单元格：标题在上、元信息在下（与持仓的「名称 + 代码」同构）。 */
+.monitor-cell-title {
+	display: block;
+	overflow: hidden;
+	color: var(--text);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	line-height: var(--lh-tight);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monitor-cell-meta {
+	display: block;
+	margin-top: 2px;
+	overflow: hidden;
+	color: var(--muted);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-snug);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monitor-event-message {
+	color: var(--muted);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-snug);
+}
+
+/* 级别 / 状态徽标：与 trading-chip 同一规格（20px 胶囊）。 */
+.monitor-severity,
+.monitor-rule-state {
+	display: inline-flex;
+	align-items: center;
+	min-height: 20px;
+	padding: 0 8px;
+	border-radius: 999px;
+	font-size: var(--fs-caption);
+	font-style: normal;
+	font-weight: 600;
+	line-height: 1.5;
+	white-space: nowrap;
+}
+
+.monitor-severity.critical,
+.monitor-rule-state.off {
+	color: var(--up);
+	background: color-mix(in srgb, var(--up) 12%, transparent);
+}
+
+.monitor-severity.warning {
+	color: var(--amber);
+	background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+
+.monitor-severity.info {
+	color: var(--blue);
+	background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.monitor-rule-state.on {
+	color: var(--theme-blue);
+	background: var(--theme-blue-soft);
+}
+
+.monitor-rule-state.off {
+	color: var(--subtle);
+	background: color-mix(in srgb, var(--subtle) 14%, transparent);
+}
+
+.monitor-rules-table .monitor-hosted {
+	margin-left: 4px;
+}
+
+/* ---------------------------------------------------------------- 规则名称 / 作用域 / 行内动作
+   规则清单的视觉分层：名称是一圈描边胶囊（启用=蓝、停用=灰，状态直接长在名字上），
+   类型与冷却退到下方元信息，行内动作按语义配色。 */
+
+/* 名称列只有一枚胶囊，居中摆放；宽度交给列宽，胶囊自己省略号收边。 */
+.monitor-rule-name {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-width: 0;
+}
+
+/* 作用域：字号收小到说明级，圆角描边标签取主题色（软底 + 主题色描边）。 */
+.monitor-scope-tag {
+	display: inline-block;
+	max-width: 100%;
+	overflow: hidden;
+	padding: 0 7px;
+	border: 1px solid var(--theme-blue-line, var(--line));
+	border-radius: 999px;
+	background: var(--theme-blue-soft, transparent);
+	color: var(--theme-blue, var(--blue));
+	font-size: var(--fs-caption);
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: middle;
+	min-height: 20px;
+	font-weight: 600;
+}
+
+/* 行内动作全状态：基础描边样式在 monitor-table.css，这里只补
+   active / focus-visible / disabled 与语义配色。选择器带上表层类提高权重，
+   压过基础 hover 规则，不依赖两张样式表的加载顺序。 */
+.monitor-events-table .trading-row-action:active:not(:disabled),
+.monitor-rules-table .trading-row-action:active:not(:disabled) {
+	transform: translateY(1px);
+}
+
+.monitor-events-table .trading-row-action:focus-visible,
+.monitor-rules-table .trading-row-action:focus-visible {
+	outline: 2px solid var(--theme-blue, var(--blue));
+	outline-offset: 1px;
+}
+
+.monitor-events-table .trading-row-action:disabled,
+.monitor-rules-table .trading-row-action:disabled {
+	opacity: .5;
+	cursor: not-allowed;
+}
+
+.monitor-events-table .trading-row-action:disabled:hover,
+.monitor-rules-table .trading-row-action:disabled:hover {
+	border-color: var(--line);
+	background: var(--theme-surface, var(--surface));
+	color: var(--theme-muted);
+}
+
+/* 语义配色：删除=红（两张表都有）；启停=蓝、编辑=蓝（规则表）。 */
+.monitor-events-table .trading-row-action.rule-action-delete,
+.monitor-rules-table .trading-row-action.rule-action-delete {
+	border-color: var(--theme-red-line, var(--line));
+	color: var(--theme-red, var(--up));
+}
+
+.monitor-events-table .trading-row-action.rule-action-delete:hover:not(:disabled),
+.monitor-rules-table .trading-row-action.rule-action-delete:hover:not(:disabled) {
+	border-color: var(--theme-red, var(--up));
+	background: var(--theme-red-soft, transparent);
+	color: var(--theme-red, var(--up));
+}
+
+.monitor-rules-table .trading-row-action.rule-action-toggle {
+	border-color: var(--theme-blue-line);
+	color: var(--theme-blue);
+}
+
+.monitor-rules-table .trading-row-action.rule-action-toggle:hover:not(:disabled) {
+	border-color: var(--theme-blue);
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+}
+
+.monitor-rules-table .trading-row-action.rule-action-edit {
+	border-color: var(--theme-blue-line, var(--line));
+	color: var(--theme-blue, var(--blue));
+}
+
+.monitor-rules-table .trading-row-action.rule-action-edit:hover:not(:disabled) {
+	border-color: var(--theme-blue, var(--blue));
+	background: var(--theme-blue-soft, transparent);
+	color: var(--theme-blue, var(--blue));
+}
+
+
+.monitor-footnote {
+	margin: 0;
+	font-size: var(--fs-desc);
+	color: var(--subtle);
+	font-variant-numeric: tabular-nums;
+}
+
+.muted {
+	color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- 规则 / 批次编辑器 */
+
+.monitor-editor-backdrop {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 20px;
+	background: var(--theme-overlay, rgba(11, 18, 32, .45));
+	z-index: 60;
+}
+
+.monitor-editor {
+	width: min(560px, 100%);
+	max-height: 86vh;
+	overflow-y: auto;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--surface);
+	padding: 14px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 11px;
+	box-shadow: 0 18px 48px var(--theme-shadow);
+}
+
+.monitor-editor > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.monitor-editor > header strong {
+	font-size: var(--fs-heading);
+	color: var(--text);
+}
+
+.monitor-editor > header button {
+	border: 0;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+	padding: 3px;
+	border-radius: 6px;
+	transition: background .15s ease, color .15s ease;
+}
+
+.monitor-editor-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.monitor-editor label {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: var(--fs-caption);
+	color: var(--muted);
+}
+
+/* 勾选框/单选框不吃输入框的 32px 高度：否则 36x20 的开关会被拉成 36x32 的椭圆。 */
+.monitor-editor input:not([type='checkbox']):not([type='radio']),
+.monitor-editor select {
+	min-height: 32px;
+	padding: 6px 9px;
+	border-radius: 8px;
+	border: 1px solid var(--line);
+	background: var(--theme-surface, var(--surface));
+	color: var(--text);
+	font-size: var(--fs-body);
+}
+
+.monitor-editor input:focus,
+.monitor-editor select:focus {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 15%, transparent);
+	outline: none;
+}
+
+.monitor-conditions {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	padding: 10px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--surface-2);
+}
+
+.monitor-conditions > span {
+	font-size: var(--fs-caption);
+	color: var(--muted);
+}
+
+.monitor-filter-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: flex-end;
+}
+
+.monitor-filter-row label {
+	flex: 1 1 130px;
+	min-width: 110px;
+}
+
+
+/* ST 过滤开关：label 文本在上、控件在下，与相邻输入框同一基线 */
+.monitor-filter-row .monitor-toggle {
+	flex: 0 0 auto;
+	min-width: 92px;
+}
+
+.monitor-toggle-line {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	height: 32px;
+}
+
+.monitor-toggle-line input[type='checkbox'] {
+	appearance: none;
+	-webkit-appearance: none;
+	position: relative;
+	flex: none;
+	box-sizing: border-box;
+	width: 36px;
+	min-width: 36px;
+	height: 20px;
+	min-height: 20px;
+	max-height: 20px;
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--line) 65%, transparent);
+	cursor: pointer;
+	transition: background .16s ease, border-color .16s ease;
+}
+
+.monitor-toggle-line input[type='checkbox']::after {
+	content: '';
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--theme-on-emphasis);
+	box-shadow: 0 1px 2px var(--theme-shadow);
+	transition: transform .16s ease;
+}
+
+.monitor-toggle-line input[type='checkbox']:checked {
+	border-color: var(--theme-blue-solid);
+	background: var(--theme-blue-solid);
+}
+
+.monitor-toggle-line input[type='checkbox']:checked::after {
+	transform: translateX(16px);
+}
+
+.monitor-toggle-line input[type='checkbox']:focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--blue) 35%, transparent);
+	outline-offset: 1px;
+}
+
+.monitor-toggle-line em {
+	font-style: normal;
+	color: var(--text);
+	font-size: var(--fs-body);
+	white-space: nowrap;
+}
+
+.monitor-condition-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.monitor-condition-row input,
+.monitor-condition-row select {
+	max-width: 150px;
+}
+
+.monitor-condition-row > button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 22px;
+	border: 1px solid var(--theme-red-line);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--theme-red);
+	cursor: pointer;
+	padding: 0;
+}
+
+.monitor-condition-row > button:hover {
+	border-color: var(--theme-red);
+	background: var(--theme-red-soft);
+}
+
+.monitor-logic-switch {
+	display: inline-flex;
+	gap: 3px;
+	padding: 3px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	width: fit-content;
+	background: var(--theme-surface-soft);
+}
+
+.monitor-editor > footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding-top: 9px;
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-editor > footer .muted {
+	font-size: var(--fs-caption);
+	line-height: 1.5;
+}
+
+.monitor-editor-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: none;
+}
+
+/* ---------------------------------------------------------------- 结论表 / 清单表
+   与 持仓清单同款：真表格 + 吸顶表头直接复用 monitor-table.css
+   的 .trading-table-wrap / .trading-symbol-cell / .trading-row-action；
+   这里只补监控自己的列内容（结论色条、净分单元格、展开详情行）。 */
+
+.monitor-radar-table,
+.monitor-watch-table {
+	min-width: 680px;
+}
+
+.monitor-radar-table td,
+.monitor-watch-table td {
+	font-variant-numeric: tabular-nums;
+	vertical-align: middle;
+}
+
+/* 结论类型由「结论」列的徽标表达，行首不再画色条（同上，避免贯穿竖条）。 */
+
+/* 展开详情行：与持仓的防守线编辑行同一底色（蓝色软底）。 */
+.monitor-radar-detail-row > td {
+	padding: 0 12px 12px;
+	background: var(--theme-blue-soft);
+}
+
+.monitor-radar-detail {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 12px;
+}
+
+.spin {
+	animation: monitor-spin 1s linear infinite;
+}
+
+@keyframes monitor-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* 窄屏：状态条与面板全部纵向堆叠，表格横向滚动而不撑破布局。 */
+@media (max-width: 720px) {
+	.monitor-workspace {
+		padding: 10px 10px 18px;
+	}
+
+	.monitor-engine-strip {
+		align-items: flex-start;
+	}
+
+	.monitor-strip-space {
+		display: none;
+	}
+
+	.monitor-stat-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.monitor-editor {
+		width: 100%;
+	}
+}
+
+/* ---------------------------------------------------------------- 智能雷达 */
+
+.monitor-radar-layout {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.monitor-radar-strip {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+	padding: 12px 16px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: linear-gradient(120deg, color-mix(in srgb, var(--blue) 8%, transparent), transparent 55%), var(--theme-surface, var(--surface));
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+}
+
+.monitor-radar-strip strong {
+	display: block;
+	font-size: var(--fs-subtitle);
+	font-weight: 700;
+	color: var(--text);
+}
+
+.monitor-radar-strip small {
+	display: block;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+}
+
+.monitor-radar-pos {
+	font-style: normal;
+	margin-left: 6px;
+	padding: 0 6px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	color: var(--muted);
+	font-size: var(--fs-micro);
+}
+
+.monitor-radar-score {
+	flex: none;
+	color: var(--muted);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* 展开详情：三块卡片式分区（判断依据 / 技术面事实 / 建议规则）。
+   文字靠编号、指标瓦片与 chip 分层，避免一大段纯文本堆在一起。 */
+.monitor-radar-detail-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+/* 免责声明：系统自动分析结果的可信度提示。
+   用琥珀色描边 + 淡底把它从周围的说明文字里拎出来，既醒目又不抢眼，
+   点明「这是机器给的，别当投资建议」——与站内其它免责声明的口径一致。 */
+.monitor-radar-disclaimer {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 9px;
+	border: 1px solid var(--theme-amber-line);
+	border-radius: 8px;
+	background: var(--theme-amber-soft);
+	color: var(--theme-amber);
+	font-size: var(--fs-caption);
+	font-weight: 500;
+	line-height: 1.5;
+}
+
+.monitor-radar-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.monitor-radar-tags span {
+	font-size: var(--fs-micro);
+	font-weight: 500;
+	color: var(--blue);
+	border: 1px solid color-mix(in srgb, var(--blue) 26%, transparent);
+	background: color-mix(in srgb, var(--blue) 7%, transparent);
+	border-radius: 999px;
+	padding: 2px 9px;
+}
+
+.monitor-radar-detail-grid {
+	display: grid;
+	grid-template-columns: minmax(260px, 1.4fr) minmax(210px, 1fr) minmax(210px, 1fr);
+	gap: 10px;
+	/* 三张卡片必须等高：内容多寡不同（判断依据常 5 条、建议规则常只有 2 行），
+	   用 align-items:start 收边会让建议规则的底边悬在半空——
+	   实测三张卡片高度 183 / 204 / 118，底边完全不齐。
+	   宁可卡片内留白，也要三张卡的外框上下对齐。 */
+	align-items: stretch;
+}
+
+@media (max-width: 1080px) {
+	.monitor-radar-detail-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+.monitor-radar-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	padding: 10px 12px 11px;
+	border: 1px solid color-mix(in srgb, var(--blue) 10%, var(--line-soft));
+	border-radius: 8px;
+	background: var(--theme-surface, var(--surface));
+}
+
+.monitor-radar-card > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid var(--line-soft);
+}
+
+.monitor-radar-card > header span {
+	color: var(--text);
+	font-size: var(--fs-caption);
+	font-weight: 700;
+	letter-spacing: .02em;
+}
+
+.monitor-radar-card > header em {
+	font-style: normal;
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.monitor-radar-reasons {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.monitor-radar-reasons li {
+	display: flex;
+	align-items: flex-start;
+	gap: 7px;
+	color: var(--muted);
+	font-size: var(--fs-desc);
+	line-height: 1.55;
+}
+
+.monitor-radar-reasons li + li {
+	padding-top: 7px;
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-radar-reasons li > i {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	margin-top: 1px;
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--blue) 10%, transparent);
+	color: var(--blue);
+	font-style: normal;
+	font-size: var(--fs-micro);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-radar-reasons li > p {
+	margin: 0;
+	min-width: 0;
+}
+
+.monitor-radar-reasons li b {
+	margin-right: 4px;
+	color: var(--text);
+	font-weight: 600;
+}
+
+/* 技术面事实：2×2 指标瓦片；60 日位置独占一行并带比例条。 */
+.monitor-radar-facts {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.monitor-radar-facts .monitor-radar-fact {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	padding: 6px 8px;
+	border-radius: 8px;
+	background: var(--surface-2);
+}
+
+.monitor-radar-fact span {
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+}
+
+.monitor-radar-fact strong {
+	color: var(--text);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.monitor-radar-fact strong.up { color: var(--up); }
+
+.monitor-radar-fact strong.down { color: var(--down); }
+
+.monitor-radar-fact.is-bar {
+	grid-column: span 2;
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr) max-content;
+	align-items: center;
+	gap: 8px;
+}
+
+.monitor-radar-fact.is-bar > i {
+	display: block;
+	grid-column: 2;
+	grid-row: 1;
+	height: 4px;
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--line) 70%, transparent);
+	overflow: hidden;
+}
+
+.monitor-radar-fact.is-bar > i > b {
+	display: block;
+	height: 100%;
+	border-radius: 2px;
+	background: linear-gradient(90deg, color-mix(in srgb, var(--blue) 55%, transparent), var(--blue));
+}
+
+/* 建议规则：名称一行、条件逐条成 chip、元信息退到最后一行。 */
+.monitor-radar-rule {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.monitor-radar-rule p {
+	margin: 0;
+}
+
+.monitor-radar-rule-name {
+	color: var(--text);
+	font-size: var(--fs-desc);
+	font-weight: 600;
+	line-height: 1.4;
+}
+
+.monitor-radar-rule-conds,
+.monitor-radar-signal-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+
+.monitor-radar-rule-conds {
+	justify-content: center;
+}
+
+.monitor-radar-cond {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 3px 8px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--surface-2);
+	color: var(--text);
+	font-size: var(--fs-micro);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.monitor-radar-cond em {
+	font-style: normal;
+	color: var(--blue);
+	font-weight: 600;
+}
+
+.monitor-radar-rule-meta {
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+}
+
+.monitor-radar-badge,
+.monitor-radar-source {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 20px;
+	padding: 0 7px;
+	border-radius: 999px;
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: var(--theme-muted);
+	font-size: var(--fs-caption);
+	font-style: normal;
+	font-weight: 600;
+	line-height: 1.5;
+	white-space: nowrap;
+}
+
+.monitor-radar-badge.kind-opportunity {
+	color: var(--up);
+	background: var(--theme-red-soft);
+}
+
+.monitor-radar-badge.kind-risk {
+	color: var(--down);
+	background: var(--theme-green-soft);
+}
+
+.monitor-radar-badge.kind-watch {
+	color: var(--amber);
+	background: var(--theme-amber-soft);
+}
+
+/* 情绪徽标：市场冷暖的定性标签，颜色只表达方向不表达强度。 */
+.monitor-radar-mood {
+	font-style: normal;
+	padding: 0 7px;
+	border-radius: 999px;
+	font-size: var(--fs-caption);
+	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	min-height: 20px;
+	font-weight: 600;
+}
+
+.monitor-radar-mood.warm { color: var(--up); background: color-mix(in srgb, var(--up) 12%, transparent); }
+
+.monitor-radar-mood.cool { color: var(--down); background: color-mix(in srgb, var(--down) 12%, transparent); }
+
+.monitor-radar-mood.neutral { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+
+.monitor-watch {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+/* 两列布局：左栏放概要（环境/分布/范围/引擎），右栏放清单本体。
+   内容左右摊开、纵向填满，避免宽屏下整页只有上半截。 */
+.monitor-radar-body,
+.monitor-watch-layout {
+	display: grid;
+	grid-template-columns: 300px minmax(0, 1fr);
+	/* 行高锁进容器：只写 align-items:stretch 不够——隐式行仍是 auto，
+	   行会被内容撑开再把整页顶出窗口，外面边框就跟着拉长了。 */
+	grid-template-rows: minmax(0, 1fr);
+	gap: 12px;
+	align-items: stretch;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.monitor-watch-layout {
+	grid-template-columns: 280px minmax(0, 1fr);
+}
+
+/* ---------------------------------------------------------------- 左栏卡片
+   参照 AI 总控台侧栏的密度与层次：图标 + 标题一行、指标走「标签左 / 数值右」，
+   卡片只用一层浅边框与极小阴影，靠留白分块，不再几层重阴影堆在一起。 */
+
+.monitor-rail {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-height: 0;
+	overflow-y: auto;
+	/* 细滚动条会在左栏右侧拉出一条贯穿到底的竖线，像多了一根分隔条；
+	   这里隐藏滚动条、保留滚轮滚动。 */
+	scrollbar-width: none;
+}
+
+.monitor-rail::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}
+
+.monitor-rail-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 11px 12px 12px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 1px 2px var(--theme-shadow, rgba(30, 52, 78, 0.04));
+}
+
+.monitor-rail-card > header {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding-bottom: 7px;
+	border-bottom: 1px solid var(--line-soft);
+}
+
+.monitor-rail-card > header > svg {
+	flex: none;
+	color: var(--blue);
+	opacity: .8;
+}
+
+.monitor-rail-card > header strong {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: var(--fs-body);
+	font-weight: 600;
+	color: var(--text);
+	letter-spacing: .1px;
+	line-height: 1.3;
+}
+
+.monitor-rail-card > header small {
+	flex: none;
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.monitor-rail-card > header .monitor-radar-mood {
+	margin-left: auto;
+}
+
+/* 三个周期共用列线，方向与样本单独成行。 */
+.monitor-window-risk-grid {
+	display: grid;
+	gap: 7px;
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-window-risk-head,
+.monitor-window-risk-values {
+	display: grid;
+	grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr));
+	align-items: center;
+	gap: 8px;
+}
+
+.monitor-window-risk-head {
+	padding: 0 11px 1px;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+}
+
+.monitor-window-risk-head > span:not(:first-child),
+.monitor-window-risk-values > b { text-align: center; }
+
+.monitor-window-risk-item {
+	padding: 10px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	transition: border-color .15s ease;
+}
+
+.monitor-window-risk-item:hover { border-color: color-mix(in srgb, var(--blue) 35%, var(--line)); }
+
+.monitor-window-risk-values > strong {
+	color: var(--text);
+	font-size: var(--fs-body);
+	font-weight: 600;
+}
+
+.monitor-window-risk-values > b {
+	color: var(--muted);
+	font-family: var(--font-num);
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.monitor-window-risk-values > b.is-near { color: var(--amber); }
+.monitor-window-risk-values > b.is-triggered { color: var(--up); }
+
+.monitor-window-risk-meta {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-top: 7px;
+	padding-top: 7px;
+	border-top: 1px solid var(--line-soft);
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+	white-space: nowrap;
+}
+
+.monitor-window-risk-meta > small { font-size: inherit; }
+
+.monitor-data-status .monitor-rail-rows > div > b {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 62%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.monitor-data-warning {
+	color: var(--theme-amber);
+	overflow-wrap: anywhere;
+}
+
+.monitor-watch-tools-card > header > button {
+	flex: none;
+	font-size: var(--fs-caption);
+}
+
+/* 指标行：左标签右数值，数值等宽对齐，扫一列就能比大小。 */
+.monitor-rail-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.monitor-rail-rows > div {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 3px 0;
+	font-size: var(--fs-desc);
+}
+
+/* 指标行统一行间分割线：扫描范围、引擎这些卡的行也要能分行读数。 */
+.monitor-rail-rows > div + div {
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-rail-rows + .monitor-rail-note {
+	margin-top: 6px;
+	padding-top: 7px;
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-rail-rows > div > span {
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+.monitor-rail-rows > div > b {
+	flex: none;
+	color: var(--text);
+	font-weight: 600;
+	font-size: var(--fs-desc);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.monitor-rail-rows em {
+	font-style: normal;
+}
+
+.monitor-rail-rows .up { color: var(--up); }
+
+.monitor-rail-rows .down { color: var(--down); }
+
+/* 指数区：沪 / 深 / 创业板 / 科创四行一组，行间细分隔线，
+   与下方宽度统计之间再补一条分界，两类信息不混成一片。 */
+.monitor-rail-rows > .monitor-rail-indexes {
+	display: flex;
+	flex-direction: column;
+	/* 父规则给的是 baseline，会把每行压成内容宽，分割线跟着断成短横。 */
+	align-items: stretch;
+	gap: 0;
+	padding: 0 0 4px;
+	margin-bottom: 5px;
+	border-bottom: 1px solid var(--line-soft);
+}
+
+.monitor-rail-indexes > div {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 3px 0;
+	font-size: var(--fs-desc);
+}
+
+.monitor-rail-indexes > div + div {
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-rail-indexes > div > span {
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+.monitor-rail-indexes > div > b {
+	flex: none;
+	font-size: var(--fs-desc);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.monitor-rail-indexes .up { color: var(--up); }
+
+.monitor-rail-indexes .down { color: var(--down); }
+
+.monitor-rail-note {
+	margin: 0;
+	color: var(--subtle);
+	font-size: var(--fs-caption);
+	line-height: 1.5;
+}
+
+/* 结论分布：三行可点筛选，每行一条淡色底条 + 行间细分隔线，
+   颜色只表达类型（机会红 / 风险绿 / 观察橙），不再画左侧竖条。 */
+.monitor-rail-kinds {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.monitor-rail-kind {
+	display: grid;
+	grid-template-columns: 6px 38px 24px minmax(0, 1fr);
+	align-items: center;
+	gap: 6px;
+	padding: 6px 9px;
+	border: 0;
+	border-radius: 0;
+	background: color-mix(in srgb, var(--kind-color) 8%, var(--theme-surface, var(--surface)));
+	text-align: left;
+	font-size: var(--fs-desc);
+	color: var(--muted);
+	cursor: pointer;
+	transition: background .15s ease, box-shadow .15s ease;
+	--kind-color: var(--line);
+}
+
+.monitor-rail-kind + .monitor-rail-kind {
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-rail-kind::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--kind-color);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--kind-color) 18%, transparent);
+}
+
+.monitor-rail-kind:hover {
+	background: color-mix(in srgb, var(--kind-color) 15%, var(--theme-surface, var(--surface)));
+}
+
+.monitor-rail-kind.active {
+	/* 选中态用整行加深 + 内描边，不再画左侧竖条（细竖条易被当成滚动条）。 */
+	background: color-mix(in srgb, var(--kind-color) 18%, var(--theme-surface, var(--surface)));
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kind-color) 42%, transparent);
+}
+
+.monitor-rail-kind.kind-opportunity { --kind-color: var(--up); }
+
+.monitor-rail-kind.kind-risk { --kind-color: var(--down); }
+
+.monitor-rail-kind.kind-watch { --kind-color: var(--amber); }
+
+.monitor-rail-kind > span {
+	color: var(--text);
+	font-weight: 600;
+}
+
+.monitor-rail-kind strong {
+	color: var(--text);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+}
+
+.monitor-rail-kind small {
+	min-width: 0;
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 侧栏通过边框与文字反馈悬停，指标行保持透明。 */
+.monitor-rail-interaction {
+	transition: border-color .15s ease;
+}
+
+.monitor-rail-interaction:hover {
+	border-color: color-mix(in srgb, var(--blue) 35%, var(--line));
+}
+
+.monitor-rail-interaction .monitor-rail-rows {
+	gap: 0;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.monitor-rail-interaction .monitor-rail-rows > div:not(.monitor-rail-indexes),
+.monitor-rail-interaction .monitor-rail-indexes > div {
+	padding: 6px 9px;
+}
+
+.monitor-rail-interaction .monitor-rail-indexes {
+	padding: 0;
+	margin-bottom: 0;
+	border-bottom: 0;
+}
+
+.monitor-rail-interaction .monitor-rail-rows > div:not(.monitor-rail-indexes) > span,
+.monitor-rail-interaction .monitor-rail-indexes > div > span {
+	transition: color .15s ease;
+}
+
+.monitor-rail-interaction .monitor-rail-rows > div:not(.monitor-rail-indexes):hover > span,
+.monitor-rail-interaction .monitor-rail-indexes > div:hover > span {
+	color: var(--blue);
+}
+
+.monitor-market-card {
+	color: inherit;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.monitor-market-card:focus-visible {
+	outline: 2px solid var(--blue);
+	outline-offset: -2px;
+}
+
+.monitor-market-card:active {
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 42%, transparent);
+}
+
+.monitor-rail-event {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-top: 7px;
+	border-top: 1px solid var(--line-soft);
+}
+
+.monitor-rail-event strong {
+	font-weight: 600;
+	color: var(--text);
+	font-size: var(--fs-desc);
+}
+
+.monitor-rail-event small {
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-rail-event span {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+	line-height: var(--lh-snug);
+}
+
+/* 关注仓左栏：总量、涨跌分档、雷达结论与批量入口。 */
+.monitor-watch-total {
+	margin-top: -2px;
+	font-size: var(--fs-display);
+	font-weight: 600;
+	line-height: 1.1;
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-watch-total small {
+	margin-left: 4px;
+	font-size: var(--fs-micro);
+	font-weight: 400;
+	color: var(--subtle);
+}
+
+.monitor-watch-bars {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.monitor-watch-bar {
+	display: grid;
+	grid-template-columns: 42px minmax(0, 1fr) 18px;
+	align-items: center;
+	gap: 8px;
+}
+
+.monitor-watch-bar em {
+	font-style: normal;
+	color: var(--subtle);
+	font-size: var(--fs-caption);
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-watch-bar > span {
+	height: 6px;
+	border-radius: 999px;
+	background: var(--surface-2);
+	overflow: hidden;
+}
+
+.monitor-watch-bar i {
+	display: block;
+	height: 6px;
+	border-radius: 999px;
+}
+
+.monitor-watch-bar i.up { background: var(--up); }
+
+.monitor-watch-bar i.down { background: var(--down); }
+
+.monitor-watch-bar i.neutral { background: var(--theme-subtle); }
+
+.monitor-watch-bar b {
+	color: var(--text);
+	font-weight: 600;
+	font-size: var(--fs-desc);
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+/* 雷达结论：三块等宽小瓦片，数字比一句话更好扫。 */
+.monitor-watch-radar {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.monitor-watch-radar > div {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1px;
+	padding: 7px 4px 6px;
+	border-radius: 8px;
+	background: var(--surface-2);
+}
+
+.monitor-watch-radar small {
+	color: var(--subtle);
+	font-size: var(--fs-micro);
+}
+
+.monitor-watch-radar b {
+	font-size: var(--fs-subtitle);
+	font-weight: 600;
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+	line-height: 1.2;
+}
+
+.monitor-watch-radar .kind-opportunity b { color: var(--up); }
+
+.monitor-watch-radar .kind-risk b { color: var(--down); }
+
+.monitor-watch-radar .kind-watch b { color: var(--amber); }
+
+.monitor-watch-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.monitor-watch-action-row {
+	display: flex;
+	gap: 6px;
+}
+
+.monitor-watch-action-row > button {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.monitor-watch-bulk {
+	width: 100%;
+	min-height: 46px;
+	padding: 7px 9px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, var(--surface));
+	color: var(--text);
+	font: inherit;
+	font-size: var(--fs-body);
+	line-height: var(--lh-snug, 1.45);
+	resize: vertical;
+}
+
+.monitor-watch-bulk:focus {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 15%, transparent);
+	outline: none;
+}
+
+/* 窗口收窄时把 3:2 改成 1:1：规则表五列在 400px 里会挤到截名字、动作折行，
+   两边等宽后规则栏多出 130px，整表能完整读。 */
+@media (max-width: 1500px) {
+	.monitor-events-layout-body {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	}
+}
+
+@media (max-width: 1400px) {
+	/* 堆叠后左栏横排占一行（auto），面板吃掉剩余高度继续内部滚，
+	   不再留出一条内容高度之外的空白。 */
+	.monitor-radar-body,
+	.monitor-watch-layout {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: auto minmax(0, 1fr);
+		align-content: stretch;
+		overflow-y: auto;
+	}
+
+	/* 窄屏左栏改横排：四张卡并排，不再拉成一列长条。 */
+	.monitor-rail {
+		position: static;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+	}
+}
+
+/* 净值列：走势、强度条与数值同排。 */
+.monitor-radar-scorecell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-width: 0;
+}
+
+/* 走势缩略图是 64px 硬尺寸的装饰件：一旦让它 flex-grow 吃掉富余宽度，
+   30 个点会被横向摊平，折线退化成一条几乎水平的直线，涨跌形态就看不出来了。
+   所以它固定不伸（只允许在极窄时被压），宽度由列富余交给下面的强度条。 */
+.monitor-radar-spark {
+	flex: 0 0 64px;
+	width: 64px;
+	min-width: 0;
+}
+
+/* 净分双向条才是要「长」的那个：宽窗口下净分列有 279px，折线 64 + 数字 27
+   之外都是空的。让它 flex-grow 吃掉富余，用户要的是内容撑开、不是把列拉宽。
+   上限放到 240px，避免超宽屏下条子长得比读数还抢眼。 */
+.monitor-radar-scorebar {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 24px;
+	max-width: 240px;
+	height: 6px;
+	border-radius: 3px;
+	background: var(--surface-2);
+}
+
+.monitor-radar-scorebar::before {
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: -3px;
+	width: 1px;
+	height: 12px;
+	background: var(--line);
+}
+
+.monitor-radar-scorebar-fill {
+	position: absolute;
+	top: 0;
+	height: 6px;
+	border-radius: 3px;
+}
+
+.monitor-radar-scorebar-fill.pos { background: var(--up); }
+
+.monitor-radar-scorebar-fill.neg { background: var(--down); }
+
+.monitor-radar-score.up { color: var(--up); }
+
+.monitor-radar-score.down { color: var(--down); }
+
+/* 风平浪静时的池内异动填充。 */
+.monitor-radar-movers {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: center;
+}
+
+.monitor-radar-mover {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 10px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	font-size: var(--fs-desc);
+}
+
+.monitor-radar-mover strong {
+	font-weight: 500;
+	color: var(--text);
+}
+
+.monitor-radar-mover em {
+	font-style: normal;
+	font-variant-numeric: tabular-nums;
+}
+
+.monitor-radar-mover small {
+	color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- 板块选择器 */
+
+.monitor-sector-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.monitor-sector-picker > span {
+	color: var(--muted);
+	font-size: var(--fs-caption);
+}
+
+.monitor-sector-selected {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.monitor-sector-selected button {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--fs-micro);
+	color: var(--text);
+	border: 1px solid var(--blue);
+	background: color-mix(in srgb, var(--blue) 10%, transparent);
+	border-radius: 999px;
+	padding: 2px 9px;
+	cursor: pointer;
+}
+
+.monitor-sector-picker input {
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--surface);
+	color: var(--text);
+	padding: 7px 10px;
+	font-size: var(--fs-body);
+	min-height: 32px;
+}
+
+.monitor-sector-picker input:focus {
+	outline: none;
+	border-color: var(--blue);
+}
+
+.monitor-sector-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 200px;
+	overflow-y: auto;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	padding: 4px;
+	background: var(--surface);
+}
+
+.monitor-sector-list button {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	border: none;
+	background: transparent;
+	color: var(--text);
+	text-align: left;
+	padding: 6px 8px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: var(--fs-desc);
+}
+
+.monitor-sector-list button:hover {
+	background: color-mix(in srgb, var(--blue) 8%, transparent);
+}
+
+.monitor-sector-list button.active {
+	background: color-mix(in srgb, var(--blue) 14%, transparent);
+}
+
+.monitor-sector-list button strong {
+	font-weight: 600;
+	flex: 0 0 auto;
+}
+
+.monitor-sector-list button small {
+	color: var(--muted);
+	flex: 1 1 auto;
+}
+
+.monitor-sector-list button em {
+	font-style: normal;
+	font-variant-numeric: tabular-nums;
+	flex: 0 0 auto;
+}
+
+.monitor-sector-tabs {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.monitor-sector-tabs button {
+	font-size: var(--fs-caption);
+	color: var(--muted);
+	border: 1px solid var(--line);
+	background: var(--surface);
+	border-radius: 999px;
+	padding: 2px 10px;
+	cursor: pointer;
+}
+
+.monitor-sector-tabs button.active {
+	color: var(--blue);
+	border-color: var(--blue);
+	background: color-mix(in srgb, var(--blue) 8%, transparent);
+	font-weight: 600;
+}
+
+/* ------------------------------------------------------------ 规则模板化编辑器 */
+
+.monitor-editor-head-tools {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.monitor-link-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--blue);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	line-height: 1.5;
+	cursor: pointer;
+}
+
+.monitor-link-button:hover {
+	text-decoration: underline;
+}
+
+.monitor-template-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 8px;
+}
+
+.monitor-template-card {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	padding: 11px 12px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, var(--surface));
+	cursor: pointer;
+	text-align: left;
+	color: var(--text);
+}
+
+.monitor-template-card:hover {
+	border-color: var(--blue);
+	background: color-mix(in srgb, var(--blue) 6%, var(--surface));
+}
+
+.monitor-template-card svg {
+	color: var(--blue);
+}
+
+.monitor-template-card strong {
+	font-size: var(--fs-body);
+	font-weight: 600;
+}
+
+.monitor-template-card small {
+	font-size: var(--fs-desc);
+	color: var(--muted);
+	line-height: 1.45;
+}
+
+.monitor-template-back {
+	align-self: flex-start;
+	border: 0;
+	background: transparent;
+	color: var(--muted);
+	font-size: var(--fs-body);
+	cursor: pointer;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	line-height: 1.5;
+}
+
+.monitor-template-back:hover {
+	color: var(--blue);
+}
+
+.monitor-simple-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.monitor-simple-row > select {
+	flex: 1 1 150px;
+	max-width: 220px;
+}
+
+.monitor-simple-row > input[type='number'] {
+	width: 96px;
+}
+
+.monitor-simple-label {
+	font-size: var(--fs-body);
+	color: var(--muted);
+	flex: 0 0 auto;
+}
+
+.monitor-seg {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	padding: 3px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface-soft);
+}
+
+.monitor-seg button {
+	border: 0;
+	background: transparent;
+	color: var(--muted);
+	border-radius: 6px;
+	padding: 4px 10px;
+	font-size: var(--fs-body);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.monitor-seg button.active {
+	color: var(--blue);
+	background: var(--theme-surface);
+	font-weight: 600;
+	box-shadow: 0 1px 3px var(--theme-shadow);
+}
+
+.monitor-chip-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.monitor-chip {
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: var(--surface);
+	color: var(--muted);
+	font-size: var(--fs-body);
+	padding: 4px 12px;
+	cursor: pointer;
+}
+
+.monitor-chip:hover {
+	border-color: var(--blue);
+	color: var(--blue);
+}
+
+.monitor-chip.active {
+	border-color: var(--blue);
+	color: var(--blue);
+	background: color-mix(in srgb, var(--blue) 10%, transparent);
+	font-weight: 600;
+}
+
+.monitor-scenario-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.monitor-scenario-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	padding: 3px 0;
+}
+
+.monitor-scenario-row small {
+	font-size: var(--fs-desc);
+	margin-left: auto;
+	text-align: right;
+}
+
+.monitor-scenario-value {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--fs-body);
+	color: var(--blue);
+	white-space: nowrap;
+}
+
+.monitor-scenario-value input {
+	width: 72px;
+	padding: 3px 6px;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	background: var(--surface);
+	color: var(--text);
+	font-size: var(--fs-body);
+}
+
+.monitor-advanced {
+	border: 1px dashed var(--line);
+	border-radius: 8px;
+	padding: 8px 10px;
+}
+
+.monitor-advanced summary {
+	cursor: pointer;
+	font-size: var(--fs-body);
+	color: var(--muted);
+	user-select: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	list-style: none;
+}
+
+.monitor-advanced > *:not(summary) {
+	margin-top: 8px;
+}
+
+@media (max-width: 620px) {
+	.monitor-template-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+
+.monitor-seg button small {
+	margin-left: 4px;
+	padding: 0 5px;
+	border-radius: 8px;
+	font-size: var(--fs-micro);
+	line-height: 15px;
+	background: color-mix(in srgb, var(--blue) 12%, transparent);
+	color: var(--blue);
+	font-weight: 600;
+}
+.monitor-seg button.active small {
+	background: var(--theme-blue-soft);
+	color: inherit;
+}
+.monitor-scope-empty {
+	display: block;
+	margin-top: 4px;
+}
+
+
+/* 页签行：左边页签、右边关注仓搜索框（仅关注仓页签渲染）。 */
+.monitor-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.monitor-head .monitor-watch-search {
+	flex: 0 1 300px;
+	min-width: 220px;
+	margin-left: auto;
+}
+.monitor-watch-search {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 32px;
+	padding: 0 10px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, var(--surface));
+	color: var(--muted);
+}
+.monitor-watch-search:focus-within {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 15%, transparent);
+}
+.monitor-watch-search input {
+	flex: 1;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: var(--text);
+	font-size: var(--fs-body);
+	min-width: 0;
+	font-family: inherit;
+}
+.monitor-suggest {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
+	z-index: 30;
+	max-height: 260px;
+	overflow-y: auto;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 8px 24px var(--theme-shadow, rgba(30, 52, 78, 0.06));
+	padding: 4px;
+}
+.monitor-suggest button {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	width: 100%;
+	padding: 7px 10px;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text);
+	text-align: left;
+	cursor: pointer;
+	font-size: var(--fs-body);
+}
+.monitor-suggest button:hover {
+	background: color-mix(in srgb, var(--blue) 10%, transparent);
+}
+.monitor-suggest button small {
+	color: var(--muted);
+	font-size: var(--fs-desc);
+}
+.monitor-suggest.empty {
+	padding: 10px;
+	color: var(--muted);
+	font-size: var(--fs-body);
+}
+.monitor-watch-note-cell {
+	max-width: 340px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 备注是人工写的「为什么盯它」：琥珀描边 + 淡底把它从行情列里拎出来。
+   与雷达免责声明同一套范式（琥珀线 + 淡底 + 6px 圆角），
+   全站“人写的提示”长一个样子。空备注不套框，只留一个 —。 */
+.monitor-watch-note {
+	display: inline-block;
+	max-width: 100%;
+	box-sizing: border-box;
+	padding: 2px 8px;
+	border: 1px solid var(--theme-amber-line);
+	border-radius: 6px;
+	background: var(--theme-amber-soft);
+	color: var(--theme-amber);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-snug);
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: middle;
+}
+.monitor-watch-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.monitor-watch-note-input {
+	width: 100%;
+	min-width: 0;
+	min-height: 26px;
+	padding: 3px 8px;
+	border: 1px solid var(--theme-amber-line);
+	border-radius: 6px;
+	background: var(--theme-amber-soft);
+	color: var(--text);
+	font-size: var(--fs-body);
+}
+
+/* 编辑态沿用琥珀描边：编辑前后不换“皮肤”，用户不会以为自己点错了地方。 */
+.monitor-watch-note-input:focus {
+	border-color: var(--theme-amber);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-amber) 18%, transparent);
+	outline: none;
+}
+
+.monitor-watch-flow-wrap {
+	container-type: inline-size;
+}
+
+.monitor-watch-flow-table {
+	min-width: 1080px;
+}
+
+.monitor-watch-flow-table col:first-child {
+	width: 176px;
+}
+
+.monitor-watch-flow-row {
+	cursor: pointer;
+}
+
+.monitor-watch-flow-row:hover > td:first-child {
+	box-shadow: inset 2px 0 0 var(--theme-blue-line);
+}
+
+.monitor-watch-flow-row.expanded > td:first-child {
+	box-shadow: inset 2px 0 0 var(--theme-blue);
+}
+
+.trading-table-wrap tbody .monitor-watch-flow-row.expanded > td,
+.monitor-watch-note-detail-row > td {
+	background: var(--theme-blue-soft);
+}
+
+.trading-table-wrap .monitor-watch-note-detail-row > td {
+	padding: 0 12px 12px;
+	text-align: left;
+	white-space: normal;
+}
+
+.monitor-watch-expand {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+
+.monitor-watch-expand:focus-visible {
+	outline: 2px solid var(--blue);
+	outline-offset: 4px;
+	border-radius: 4px;
+}
+
+.monitor-watch-note-editor {
+	position: sticky;
+	left: 12px;
+	box-sizing: border-box;
+	width: calc(100cqw - 24px);
+	max-width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 12px;
+}
+
+.monitor-watch-note-heading,
+.monitor-watch-note-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+}
+
+.monitor-watch-note-heading strong {
+	font-size: var(--fs-body);
+	font-weight: 600;
+}
+
+.monitor-watch-note-heading small,
+.monitor-watch-note-actions small {
+	color: var(--muted);
+	font-size: var(--fs-desc);
+}
+
+.monitor-watch-note-heading small {
+	margin-left: auto;
+}
+
+.monitor-watch-note-editor .monitor-watch-note-input {
+	box-sizing: border-box;
+	min-height: 84px;
+	padding: 8px 10px;
+	border-color: var(--line);
+	background: var(--theme-surface, var(--surface));
+	font-family: inherit;
+	line-height: var(--lh-normal);
+	resize: vertical;
+}
+
+.monitor-watch-note-editor .monitor-watch-note-input:focus {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px var(--theme-blue-soft);
+}
+
+.monitor-watch-note-actions small {
+	flex: 1 1 220px;
+}
+
+.monitor-watch-note-actions small.is-over {
+	color: var(--up);
+}
+
+/* ---------------------------------------------------------------- 控件体系
+   与 系统控件一致：ghost = 描边 + 蓝软底 hover，primary = 蓝底投影。
+   监控页的 monitor-small-button / monitor-primary / monitor-select 之前根本没有
+   定义，浏览器默认控件直接漏在页面上，才显得像"插进来的半成品"。 */
+
+.monitor-workspace .monitor-small-button,
+.monitor-workspace .monitor-primary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 32px;
+	padding: 0 12px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, var(--surface));
+	color: var(--text);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	font-weight: 600;
+	line-height: 1;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+/* 条件区里的「添加条件」按内容宽度收边，不要被 flex 列拉成整行通栏按钮。 */
+.monitor-conditions > .monitor-small-button {
+	align-self: flex-start;
+}
+
+.monitor-workspace .monitor-small-button svg,
+.monitor-workspace .monitor-primary svg {
+	flex: none;
+}
+
+.monitor-workspace .monitor-small-button:hover:not(:disabled) {
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+	color: var(--blue);
+}
+
+/* 主操作：实心主色。底色取 --theme-blue-solid 而不是 --blue：
+   暗色下 --blue 是浅蓝，白字压上去对比度不够；--theme-blue-solid 两套主题
+   各自给出「配白字够看」的实心蓝，不需要在这里写死任何色值。 */
+.monitor-workspace .monitor-primary {
+	border-color: var(--theme-blue-solid, var(--blue));
+	background: var(--theme-blue-solid, var(--blue));
+	color: var(--theme-on-emphasis);
+	box-shadow: 0 4px 10px color-mix(in srgb, var(--theme-blue-solid, var(--blue)) 20%, transparent);
+}
+
+.monitor-workspace .monitor-primary:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--theme-blue-solid, var(--blue)) 86%, #000000);
+	background: color-mix(in srgb, var(--theme-blue-solid, var(--blue)) 86%, #000000);
+}
+
+.monitor-workspace .monitor-small-button:disabled,
+.monitor-workspace .monitor-primary:disabled {
+	opacity: .5;
+	cursor: not-allowed;
+}
+
+/* 下拉：去掉浏览器默认外观，30px 高、与按钮同圆角，箭头换成细线 chevron。 */
+.monitor-workspace .monitor-select,
+.monitor-editor select {
+	appearance: none;
+	-webkit-appearance: none;
+	min-height: 32px;
+	padding: 0 26px 0 10px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background-color: var(--theme-surface, var(--surface));
+	background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7a8c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 8px center;
+	background-size: 12px 12px;
+	color: var(--text);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	font-weight: 500;
+	cursor: pointer;
+	transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.monitor-workspace .monitor-select:hover,
+.monitor-editor select:hover {
+	border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
+}
+
+.monitor-workspace .monitor-select:focus,
+.monitor-editor select:focus {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 15%, transparent);
+	outline: none;
+}
+
+/* ---------------------------------------------------------------- 面板内表格
+   面板头已经是标题，表格就不再套第二层"标题栏"外框：去掉圆角边框，
+   表头只保留列名语义（灰字 + 细下边框 + 面板同色底，滚动时仍吸顶遮挡）。 */
+
+.monitor-panel > .trading-table-wrap {
+	border: 0;
+	border-radius: 0;
+}
+
+.monitor-panel .trading-table-wrap th {
+	background: var(--theme-surface, var(--surface));
+	border-bottom: 1px solid var(--line-soft);
+	color: var(--subtle);
+	font-weight: 600;
+}
+
+/* 两栏更窄：单元格左右内边距收到 8px（交易台是 10px），把宽度让给内容，
+   窗口一窄动作区只会折行、不会把表撑出横向滚动。 */
+.monitor-events-table th,
+.monitor-events-table td,
+.monitor-rules-table th,
+.monitor-rules-table td {
+	padding-left: 8px;
+	padding-right: 8px;
+}
+
+/* 触发记录 / 规则所在的两栏比右侧宽表窄：表格收进栏宽，宁可压缩也不横向裁切。 */
+.monitor-events-table,
+.monitor-rules-table {
+	min-width: 0;
+}
+
+/* 窄栏保留时间和通知的横向读法，余量交给表格容器滚动。 */
+.monitor-events-table {
+	min-width: 600px;
+}
+
+.monitor-events-table td:first-child,
+.monitor-events-table .monitor-notify {
+	white-space: nowrap;
+}
+
+/* 「更多选项」从虚线框改成与条件区同一种软底实线框。 */
+.monitor-advanced {
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--surface-2);
+}
+
+.monitor-advanced summary {
+	font-size: var(--fs-body);
+	color: var(--muted);
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	list-style: none;
+}
+
+/* ---------------------------------------------------------------- 自绘下拉
+   原生 <select> 的展开层由系统绘制（白底、系统蓝选中条、直角），在监控页里
+   和周边卡片完全不是一套。这里用按钮 + portal 菜单替代；菜单挂在 body 上，
+   面板的 overflow:hidden 裁不到它。 */
+
+.monitor-selectbox {
+	position: relative;
+	display: inline-flex;
+	min-width: 0;
+}
+
+.monitor-selectbox.is-block {
+	display: flex;
+	width: 100%;
+}
+
+.monitor-select-trigger {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	width: 100%;
+	min-height: 32px;
+	padding: 0 8px 0 10px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface, var(--surface));
+	color: var(--text);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	font-weight: 500;
+	line-height: 1;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.monitor-select-trigger > span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.monitor-select-trigger > span.is-placeholder {
+	color: var(--subtle);
+}
+
+.monitor-select-trigger > svg {
+	flex: none;
+	color: var(--muted);
+}
+
+.monitor-select-trigger:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
+}
+
+.monitor-select-trigger:focus-visible,
+.monitor-select-trigger[aria-expanded='true'] {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 15%, transparent);
+	outline: none;
+}
+
+.monitor-select-trigger:disabled {
+	opacity: .55;
+	cursor: not-allowed;
+}
+
+.monitor-select-menu {
+	position: fixed;
+	z-index: 1200;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	max-height: 288px;
+	padding: 4px;
+	overflow-y: auto;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 12px 32px var(--theme-shadow, rgba(15, 23, 42, .18));
+	scrollbar-width: thin;
+}
+
+.monitor-select-option {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	width: 100%;
+	min-height: 30px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text);
+	font-family: inherit;
+	font-size: var(--fs-body);
+	text-align: left;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.monitor-select-option.is-active {
+	background: var(--theme-blue-soft);
+}
+
+.monitor-select-option.is-selected {
+	color: var(--blue);
+	font-weight: 600;
+}
+
+.monitor-select-option > svg {
+	flex: none;
+	color: var(--blue);
+}
+
+/* 焦点可见：交易台同款蓝色描边，键盘导航可用性的底线。 */
+.monitor-workspace button:focus-visible,
+.monitor-workspace a:focus-visible,
+.monitor-editor button:focus-visible {
+	outline: 2px solid var(--blue);
+	outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- 异动预警
+   交易所异常波动口径：3/10/30 日累计偏离值对照阈值。布局复用雷达的
+   「rail + panel」骨架，这里只补计算器卡片、进度条与分级徽标。 */
+
+.monitor-rail-kind.kind-info {
+	--kind-color: var(--blue);
+}
+
+/* 11 列（含操作列）压进面板可视宽度：操作列必须常驻可见，
+   不能被横向滚动条挡在右边——否则移除按钮等于没有。 */
+.monitor-abnormal-table {
+	min-width: 800px;
+}
+
+/* 数值列不折行：+203.37% 折成两行会让整列高度失控。 */
+.monitor-abnormal-table td,
+.monitor-abnormal-table th {
+	white-space: nowrap;
+}
+
+/* 状态列：监控中 + 触发状态两枚徽标并排居中；列窄时换行，不挤成竖排三行。 */
+.monitor-abn-status {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: 4px 6px;
+}
+
+.monitor-abn-row {
+	cursor: pointer;
+}
+
+/* 接近度：细进度条 + 百分比，占位与净分条同高。 */
+.monitor-abn-meter-cell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.monitor-abn-meter {
+	flex: 1 1 auto;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--surface-2);
+	overflow: hidden;
+}
+
+.monitor-abn-meter i {
+	display: block;
+	height: 100%;
+	min-width: 0;
+	border-radius: 999px;
+	background: linear-gradient(90deg, var(--blue), var(--up));
+	background-repeat: no-repeat;
+}
+
+.monitor-abn-meter-cell em {
+	min-width: 34px;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+	font-style: normal;
+	text-align: right;
+}
+
+.monitor-abn-meter-cell.is-triggered .monitor-abn-meter i { background: var(--up); }
+.monitor-abn-meter-cell.is-triggered em { color: var(--up); }
+
+.monitor-abn-unit {
+	display: block;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+	font-weight: 400;
+}
+
+.monitor-abn-remaining { color: var(--text); }
+.monitor-abn-remaining.is-past { color: var(--up); }
+
+.monitor-abn-badge {
+	display: inline-flex;
+	align-items: center;
+	min-height: 20px;
+	padding: 0 8px;
+	border-radius: 999px;
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.monitor-abn-badge.is-triggered { color: var(--up); background: color-mix(in srgb, var(--up) 12%, transparent); }
+.monitor-abn-badge.is-near { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.monitor-abn-badge.is-watch { color: var(--blue); background: color-mix(in srgb, var(--blue) 10%, transparent); }
+.monitor-abn-badge.is-normal { color: var(--muted); background: var(--surface-2); }
+/* 严重异常波动：比「已触发」更重，用最深的一档红色 + 描边区分。 */
+.monitor-abn-badge.is-severe {
+	color: var(--theme-on-emphasis);
+	background: var(--theme-red, var(--up));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-red, var(--up)) 40%, transparent);
+}
+
+/* 单票计算器：状态行 + 三窗口瓦片 + 逐日明细。
+   窗口高度不够时计算器自己收进 56% 并在内部滚动，给下面的预警列表
+   留出固定高度——否则两块抢空间，列表会被挤成 0。 */
+.monitor-abn-calc {
+	flex: 0 1 auto;
+	min-height: 0;
+	max-height: 56%;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin: 0 16px 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--theme-blue-soft);
+}
+
+.monitor-abn-state {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--fs-desc);
+}
+
+.monitor-abn-state.is-error { color: var(--theme-red); }
+
+.monitor-abn-status {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.monitor-abn-status strong { font-size: var(--fs-body); }
+.monitor-abn-status small { color: var(--muted); }
+
+.monitor-abn-st {
+	padding: 0 5px;
+	border-radius: 5px;
+	color: var(--up);
+	background: color-mix(in srgb, var(--up) 10%, transparent);
+	font-size: var(--fs-caption);
+	font-style: normal;
+	font-weight: 700;
+}
+
+.monitor-abn-tiles {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.monitor-abn-tile {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	border: 1px solid var(--line-soft);
+	border-left: 3px solid var(--amber);
+	border-radius: 8px;
+	background: var(--surface);
+}
+
+.monitor-abn-tile.is-up { border-left-color: var(--up); }
+.monitor-abn-tile.is-down { border-left-color: var(--down); }
+.monitor-abn-tile.is-past { border-left-color: var(--blue); }
+
+.monitor-abn-tile > header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.monitor-abn-tile > header span { color: var(--muted); font-size: var(--fs-desc); }
+.monitor-abn-tile > header b { font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
+
+.monitor-abn-tile dl {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+}
+
+.monitor-abn-tile dl > div {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.monitor-abn-tile dt { color: var(--muted); font-size: var(--fs-caption); }
+.monitor-abn-tile dd { margin: 0; font-size: var(--fs-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.monitor-abnormal-panel > .trading-table-wrap {
+	/* 计算器展开时列表仍要露出几行，余量不够就在各自内部滚动。 */
+	min-height: 168px;
+}
+
+.monitor-abnormal-rail .monitor-rail-kind {
+	/* 「接近阈值」是 4 个字，38px 的标签列会折行，这里单独放宽。 */
+	grid-template-columns: 6px 56px 22px minmax(0, 1fr);
+}
+
+.monitor-abn-rows-wrap {
+	max-height: 190px;
+	overflow: auto;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+}
+
+.monitor-abn-rows {
+	min-width: 0;
+}
+
+/* 明细小表：表头吸顶。
+   这个容器有 max-height:190px + overflow:auto，是真的会纵向滚的。
+   不写这条的话折叠展开后滚一半就不知道每列是什么了。
+   背景必须不透明，否则数据会从字下面穿过。 */
+.monitor-abn-rows-wrap th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--theme-surface, var(--surface));
+}
+
+.monitor-abn-rows td,
+.monitor-abn-rows th {
+	padding: 6px 10px;
+	font-size: var(--fs-caption);
+	font-variant-numeric: tabular-nums;
+}
+
+/* 顶部条搜索框：相对定位容器，下拉绝对展开；输入框固定宽度不与条内其他元素抢空间。 */
+.monitor-abn-searchbox {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--muted);
+}
+
+.monitor-abn-searchbox .monitor-abn-search {
+	width: 200px;
+}
+
+/* 左栏查询卡：输入框 + 建议列表。 */
+.monitor-abn-search {
+	width: 100%;
+	height: 32px;
+	padding: 0 10px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--surface);
+	color: var(--text);
+	font-size: var(--fs-body);
+}
+
+.monitor-abn-search:focus {
+	outline: none;
+	border-color: var(--theme-blue);
+	box-shadow: 0 0 0 3px var(--theme-blue-soft);
+}
+
+.monitor-abn-hits {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 240px;
+	padding: 6px;
+	border: 1px solid var(--line-soft);
+	border-radius: 12px;
+	background: var(--surface);
+	box-shadow: 0 12px 32px var(--theme-shadow);
+}
+
+/* 搜索建议行：主按钮（计算）+ 加入监控 / 已监控标记。 */
+.monitor-abn-hit {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	border-radius: 6px;
+}
+
+.monitor-abn-hit:hover { background: var(--surface-2); }
+
+.monitor-abn-hit-main {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 5px 8px;
+	border: 0;
+	background: transparent;
+	text-align: left;
+	font-size: var(--fs-desc);
+	color: var(--text);
+	cursor: pointer;
+}
+
+.monitor-abn-hit-main small { color: var(--muted); }
+
+.monitor-abn-hit-add,
+.monitor-abn-hit-flag {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 20px;
+	margin-right: 6px;
+	border: 0;
+	border-radius: 999px;
+	font-size: var(--fs-caption);
+}
+
+.monitor-abn-hit-add {
+	width: 26px;
+	background: var(--theme-surface);
+	color: var(--blue);
+	cursor: pointer;
+	border: 1px solid var(--theme-blue-line);
+	border-radius: 6px;
+	height: 22px;
+}
+
+.monitor-abn-hit-add:hover { background: color-mix(in srgb, var(--blue) 22%, transparent); }
+.monitor-abn-hit-add:disabled { opacity: 0.5; cursor: default; }
+
+.monitor-abn-hit-flag {
+	padding: 0 8px;
+	background: var(--surface-2);
+	color: var(--muted);
+}
+
+.monitor-abn-watch-notice {
+	margin: 0 0 6px;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+}
+
+/* 列表展开行：与智能雷达折叠行同构——蓝色软底整行，
+   里面是三窗口状态卡 + 最近 12 个交易日逐日明细。 */
+.monitor-abn-detail-row > td {
+	padding: 0 12px 12px;
+	background: var(--theme-blue-soft);
+}
+
+.monitor-abn-detail {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 12px;
+}
+
+.monitor-abn-detail-top {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+}
+
+.monitor-abn-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.monitor-abn-tags > span {
+	padding: 1px 7px;
+	border: 1px solid var(--line-soft);
+	border-radius: 999px;
+	color: var(--muted);
+	font-size: var(--fs-caption);
+}
+
+.monitor-abn-detail-hint {
+	color: var(--muted);
+	font-size: var(--fs-caption);
+}
+
+/* 操作列：监控中的行给移除（✕），其余行给加入（＋）。 */
+.monitor-abn-ops {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+}
+
+.monitor-abn-op {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 22px;
+	border: 1px solid var(--line-soft);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+	transition: border-color .12s ease, color .12s ease, background .12s ease;
+	border-color: var(--line);
+}
+
+.monitor-abn-op:hover { border-color: var(--theme-blue, var(--blue)); color: var(--theme-blue, var(--blue)); background: var(--theme-blue-soft, transparent); }
+
+.monitor-abn-op.is-remove:hover { border-color: var(--theme-red, var(--up)); color: var(--theme-red, var(--up)); background: var(--theme-red-soft, transparent); }
+
+.monitor-abn-op:active { transform: translateY(1px); }
+
+.monitor-abn-op:focus-visible { outline: 2px solid var(--theme-blue, var(--blue)); outline-offset: 1px; }
+
+.monitor-abn-op:disabled { opacity: 0.5; cursor: default; }
+
+/* 结论筛选：系统风格分段控件（segmented control）。
+   一条浅底凹槽里排三个等宽分段，选中项背后是一块白色/浮起的高亮，
+   切换时高亮沿 X 轴滑过去——就是系统设置里那种「分段 + 滑块」的观感。
+   与站内其它分段控件（.patrol-tabs / .sector-flow-tabs）同一套读法，
+   但这里是「一个槽 + 一块滑动高亮」，不是「每格各自上色」。 */
+/* 筛选行：段控件铺满整行，与下面的列表同宽。 */
+.monitor-abn-filterbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 2px 0 0;
+	min-width: 0;
+}
+
+.monitor-segmented {
+	position: relative;
+	/* 块级 grid（非 inline-grid）+ width:100%：才会满整行。
+	   inline-grid 被 flex 交给长时会收到 max-content，
+	   也就是用户看到的「只有左边一小段」。 */
+	display: grid;
+	width: 100%;
+	grid-auto-flow: column;
+	/* 三段等宽：高亮块的位移量才能用 100% / 200% 直接算，不必读布局。
+	   下限改成 0：窄窗口下让三段压缩而不撑出面板。 */
+	grid-auto-columns: minmax(0, 1fr);
+	padding: 3px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface-soft);
+}
+
+/* 滑动高亮：一块浮起的白色圆角块，停在当前选中分段下面。
+   未筛选（data-active=-1）时淡出隐藏，不占视觉。 */
+.monitor-segmented-thumb {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: calc((100% - 6px) / 3);
+	height: calc(100% - 6px);
+	border-radius: 6px;
+	background: var(--theme-surface, var(--surface));
+	box-shadow: 0 1px 2px var(--theme-shadow, rgba(30, 52, 78, .18));
+	transition: transform .18s ease, opacity .18s ease;
+	pointer-events: none;
+	opacity: 0;
+}
+
+.monitor-segmented[data-active='0'] .monitor-segmented-thumb { transform: translateX(0); opacity: 1; }
+.monitor-segmented[data-active='1'] .monitor-segmented-thumb { transform: translateX(100%); opacity: 1; }
+.monitor-segmented[data-active='2'] .monitor-segmented-thumb { transform: translateX(200%); opacity: 1; }
+
+.monitor-segmented-item {
+	position: relative;
+	z-index: 1;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	min-height: 30px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--theme-muted, var(--muted));
+	font: inherit;
+	font-size: var(--fs-caption);
+	font-weight: 500;
+	cursor: pointer;
+	transition: color .18s ease;
+	white-space: nowrap;
+}
+
+.monitor-segmented-item small { font-weight: 700; font-variant-numeric: tabular-nums; }
+.monitor-segmented-item:hover:not(:disabled) { color: var(--theme-text, var(--text)); }
+/* 选中项：字重加深 + 按状态给一点语义色，高亮块本身保持中性。 */
+.monitor-segmented-item.active { color: var(--theme-text, var(--text)); font-weight: 600; }
+.monitor-segmented-item.is-triggered.active { color: var(--up); }
+.monitor-segmented-item.is-near.active { color: var(--theme-amber, var(--amber)); }
+.monitor-segmented-item.is-monitored.active { color: var(--theme-blue, var(--blue)); }
+/* 计数为 0 的分段不能点：点了只会看到空列表，不如直接灰掉。 */
+.monitor-segmented-item:disabled { opacity: .45; cursor: default; }
+
+/* 关注仓导航沿用系统分段滑块，悬停或键盘聚焦时在两个入口间移动。 */
+.monitor-watch-navigation .monitor-segmented-thumb {
+	width: calc((100% - 6px) / 2);
+	transform: translateX(var(--watch-navigation-offset, 0%));
+}
+
+.monitor-watch-navigation .monitor-segmented-item { scroll-margin-block: 8px; }
+.monitor-watch-navigation:has(button:last-of-type:hover) { --watch-navigation-offset: 100%; }
+.monitor-watch-navigation:has(button:first-of-type:focus-visible) { --watch-navigation-offset: 0%; }
+.monitor-watch-navigation:has(button:last-of-type:focus-visible) { --watch-navigation-offset: 100%; }
+
+.monitor-watch-navigation:has(button:is(:hover, :focus-visible)) .monitor-segmented-thumb { opacity: 1; }
+
+.monitor-watch-navigation .monitor-segmented-item:focus-visible {
+	outline: 2px solid var(--blue);
+	outline-offset: -2px;
+}
+
+/* 左栏严重异动榜：标的合并编号与名称，偏离度和窗口等宽居中。 */
+.monitor-abn-rank {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 230px;
+	overflow: auto;
+}
+
+.monitor-abn-rank .monitor-abn-list-head,
+.monitor-abn-rank-row {
+	grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
+}
+
+.monitor-abn-rank .monitor-abn-list-head > span:not(:first-child),
+.monitor-abn-rank-row > .monitor-abn-rank-dev,
+.monitor-abn-rank-row > .monitor-abn-badge { justify-self: center; }
+
+.monitor-abn-rank-row {
+	display: grid;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 6px 4px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	text-align: left;
+	color: var(--text);
+	cursor: pointer;
+	font-size: var(--fs-desc);
+}
+
+/* 行是按钮：hover 抬高底色、按下有位移、键盘聚焦有描边——
+   左栏三块卡片的行都要"像能点的"，不能只有光标变手型。 */
+.monitor-abn-rank-row,
+.monitor-abn-watchlist-row {
+	transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.monitor-abn-rank-row:hover {
+	background: var(--theme-blue-soft, var(--surface-2));
+}
+
+.monitor-abn-rank-row:active {
+	transform: translateY(1px);
+}
+
+.monitor-abn-rank-row:focus-visible {
+	outline: 2px solid var(--theme-blue, var(--blue));
+	outline-offset: 1px;
+}
+
+.monitor-abn-watchlist-row:hover {
+	background: var(--theme-blue-soft, var(--surface-2));
+}
+.monitor-abn-rank-target {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.monitor-abn-rank-no {
+	flex: none;
+	min-width: 20px;
+	height: 18px;
+	padding: 0 4px;
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	color: var(--theme-muted);
+	font-family: var(--font-num);
+	font-size: var(--fs-desc);
+	font-weight: 600;
+	line-height: 16px;
+	text-align: center;
+}
+.monitor-abn-rank-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.monitor-abn-rank-dev { font-variant-numeric: tabular-nums; font-weight: 600; }
+.monitor-abn-rank-dev.up { color: var(--up); }
+.monitor-abn-rank-dev.down { color: var(--down); }
+
+/* 左栏「异动名单个股」：列出最近触发日期 / 偏离度 / 估算触发价。 */
+.monitor-abn-watchlist {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 320px;
+	overflow: auto;
+}
+
+.monitor-abn-watchlist-row {
+	display: grid;
+	/* 名称 / 触发 / 偏离度 / 触发价：四列与表头一一对应。
+	   触发列给 62px（MM-DD 日期），偏离度 64px（+203.37% 这种六位数字），
+	   触发价 54px（「已越过」三个字）。 */
+	grid-template-columns: minmax(0, 1fr) 62px 64px 54px;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 4px;
+	border-bottom: 1px solid var(--line-soft);
+}
+
+.monitor-abn-watchlist-row:last-child { border-bottom: 0; }
+
+.monitor-abn-watchlist-main {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	border: 0;
+	background: transparent;
+	text-align: left;
+	color: var(--text);
+	cursor: pointer;
+	font-size: var(--fs-desc);
+}
+
+.monitor-abn-watchlist-main small { color: var(--muted); font-size: var(--fs-caption); }
+/* 指标不用 flex 包一层：display:contents 让三个数字直接成为行栅格的列，
+   与表头的「触发 / 偏离度 / 触发价」逐列对齐。 */
+.monitor-abn-watchlist-metrics {
+	display: contents;
+	font-size: var(--fs-caption);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* 数字列靠列右沿，与表头的右对齐同一条边线。
+   .monitor-abn-watchlist-metrics 是 display:contents，span 实际是 row 的网格项，
+   父级却是那个 metrics 盒，所以这里必须用后代选择器而不是子选择器。 */
+.monitor-abn-watchlist-row .monitor-abn-rank-dev,
+.monitor-abn-watchlist-row .monitor-abn-wl-price,
+.monitor-abn-watchlist-row .monitor-abn-wl-date {
+	justify-self: end;
+}
+.monitor-abn-wl-date { color: var(--muted); }
+.monitor-abn-wl-price { font-weight: 600; }
+
+/* 主列表最后一列（操作）表头与内容居中对齐；列宽足够容纳图标按钮。 */
+.monitor-abnormal-table th:last-child,
+.monitor-abnormal-table td:last-child {
+	text-align: center;
+}
+
+/* 标的列留出序号、名称和代码的空间，避免等分列把股票名截成单字。 */
+.monitor-abnormal-table col:first-child {
+	width: 120px;
+}
+
+/* 主列表「监控中」徽标：与 ST 徽标同族，语义色换蓝。
+   现在住在「状态」列里，和右边的触发状态徽标同高（20px），否则两枚并排时
+   一枚高一枚矮、看着像没对齐。 */
+.monitor-abn-monitored {
+	display: inline-flex;
+	align-items: center;
+	min-height: 20px;
+	padding: 0 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--blue) 10%, transparent);
+	color: var(--blue);
+	font-size: var(--fs-caption);
+	font-style: normal;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.monitor-rail-clear {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	margin-left: auto;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+.monitor-rail-clear:hover { background: var(--surface-2); color: var(--text); }
+/* ---------------------------------------------------------------- 规则名胶囊 / 雷达来源 / 侧栏表头
+   这三处是同一次改版：规则的状态长在名字的描边上，「来自」独立成列，
+   左栏两张榜单补上与主列表同构的表头。 */
+
+/* 规则名：一圈描边胶囊，启用=蓝、停用=灰，悬浮时描边加深。
+   状态不再单独占一列，扫一眼名字的颜色就知道这条规则开没开。 */
+.monitor-rule-chip {
+	display: inline-block;
+	max-width: 100%;
+	padding: 1px 10px;
+	overflow: hidden;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	font-size: var(--fs-body);
+	font-weight: 600;
+	line-height: 20px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: middle;
+	transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.monitor-rule-chip.on {
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+}
+
+.monitor-rule-chip.off {
+	border-color: var(--line);
+	background: transparent;
+	color: var(--theme-muted);
+}
+
+.monitor-rule-chip:hover {
+	border-color: currentColor;
+}
+
+/* 雷达「来自」：持仓用主题紫区分来源，关注仓蓝，规则标的走中性；红绿保留给行情与风险。 */
+.monitor-radar-source.is-position {
+	background: var(--theme-purple-soft);
+	color: var(--theme-purple);
+}
+
+.monitor-radar-source.is-watch {
+	background: var(--theme-blue-soft, transparent);
+	color: var(--theme-blue, var(--blue));
+}
+
+.monitor-radar-source.is-rule {
+	color: var(--theme-muted);
+}
+
+/* 关注仓 / 雷达 / 异动三张表的标的列：名称不再套蓝底描边方框。
+   一列里十几个方框会连成一片色块，反而盖住了名称本身。
+   选择器带上 .trading-table-wrap 压过基础样式表里的同名规则。 */
+.trading-table-wrap .monitor-watch-table .trading-symbol-name,
+.trading-table-wrap .monitor-radar-table .trading-symbol-name,
+.trading-table-wrap .monitor-abnormal-table .trading-symbol-name {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--text);
+}
+
+/* 表头与内容统一横向居中；数值列本来就是等宽数字，居中后竖着看更齐。
+   带上 .trading-table-wrap 是为了压过基础表的 th{text-align:left}——
+   两张表权重相同只剩加载顺序，换主题或打包顺序一变就会翻。 */
+.trading-table-wrap .monitor-rules-table th,
+.trading-table-wrap .monitor-rules-table td,
+.trading-table-wrap .monitor-watch-table th,
+.trading-table-wrap .monitor-watch-table td,
+.trading-table-wrap .monitor-radar-table th,
+.trading-table-wrap .monitor-radar-table td,
+.trading-table-wrap .monitor-abnormal-table th,
+.trading-table-wrap .monitor-abnormal-table td {
+	text-align: center;
+}
+
+/* 按钮组默认贴左：表头居中、内容贴左会让「操作」列看着错位十几像素。
+   居中列里的动作组与净分组合（走势 + 净分条 + 分数）一并居中。 */
+.trading-table-wrap .monitor-rules-table .trading-row-actions,
+.trading-table-wrap .monitor-watch-table .trading-row-actions,
+.trading-table-wrap .monitor-radar-table .trading-row-actions,
+.trading-table-wrap .monitor-abnormal-table .monitor-abn-ops {
+	justify-content: center;
+}
+
+.trading-table-wrap .monitor-radar-table .monitor-radar-scorecell {
+	justify-content: center;
+}
+
+/* text-align 管不到 flex 盒：名称行、接近度条、净分条这些组合单元格内部
+   默认贴左，外层文字是居中的，整组就会偏十几到几十像素。统一按整组居中，
+   表头文字与下面的内容才落在同一条竖线上。 */
+.trading-table-wrap .monitor-rules-table td:first-child .monitor-rule-name {
+	justify-content: center;
+}
+
+/* 序号与标的并成一列后，整格是「序号 +（名称 / 代码）」的横向组合：
+   序号退到左侧做纯索引（灰色等宽数字、无边框），右侧名称与代码纵向堆叠
+   并共用同一条左边缘。整组在列内水平居中，序号与右侧两行行盒垂直居中。
+   直接照抄参考图：一列里十几个描边徽标会连成一片，序号反而是噪音。 */
+.trading-table-wrap .monitor-watch-table .trading-symbol-stack,
+.trading-table-wrap .monitor-radar-table .trading-symbol-stack,
+.trading-table-wrap .monitor-abnormal-table .trading-symbol-stack {
+	display: inline-flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 12px;
+	max-width: 100%;
+	vertical-align: middle;
+	text-align: left;
+}
+
+/* 序号：灰色等宽数字 + 一圈细描边，做成小而完整的编号徽标。
+   描边用 --line（比文字浅一档），只勾出轮廓，不抢名称的视觉重量。
+   定宽保证个位数与两位数时名称的左边缘仍然齐平。 */
+.trading-table-wrap .monitor-watch-table .trading-symbol-seq,
+.trading-table-wrap .monitor-radar-table .trading-symbol-seq,
+.trading-table-wrap .monitor-abnormal-table .trading-symbol-seq {
+	flex: none;
+	box-sizing: border-box;
+	min-width: 20px;
+	height: 18px;
+	padding: 0 4px;
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	color: var(--theme-muted);
+	font-family: var(--font-num);
+	font-size: var(--fs-desc);
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	line-height: 16px;
+	text-align: center;
+}
+
+/* 名称 + 代码这一段自己纵向堆叠，居中的职责留给外层 stack。
+   两行必须互相居中（align-items: center）：名称 4 个字、代码 9 个字符，
+   各自贴左就会长短不一地错开——短名称偏右、长名称偏左，看着就是没对齐。
+   居中后两个中心重合，整块再由外层 stack 决定在列里的落点。 */
+.trading-table-wrap .monitor-watch-table .trading-symbol-body,
+.trading-table-wrap .monitor-radar-table .trading-symbol-body,
+.trading-table-wrap .monitor-abnormal-table .trading-symbol-body {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	min-width: 0;
+	max-width: 100%;
+}
+
+/* 堆叠内部两行改左对齐，居中的职责交给最外层 .trading-symbol-stack。 */
+.trading-table-wrap .monitor-watch-table .trading-symbol-line,
+.trading-table-wrap .monitor-radar-table .trading-symbol-line,
+.trading-table-wrap .monitor-abnormal-table .trading-symbol-line {
+	justify-content: flex-start;
+	max-width: 100%;
+}
+
+/* 接近度：进度条不再抢满整格，条 + 百分比作为一个整体居中。 */
+.trading-table-wrap .monitor-abnormal-table .monitor-abn-meter-cell {
+	justify-content: center;
+}
+
+.trading-table-wrap .monitor-abnormal-table .monitor-abn-meter {
+	flex: 0 1 56px;
+}
+
+.trading-table-wrap .monitor-abnormal-table .monitor-abn-meter-cell em {
+	min-width: 0;
+	text-align: center;
+}
+
+/* 净分：走势 + 强度条 + 分数整组居中；强度条承担拉伸（吃列富余），
+   折线固定 64px 保持形态、分数不换行。 */
+.trading-table-wrap .monitor-radar-table .monitor-radar-scorebar {
+	flex: 1 1 auto;
+	min-width: 24px;
+	max-width: 240px;
+}
+
+/* 表格有 min-width：窗口窄到触发横向滚动时，表格本身也居中，
+   不会右边空一条、内容全挤在左边。宽屏下表格铺满容器，这条不起作用。 */
+.monitor-rules-table,
+.monitor-watch-table,
+.monitor-radar-table,
+.monitor-abnormal-table {
+	margin: 0 auto;
+}
+
+/* 表头与内容竖向同轴：单元格一律垂中。基础表给 td 的是 vertical-align: top，
+   名称两行、数字一行的行里数字会贴着顶边，读起来整行往下坠。 */
+.trading-table-wrap .monitor-rules-table th,
+.trading-table-wrap .monitor-rules-table td,
+.trading-table-wrap .monitor-events-table th,
+.trading-table-wrap .monitor-events-table td,
+.trading-table-wrap .monitor-watch-table th,
+.trading-table-wrap .monitor-watch-table td,
+.trading-table-wrap .monitor-radar-table th,
+.trading-table-wrap .monitor-radar-table td,
+.trading-table-wrap .monitor-abnormal-table th,
+.trading-table-wrap .monitor-abnormal-table td {
+	vertical-align: middle;
+}
+
+/* 左栏榜单表头：与主列表同一套读法（列名在上、数据在下）。
+   卡片只有三百来像素，字号收到 caption，缩进与数据行的内边距对齐。 */
+.monitor-abn-list-head {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--theme-surface, var(--surface));
+	display: grid;
+	grid-template-columns: 30px minmax(0, 1fr) 68px 62px;
+	gap: 8px;
+	padding: 0 4px 5px;
+	border-bottom: 1px dashed var(--line-soft);
+	color: var(--theme-muted);
+	font-size: var(--fs-caption);
+	font-weight: 600;
+}
+
+.monitor-abn-list-head > span:nth-child(3),
+.monitor-abn-list-head > span:nth-child(4) {
+	justify-self: end;
+}
+
+.monitor-abn-list-head.is-watchlist {
+	grid-template-columns: minmax(0, 1fr) 62px 64px 54px;
+}
+
+.monitor-abn-list-head.is-watchlist > span:nth-child(2) {
+	justify-self: end;
+}
+
+/* 异动页左栏比雷达页宽 40px：三列数字（触发日期/偏离度/触发价）挤在 300px 里
+   会把偏离度截成「+32.6…」，多出来的宽度给它们。 */
+.monitor-radar-body.is-abnormal {
+	grid-template-columns: 340px minmax(0, 1fr);
+}
+
+/* 卡片内的榜单/清单本身滚动，表头固定在卡片里不跟着滚。 */
+.monitor-abn-rank {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+/* 「异动名单个股」吃掉左栏剩余高度。
+   它是左栏里条数最多的一张（常见几十只），原来锁死 320px，
+   高窗口下就会在它下面空出一大片（1920×1400 实测空 508px）。
+   这里让它用 flex 吃掉剩余高度，列表自己内部滚，
+   表头仍然吸顶（.monitor-abn-list-head 已是 sticky）。
+   min-height 是矮窗口的底：窗口够短时列表不被压成一条线，
+   够出来的部分交给左栏自己滚。 */
+@media (min-width: 1401px) {
+	.monitor-abnormal-rail > .monitor-rail-card.is-abn-watchlist-card {
+		flex: 1 1 auto;
+		min-height: 0;
+	}
+
+	.monitor-abnormal-rail > .monitor-rail-card.is-abn-watchlist-card .monitor-abn-watchlist {
+		flex: 1 1 auto;
+		/* 表头 21px + 两行 46px ≈ 120px：再窄就不如交给左栏滚。 */
+		min-height: 120px;
+		max-height: none;
+		overflow-y: auto;
+	}
+}
+
+/* ---------------------------------------------------------------- 窄屏自适应
+   1080 一带的窗口是本项目的常见宽度：宽屏排版（左栏 340px 并排 + 12 列主表）
+   在那里会把主表压到 440px 左右，触发表格自身的 min-width 横向滚动，
+   单元格里的 +123.76% 被裁、列看着忽宽忽窄。这里按宽度分三处收口。 */
+@media (max-width: 1400px) {
+	/* 1) 异动页左栏横排到主表上方。原先的 .monitor-radar-body.is-abnormal
+	   比媒体查询里的 .monitor-radar-body 多一个类，权重更高，窄屏一直没堆叠，
+	   主表只剩 446px。这里同名补一条，让 12 列拿到整行宽度。 */
+	.monitor-radar-body.is-abnormal {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: auto minmax(0, 1fr);
+		align-content: stretch;
+		overflow-y: auto;
+	}
+
+	/* 三张摘要卡在窄屏并排，列表内部滚动，为主表保留高度。 */
+	.monitor-abnormal-rail {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		max-height: 420px;
+		align-content: start;
+		align-items: start;
+	}
+
+	.monitor-watch-layout > .monitor-rail {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		max-height: 430px;
+		align-items: start;
+	}
+
+	.monitor-watch-coverage {
+		max-height: 310px;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.monitor-watch-tools-card {
+		grid-column: 1 / -1;
+	}
+
+	.monitor-abnormal-rail .monitor-abn-rank {
+		/* 严重异动行高 32，条数不定：按内容走，超过 165 再内部滚。 */
+		max-height: 165px;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.monitor-abnormal-rail .monitor-abn-watchlist {
+		/* 名单这一段自带一行表头（21）+ 三行数据（46×3）+ 行距 = 165。
+		   固定高度而不是 max-height：flex 列里被压到 120 左右时，
+		   第三行的代码和加号按钮会被卡片底边切掉。 */
+		height: 165px;
+		flex: 0 0 auto;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	/* 2) 12 列挤一行：横向留白 10px → 4px。1080 下每列 69px，
+	   内宽从 49 提到 61，+123.76% / 已越过 这类内容才不溢出。 */
+	.monitor-abnormal-table {
+		min-width: 700px;
+	}
+
+	.trading-table-wrap .monitor-abnormal-table th,
+	.trading-table-wrap .monitor-abnormal-table td {
+		padding-left: 4px;
+		padding-right: 4px;
+	}
+
+	/* 3) 净分格：装饰性迷你走势占 64px，100px 列宽里把净分数字挤到格子外
+	   （实测中心偏 32px）。窄屏只留强度条 + 分数，条也压短，整组才居中。 */
+	.monitor-radar-spark {
+		display: none;
+	}
+
+	.monitor-radar-scorecell {
+		gap: 6px;
+	}
+
+	.trading-table-wrap .monitor-radar-table .monitor-radar-scorebar {
+		display: none;
+	}
+
+	/* 窄屏把能量条与数值上下居中，保留渐变信息且不挤压相邻列。 */
+	.trading-table-wrap .monitor-abnormal-table .monitor-abn-meter {
+		display: block;
+		flex: 0 0 6px;
+		width: min(100%, 44px);
+	}
+
+	.trading-table-wrap .monitor-abnormal-table .monitor-abn-meter-cell {
+		flex-direction: column;
+		justify-content: center;
+		gap: 3px;
+	}
+
+	/* 代码 9 位在 59px 内宽里差 2px 会溢出，缩一号正合适。 */
+	.trading-table-wrap .monitor-abnormal-table .trading-symbol-code {
+		font-size: var(--fs-micro);
+	}
+
+	/* 规则表四列在 1080 下只有 94px：动作组默认 flex-wrap，三个图标会被
+	   挤成两行（垃圾桶掉到第二行）。窄屏改成不换行 + 22px 图标。 */
+	.monitor-rules-table .trading-row-actions {
+		flex-wrap: nowrap;
+		gap: 3px;
+	}
+
+	.monitor-rules-table .trading-row-action.is-icon {
+		width: 22px;
+		height: 20px;
+	}
+}
+
+/* 系统控件交互状态：限定监控工作区与监控浮层。 */
+.monitor-editor > header button[aria-label='关闭'] {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+}
+.monitor-editor > header button[aria-label='关闭']:hover {
+	background: var(--theme-surface-soft);
+	color: var(--theme-text);
+}
+.monitor-editor > header .monitor-link-button { color: var(--theme-blue); }
+.monitor-advanced summary::-webkit-details-marker { display: none; }
+.monitor-advanced summary > svg { flex: none; transition: transform .15s ease; }
+.monitor-advanced[open] > summary > svg { transform: rotate(90deg); }
+.monitor-workspace summary:focus-visible,
+.monitor-select-option:focus-visible {
+	outline: 2px solid var(--theme-blue);
+	outline-offset: 1px;
+}
+.monitor-seg button:hover:not(.active),
+.monitor-abn-hit-add:hover:not(:disabled) {
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+}
+.monitor-workspace input::placeholder,
+.monitor-workspace textarea::placeholder { color: var(--theme-subtle); opacity: 1; }
+.monitor-workspace input:disabled,
+.monitor-workspace textarea:disabled { opacity: .5; cursor: not-allowed; }
+.monitor-toggle-line input[type='checkbox']:disabled { cursor: not-allowed; }
+.monitor-workspace .monitor-small-button:active:not(:disabled),
+.monitor-workspace .monitor-primary:active:not(:disabled) { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) {
+	.monitor-workspace *,
+	.monitor-select-menu * { transition: none; animation-duration: 1ms; }
+}

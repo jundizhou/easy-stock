@@ -146,6 +146,83 @@ func TestMarketEmotionIntradayCacheRecomputesAtMostEveryTenMinutes(t *testing.T)
 	}
 }
 
+// 2026-10-22 的真实盘面：涨停 33、跌停 49、上涨占比 25%，高位股 16 只里 10 只走弱、
+// 8 只被闷杀、6 只跌停，昨涨停 -1.57%、昨连板 -2.74%。这种日子按旧刻度算出 35.7 分
+// （落在「混沌/过渡」），与实际体感（接近冰点）不符，所以把两个偏松的刻度钉住。
+func TestMarketEmotionScoresFreezeDayBelowCriticalZone(t *testing.T) {
+	raw := marketemotion.RawMetrics{
+		LimitUpCount:       33,
+		LimitDownCount:     49,
+		BrokenCount:        23,
+		FirstBoardCount:    24,
+		BoardCount:         9,
+		MaxStreak:          5,
+		FinalBreakRate:     0.4107,
+		PreviousLimitUpRet: -1.5737,
+		PreviousBoardRet:   -2.7354,
+		OpenPremium:        1.7789,
+		CoreReturn:         -0.8059,
+		AdvanceRate:        0.25,
+		ThemeFocus:         0.2921,
+		LadderContinuity:   0.75,
+		HighSampleCount:    16,
+		HighWeakCount:      10,
+		HighKill:           8,
+		HighLimitDown:      6,
+		HighAverageReturn:  -2.7354,
+		HighDownRate:       0.6875,
+		HighAdvanceRate:    0.25,
+		HighRiskScore:      46.07,
+		LowKill:            7,
+		QuoteCoverage:      0.92,
+	}
+	snapshot := scoreMarketEmotion("2026-10-22", raw, nil, time.Now())
+	if snapshot.Scores.Total >= 26 {
+		t.Fatalf("total = %v, want a freeze-level score below 26 (%+v)", snapshot.Scores.Total, snapshot.Scores)
+	}
+	if snapshot.Scores.Profit >= 32 {
+		t.Fatalf("profit = %v, losing days should not score near neutral (%+v)", snapshot.Scores.Profit, snapshot.Scores)
+	}
+	if snapshot.Phase != "冰点" {
+		t.Fatalf("phase = %s, want 冰点", snapshot.Phase)
+	}
+}
+
+// 强市不能被新刻度误伤：涨停 92、跌停 4、上涨 72%、昨涨停 +4.5% 仍应是高分。
+func TestMarketEmotionScoresStrongDayHigh(t *testing.T) {
+	raw := marketemotion.RawMetrics{
+		LimitUpCount:       92,
+		LimitDownCount:     4,
+		BrokenCount:        18,
+		FirstBoardCount:    62,
+		BoardCount:         30,
+		MaxStreak:          7,
+		FinalBreakRate:     0.16,
+		PreviousLimitUpRet: 4.5,
+		PreviousBoardRet:   5.2,
+		OpenPremium:        3.2,
+		CoreReturn:         4.1,
+		AdvanceRate:        0.72,
+		ThemeFocus:         0.55,
+		LadderContinuity:   1.0,
+		HighSampleCount:    12,
+		HighWeakCount:      2,
+		HighKill:           1,
+		HighAverageReturn:  2.5,
+		HighDownRate:       0.17,
+		HighAdvanceRate:    0.8,
+		HighRiskScore:      20,
+		QuoteCoverage:      0.95,
+	}
+	snapshot := scoreMarketEmotion("2026-10-23", raw, nil, time.Now())
+	if snapshot.Scores.Total < 70 {
+		t.Fatalf("total = %v, want a strong score (%+v)", snapshot.Scores.Total, snapshot.Scores)
+	}
+	if phase := snapshot.Phase; phase == "冰点" {
+		t.Fatalf("strong day should not be classified as 冰点: %+v", snapshot.Scores)
+	}
+}
+
 func TestHighLevelRiskVetoPreventsClimax(t *testing.T) {
 	raw := marketemotion.RawMetrics{
 		HighSampleCount:   4,
@@ -208,4 +285,73 @@ func (p *countingEmotionKLineProvider) KLine(_ context.Context, symbol string, _
 	defer p.mu.Unlock()
 	p.calls++
 	return append([]foundation.KLine(nil), p.lines[symbol]...), nil
+}
+
+func TestScoreIntradayEmotionTracksLiveInputs(t *testing.T) {
+	snapshot := marketemotion.IntradaySnapshot{
+		RiskScore: 15,
+		SealRate:  44.0 / 61.0,
+		Metrics: marketemotion.IntradayMetrics{
+			LimitUpCount:              44,
+			BoardCount:                15,
+			CurrentMaxStreak:          4,
+			PreviousMaxStreak:         5,
+			HeightCollapse:            1,
+			BrokenCount:               17,
+			LimitDownCount:            6,
+			PoolAvailable:             true,
+			PreviousLimitUpReturn:     3.68,
+			PreviousLimitUpQuoteCount: 30,
+			HighAverageReturn:         1,
+			HighQuoteCount:            8,
+			HighDownRate:              0.375,
+		},
+	}
+	scores, ok := scoreIntradayEmotion(snapshot)
+	if !ok {
+		t.Fatal("expected an intraday score")
+	}
+	if want := round2(0.35*scores.Heat + 0.40*scores.Profit + 0.25*scores.Structure); scores.Total != want {
+		t.Fatalf("total = %v, want %v (published weights)", scores.Total, want)
+	}
+	if scores.Profit < 70 {
+		t.Fatalf("yesterday's limit-up return should lift profit: %+v", scores)
+	}
+	if scores.Heat < 45 || scores.Heat > 55 {
+		t.Fatalf("heat out of expected range: %+v", scores)
+	}
+}
+
+func TestApplyIntradayPoolsSkipsMissingFactors(t *testing.T) {
+	base := marketemotion.IntradaySnapshot{
+		RiskScore: 20,
+		Metrics: marketemotion.IntradayMetrics{
+			LimitUpCount:              30,
+			BoardCount:                8,
+			CurrentMaxStreak:          3,
+			PreviousMaxStreak:         3,
+			PreviousLimitUpReturn:     1,
+			PreviousLimitUpQuoteCount: 12,
+			HighAverageReturn:         0.5,
+			HighQuoteCount:            5,
+			HighDownRate:              0.2,
+		},
+	}
+	withoutPools := applyIntradayPools(base, marketEmotionSidePools{}, false)
+	if !withoutPools.ScoreAvailable || withoutPools.Metrics.PoolAvailable || withoutPools.Metrics.BrokenCount != 0 {
+		t.Fatalf("missing pools should not be written as zero: %+v", withoutPools)
+	}
+	withPools := applyIntradayPools(base, marketEmotionSidePools{
+		broken: make([]foundation.MarketLimitEvent, 17),
+		down:   make([]foundation.MarketLimitEvent, 6),
+	}, true)
+	if !withPools.ScoreAvailable || !withPools.Metrics.PoolAvailable {
+		t.Fatalf("expected a score with pools: %+v", withPools)
+	}
+	if withPools.Metrics.BrokenCount != 17 || withPools.Metrics.LimitDownCount != 6 || withPools.SealRate <= 0.6 {
+		t.Fatalf("pool inputs not applied: %+v", withPools)
+	}
+	if withPools.Scores.Heat == withoutPools.Scores.Heat {
+		t.Fatalf("seal/limit-down factors should change heat: %+v vs %+v", withPools.Scores, withoutPools.Scores)
+	}
 }

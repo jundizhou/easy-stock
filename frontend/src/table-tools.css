@@ -1,0 +1,109 @@
+/* 全站数据表的列工具：可排序表头的指示箭头、拖列时的落点提示、
+   拖列宽时的光标。样式文件独立于具体工作区，供 table-tools.ts 使用。 */
+
+/* 可排序的表头：鼠标移上去是手型，让人知道这里能点。
+   不可排序的（例如「操作」列）维持默认光标，避免点空。
+   仅作用于工具标记过的列头。 */
+[data-tt-sortable='yes'] {
+	cursor: pointer;
+}
+
+/* 表头右侧的排序箭头走 ::after（见下），它是零宽的流内 inline-block，
+   靠 margin-left + 两侧 border 占位，**不需要给 th 加 position**。
+   这里原先写过 position: relative，权重高于 .trading-table-wrap th 的 sticky，
+   把表头的吸顶整个覆盖掉——横向固定住了、纵向滚动时表头却跟着内容一起走。
+   别再加回来：一旦写了 position, 就会赢过 sticky（两者同为 position 属性）。 */
+
+th[data-tt-sortable='yes']::after,
+[data-tt-grid]:not([data-tt-sort-mode='react']) [data-tt-sortable='yes']::after {
+	content: '';
+	display: inline-block;
+	width: 0;
+	height: 0;
+	margin-left: 5px;
+	vertical-align: middle;
+	border-left: 3.5px solid transparent;
+	border-right: 3.5px solid transparent;
+	border-bottom: 4.5px solid transparent;
+	opacity: 0;
+	transition: opacity .12s ease;
+}
+
+/* 悬停或已参与排序时把箭头显出来：默认淡着，不干扰阅读。 */
+[data-tt-sortable='yes']:hover::after,
+[data-tt-sort]::after {
+	opacity: .45;
+	visibility: visible;
+}
+
+[data-tt-sort='asc']::after {
+	opacity: 1;
+	border-bottom-color: currentColor;
+}
+
+[data-tt-sort='desc']::after {
+	opacity: 1;
+	border-bottom-color: transparent;
+	border-top: 4.5px solid currentColor;
+}
+
+/* 拖列宽时整页光标统一成 col-resize，并在表头边缘画一条细线；
+   指针划出表头也不会中途变回箭头。 */
+body.tt-col-resizing,
+body.tt-col-resizing * {
+	cursor: col-resize !important;
+	user-select: none !important;
+}
+
+body.tt-col-dragging,
+body.tt-col-dragging * {
+	cursor: grabbing !important;
+	user-select: none !important;
+}
+
+/* 悬停在列边界上：整页光标立刻变成 col-resize。
+   这是「表头没有动态交互」的直接答案——鼠标还没按下，用户就知道这里能抓。
+   用 body 上的类而不是 th:hover，是因为指针可能停在相邻两列的缝上，
+   此时落点归属在 JS 里判定，样式只需跟着那个判定走。 */
+body.tt-col-edge,
+body.tt-col-edge * {
+	cursor: col-resize !important;
+}
+
+/* 列边界参考线：从表头顶一直画到表格底部，跨过正文。
+   比「只在表头画一小段」更容易判断这一列和下面数据对不对齐。
+   位置由 JS 按 fixed 坐标写死，因此滚动时需要重新定位（见 table-tools.ts）。 */
+.tt-col-edge-line {
+	position: fixed;
+	z-index: 40;
+	width: 1px;
+	background: var(--theme-blue, #2476d2);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-blue, #2476d2) 25%, transparent);
+	pointer-events: none;
+}
+
+/* 列宽被拖过之后，表宽会被钉成各列之和（见 table-tools.ts 的 syncTableWidth），
+   可能超出容器。其余表的容器本来就带 overflow，只有行情总览这个容器没有：
+   这里补一条兜底，避免将来它里面出现表格时把整页顶出横向滚动条。
+   用 :has() 限定「真的装了表」，不影响容器自身的排版。 */
+.market-overview-main:has(table),
+[data-tt-overflow='yes'],
+[data-tt-grid][data-tt-layout='custom'] {
+	overflow-x: auto;
+}
+
+table[data-tt-layout='custom'] {
+	min-width: 0;
+}
+
+/* 正在被拖动的表头：降一档透明度，让落点位置看得清。 */
+[data-tt-drag='active'] {
+	opacity: .5;
+}
+
+/* 表头在拖拽期间不要触发文本选择。 */
+thead:has([data-tt-sortable]),
+[data-tt-head],
+[data-tt-grid] > :first-child {
+	user-select: none;
+}

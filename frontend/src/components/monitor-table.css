@@ -1,0 +1,189 @@
+
+
+.monitor-workspace .trading-table-wrap {
+	overflow: auto;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+}
+.monitor-workspace .trading-table-wrap {
+	max-height: 560px;
+}
+.monitor-workspace .trading-table-wrap > table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--fs-body);
+}
+.monitor-workspace .trading-table-wrap th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--line);
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: var(--theme-muted);
+	font-size: var(--fs-caption);
+	font-weight: 700;
+	text-align: left;
+	white-space: nowrap;
+}
+.monitor-workspace .trading-table-wrap td {
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--line-soft);
+	vertical-align: top;
+}
+.monitor-workspace .trading-table-wrap tbody tr:last-child td {
+	border-bottom: 0;
+}
+.monitor-workspace .trading-table-wrap tbody tr:hover td {
+	background: var(--theme-surface-soft, var(--surface-2));
+}
+.monitor-workspace .trading-table-wrap td > strong {
+	display: block;
+	font-size: var(--fs-body);
+	line-height: var(--lh-tight);
+}
+.monitor-workspace .trading-table-wrap td > strong + span,
+.monitor-workspace .trading-symbol-stack > strong + span {
+	display: block;
+	color: var(--theme-muted);
+	font-size: var(--fs-desc);
+	line-height: var(--lh-snug);
+}
+.monitor-workspace .trading-symbol-stack > strong {
+	display: block;
+	font-size: var(--fs-body);
+	line-height: var(--lh-tight);
+}
+.monitor-workspace .trading-table-wrap .trading-symbol-name {
+	display: inline-block;
+	max-width: 100%;
+	margin-top: 0;
+	padding: 0 6px;
+	border: 1px solid var(--theme-blue-line);
+	border-radius: 5px;
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+	font-size: var(--fs-body);
+	font-weight: 600;
+	line-height: 18px;
+	vertical-align: top;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.monitor-workspace .trading-symbol-cell .trading-symbol-line {
+	display: flex;
+	justify-content: flex-start;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	color: inherit;
+	font-size: inherit;
+	line-height: inherit;
+}
+.monitor-workspace .trading-symbol-cell .trading-symbol-code {
+	display: block;
+	margin-top: 3px;
+	color: var(--theme-muted);
+	font-family: var(--font-num);
+	font-size: var(--fs-desc);
+	font-weight: 500;
+	line-height: 1.3;
+	letter-spacing: .01em;
+	text-align: left;
+	white-space: nowrap;
+}
+.monitor-workspace .trading-position-row {
+	cursor: pointer;
+}
+.monitor-workspace .trading-position-row:hover td:first-child {
+	box-shadow: inset 2px 0 0 var(--theme-blue-line);
+}
+.monitor-workspace .trading-table-wrap tbody tr.trading-position-row.expanded td {
+	background: var(--theme-blue-soft);
+}
+.monitor-workspace .trading-position-row.expanded td:first-child {
+	box-shadow: inset 2px 0 0 var(--theme-blue);
+}
+.monitor-workspace .trading-position-row td:last-child {
+	white-space: nowrap;
+}
+.monitor-workspace .trading-position-row .trading-symbol-cell > .trading-symbol-stack {
+	align-items: center;
+}
+.monitor-workspace .trading-position-row .trading-symbol-line {
+	justify-content: center;
+}
+.monitor-workspace .trading-position-row .trading-symbol-code {
+	text-align: center;
+}
+.monitor-workspace .trading-position-row > td:first-child > strong {
+	white-space: nowrap;
+}
+.monitor-workspace .trading-row-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.monitor-workspace .trading-row-action {
+	justify-self: start;
+	padding: 1px 8px;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	background: var(--theme-surface, var(--surface));
+	color: var(--theme-muted);
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	line-height: 1.7;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.monitor-workspace .trading-row-action:hover {
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+}
+.monitor-workspace .trading-symbol-stack {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: flex-start;
+	max-width: 100%;
+}
+.monitor-workspace .trading-table-fixed {
+	table-layout: fixed;
+}
+.monitor-workspace .trading-table-fixed td {
+	overflow-wrap: anywhere;
+}
+.monitor-workspace .trading-row-action {
+	transition:
+		border-color 160ms ease,
+		background 160ms ease,
+		box-shadow 160ms ease,
+		color 160ms ease;
+}
+.monitor-workspace .trading-row-action {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+.monitor-workspace .trading-row-action svg {
+	flex: 0 0 auto;
+}
+.monitor-workspace .trading-row-action.is-icon {
+	justify-content: center;
+	width: 26px;
+	height: 22px;
+	padding: 0;
+	line-height: 1;
+}
+.monitor-workspace .trading-row-action.is-icon.is-danger {
+	border-color: var(--theme-red-line, var(--line));
+	color: var(--theme-red, var(--up));
+}
+.monitor-workspace .trading-row-action.is-icon.is-danger:hover:not(:disabled) {
+	border-color: var(--theme-red, var(--up));
+	background: var(--theme-red-soft, transparent);
+	color: var(--theme-red, var(--up));
+}

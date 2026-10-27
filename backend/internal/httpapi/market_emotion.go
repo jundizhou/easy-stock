@@ -17,7 +17,14 @@ import (
 )
 
 const marketEmotionBootstrapDays = 7
-const currentMarketEmotionModelVersion = 2
+
+// 模型升级时整段重算的天数上限：本地缓存里通常有 20 个交易日左右，
+// 只补最近 7 天会让新旧口径混在同一根曲线上，看起来像情绪突然断层。
+const marketEmotionRebuildDays = 24
+
+// v3：赚钱刻度改为非对称（亏损日加速扣分）+ 跌停压过涨停时的额外扣分，
+// 解决「跌停 49 家、高位股被杀」的冰点日还能拿到 35 分的问题。
+const currentMarketEmotionModelVersion = 3
 const marketEmotionIntradayTTL = 10 * time.Minute
 
 var shanghaiLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -243,8 +250,12 @@ func (e *marketEmotionEngine) shouldSync(points []marketemotion.Snapshot, state 
 	if len(points) == 0 {
 		return true
 	}
-	if points[len(points)-1].ModelVersion < currentMarketEmotionModelVersion {
-		return true
+	// 任一历史点还是旧模型就触发同步：模型升级后要把旧口径的点整段重算，
+	// 只检查最新点会漏掉中间那些按旧刻度算出来的分数。
+	for _, point := range points {
+		if point.ModelVersion < currentMarketEmotionModelVersion {
+			return true
+		}
 	}
 	localNow := now.In(shanghaiLocation)
 	today := localNow.Format("2006-01-02")
@@ -321,7 +332,13 @@ func (e *marketEmotionEngine) sync(
 	}
 
 	latestCached := ""
-	rebuild := len(existing) > 0 && existing[len(existing)-1].ModelVersion < currentMarketEmotionModelVersion
+	rebuild := false
+	for _, point := range existing {
+		if point.ModelVersion < currentMarketEmotionModelVersion {
+			rebuild = true
+			break
+		}
+	}
 	if rebuild {
 		existing = nil
 	}
@@ -334,8 +351,12 @@ func (e *marketEmotionEngine) sync(
 			targetDates = append(targetDates, date)
 		}
 	}
-	if len(targetDates) > marketEmotionBootstrapDays {
-		targetDates = targetDates[len(targetDates)-marketEmotionBootstrapDays:]
+	limitDays := marketEmotionBootstrapDays
+	if rebuild {
+		limitDays = marketEmotionRebuildDays
+	}
+	if len(targetDates) > limitDays {
+		targetDates = targetDates[len(targetDates)-limitDays:]
 	}
 	if len(targetDates) == 0 {
 		state.LastSuccessDate = latestCached
@@ -400,6 +421,13 @@ func (e *marketEmotionEngine) sync(
 	for _, snapshot := range newSnapshots {
 		if err := e.store.Upsert(ctx, snapshot); err != nil {
 			return err
+		}
+	}
+	if rebuild {
+		// 能重算的点已经被覆盖，剩下的是事件窗口之外、算不出来的旧口径点，直接清掉。
+		if _, err := e.store.DeleteBeforeVersion(ctx, currentMarketEmotionModelVersion); err != nil {
+			// 清理失败不影响本次同步结果，下次同步会再试。
+			_ = err
 		}
 	}
 	return nil
@@ -824,23 +852,26 @@ func scoreMarketEmotion(
 		0.20*blendedFactor(float64(raw.LimitDownCount), historyValues(history, func(item marketemotion.RawMetrics) float64 { return float64(item.LimitDownCount) }), inverseScale(float64(raw.LimitDownCount), 0, 30), true) +
 		0.20*blendedFactor(raw.FinalBreakRate, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.FinalBreakRate }), inverseScale(raw.FinalBreakRate, 0.08, 0.5), true)
 
-	profit := 0.35*blendedFactor(raw.PreviousLimitUpRet, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.PreviousLimitUpRet }), centeredScore(raw.PreviousLimitUpRet, 10), false) +
-		0.25*blendedFactor(raw.PreviousBoardRet, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.PreviousBoardRet }), centeredScore(raw.PreviousBoardRet, 8), false) +
-		0.15*blendedFactor(raw.OpenPremium, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.OpenPremium }), centeredScore(raw.OpenPremium, 12), false) +
-		0.25*blendedFactor(raw.CoreReturn, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.CoreReturn }), centeredScore(raw.CoreReturn, 8), false)
+	// 赚钱效应用非对称刻度：短线亏 2.5% 等于一天白干，和赚 2.5% 不能对称看待。
+	// 原来 centeredScore 以 0 为中心，昨涨停 -1.57% 还能拿 42 分，是总分虚高的主因。
+	profit := 0.35*blendedFactor(raw.PreviousLimitUpRet, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.PreviousLimitUpRet }), returnScore(raw.PreviousLimitUpRet, 6, 2.5), false) +
+		0.25*blendedFactor(raw.PreviousBoardRet, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.PreviousBoardRet }), returnScore(raw.PreviousBoardRet, 6, 3.5), false) +
+		0.15*blendedFactor(raw.OpenPremium, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.OpenPremium }), returnScore(raw.OpenPremium, 8, 6), false) +
+		0.25*blendedFactor(raw.CoreReturn, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.CoreReturn }), returnScore(raw.CoreReturn, 6, 2.5), false)
 
-	structure := 0.30*blendedFactor(raw.AdvanceRate, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.AdvanceRate }), scale(raw.AdvanceRate, 0.05, 0.55), false) +
+	structure := 0.30*blendedFactor(raw.AdvanceRate, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.AdvanceRate }), scale(raw.AdvanceRate, 0.15, 0.65), false) +
 		0.20*blendedFactor(raw.ThemeFocus, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.ThemeFocus }), scale(raw.ThemeFocus, 0.15, 0.7), false) +
-		0.20*blendedFactor(raw.LadderContinuity, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.LadderContinuity }), scale(raw.LadderContinuity, 0.2, 1), false) +
-		0.20*blendedFactor(raw.HighRiskScore, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.HighRiskScore }), inverseScale(raw.HighRiskScore, 15, 80), true) +
-		0.10*blendedFactor(float64(raw.MidKill), historyValues(history, func(item marketemotion.RawMetrics) float64 { return float64(item.MidKill) }), inverseScale(float64(raw.MidKill), 0, 5), true)
+		0.20*blendedFactor(raw.LadderContinuity, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.LadderContinuity }), scale(raw.LadderContinuity, 0.15, 1.2), false) +
+		0.20*blendedFactor(raw.HighRiskScore, historyValues(history, func(item marketemotion.RawMetrics) float64 { return item.HighRiskScore }), inverseScale(raw.HighRiskScore, 15, 70), true) +
+		// 中位 0 家跌停不该拿满分：低位跌停同样是风险扩散，两者合并成「跌停扩散」。
+		0.10*blendedFactor(float64(raw.MidKill+raw.LowKill), historyValues(history, func(item marketemotion.RawMetrics) float64 { return float64(item.MidKill + item.LowKill) }), inverseScale(float64(raw.MidKill+raw.LowKill), 0, 12), true)
 
 	scores := marketemotion.Scores{
 		Heat:      round2(heat),
 		Profit:    round2(profit),
 		Structure: round2(structure),
 	}
-	scores.Total = round2(0.35*scores.Heat + 0.40*scores.Profit + 0.25*scores.Structure)
+	scores.Total = round2(clamp(0.35*scores.Heat+0.40*scores.Profit+0.25*scores.Structure-limitDownPressure(raw.LimitDownCount, raw.LimitUpCount), 0, 100))
 	return marketemotion.Snapshot{
 		ModelVersion:   currentMarketEmotionModelVersion,
 		TradeDate:      date,
@@ -890,7 +921,12 @@ func percentileRank(current float64, history []float64) float64 {
 }
 
 func classifyMarketEmotion(scores marketemotion.Scores, raw marketemotion.RawMetrics, history []marketemotion.Snapshot) string {
-	if scores.Total < 25 && scores.Profit < 25 {
+	// 冰点不只有「分数极低」一种形态：跌停压过涨停、赚钱效应为负的日子，
+	// 即使被开盘溢价之类的小亮点撑住，实际也已经在冰点区。
+	if scores.Total < 28 && scores.Profit < 30 {
+		return "冰点"
+	}
+	if raw.LimitDownCount > raw.LimitUpCount && scores.Profit < 32 && scores.Heat < 35 {
 		return "冰点"
 	}
 	if severeHighLevelRetreat(raw) {
@@ -982,6 +1018,24 @@ func buildMarketEmotionIntraday(data limitUpLadderData, latest *marketemotion.Sn
 		BoardCount:        data.Current.BoardCount,
 		FirstBoardCount:   data.Current.FirstBoardCount,
 	}
+	// 昨日涨停/连板股今天的实时涨幅，是盘中「赚钱效应」最直接的读数。
+	var previousReturns []float64
+	var previousBoardReturns []float64
+	for _, stock := range previousStocks {
+		if stock.CurrentChangePercent == nil {
+			continue
+		}
+		change := *stock.CurrentChangePercent
+		previousReturns = append(previousReturns, change)
+		if stock.Streak >= 2 {
+			previousBoardReturns = append(previousBoardReturns, change)
+		}
+	}
+	metrics.PreviousLimitUpReturn = average(previousReturns)
+	metrics.PreviousLimitUpQuoteCount = len(previousReturns)
+	metrics.PreviousBoardReturn = average(previousBoardReturns)
+	metrics.PreviousBoardQuoteCount = len(previousBoardReturns)
+
 	returns := []float64{}
 	for _, stock := range previousStocks {
 		if _, ok := highLevelSet[stock.Streak]; !ok {
@@ -1043,6 +1097,110 @@ func buildMarketEmotionIntraday(data limitUpLadderData, latest *marketemotion.Sn
 		Confidence:    confidence,
 		Metrics:       metrics,
 	}
+}
+
+// loadIntradayPools 取当日炸板池与跌停池。盘中它们就是「此刻」的池子，
+// 与收盘后正式快照使用同一套接口，口径一致。
+func (e *marketEmotionEngine) loadIntradayPools(ctx context.Context, tradeDate string) (marketEmotionSidePools, error) {
+	if e == nil || e.pools == nil {
+		return marketEmotionSidePools{}, fmt.Errorf("no market pool provider")
+	}
+	if tradeDate == "" {
+		return marketEmotionSidePools{}, fmt.Errorf("empty intraday trade date")
+	}
+	date, err := time.ParseInLocation("2006-01-02", tradeDate, shanghaiLocation)
+	if err != nil {
+		return marketEmotionSidePools{}, fmt.Errorf("parse intraday trade date %q: %w", tradeDate, err)
+	}
+	var broken, down []foundation.MarketLimitEvent
+	var brokenErr, downErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		broken, brokenErr = e.pools.BrokenLimitUpPool(ctx, date)
+	}()
+	go func() {
+		defer wg.Done()
+		down, downErr = e.pools.LimitDownPool(ctx, date)
+	}()
+	wg.Wait()
+	if brokenErr != nil {
+		return marketEmotionSidePools{}, brokenErr
+	}
+	if downErr != nil {
+		return marketEmotionSidePools{}, downErr
+	}
+	return marketEmotionSidePools{broken: broken, down: down}, nil
+}
+
+// applyIntradayPools 把炸板/跌停池并入盘中快照，并据此给出盘中情绪分。
+// poolsOK=false 时不把缺失当成 0：炸板/跌停/封板率因子直接退出计算，其余因子按权重归一。
+func applyIntradayPools(snapshot marketemotion.IntradaySnapshot, pools marketEmotionSidePools, poolsOK bool) marketemotion.IntradaySnapshot {
+	metrics := snapshot.Metrics
+	metrics.PoolAvailable = poolsOK
+	if poolsOK {
+		metrics.BrokenCount = len(pools.broken)
+		metrics.LimitDownCount = len(pools.down)
+	}
+	snapshot.Metrics = metrics
+	if poolsOK {
+		snapshot.SealRate = divide(float64(metrics.LimitUpCount), float64(metrics.LimitUpCount+metrics.BrokenCount))
+	}
+	scores, ok := scoreIntradayEmotion(snapshot)
+	snapshot.Scores = scores
+	snapshot.ScoreAvailable = ok
+	return snapshot
+}
+
+type emotionFactor struct {
+	value  float64
+	weight float64
+	ok     bool
+}
+
+func weightedEmotionScore(factors []emotionFactor) (float64, bool) {
+	var sum, weight float64
+	for _, factor := range factors {
+		if !factor.ok || factor.weight <= 0 {
+			continue
+		}
+		sum += factor.value * factor.weight
+		weight += factor.weight
+	}
+	if weight <= 0 {
+		return 0, false
+	}
+	return clamp(sum/weight, 0, 100), true
+}
+
+// scoreIntradayEmotion 盘中情绪分：沿用收盘模型的三个维度与总权重
+// （热度 35% / 赚钱 40% / 结构 25%），因子只取盘中实时可得的读数。
+// 每个维度内部的权重写在下表，前端展示同一张表，读数可以逐项复算。
+func scoreIntradayEmotion(snapshot marketemotion.IntradaySnapshot) (marketemotion.Scores, bool) {
+	metrics := snapshot.Metrics
+	heat, heatOK := weightedEmotionScore([]emotionFactor{
+		{value: scale(float64(metrics.LimitUpCount), 10, 100), weight: 0.30, ok: true},
+		{value: scale(snapshot.SealRate, 0.40, 0.95), weight: 0.30, ok: metrics.PoolAvailable},
+		{value: scale(float64(metrics.CurrentMaxStreak), 1, 8), weight: 0.15, ok: true},
+		{value: scale(float64(metrics.BoardCount), 2, 35), weight: 0.15, ok: true},
+		{value: inverseScale(float64(metrics.LimitDownCount), 0, 30), weight: 0.10, ok: metrics.PoolAvailable},
+	})
+	profit, profitOK := weightedEmotionScore([]emotionFactor{
+		{value: returnScore(metrics.PreviousLimitUpReturn, 6, 2.5), weight: 0.60, ok: metrics.PreviousLimitUpQuoteCount > 0},
+		{value: returnScore(metrics.HighAverageReturn, 6, 3), weight: 0.40, ok: metrics.HighQuoteCount > 0},
+	})
+	structure, structureOK := weightedEmotionScore([]emotionFactor{
+		{value: inverseScale(snapshot.RiskScore, 15, 70), weight: 0.50, ok: true},
+		{value: inverseScale(metrics.HighDownRate*100, 10, 80), weight: 0.30, ok: metrics.HighQuoteCount > 0},
+		{value: inverseScale(float64(metrics.HeightCollapse), 0, 4), weight: 0.20, ok: metrics.PreviousMaxStreak > 0},
+	})
+	if !heatOK || !profitOK || !structureOK {
+		return marketemotion.Scores{}, false
+	}
+	scores := marketemotion.Scores{Heat: round2(heat), Profit: round2(profit), Structure: round2(structure)}
+	scores.Total = round2(clamp(0.35*scores.Heat+0.40*scores.Profit+0.25*scores.Structure-limitDownPressure(metrics.LimitDownCount, metrics.LimitUpCount), 0, 100))
+	return scores, true
 }
 
 func nearLimitDown(change float64, regime string) bool {
@@ -1129,6 +1287,15 @@ func emotionConfidence(historySamples int, quoteCoverage float64) string {
 }
 
 func buildMarketEmotionHistory(points []marketemotion.Snapshot, state marketemotion.SyncState) marketemotion.History {
+	// 只输出当前模型口径的点：升级前的旧分数与现在的分数不可比，
+	// 混在一根曲线上会画出并不存在的「情绪断层」。
+	current := make([]marketemotion.Snapshot, 0, len(points))
+	for _, point := range points {
+		if point.ModelVersion >= currentMarketEmotionModelVersion {
+			current = append(current, point)
+		}
+	}
+	points = current
 	history := marketemotion.History{
 		Points: points,
 		Cache: marketemotion.CacheStatus{
@@ -1204,8 +1371,35 @@ func inverseScale(value float64, low float64, high float64) float64 {
 	return 100 - scale(value, low, high)
 }
 
-func centeredScore(value float64, multiplier float64) float64 {
-	return clamp(50+value*multiplier, 0, 100)
+// returnScore 把涨跌幅换成 0–100 的情绪分，涨跌两侧刻度不对称：
+// 短线赚钱慢、亏钱快，-2.5% 已经等于一天白干，不能和 +2.5% 对称抵消。
+func returnScore(value float64, gain float64, loss float64) float64 {
+	if value >= 0 {
+		if gain <= 0 {
+			return 50
+		}
+		return clamp(50+value/gain*50, 0, 100)
+	}
+	if loss <= 0 {
+		return 50
+	}
+	return clamp(50+value/loss*50, 0, 100)
+}
+
+// limitDownPressure 是「跌停压过涨停」的额外扣分，最高 12 分。
+// 涨停与跌停是同一把温度计的两端：跌停更多说明风险偏好已经转向，
+// 即使三个维度各自看着还行，也不该判成中性。
+func limitDownPressure(limitDown int, limitUp int) float64 {
+	if limitDown <= 0 {
+		return 0
+	}
+	if limitUp <= 0 {
+		return 12
+	}
+	if limitDown <= limitUp {
+		return 0
+	}
+	return clamp(float64(limitDown-limitUp)/float64(limitUp), 0, 1) * 12
 }
 
 func clamp(value float64, minimum float64, maximum float64) float64 {
