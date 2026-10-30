@@ -19,7 +19,7 @@ import {
 	WalletCards,
 	type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
 	BackendConfig,
 	BackendRequestError,
@@ -84,7 +84,6 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	const [notice, setNotice] = useState('');
  const [optimizationSignal,setOptimizationSignal] = useState(0);
 
-	const totalWeight = useMemo(() => draft.holdings.reduce((total, item) => total + item.weight, 0), [draft.holdings]);
 	const running = job?.status === 'running';
 	const mutationBusy = starting || applying || Boolean(deletingID);
 
@@ -234,7 +233,9 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 	};
 
  const startInspection = async (forceSymbols: string[] = [], existing?: PortfolioResearchRequest, calculatedHoldings?: PortfolioHolding[]) => {
-		if (!config || starting || applyingRef.current || deletingRef.current || (!existing && (draft.holdings.length === 0 || totalWeight > 100))) return;
+		if (!config || starting || applyingRef.current || deletingRef.current) return;
+		const holdings = calculatedHoldings || portfolioDraftToHoldingsWithAssets(draft.holdings, draft.totalAssets);
+		if (!existing && (holdings.length === 0 || holdings.some((item) => item.weight_percent <= 0) || holdings.reduce((sum, item) => sum + item.weight_percent, 0) > 100)) { setError('请检查持仓数量与总资产后再开始巡检'); return; }
 		if (existing && !existing.portfolio_plan_id) { setError('请先将这份历史记录绑定到持仓方案'); return; }
 		setStarting(true);
 		setError('');
@@ -244,7 +245,7 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-     ...(existing || { portfolio_plan_id: activePlan.id, portfolio_plan_name: activePlan.name, trader_profile: draft.profile, holdings: calculatedHoldings || portfolioDraftToHoldingsWithAssets(draft.holdings, draft.totalAssets), horizon: draft.horizon || 'swing', research_level: draft.researchLevel || 'standard' }),
+     ...(existing || { portfolio_plan_id: activePlan.id, portfolio_plan_name: activePlan.name, trader_profile: draft.profile, holdings, horizon: draft.horizon || 'swing', research_level: draft.researchLevel || 'standard' }),
      force_symbols: forceSymbols,
     }),
 			});

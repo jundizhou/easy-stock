@@ -139,13 +139,14 @@ export function portfolioDraftToHoldings(holdings: PortfolioDraftHolding[]): Por
 export function portfolioDraftToHoldingsWithAssets(holdings: PortfolioDraftHolding[], totalAssets?: number, quotes?: Record<string, Quote>): PortfolioHolding[] {
 	const assets = typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null;
 	const exact = holdings.map((item) => {
-		const quantity = portfolioHoldingQuantity(item);
+		const quantity = portfolioValuationQuantity(item, assets);
+		const explicitQuantity = portfolioHoldingQuantity(item);
 		const cost = portfolioHoldingCost(item);
 		const price = quotes?.[item.symbol]?.price;
 		const validPrice = typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
 		return quantity !== null && assets !== null && validPrice !== null
 			? quantity * validPrice / assets * 100
-			: quantity !== null && cost !== null && assets !== null ? quantity * cost / assets * 100 : item.weight;
+			: explicitQuantity !== null && cost !== null && assets !== null ? explicitQuantity * cost / assets * 100 : item.weight;
 	});
 	const weights = apportionPortfolioWeights(exact);
 	return holdings.map((item, index) => ({ ...portfolioDraftToHoldings([item])[0], weight_percent: weights[index] }));
@@ -191,4 +192,13 @@ function isDraftHolding(value: unknown): value is PortfolioDraftHolding {
 export function portfolioHoldingQuantity(holding: PortfolioDraftHolding): number | null {
 	const value = holding.quantity?.trim() ? Number(holding.quantity) : null;
 	return value !== null && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+}
+
+// Legacy drafts only store an allocation. Use the same whole-share estimate
+// for market value, displayed allocation and the inspection request.
+export function portfolioValuationQuantity(holding: PortfolioDraftHolding, totalAssets?: number | null): number | null {
+	if (holding.quantity?.trim()) return portfolioHoldingQuantity(holding);
+	const cost = portfolioHoldingCost(holding);
+	return typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 && cost !== null
+		? Math.floor(totalAssets * holding.weight / 100 / cost + 1e-9) : null;
 }

@@ -15,6 +15,10 @@ describe('portfolio draft mapping', () => {
 		const result = portfolioDraftToHoldingsWithAssets([{ symbol: '688002.SH', name: '睿创微纳', weight: 1, quantity: '10000', costPrice: '40' }], 500000, { '688002.SH': { symbol: '688002.SH', price: 45.02 } as never });
 		expect(result[0].weight_percent).toBe(90);
 	});
+	it('submits legacy estimated quantities at the same market-value share shown in the form', () => {
+		const result = portfolioDraftToHoldingsWithAssets([{ symbol: '600001.SH', name: '旧持仓', weight: 30, quantity: '', costPrice: '20' }], 500000, { '600001.SH': { symbol: '600001.SH', price: 22 } as never });
+		expect(result[0].weight_percent).toBe(33);
+	});
 	it('submits the whole percentage the inspection API stores', () => {
 		const holdings = portfolioDraftToHoldingsWithAssets([{ symbol: '600206.SH', name: '有研新材', weight: 10, quantity: '900', costPrice: '46.95' }], 500000, { '600206.SH': { symbol: '600206.SH', price: 37.51 } as never });
 		expect(holdings[0].weight_percent).toBe(7);

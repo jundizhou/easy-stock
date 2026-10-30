@@ -30,6 +30,8 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 	useEffect(() => setAssetsInput(String(draft.totalAssets ?? defaultPortfolioAssets)), [draft.totalAssets]);
 	useEffect(() => () => { addRequest.current?.abort(); }, []);
 	const market = usePortfolioQuotes(config, draft.holdings.map((holding) => holding.symbol));
+	const latestQuotes = useRef(market.quotes);
+	latestQuotes.current = market.quotes;
 	const totalAssets = Number(assetsInput);
 	const assetsValid = Number.isFinite(totalAssets) && totalAssets > 0;
 	const valuation = valuePortfolio({ ...draft, totalAssets }, market.quotes);
@@ -38,20 +40,21 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 	const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 	const [activeSuggestion, setActiveSuggestion] = useState(0);
 	const [error, setError] = useState('');
-	const totalWeight = useMemo(() => valuation.holdings.reduce((total, item) => total + (item.weightPercent ?? 0), 0), [valuation.holdings]);
-	const remainingWeight = 100 - totalWeight;
 	const allocationIncomplete = valuation.holdings.some((item) => item.weightPercent === null);
+	const totalWeight = allocationIncomplete ? null : valuation.holdings.reduce((total, item) => total + item.weightPercent!, 0);
+	const remainingWeight = totalWeight === null ? null : 100 - totalWeight;
+	const emptyQuantity = valuation.holdings.some((item) => item.quantity === 0);
 	const quantityExceedsAssets = assetsValid && valuation.holdings.some((item) => item.marketValue !== null && item.marketValue > totalAssets + 1e-6);
 	const suggestions = useMemo(() => searchStockDirectory(directory, query).filter((item) => !draft.holdings.some((holding) => holding.symbol === item.symbol)), [directory, draft.holdings, query]);
 
 	const addHolding = async (entry?: StockDirectoryEntry) => {
 		if (disabled || addRequest.current) return;
-		const symbol = entry?.symbol || resolveStockDirectorySymbol(query, directory);
-		const stock = entry || directory.find((item) => item.symbol === symbol);
+		const resolved = entry?.symbol || resolveStockDirectorySymbol(query, directory);
+		const stock = entry || directory.find((item) => item.symbol === resolved || item.code === resolved);
+		const symbol = stock?.symbol;
 		if (!symbol || !stock) { setError('未找到唯一匹配的股票或 ETF，请从搜索结果中选择'); return; }
 		if (draft.holdings.some((item) => item.symbol === symbol)) { setError('此标的已经在持仓中'); return; }
 		if (draft.holdings.length >= maxPortfolioHoldings) { setError(`最多添加 ${maxPortfolioHoldings} 只持仓标的`); return; }
-		if (remainingWeight <= 0) { setError('当前仓位已达到 100%，请先减少已有持仓数量'); return; }
 		const controller = new AbortController();
 		addRequest.current = controller;
 		setAdding(true);
@@ -75,9 +78,13 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 		addRequest.current = null;
 		setAdding(false);
 		const current = latestDraft.current;
-		const remaining = 100 - current.holdings.reduce((sum, item) => sum + item.weight, 0);
-		if (current.holdings.some((item) => item.symbol === symbol) || current.holdings.length >= maxPortfolioHoldings || remaining <= 0) return;
-			onChange({ ...current, holdings: [...current.holdings, { symbol, name: stock.name, instrumentType: stock.instrument_type, weight: Math.min(10, remaining), quantity: '', costPrice: snapshot.entryPrice ? String(snapshot.entryPrice) : '', ...snapshot }] });
+		if (current.holdings.some((item) => item.symbol === symbol)) { setError('此标的已经在持仓中'); return; }
+		if (current.holdings.length >= maxPortfolioHoldings) { setError(`最多添加 ${maxPortfolioHoldings} 只持仓标的`); return; }
+		const values = valuePortfolio(current, latestQuotes.current).holdings;
+		const remaining = 100 - values.reduce((sum, item, index) => sum + (item.weightPercent ?? current.holdings[index].weight), 0);
+		// Allow editing a full portfolio; enforce the asset budget on submission.
+		const weight = remaining > 0 ? Math.min(10, remaining) : 10;
+		onChange({ ...current, holdings: [...current.holdings, { symbol, name: stock.name, instrumentType: stock.instrument_type, weight, quantity: '', costPrice: snapshot.entryPrice ? String(snapshot.entryPrice) : '', ...snapshot }] });
 		setQuery('');
 		setSuggestionsOpen(false);
 		setError(priceError);
@@ -99,7 +106,6 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 	};
 
 	return <div className="portfolio-builder">
-		{error && <div className="portfolio-error"><span>{error}</span></div>}
 		<section className="portfolio-assets-section">
 			<div className="portfolio-assets-heading"><label>总资产（元）<input type="number" min="0.01" step="1000" inputMode="decimal" value={assetsInput} disabled={disabled} aria-invalid={!assetsValid} onChange={(event) => {
 				setAssetsInput(event.target.value);
@@ -130,10 +136,13 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 		<section className="portfolio-holdings-section">
 			<header><span>02</span><div><strong>当前持仓</strong><small>{draft.holdings.length}/{maxPortfolioHoldings} 只标的</small></div><div className="portfolio-allocation"><span>持仓 <b>{allocationPercent(totalWeight)}</b></span><span>现金 <b>{allocationPercent(remainingWeight)}</b></span></div></header>
 			<div className="portfolio-stock-search">
-				<label><Search size={16} /><input value={query} disabled={disabled || adding || directory.length === 0 || draft.holdings.length >= maxPortfolioHoldings || remainingWeight <= 0} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); setActiveSuggestion(0); }} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKey} placeholder="输入股票 / ETF 名称或代码" aria-label="搜索持仓股票或 ETF" aria-autocomplete="list" /></label>
-				<button type="button" onClick={() => void addHolding()} disabled={disabled || adding || !query.trim() || remainingWeight <= 0} aria-label="添加持仓" title="添加持仓">{adding ? <LoaderCircle size={18} className="spin" /> : <Plus size={18} />}</button>
+				<label><Search size={16} /><input value={query} disabled={disabled || adding || directory.length === 0 || draft.holdings.length >= maxPortfolioHoldings} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); setActiveSuggestion(0); }} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKey} placeholder="输入股票 / ETF 名称或代码" aria-label="搜索持仓股票或 ETF" aria-autocomplete="list" /></label>
+				<button type="button" onClick={() => void addHolding()} disabled={disabled || adding || !query.trim() || draft.holdings.length >= maxPortfolioHoldings} aria-label="添加持仓" title="添加持仓">{adding ? <LoaderCircle size={18} className="spin" /> : <Plus size={18} />}</button>
 				{suggestionsOpen && query.trim() && suggestions.length > 0 && <div className="portfolio-stock-suggestions" role="listbox">{suggestions.map((stock, index) => <button type="button" className={index === activeSuggestion ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => void addHolding(stock)} disabled={adding || disabled} role="option" aria-selected={index === activeSuggestion} key={stock.symbol}><strong>{stock.name}</strong><span>{stock.code}</span><small>{stock.instrument_type === 'etf' ? 'ETF · ' : ''}{marketLabel(stock.symbol)}</small></button>)}</div>}
 			</div>
+			{error && <div className="portfolio-error" role="alert"><span>{error}</span></div>}
+			{totalWeight !== null && totalWeight > 100 && <p className="portfolio-quote-warning" role="alert">持仓总市值超过总资产，可继续编辑；请调整持仓数量或总资产后再开始巡检。</p>}
+			{emptyQuantity && <p className="portfolio-quote-warning" role="alert">部分持仓数量为 0，请填写有效数量或删除该标的后再开始巡检。</p>}
 			<div className="portfolio-holding-list">
 				{draft.holdings.length === 0 && <div className="portfolio-empty-holdings"><WalletCards size={24} /><strong>尚未录入持仓</strong></div>}
 				{draft.holdings.map((holding, index) => {
@@ -165,7 +174,7 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 				})}
 			</div>
 		</section>
-		<footer className="portfolio-builder-footer"><div><Activity size={17} /><span>总仓位 {allocationPercent(totalWeight)}</span><strong>现金 {allocationPercent(remainingWeight)}</strong></div><button type="button" onClick={() => onSubmit(portfolioDraftToHoldingsWithAssets(draft.holdings, totalAssets, market.quotes))} disabled={disabled || busy || adding || !assetsValid || invalidCost || allocationIncomplete || quantityExceedsAssets || draft.holdings.length === 0 || totalWeight > 100}>{busy ? <LoaderCircle className="spin" size={17} /> : actionIcon || <BrainCircuit size={17} />}{busy ? busyLabel : actionLabel}</button></footer>
+		<footer className="portfolio-builder-footer"><div><Activity size={17} /><span>总仓位 {allocationPercent(totalWeight)}</span><strong>现金 {allocationPercent(remainingWeight)}</strong></div><button type="button" onClick={() => onSubmit(portfolioDraftToHoldingsWithAssets(draft.holdings, totalAssets, market.quotes))} disabled={disabled || busy || adding || !assetsValid || invalidCost || allocationIncomplete || emptyQuantity || quantityExceedsAssets || draft.holdings.length === 0 || (totalWeight ?? 0) > 100}>{busy ? <LoaderCircle className="spin" size={17} /> : actionIcon || <BrainCircuit size={17} />}{busy ? busyLabel : actionLabel}</button></footer>
 	</div>;
 }
 
