@@ -255,6 +255,15 @@ func (s *Service) run(ctx context.Context, job Job) {
 		}
 		s.mu.Unlock()
 	}()
+	if job.ResumedFrom != "" {
+		copyCtx, cancelCopy := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		err := s.store.copyCompactionCheckpoints(copyCtx, job.ResumedFrom, job.ID)
+		cancelCopy()
+		if err != nil {
+			s.finishPartial(&job, fmt.Errorf("恢复组合压缩检查点失败：%w", err))
+			return
+		}
+	}
 	bound, release, err := agent.BindTask(ctx, s.gateway)
 	if err != nil {
 		job.Status, job.Stage, job.Error = "failed", "failed", err.Error()
@@ -400,7 +409,7 @@ func (s *Service) run(ctx context.Context, job Job) {
 	job.Message = "标的AI报告已就绪，正在综合评分和评估组合风险"
 	s.persist(job)
 	if s.logger != nil {
-		s.logger.Printf("level=info event=portfolio_aggregation_start feature=portfolio-inspection job_id=%q reused=%d new=%d shared=%d reasoning_effort=%q response_timeout_seconds=%d stage_timeout_seconds=%d total_timeout_seconds=%d", job.ID, job.ReusedStocks, job.NewStocks, job.SharedStocks, aggregation.ReasoningEffort, int(aggregation.ResponseTimeout.Seconds()), int(aggregation.StageTimeout.Seconds()), int(aggregation.TotalTimeout().Seconds()))
+		s.logger.Printf("level=info event=portfolio_aggregation_start feature=portfolio-inspection job_id=%q reused=%d new=%d shared=%d reasoning_effort=%q response_timeout_seconds=%d stage_timeout_seconds=%d total_timeout_seconds=%d compression_timeout_seconds=%d", job.ID, job.ReusedStocks, job.NewStocks, job.SharedStocks, aggregation.ReasoningEffort, int(aggregation.ResponseTimeout.Seconds()), int(aggregation.StageTimeout.Seconds()), int(aggregation.TotalTimeout().Seconds()), int(aggregation.CompressionTimeout().Seconds()))
 	}
 	var seed *scoringAttempt
 	if job.ResumedFrom != "" {
@@ -410,6 +419,10 @@ func (s *Service) run(ctx context.Context, job Job) {
 			return
 		}
 	}
+	ctx = context.WithValue(ctx, compactionHooksKey{}, s.store.compactionHooks(job.ID, func(message string) {
+		job.Message = message
+		s.persist(job)
+	}))
 	conclusion, err := s.scorePortfolioWithAudit(ctx, job.Request, job.Results, metrics, rules, job.AggregationStartedAt, seed, func(attempt scoringAttempt) error {
 		// Persist diagnostics even if cancellation arrives with the response.
 		saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

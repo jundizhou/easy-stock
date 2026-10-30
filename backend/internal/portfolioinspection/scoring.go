@@ -221,8 +221,8 @@ func buildLegacyScoringPromptAt(request Request, results []HoldingResult, metric
 ` + ScoringPolicy + ETFPolicyFor(results) + `区分公司主营、近期交易主线和量价联动，不只沿用规则行业标签。多主线风险组可以重叠，其仓位不能相加当作组合总仓位。
 原报告用途、成本、周期可能不同；使用本次持仓和facts中的成本盈亏评估已有持仓，不直接套用原新仓动作。短周期证据不能证明中期走势。no_plan/observe只能给出观察与核验事项，不能绕过原个股证据限制编造交易价格。条件化动作需给出确认和失效条件。
 没有静态止损价不阻断评分；评估退出条件是否清晰。未知止损、相关性等不是零风险，也不是零相关。新报价不是更新后的研究；语义条件未核验须说明。
-每个维度必须有reason、adjustments（risk_id/reason/points，正加负扣）、evidence_refs和limitations。引用只返回{"evidence_id":"从evidence_catalog选择的编号"}，目录reference用于识别事实含义和来源归属，不得自行返回或拼接report_id/source_id/fact。每个维度至少一条引用。不编造引用。高分结构评价与大仓位集中等事实有冲突时，解释集中风险被怎样控制，不得称充分分散。不得引用总仓位、现金或总资产仓位事实作为维度评分依据。
-风险等级独立于总分，risk_reason必须解释低/中/高/极高；置信度为高/中/低，confidence_reason交代证据质量、覆盖、时效、周期差异和缺口。数据不足降低置信度，不能虚构事实。score不表示胜率或收益预测。
+每个维度必须有reason、adjustments（risk_id/reason/points，正加负扣）、evidence_refs和limitations。points必须是合法JSON整数，正数写2而不是+2，负数写-2。引用只返回{"evidence_id":"从evidence_catalog选择的编号"}，目录reference用于识别事实含义和来源归属，不得自行返回或拼接report_id/source_id/fact。每个维度至少一条引用。不编造引用。高分结构评价与大仓位集中等事实有冲突时，解释集中风险被怎样控制，不得称充分分散。不得引用总仓位、现金或总资产仓位事实作为维度评分依据。
+风险等级独立于总分，risk_reason必须解释低/中/高/极高；置信度为高/中/低，confidence_reason交代证据质量、覆盖、时效、周期差异和缺口。style_match仅允许匹配/部分偏离/明显偏离，不得返回“基本匹配”等近义词。数据不足降低置信度，不能虚构事实。score不表示胜率或收益预测。
 每只真实持仓都必须出现在holdings，股票使用规范代码；条件化行动优先级考虑仓位和研究风险。risk_contribution不用填写，由后端保留量化代理值供历史兼容。风险组的symbols只含真实持仓，仓位由程序计算。
 holdings[].action_priority只能为` + strings.Join(scoringActionPriorities, "/") + `，必须使用原值，不写“持有观察”“优先复核”等近义词。优先级与action_id分开选择；优先处理表示复核/处理优先级，不代表立即交易。
 动作只能选择action_catalog中属于对应标的的action_id。holdings仅返回action_id，不写action/confirmation/invalidation；处理顺序返回adjustment_action_ids，不写adjustment_order；scenarios返回action_ids，不写portfolio_action。后端统一生成动作文字和原研究执行前提。每个情景可选择不同动作，但同一情景/处理顺序中每个标的最多一个动作。目录没有合法交易计划时选择观察、持有观察或重新评估，不另造动作。conditional_*永远是待核验计划，不代表条件已触发或可立即成交。condition只描述市场观察，不替代动作自身条件，也不解除执行限制。不返回actions，其为后端生成字段。结论/风险/理由用于解释研究，不在自由文字中另下交易指令。
@@ -737,9 +737,9 @@ func scoringRepairPrompt(base, response string, issues scoringIssues) string {
 
 func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, evaluatedAt time.Time, seed *scoringAttempt, record func(scoringAttempt) error) (AIReport, error) {
 	budget := aggregationBudgetFromContext(ctx)
-	ctx, cancel := context.WithTimeout(agent.WithUsageModule(ctx, "portfolio-inspection"), budget.TotalTimeout())
+	ctx, cancel := context.WithTimeout(agent.WithUsageModule(ctx, "portfolio-inspection"), budget.TotalTimeout()+budget.CompressionTimeout())
 	defer cancel()
-	prompt, err := buildScoringPromptAt(request, results, metrics, rules, evaluatedAt)
+	prompt, compressed, err := s.prepareScoringPrompt(ctx, request, results, metrics, rules, evaluatedAt, budget)
 	if err != nil {
 		return AIReport{}, err
 	}
@@ -751,11 +751,17 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 		// Always ask for a fresh answer against current facts; never publish an
 		// old draft just because a new validator can now accept it.
 		prompt = scoringRepairPrompt(basePrompt, seed.Response, issues)
+		if len(prompt) > maxScoringPromptBytes {
+			prompt = scoringRestartPrompt(basePrompt, issues)
+		}
 	}
 	options := agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, FirstResponseTimeout: budget.ResponseTimeout, IdleTimeout: budget.ResponseTimeout, MaxAttempts: 1}
 	for attempt := 0; attempt < aggregationModelCalls; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return AIReport{}, fmt.Errorf("组合AI评估失败: %w", err)
+		}
+		if (attempt > 0 || seed != nil) && len(prompt) > maxScoringPromptBytes {
+			return AIReport{}, errors.New("组合评分修复资料超过输入预算，已完成的标的研究已保存，请重试")
 		}
 		callCtx, cancelCall := context.WithTimeout(ctx, budget.StageTimeout)
 		node := "assess"
@@ -791,6 +797,9 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 			}
 		}
 		if len(issues) == 0 {
+			if compressed {
+				report.DataLimitations = append([]string{compactionNotice}, report.DataLimitations...)
+			}
 			return report, nil
 		}
 		if s.logger != nil {
@@ -802,6 +811,9 @@ func (s *Service) scorePortfolioWithAudit(ctx context.Context, request Request, 
 		repair, prompt = makeScoringRepair(basePrompt, content, issues)
 		if prompt == "" {
 			return AIReport{}, &scoringValidationError{cause: issues}
+		}
+		if len(prompt) > maxScoringPromptBytes {
+			repair, prompt = nil, scoringRestartPrompt(basePrompt, issues)
 		}
 	}
 	return AIReport{}, errors.New("组合评分未完成")

@@ -11,6 +11,7 @@ import (
 )
 
 const aggregationModelCalls = 2 // Initial scoring and at most one validation repair.
+const compressionStages = 4     // Shared ceiling for all evidence compaction calls.
 
 type aggregationBudget struct {
 	ResponseTimeout time.Duration
@@ -20,6 +21,10 @@ type aggregationBudget struct {
 
 func (b aggregationBudget) TotalTimeout() time.Duration {
 	return aggregationModelCalls * b.StageTimeout
+}
+
+func (b aggregationBudget) CompressionTimeout() time.Duration {
+	return compressionStages * b.StageTimeout
 }
 
 // Keep a full response allowance and time to finish the answer in each call.
@@ -57,5 +62,5 @@ func inspectionTimeout(request Request, holdings, concurrency int, aggregation a
 	research := stockanalysis.ResearchBudgetFor(stockanalysis.ResearchRequest{AnalysisLevel: request.ResearchLevel}, aggregation.ResponseTimeout, aggregation.ReasoningEffort)
 	concurrency = max(1, concurrency)
 	batches := (holdings + concurrency - 1) / concurrency
-	return time.Duration(batches)*research.TotalTimeout() + aggregation.TotalTimeout() + 2*time.Minute
+	return time.Duration(batches)*research.TotalTimeout() + aggregation.TotalTimeout() + aggregation.CompressionTimeout() + 2*time.Minute
 }

@@ -90,6 +90,9 @@ func TestPreparePromptSandboxUsesMinimalConfigAndToolsets(t *testing.T) {
 	if got := sandbox.process.env[staleTimeoutEnvName]; got != "300" {
 		t.Fatalf("stale timeout = %q, want 300", got)
 	}
+	if got := sandbox.process.env["EASY_STOCK_UNATTENDED"]; got != "1" {
+		t.Fatalf("background sandbox must suppress interactive onboarding: %q", got)
+	}
 	if sandbox.process.workDir == "" || !strings.HasPrefix(sandbox.process.workDir, root+string(os.PathSeparator)) {
 		t.Fatalf("work dir is outside sandbox: %q", sandbox.process.workDir)
 	}

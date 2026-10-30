@@ -9,7 +9,7 @@ import (
 
 const (
 	MaxHoldings        = 10
-	PromptVersion      = "portfolio-inspection-v10"
+	PromptVersion      = "portfolio-inspection-v11"
 	AlgorithmVersion   = "portfolio-ai-score-v5"
 	MinimumAICoverage  = 70
 	DefaultConcurrency = 2

@@ -120,10 +120,10 @@ func TestInspectionDeadlineReservesFullAggregationAndRepair(t *testing.T) {
 		holdings, concurrency int
 		want                  time.Duration
 	}{
-		{"one_batch", 2, 2, 89 * time.Minute},
-		{"two_batches", 4, 2, 136 * time.Minute},
-		{"single_worker", 2, 1, 136 * time.Minute},
-		{"aggregation_only", 0, 2, 42 * time.Minute},
+		{"one_batch", 2, 2, 169 * time.Minute},
+		{"two_batches", 4, 2, 216 * time.Minute},
+		{"single_worker", 2, 1, 216 * time.Minute},
+		{"aggregation_only", 0, 2, 122 * time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := inspectionTimeout(req, tc.holdings, tc.concurrency, b); got != tc.want {
@@ -285,7 +285,7 @@ func TestInspectionReservesAndLogsFrozenAggregationBudget(t *testing.T) {
 	}
 	// Wait for completion logging before reading the buffer.
 	s.Close()
-	if got := <-outerBudget; got > 89*time.Minute || got < 89*time.Minute-time.Second {
+	if got := <-outerBudget; got > 169*time.Minute || got < 169*time.Minute-time.Second {
 		t.Fatal("workflow kept the old outer deadline", got)
 	}
 	if len(g.deadlines) != 1 {

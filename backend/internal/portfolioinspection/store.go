@@ -42,6 +42,10 @@ func OpenStore(path string) (*Store, error) {
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS portfolio_compaction_checkpoints (
+			job_id TEXT NOT NULL, input_digest TEXT NOT NULL, summary TEXT NOT NULL,
+			PRIMARY KEY(job_id,input_digest)
+		);
 		CREATE TABLE IF NOT EXISTS portfolio_scoring_attempts (
 			job_id TEXT NOT NULL, attempt INTEGER NOT NULL, content_json TEXT NOT NULL,
 			PRIMARY KEY(job_id,attempt)
@@ -198,7 +202,7 @@ func (s *Store) Get(ctx context.Context, id string) (Job, error) {
 	return job, nil
 }
 
-// deleteJob removes only this inspection and its private scoring attempts.
+// deleteJob removes this inspection and its private scoring/compaction state.
 // Schedules retain their last-run metadata; optimization/research snapshots are independent.
 func (s *Store) deleteJob(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -222,6 +226,9 @@ func (s *Store) deleteJob(ctx context.Context, id string) error {
 		return ErrDeleteRunning
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM portfolio_scoring_attempts WHERE job_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM portfolio_compaction_checkpoints WHERE job_id=?`, id); err != nil {
 		return err
 	}
 	return tx.Commit()

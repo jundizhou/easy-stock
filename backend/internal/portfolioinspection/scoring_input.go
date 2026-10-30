@@ -15,36 +15,38 @@ import (
 const assetCardVersion = "portfolio-asset-card-v1"
 const compactInputVersion = "portfolio-input-v1"
 
-// Decision cards are deterministic views. Original reports remain immutable.
+// Decision cards are deterministic views until the optional oversized-input
+// compaction step. Original reports remain immutable.
 // Negative claims, gaps and execution restrictions are never count-truncated.
 type PortfolioAssetCard struct {
-	Symbol          string                              `json:"symbol"`
-	Name            string                              `json:"name,omitempty"`
-	Type            string                              `json:"instrument_type"`
-	ReportID        string                              `json:"report_id"`
-	CompletedAt     time.Time                           `json:"completed_at"`
-	CutoffAt        time.Time                           `json:"cutoff_at"`
-	ResearchVersion string                              `json:"research_version"`
-	OriginalHorizon string                              `json:"original_horizon"`
-	EquityWeight    float64                             `json:"equity_weight_percent"`
-	Thesis          stockanalysis.ResearchClaim         `json:"thesis"`
-	Support         []stockanalysis.ResearchClaim       `json:"support"`
-	Counter         []stockanalysis.ResearchClaim       `json:"counter"`
-	Alternatives    []stockanalysis.ResearchClaim       `json:"alternatives"`
-	Conflict        string                              `json:"main_conflict"`
-	TradingLogic    *stockanalysis.ResearchTradingLogic `json:"trading_logic,omitempty"`
-	ETF             *etfanalysis.Judgments              `json:"etf_judgments,omitempty"`
-	EvidenceLevel   string                              `json:"evidence_level"`
-	EvidenceReasons []string                            `json:"evidence_reasons,omitempty"`
-	Limitations     []string                            `json:"limitations"`
-	Conditions      []stockanalysis.ResearchCondition   `json:"conditions"`
-	Anchors         []stockanalysis.PriceAnchor         `json:"anchors,omitempty"`
-	InvalidationIDs []string                            `json:"invalidation_ids"`
-	DecisionStatus  string                              `json:"decision_status"`
-	Blockers        []string                            `json:"blockers,omitempty"`
-	Prerequisites   []string                            `json:"execution_prerequisites"`
-	QuoteStatus     string                              `json:"quote_status"`
-	QuoteMessage    string                              `json:"quote_message,omitempty"`
+	Symbol            string                              `json:"symbol"`
+	Name              string                              `json:"name,omitempty"`
+	Type              string                              `json:"instrument_type"`
+	ReportID          string                              `json:"report_id"`
+	CompletedAt       time.Time                           `json:"completed_at"`
+	CutoffAt          time.Time                           `json:"cutoff_at"`
+	ResearchVersion   string                              `json:"research_version"`
+	OriginalHorizon   string                              `json:"original_horizon"`
+	EquityWeight      float64                             `json:"equity_weight_percent"`
+	Thesis            stockanalysis.ResearchClaim         `json:"thesis"`
+	Support           []stockanalysis.ResearchClaim       `json:"support"`
+	Counter           []stockanalysis.ResearchClaim       `json:"counter"`
+	Alternatives      []stockanalysis.ResearchClaim       `json:"alternatives"`
+	Conflict          string                              `json:"main_conflict"`
+	TradingLogic      *stockanalysis.ResearchTradingLogic `json:"trading_logic,omitempty"`
+	ETF               *etfanalysis.Judgments              `json:"etf_judgments,omitempty"`
+	EvidenceLevel     string                              `json:"evidence_level"`
+	EvidenceReasons   []string                            `json:"evidence_reasons,omitempty"`
+	Limitations       []string                            `json:"limitations"`
+	Conditions        []stockanalysis.ResearchCondition   `json:"conditions"`
+	Anchors           []stockanalysis.PriceAnchor         `json:"anchors,omitempty"`
+	InvalidationIDs   []string                            `json:"invalidation_ids"`
+	DecisionStatus    string                              `json:"decision_status"`
+	Blockers          []string                            `json:"blockers,omitempty"`
+	Prerequisites     []string                            `json:"execution_prerequisites"`
+	QuoteStatus       string                              `json:"quote_status"`
+	QuoteMessage      string                              `json:"quote_message,omitempty"`
+	CompactedResearch string                              `json:"compacted_research,omitempty"`
 }
 
 type compactFact struct {
@@ -182,25 +184,46 @@ func buildCompactScoringInput(request Request, results []HoldingResult, metrics 
 	return in
 }
 
-func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, at time.Time) (string, error) {
+const maxScoringPromptBytes = 256 * 1024
+
+// Reserve space for the prior answer and diagnostics in a scoring repair.
+const targetScoringPromptBytes = 192 * 1024
+
+func buildScoringPromptParts(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, at time.Time) (string, compactScoringInput, string, error) {
 	legacy, err := buildLegacyScoringPromptAt(request, results, metrics, rules, at)
 	mode := os.Getenv("EASY_STOCK_PORTFOLIO_INPUT")
 	if err != nil || mode == "legacy" {
-		return legacy, err
+		return legacy, compactScoringInput{}, mode, err
 	}
 	input := buildCompactScoringInput(request, results, metrics, rules, at)
+	instructions, _, _ := strings.Cut(legacy, "[组合证据JSON]\n")
+	return instructions, input, mode, nil
+}
+
+func renderCompactScoringPrompt(instructions string, input compactScoringInput) (string, error) {
 	data, err := json.Marshal(input)
 	if err != nil {
 		return "", err
 	}
-	instructions, _, _ := strings.Cut(legacy, "[组合证据JSON]\n")
-	prompt := instructions + "决策卡是原报告的确定性视图。definitions解析method_id/limitation_id；相关性对称项只列一次。反证、缺口、条件与执行前提不可忽略。动作种类observe/hold/reassess仅观察；conditional_reduce/conditional_exit须满足卡片全部执行前提及对应条件，当前不代表可成交。编号仅在本次输入内有效。每条理由建议120字以内，不重复转述原报告，必须保留关键冲突与风险。\n[组合证据JSON]\n" + string(data)
+	prompt := instructions + "除明确标记的压缩摘要外，决策卡是原报告的确定性视图。definitions解析method_id/limitation_id；相关性对称项只列一次。反证、缺口、条件与执行前提不可忽略。动作种类observe/hold/reassess仅观察；conditional_reduce/conditional_exit须满足卡片全部执行前提及对应条件，当前不代表可成交。编号仅在本次输入内有效。每条理由建议120字以内，不重复转述原报告，必须保留关键冲突与风险。\n[组合证据JSON]\n" + string(data)
+	return prompt, nil
+}
+
+func buildScoringPromptAt(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, at time.Time) (string, error) {
+	instructions, input, mode, err := buildScoringPromptParts(request, results, metrics, rules, at)
+	if err != nil || mode == "legacy" {
+		return instructions, err
+	}
+	prompt, err := renderCompactScoringPrompt(instructions, input)
+	if err != nil {
+		return "", err
+	}
 	// Refuse pathological inputs rather than clipping mandatory adverse facts.
-	if len(prompt) > 256*1024 {
-		return "", fmt.Errorf("组合必要证据%d字节超过输入上限，请缩小组合或补齐结构化研究；未删减风险证据", len(prompt))
+	if len(prompt) > maxScoringPromptBytes {
+		return "", fmt.Errorf("组合评分资料%d字节超过输入预算，原研究已保存", len(prompt))
 	}
 	if mode == "shadow" {
-		return legacy, nil
+		return buildLegacyScoringPromptAt(request, results, metrics, rules, at)
 	}
 	return prompt, nil
 }

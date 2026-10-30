@@ -169,6 +169,7 @@ func (r *HermesRuntime) preparePromptSandbox(options PromptOptions) (*promptSand
 			"HERMES_TUI_TOOLSETS":    strings.Join(toolsets, ","),
 			"HERMES_IGNORE_RULES":    "1",
 			"HERMES_TUI_CHECKPOINTS": "0",
+			"EASY_STOCK_UNATTENDED":  "1",
 			"TERMINAL_CWD":           workDir,
 			"PYTHONPATH":             siteDir,
 		},
