@@ -1,0 +1,14 @@
+{
+  "parallel-search": {
+    "name": "parallel-search",
+    "enabled": true,
+    "transport": "http",
+    "url": "https://search.parallel.ai/mcp",
+    "headers": {
+      "User-Agent": "easy-stock/1.7.0"
+    },
+    "timeout": 60,
+    "connect_timeout": 30,
+    "supports_parallel_tool_calls": false
+  }
+}

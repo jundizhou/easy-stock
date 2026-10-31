@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -712,6 +713,16 @@ func runCodexProtocol(ctx context.Context, clientIn io.Reader, clientOut io.Writ
 					}
 				case "mcpServer/elicitation/request":
 					result = map[string]any{"action": "decline"}
+					if isMCPToolApproval(original) {
+						if choice := stringValue(f.Result["choice"]); choice == "once" || choice == "session" {
+							result = map[string]any{"action": "accept", "content": map[string]any{}}
+							meta, _ := stringMap(original.Params["_meta"])
+							if choice == "session" && (meta["persist"] == "session" || slices.Contains(stringSlice(meta["persist"]), "session")) {
+								result["_meta"] = map[string]any{"persist": "session"}
+							}
+						}
+						break
+					}
 					if original.Params["mode"] != "url" {
 						given, ok := stringMap(f.Result["answers"])
 						if ok {
@@ -859,7 +870,7 @@ func runCodexProtocol(ctx context.Context, clientIn io.Reader, clientOut io.Writ
 					if err := write(clientOut, map[string]any{"id": clientID, "method": "clarify", "params": map[string]any{"questions": questions}}); err != nil {
 						return err
 					}
-				} else if f.Method == "mcpServer/elicitation/request" && f.Params["mode"] != "url" {
+				} else if f.Method == "mcpServer/elicitation/request" && f.Params["mode"] != "url" && !isMCPToolApproval(f) {
 					schema, _ := stringMap(f.Params["requestedSchema"])
 					properties, _ := stringMap(schema["properties"])
 					names := make([]string, 0, len(properties))
@@ -886,7 +897,7 @@ func runCodexProtocol(ctx context.Context, clientIn io.Reader, clientOut io.Writ
 					if err := write(clientOut, map[string]any{"id": clientID, "method": "clarify", "params": map[string]any{"questions": questions}}); err != nil {
 						return err
 					}
-				} else if f.Method == "item/commandExecution/requestApproval" || f.Method == "item/fileChange/requestApproval" || f.Method == "item/permissions/requestApproval" {
+				} else if f.Method == "item/commandExecution/requestApproval" || f.Method == "item/fileChange/requestApproval" || f.Method == "item/permissions/requestApproval" || isMCPToolApproval(f) {
 					if err := write(clientOut, map[string]any{"id": clientID, "method": "approval", "params": map[string]any{"description": approvalDescription(f), "command": f.Params["command"]}}); err != nil {
 						return err
 					}
@@ -971,7 +982,24 @@ func runCodexProtocol(ctx context.Context, clientIn io.Reader, clientOut io.Writ
 	}
 }
 
+// Codex 0.164 emits tool approvals as an explicitly marked empty MCP form.
+// Keep ordinary forms and URL authentication in their existing clarify/deny paths.
+func isMCPToolApproval(frame codexFrame) bool {
+	if frame.Method != "mcpServer/elicitation/request" || frame.Params["mode"] != "form" {
+		return false
+	}
+	meta, _ := stringMap(frame.Params["_meta"])
+	schema, _ := stringMap(frame.Params["requestedSchema"])
+	properties, ok := stringMap(schema["properties"])
+	return meta["codex_approval_kind"] == "mcp_tool_call" && schema["type"] == "object" && ok && len(properties) == 0
+}
+
 func approvalDescription(frame codexFrame) string {
+	if isMCPToolApproval(frame) {
+		meta, _ := stringMap(frame.Params["_meta"])
+		args, _ := json.Marshal(meta["tool_params"])
+		return fmt.Sprintf("%s\nMCP 服务：%s\n参数：%s", stringValue(frame.Params["message"]), stringValue(frame.Params["serverName"]), args)
+	}
 	detail := firstNonEmpty(stringValue(frame.Params["reason"]), frame.Method)
 	if permissions, ok := frame.Params["permissions"]; ok {
 		data, _ := json.Marshal(permissions)
