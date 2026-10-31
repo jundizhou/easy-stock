@@ -4,6 +4,7 @@ import type { BackendConfig, AgentSettings, AgentInstalledSkill, AgentSkillMarke
 import { requestJSON } from '../lib/backend';
 import { SettingsSection } from './SettingsSection';
 import { nextID, type AgentSettingsController, type MCPDraft, type SecretEntryDraft } from '../lib/agent-settings';
+import { hasParallelSearch, parallelSearchDraft } from '../lib/mcp-presets';
 export { splitMCPArgs } from '../lib/agent-settings';
 
 type Props = { config: BackendConfig | null; open: boolean; agent: AgentSettingsController; disabled: boolean };
@@ -196,7 +197,8 @@ export function AgentSettingsPanel({ config, open, agent, disabled }: Props) {
 				</div>
 
 				<div className="agent-settings-block">
-					<div className="agent-settings-heading"><div><strong>MCP Servers</strong><span>{servers.filter((server) => server.enabled).length}/{servers.length} 个已启用</span></div><button type="button" onClick={addServer}><Plus size={14} />添加 MCP</button></div>
+					<div className="agent-settings-heading"><div><strong>MCP Servers</strong><span>{servers.filter((server) => server.enabled).length}/{servers.length} 个已启用</span></div><div className="agent-settings-heading-actions"><button type="button" disabled={hasParallelSearch(servers)} onClick={() => setServers((current) => { const preset = parallelSearchDraft(current); return preset ? [...current, preset] : current; })}><Plus size={14} />添加 Parallel 搜索</button><button type="button" onClick={addServer}><Plus size={14} />添加 MCP</button></div></div>
+					<p className="settings-field-note">可选的免费网页搜索与原文抓取，无需账号或 API Key。保存后 Hermes/Codex 共享，Hermes 内置检索不变。<a href="https://docs.parallel.ai/integrations/mcp/search-mcp" target="_blank" rel="noreferrer">服务说明</a></p>
 					<div className="mcp-server-list">
 						{servers.map((server) => <MCPServerCard server={server} onChange={(patch) => updateServer(server.id, patch)} onRemove={() => setServers((current) => current.filter((item) => item.id !== server.id))} onEntryChange={updateSecretEntry} onEntryAdd={addSecretEntry} onEntryRemove={removeSecretEntry} key={server.id} />)}
 						{!servers.length && <div className="agent-settings-empty"><Network size={20} /><strong>尚未配置 MCP Server</strong><span>可以添加本机命令或远程 HTTP/SSE 服务。</span></div>}

@@ -301,4 +301,51 @@ describe('shared settings save lifecycle', () => {
     expect(writes('/api/v1/settings')[1]).not.toHaveProperty('agent_settings');
   });
 
+  it('adds the optional Parallel preset only after selection and saves its executable HTTP configuration', async () => {
+    render(<Harness />);
+    const dialog = await loaded();
+    expect(dialog.queryByDisplayValue('https://search.parallel.ai/mcp')).toBeNull();
+    const existing = structuredClone(agent.mcp_servers);
+    fireEvent.click(dialog.getByRole('button', { name: '添加 Parallel 搜索' }));
+    expect(dialog.getByDisplayValue('https://search.parallel.ai/mcp')).toBeTruthy();
+    expect(writes('/api/v1/settings/agent')).toHaveLength(0);
+    expect((dialog.getByRole('button', { name: '添加 Parallel 搜索' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('button', { name: '仅保存 Skill/MCP' }));
+    await waitFor(() => expect(writes('/api/v1/settings/agent')).toHaveLength(1));
+    const servers = writes('/api/v1/settings/agent')[0].mcp_servers;
+    expect(servers.slice(0, 2).map((server: {name: string; url: string}) => ({ name: server.name, url: server.url })))
+      .toEqual(existing.map(({name, url}) => ({ name, url })));
+    expect(servers[2]).toMatchObject({
+      name: 'parallel-search', enabled: true, transport: 'http',
+      url: 'https://search.parallel.ai/mcp', headers: { 'User-Agent': 'easy-stock/1.7.0' },
+      timeout: 60, connect_timeout: 30, supports_parallel_tool_calls: false,
+    });
+    expect(saved.agent_runtime).toBe('hermes');
+  });
+
+  it.each(['https://search.parallel.ai/mcp/?mode=fast', 'https://search.parallel.ai/mcp-oauth'])('preserves an existing disabled Parallel choice at %s', async (url) => {
+    agent.mcp_servers[0] = { name: 'custom-search', enabled: false, transport: 'http', url, headers: { Authorization: { configured: true, masked: 'saved' } } };
+    render(<Harness />);
+    const dialog = await loaded();
+    expect((dialog.getByRole('button', { name: '添加 Parallel 搜索' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('button', { name: '添加 Parallel 搜索' }));
+    expect(dialog.getByDisplayValue(url)).toBeTruthy();
+    expect(agent.mcp_servers).toHaveLength(2);
+    expect(agent.mcp_servers[0].enabled).toBe(false);
+    expect(writes('/api/v1/settings/agent')).toHaveLength(0);
+  });
+
+  it('keeps name collisions and lets users disable the new draft before saving', async () => {
+    agent.mcp_servers[0].name = 'parallel-search';
+    render(<Harness />);
+    const dialog = await loaded();
+    fireEvent.click(dialog.getByRole('button', { name: '添加 Parallel 搜索' }));
+    const card = within(dialog.getByDisplayValue('parallel-search-2').closest('article')!);
+    fireEvent.click(card.getByRole('checkbox', { name: '启用' }));
+    fireEvent.click(dialog.getByRole('button', { name: '仅保存 Skill/MCP' }));
+    await waitFor(() => expect(writes('/api/v1/settings/agent')).toHaveLength(1));
+    expect(writes('/api/v1/settings/agent')[0].mcp_servers.map((server: {name: string; enabled: boolean}) => ({name: server.name, enabled: server.enabled})))
+      .toEqual([{name: 'parallel-search', enabled: true}, {name: 'remove-mcp', enabled: true}, {name: 'parallel-search-2', enabled: false}]);
+  });
+
 });
