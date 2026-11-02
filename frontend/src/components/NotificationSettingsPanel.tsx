@@ -58,7 +58,7 @@ export function NotificationSettingsPanel({ config, draft: drafts, revision, dis
   return data.value;
  };
 
-	return <SettingsSection title="钉钉与飞书机器人" description="通过飞书、钉钉群机器人接收个股研究和持仓巡检结果。" icon={<Bell size={18} />}>
+	return <SettingsSection title="钉钉与飞书机器人" description="通过飞书、钉钉群机器人接收个股研究、持仓巡检和监控提醒。" icon={<Bell size={18} />}>
 		<fieldset className="notification-settings-fields" disabled={!config || busy}>
 			{(['feishu', 'dingtalk'] as const).map((channel) => {
 				const definition = channelDefinitions[channel];
@@ -76,6 +76,7 @@ export function NotificationSettingsPanel({ config, draft: drafts, revision, dis
 			<div className="notification-events"><strong>通知事件</strong><label className="notification-toggle"><input type="checkbox" checked={events.stock_research} onChange={(event) => setEvents({ ...events, stock_research: event.target.checked })} /><span>个股 AI 研究完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.portfolio_inspection} onChange={(event) => setEvents({ ...events, portfolio_inspection: event.target.checked })} /><span>手动持仓 AI 巡检完成</span></label><label className="notification-toggle"><input type="checkbox" checked={events.task_failed} onChange={(event) => setEvents({ ...events, task_failed: event.target.checked })} /><span>同时提醒所选任务失败或未完成</span></label></div>
 		</fieldset>
 		<p className="settings-field-note">填写 Webhook、勾选启用通知并保存后生效；两个渠道可同时启用，关闭状态也会保留。Webhook 和签名密钥仅保存在本机，留空保留原值。个股研究和持仓巡检均发送完整 Markdown 结果（不含具体证据），失败或未完成时发送已生成结果，长报告自动分段；定时巡检按各方案勾选的渠道发送，失败提醒沿用此处设置。量化速览和手动取消的任务不发送。应用运行期间生效。</p>
+		<p className="settings-field-note">监控提醒在监控中心「触发与规则」单独开启；紧急事件立即发送，提醒级别合并摘要，记录级别仅本机保存。规则可以单独选择发送渠道，发送结果可在触发记录中查看。</p>
 		<div className="agent-settings-footer"><span>通知配置会随右下角“保存设置”一起保存，也可单独保存。</span><button type="button" onClick={onSave} disabled={!config || busy}><Save size={15} />仅保存通知配置</button></div>
 	</SettingsSection>;
 }

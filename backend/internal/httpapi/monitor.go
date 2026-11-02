@@ -12,7 +12,6 @@ import (
 
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/monitor"
-	"easy-stock/backend/internal/notification"
 	"easy-stock/backend/internal/providers/eastmoney"
 	"easy-stock/backend/internal/themelibrary"
 )
@@ -881,21 +880,4 @@ func (s *Server) monitorRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": runs, "total": len(runs)})
-}
-
-// NotifyMonitorAlert 是 engine 的通知出口：只判断事件开关；静默时段
-// 与摘要合并在 engine 侧已完成，这里不再做二次过滤。
-func (s *Server) NotifyMonitorAlert(ctx context.Context, event monitor.Event) (string, error) {
-	if s == nil || s.monitorPreferences == nil || s.monitorNotifications == nil {
-		return monitor.NotifySkipped, nil
-	}
-	if !s.monitorPreferences.Snapshot().NotifyEnabled {
-		return monitor.NotifySkipped, nil
-	}
-	s.monitorNotifications.Publish(notification.Event{Kind: "monitor_alert", Channels: []string{"feishu", "dingtalk"}, Message: notification.Message{
-		Title: "easy-stock 监控提醒",
-		Text:  event.Message,
-	}})
-	_ = ctx
-	return monitor.NotifyQueued, nil
 }

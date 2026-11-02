@@ -446,6 +446,22 @@
 	color: var(--blue);
 }
 
+.monitor-notify.sent { color: var(--theme-green); }
+.monitor-notify.partial { color: var(--amber); }
+
+.monitor-notification-control {
+	display: grid;
+	gap: 4px;
+}
+.monitor-notification-control [role='alert'] { color: var(--up); font-size: var(--fs-caption); }
+.monitor-notification-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: var(--fs-body); white-space: nowrap; cursor: pointer; }
+.monitor-notification-toggle:disabled { opacity: .55; cursor: default; }
+.monitor-notification-toggle:hover:not(:disabled) { color: var(--blue); }
+.monitor-notification-switch { display: flex; align-items: center; flex: none; width: 36px; height: 20px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--line); transition: background .15s ease; }
+.monitor-notification-switch > span { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); color: var(--blue); box-shadow: 0 1px 2px var(--theme-shadow); transition: transform .15s ease; }
+.monitor-notification-toggle[aria-checked='true'] .monitor-notification-switch { background: var(--blue); border-color: var(--blue); }
+.monitor-notification-toggle[aria-checked='true'] .monitor-notification-switch > span { transform: translateX(16px); }
+
 .monitor-notify.pending,
 .monitor-notify.merged {
 	color: var(--muted);

@@ -73,6 +73,7 @@ type EngineConfig struct {
 	ThemeCatalog       ThemeCatalogProvider
 	Settings           func() Settings
 	Notify             NotifyFunc
+	CanNotify          func(Event) bool
 	Logger             *log.Logger
 }
 
@@ -111,6 +112,7 @@ type Engine struct {
 	themeCatalog       ThemeCatalogProvider
 	settings           func() Settings
 	notify             NotifyFunc
+	canNotify          func(Event) bool
 	logger             *log.Logger
 	now                func() time.Time
 
@@ -213,6 +215,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 		themeCatalog:       cfg.ThemeCatalog,
 		settings:           cfg.Settings,
 		notify:             cfg.Notify,
+		canNotify:          cfg.CanNotify,
 		logger:             cfg.Logger,
 		now:                time.Now,
 
@@ -1709,7 +1712,8 @@ func (e *Engine) buildEvent(rule Rule, observation Observation, symbol, name str
 		}
 	}
 	return Event{
-		RuleID: rule.ID, RuleName: rule.Name, RuleType: rule.Type, Symbol: symbol,
+		NotifyChannels: append([]string(nil), rule.NotifyChannels...),
+		RuleID:         rule.ID, RuleName: rule.Name, RuleType: rule.Type, Symbol: symbol,
 		Name: name, Severity: rule.Severity, TriggerKind: signal.Kind,
 		Message: message,
 		Detail: map[string]any{
@@ -1772,6 +1776,8 @@ func (e *Engine) prepareEvent(event Event) Event {
 	switch {
 	case event.Severity == SeverityInfo:
 		// 保持 skipped：info 只供页面阅读。
+	case e.canNotify != nil && !e.canNotify(event):
+		event.NotifyError = "群通知未开启或所选机器人未启用"
 	case quietNow(now, settings.QuietHours) && event.Severity != SeverityCritical:
 		event.NotifyError = "静默时段"
 	case event.Severity == SeverityCritical && e.notify != nil:
@@ -1857,15 +1863,35 @@ func (e *Engine) flushDigest(ctx context.Context, now time.Time) {
 		}
 		return
 	}
+	// Keep events with different recipient choices in separate summaries.
+	groups := map[string][]pendingEvent{}
+	keys := []string{}
+	for _, item := range pending {
+		key := strings.Join(NotificationChannels(item.event.NotifyChannels), ",")
+		if _, found := groups[key]; !found {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], item)
+	}
+	for _, key := range keys {
+		e.deliverDigest(ctx, now, groups[key])
+	}
+}
+
+func (e *Engine) deliverDigest(ctx context.Context, now time.Time, pending []pendingEvent) {
 	lines := []string{fmt.Sprintf("共 %d 条监控提醒", len(pending))}
+	ids := make([]int64, 0, len(pending))
 	for _, item := range pending {
 		lines = append(lines, "- "+item.event.Message)
+		ids = append(ids, item.id)
 	}
 	digest := Event{
+		NotificationEventIDs: ids, NotifyChannels: pending[0].event.NotifyChannels,
 		RuleID: "digest", RuleName: "监控提醒汇总", RuleType: "digest",
 		Severity: SeverityWarning, TriggerKind: "digest",
 		Message:   strings.Join(lines, "\n"),
 		TradeDate: now.In(foundation.AStockLocation).Format("2006-01-02"),
+		CreatedAt: now,
 	}
 	status, err := e.notify(ctx, digest)
 	if err != nil && e.logger != nil {

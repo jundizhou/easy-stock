@@ -403,10 +403,38 @@ func appendMonitorEvent(ctx context.Context, writer monitorWriter, event *Event)
 }
 
 func (s *Store) UpdateEventNotify(ctx context.Context, id int64, status, message string, at time.Time) error {
+	notified := ""
+	if status == NotifySent || status == NotifyPartial {
+		notified = writeTime(at)
+	}
 	_, err := s.db.ExecContext(ctx, `UPDATE monitor_events
-		SET notify_status=?, notify_error=?, notified_at=? WHERE id=?`,
-		status, strings.TrimSpace(message), writeTime(at), id)
+		SET notify_status=?, notify_error=?, notified_at=? WHERE id=?
+		AND NOT (? IN ('queued','merged') AND COALESCE(json_type(detail,'$.notification_deliveries'),'')='array')`,
+		status, strings.TrimSpace(message), notified, id, status)
 	return err
+}
+
+// Final delivery results can arrive before the caller finishes marking the queue.
+// Store them atomically with the original event details, without changing evidence.
+func (s *Store) CompleteEventNotify(ctx context.Context, ids []int64, status, message, deliveries string, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		notified := ""
+		if status == NotifySent || status == NotifyPartial {
+			notified = writeTime(at)
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE monitor_events SET notify_status=?,notify_error=?,notified_at=?,
+			detail=json_set(CASE WHEN json_valid(detail) AND json_type(detail)='object' THEN detail ELSE '{}' END,
+			'$.notification_deliveries',json(?)) WHERE id=?`, status, message, notified, deliveries, id)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func eventWhere(filter EventFilter) (string, []any) {
@@ -865,8 +893,9 @@ func (s *Store) ResetState(ctx context.Context, ruleID string) error {
 // 能再 flush 它们，留成 pending 只会让列表出现「永远等不到通知」的行。
 func (s *Store) FailPendingDigest(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE monitor_events SET notify_status=? WHERE notify_status=?`,
-		NotifySkipped, NotifyPending)
+		`UPDATE monitor_events SET notify_status=CASE WHEN notify_status='pending' THEN 'skipped' ELSE 'failed' END,
+		notify_error='应用已重启，无法确认上次通知是否送达',notified_at=''
+		WHERE notify_status IN ('pending','queued','merged')`)
 	return err
 }
 

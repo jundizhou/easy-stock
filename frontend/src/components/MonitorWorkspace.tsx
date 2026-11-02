@@ -6,6 +6,7 @@ import {
 	ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ListPlus, Pencil, Play, Pause, Check,
 } from 'lucide-react';
 import { MonitorSelect } from './MonitorSelect';
+import { MonitorNotificationPanel } from './MonitorNotificationPanel';
 import type { BackendConfig } from '../lib/backend';
 import {
 	fetchMonitorOverview, fetchMonitorRules, saveMonitorRule, toggleMonitorRule, deleteMonitorRule, testMonitorRule,
@@ -1600,6 +1601,7 @@ function EventsTab({ config, refreshKey }: { config: BackendConfig | null; refre
 					{loadError || engine?.last_error ? <span className="monitor-engine-error" title={[loadError, engine?.last_error].filter(Boolean).join('；')}>· {[loadError, engine?.last_error].filter(Boolean).join('；')}</span> : null}
 				</div>
 				<div className="monitor-strip-space" />
+				<MonitorNotificationPanel config={config} refreshKey={refreshKey} />
 				<button type="button" className="monitor-small-button" onClick={() => void loadAll(config)}><RefreshCw size={13} />刷新</button>
 				<button
 					type="button"
@@ -1731,7 +1733,7 @@ function EventsTab({ config, refreshKey }: { config: BackendConfig | null; refre
 											</td>
 											<td><span className={`monitor-severity ${item.severity}`}>{severityLabels[item.severity] ?? item.severity}</span></td>
 											<td className="monitor-event-message">{item.message}</td>
-											<td><em className={`monitor-notify ${item.notify_status}`}>{notifyLabel(item.notify_status, item.notify_error)}</em></td>
+											<td><em className={`monitor-notify ${item.notify_status}`} title={notificationDeliveryTitle(item)}>{notifyLabel(item.notify_status, item.notify_error)}</em></td>
 											<td>
 												<div className="trading-row-actions">
 													<button type="button" className="trading-row-action is-icon rule-action-delete" title="删除这条触发记录" aria-label="删除这条触发记录" onClick={async () => { if (config) { await deleteMonitorEvent(config, item.id); void loadAll(config); } }}><Trash2 size={13} /></button>
@@ -1874,12 +1876,23 @@ const severityLabels: Record<string, string> = { critical: '紧急', warning: '�
 
 function notifyLabel(status: string, error?: string) {
 	switch (status) {
-		case 'queued': return '已通知';
+		case 'queued': return '等待发送';
 		case 'pending': return '待合并';
-		case 'merged': return '并入摘要';
-		case 'failed': return error ? `发送失败：${error}` : '发送失败';
+		case 'merged': return '摘要待发送';
+		case 'sent': return '已送达';
+		case 'partial': return '部分送达';
+		case 'failed': return '发送失败';
 		default: return error || '仅记录';
 	}
+}
+
+function notificationDeliveryTitle(event: MonitorEvent) {
+	const deliveries = event.detail?.notification_deliveries;
+	if (!Array.isArray(deliveries)) return event.notify_error;
+	return deliveries.map((item) => {
+		if (!item || typeof item !== 'object') return '';
+		return `${item.channel === 'feishu' ? '飞书' : '钉钉'}：${notifyLabel(item.status)}${item.error ? `（${item.error}）` : ''}`;
+	}).filter(Boolean).join('；');
 }
 
 function joinSymbols(symbols?: string[]) {
@@ -2549,6 +2562,7 @@ function RuleEditor({ config, rule, onClose, onSaved }: {
 						</div>
 					</div>
 				)}
+				{template !== null && <label><span>群消息发送渠道</span><MonitorSelect ariaLabel="群消息发送渠道" value={draft.notify_channels?.length === 1 ? draft.notify_channels[0] : 'all'} onChange={(next) => patch({ notify_channels: next === 'all' ? [] : [next] })} options={[{ value: 'all', label: '所有已启用的机器人' }, { value: 'feishu', label: '仅飞书' }, { value: 'dingtalk', label: '仅钉钉' }]} /><small>需要先开启监控群通知；记录级别仅保存在本机。</small></label>}
 				<footer>
 					<span className="muted">{test.text || error}</span>
 					<div className="monitor-editor-actions">

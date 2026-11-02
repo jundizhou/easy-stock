@@ -44,6 +44,8 @@ const (
 	NotifySkipped = "skipped"
 	NotifyQueued  = "queued"
 	NotifyFailed  = "failed"
+	NotifySent    = "sent"
+	NotifyPartial = "partial"
 
 	SourceManual   = "manual"
 	SourceLot      = "lot"
@@ -131,23 +133,26 @@ type Lot struct {
 // Event 是一次触发记录。rule_name/rule_type 是快照：规则改名或删除后，
 // 历史记录仍然要能自解释。
 type Event struct {
-	ID            int64          `json:"id"`
-	RuleID        string         `json:"rule_id"`
-	RuleName      string         `json:"rule_name"`
-	RuleType      string         `json:"rule_type"`
-	Symbol        string         `json:"symbol,omitempty"`
-	Name          string         `json:"name,omitempty"`
-	Severity      string         `json:"severity"`
-	TriggerKind   string         `json:"trigger_kind"`
-	Message       string         `json:"message"`
-	Detail        map[string]any `json:"detail,omitempty"`
-	Price         float64        `json:"price,omitempty"`
-	ChangePercent float64        `json:"change_percent,omitempty"`
-	TradeDate     string         `json:"trade_date,omitempty"`
-	NotifyStatus  string         `json:"notify_status"`
-	NotifyError   string         `json:"notify_error,omitempty"`
-	NotifiedAt    *time.Time     `json:"notified_at,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
+	// Frozen routing and source event IDs for asynchronous digest delivery.
+	NotifyChannels       []string       `json:"-"`
+	NotificationEventIDs []int64        `json:"-"`
+	ID                   int64          `json:"id"`
+	RuleID               string         `json:"rule_id"`
+	RuleName             string         `json:"rule_name"`
+	RuleType             string         `json:"rule_type"`
+	Symbol               string         `json:"symbol,omitempty"`
+	Name                 string         `json:"name,omitempty"`
+	Severity             string         `json:"severity"`
+	TriggerKind          string         `json:"trigger_kind"`
+	Message              string         `json:"message"`
+	Detail               map[string]any `json:"detail,omitempty"`
+	Price                float64        `json:"price,omitempty"`
+	ChangePercent        float64        `json:"change_percent,omitempty"`
+	TradeDate            string         `json:"trade_date,omitempty"`
+	NotifyStatus         string         `json:"notify_status"`
+	NotifyError          string         `json:"notify_error,omitempty"`
+	NotifiedAt           *time.Time     `json:"notified_at,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
 }
 
 // EventFilter 是事件列表的查询参：全部可选，全部组合都走同一份 SQL 拼装。

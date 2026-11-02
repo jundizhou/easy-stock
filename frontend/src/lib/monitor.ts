@@ -135,6 +135,8 @@ export type MonitorSettings = {
 	digest_seconds: number;
 };
 
+export type MonitorPreferences = { settings: MonitorSettings; notify_enabled: boolean };
+
 export const monitorRuleTypeLabels: Record<MonitorRuleType, string> = {
 	price: '价格',
 	volume: '量能',
@@ -507,9 +509,9 @@ export const syncMonitorLots = (config: BackendConfig) =>
 export const detachMonitorLot = (config: BackendConfig, id: string) =>
 	jsonRequest<{ data: MonitorLot }>(config, `/api/v1/monitor/lots/${id}/detach`, 'POST', {});
 export const fetchMonitorSettings = (config: BackendConfig) =>
-	requestJSON<{ data: MonitorSettings & { notify_enabled: boolean } }>(config, '/api/v1/monitor/settings');
-export const saveMonitorSettings = (config: BackendConfig, settings: Partial<MonitorSettings>) =>
-	jsonRequest<{ data: MonitorSettings & { notify_enabled: boolean } }>(config, '/api/v1/monitor/settings', 'PUT', settings);
+	requestJSON<{ data: MonitorPreferences }>(config, '/api/v1/monitor/settings');
+export const saveMonitorSettings = (config: BackendConfig, settings: Partial<MonitorSettings> & { notify_enabled?: boolean }) =>
+	jsonRequest<{ data: MonitorPreferences }>(config, '/api/v1/monitor/settings', 'PUT', settings);
 
 // ---------------------------------------------------------------- 关注仓
 

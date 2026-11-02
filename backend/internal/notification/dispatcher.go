@@ -17,6 +17,20 @@ type Event struct {
 	Kind     string
 	Failed   bool
 	Message  Message
+	// Called once per selected channel, after every message part has completed.
+	OnDelivery func(DeliveryResult)
+}
+
+type DeliveryResult struct {
+	Channel string `json:"channel"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
+}
+
+func reportDelivery(event Event, channel, status, message string) {
+	if event.OnDelivery != nil {
+		event.OnDelivery(DeliveryResult{Channel: channel, Status: status, Error: message})
+	}
 }
 
 type delivery struct {
@@ -47,19 +61,21 @@ func NewDispatcher(send SendFunc, settings func() appsettings.Notifications, log
 
 func (d *Dispatcher) Publish(event Event) {
 	cfg := d.settings()
-	if !eventEnabled(cfg.Events, event) {
-		return
-	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed {
-		return
-	}
+	var immediate []DeliveryResult
 	for _, channel := range []struct {
 		name   string
 		config appsettings.NotificationChannel
 	}{{"feishu", cfg.Feishu}, {"dingtalk", cfg.Dingtalk}} {
-		if !selectedChannel(event, channel.name) || !channel.config.Enabled || channel.config.Webhook == "" {
+		if !selectedChannel(event, channel.name) {
+			continue
+		}
+		if !eventEnabled(cfg.Events, event) || !channel.config.Enabled || channel.config.Webhook == "" {
+			immediate = append(immediate, DeliveryResult{channel.name, "skipped", "通知未启用或未配置"})
+			continue
+		}
+		if d.closed {
+			immediate = append(immediate, DeliveryResult{channel.name, "failed", "通知服务已关闭"})
 			continue
 		}
 		if !d.started {
@@ -70,10 +86,15 @@ func (d *Dispatcher) Publish(event Event) {
 		select {
 		case d.queue <- delivery{channel.name, event}:
 		default:
+			immediate = append(immediate, DeliveryResult{channel.name, "failed", "通知队列已满，请稍后重试"})
 			if d.logger != nil {
 				d.logger.Printf("level=warn event=notification_queue_full channel=%s", channel.name)
 			}
 		}
+	}
+	d.mu.Unlock()
+	for _, result := range immediate {
+		reportDelivery(event, result.Channel, result.Status, result.Error)
 	}
 }
 
@@ -112,6 +133,14 @@ func (d *Dispatcher) Close() {
 	d.cancel()
 	d.mu.Unlock()
 	d.wg.Wait()
+	for {
+		select {
+		case item := <-d.queue:
+			reportDelivery(item.event, item.channel, "failed", "应用已关闭，通知未发送")
+		default:
+			return
+		}
+	}
 }
 
 func selectedChannel(event Event, channel string) bool {
@@ -127,6 +156,8 @@ func selectedChannel(event Event, channel string) bool {
 }
 
 func (d *Dispatcher) deliver(item delivery) {
+	status, resultMessage := "sent", ""
+	defer func() { reportDelivery(item.event, item.channel, status, resultMessage) }()
 	parts := SplitMessage(item.event.Message)
 	for i, message := range parts {
 		if i > 0 && d.partInterval > 0 {
@@ -134,11 +165,13 @@ func (d *Dispatcher) deliver(item delivery) {
 			select {
 			case <-d.ctx.Done():
 				timer.Stop()
+				status, resultMessage = "failed", "应用已关闭，通知未发送完成"
 				return
 			case <-timer.C:
 			}
 		}
 		if d.ctx.Err() != nil {
+			status, resultMessage = "failed", "应用已关闭，通知未发送完成"
 			return
 		}
 		// Recheck each part: disabling a robot also stops a multipart delivery.
@@ -148,12 +181,14 @@ func (d *Dispatcher) deliver(item delivery) {
 			channel = cfg.Dingtalk
 		}
 		if !channel.Enabled || channel.Webhook == "" || !eventEnabled(cfg.Events, item.event) {
+			status, resultMessage = "skipped", "通知未启用或未配置"
 			return
 		}
 		ctx, cancel := context.WithTimeout(d.ctx, Timeout)
 		err := d.send(ctx, item.channel, channel, message)
 		cancel()
 		if err != nil {
+			status, resultMessage = "failed", err.Error()
 			if d.logger != nil {
 				d.logger.Printf("level=warn event=notification_send_failed channel=%s part=%d total=%d error=%q", item.channel, i+1, len(parts), err)
 			}

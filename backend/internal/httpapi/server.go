@@ -540,8 +540,9 @@ func NewServer(config any) *Server {
 			}
 			return s.monitorPreferences.Snapshot().Settings
 		},
-		Notify: notifier,
-		Logger: cfg.Logger,
+		Notify:    notifier,
+		CanNotify: s.monitorCanNotify,
+		Logger:    cfg.Logger,
 	})
 	s.startupError = errors.Join(startupErrors...)
 	s.stockResearch = stockanalysis.NewResearchServiceWithPreparation(cfg.StockResearchStore, s.runStockResearch, s.prepareStockResearch, s.notifyStockResearch)
@@ -606,11 +607,11 @@ func (s *Server) Close() error {
 		s.portfolioScheduler.Close()
 	}
 	var closeErrors []error
-	if s.monitorStore != nil {
-		closeErrors = append(closeErrors, s.monitorStore.Close())
-	}
 	if s.monitorNotifications != nil {
 		s.monitorNotifications.Close()
+	}
+	if s.monitorStore != nil {
+		closeErrors = append(closeErrors, s.monitorStore.Close())
 	}
 	if s.notifications != nil {
 		s.notifications.Close()

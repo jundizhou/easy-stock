@@ -222,6 +222,11 @@ func NormalizeRule(rule Rule) (Rule, error) {
 	}
 	rule.Conditions = cleaned
 	rule.NotifyChannels = uniqueTrim(rule.NotifyChannels)
+	for _, channel := range rule.NotifyChannels {
+		if channel != "feishu" && channel != "dingtalk" {
+			return rule, fmt.Errorf("通知渠道仅支持飞书或钉钉")
+		}
+	}
 	return rule, nil
 }
 
