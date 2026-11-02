@@ -29,7 +29,7 @@ export function MonitorSelect({
 	const menuRef = useRef<HTMLDivElement | null>(null);
 	const [open, setOpen] = useState(false);
 	const [active, setActive] = useState(-1);
-	const [box, setBox] = useState({ top: 0, left: 0, width: 0, up: false });
+	const [box, setBox] = useState({ top: 0, left: 0, width: 0, maxHeight: 288 });
 	const listId = useId();
 
 	const current = options.find((option) => option.value === value);
@@ -42,17 +42,20 @@ export function MonitorSelect({
 		const menuHeight = Math.min(options.length * 32 + 8, 288);
 		// 弹窗里的下拉不要把菜单甩到对话框外面去：可用下边界收到对话框底边。
 		const dialog = trigger.closest('.monitor-editor') as HTMLElement | null;
+		const limitTop = Math.max(8, dialog ? dialog.getBoundingClientRect().top + 8 : 8);
 		const limitBottom = Math.min(
 			window.innerHeight - 8,
 			dialog ? dialog.getBoundingClientRect().bottom - 8 : Number.POSITIVE_INFINITY,
 		);
-		const below = limitBottom - rect.bottom;
-		const up = below < menuHeight + 6 && rect.top > menuHeight + 12;
+		const below = Math.max(0, limitBottom - rect.bottom - 6);
+		const above = Math.max(0, rect.top - limitTop - 6);
+		const up = below < menuHeight && above > below;
+		const maxHeight = Math.min(menuHeight, up ? above : below);
 		setBox({
-			top: up ? Math.max(8, rect.top - menuHeight - 6) : rect.bottom + 6,
+			top: up ? rect.top - maxHeight - 6 : rect.bottom + 6,
 			left: Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8)),
 			width: rect.width,
-			up,
+			maxHeight,
 		});
 	}, [options.length]);
 
@@ -93,26 +96,33 @@ export function MonitorSelect({
 			}
 		};
 		const close = () => setOpen(false);
+		const onScroll = (event: Event) => {
+			if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+			close();
+		};
 		document.addEventListener('pointerdown', onPointerDown, true);
 		document.addEventListener('keydown', onKeyDown, true);
 		window.addEventListener('resize', close);
-		window.addEventListener('scroll', close, true);
+		window.addEventListener('scroll', onScroll, true);
 		return () => {
 			document.removeEventListener('pointerdown', onPointerDown, true);
 			document.removeEventListener('keydown', onKeyDown, true);
 			window.removeEventListener('resize', close);
-			window.removeEventListener('scroll', close, true);
+			window.removeEventListener('scroll', onScroll, true);
 		};
 	}, [open, active, options]);
 
-	// 菜单渲染后若超出视口底部，再按实际高度修正一次。
+	// 键盘切换到可视区外的选项时，只滚动菜单本身。
 	useLayoutEffect(() => {
-		if (!open || !menuRef.current) return;
-		const menu = menuRef.current.getBoundingClientRect();
-		if (menu.bottom > window.innerHeight - 8 && !box.up) {
-			place();
+		if (!open) return;
+		const menu = menuRef.current;
+		const option = menu?.children[active] as HTMLElement | undefined;
+		if (!menu || !option) return;
+		if (option.offsetTop < menu.scrollTop) menu.scrollTop = option.offsetTop;
+		else if (option.offsetTop + option.offsetHeight > menu.scrollTop + menu.clientHeight) {
+			menu.scrollTop = option.offsetTop + option.offsetHeight - menu.clientHeight;
 		}
-	}, [open, box.up, place]);
+	}, [open, active]);
 
 	return (
 		<span className={`monitor-selectbox${block ? ' is-block' : ''}${className ? ` ${className}` : ''}`}>
@@ -137,7 +147,7 @@ export function MonitorSelect({
 					role="listbox"
 					aria-label={ariaLabel}
 					className="monitor-select-menu"
-					style={{ top: box.top, left: box.left, minWidth: box.width }}
+					style={{ top: box.top, left: box.left, minWidth: box.width, maxHeight: box.maxHeight }}
 				>
 					{options.map((option, index) => (
 						<button

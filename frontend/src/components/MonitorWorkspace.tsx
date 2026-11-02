@@ -1639,7 +1639,7 @@ function EventsTab({ config, refreshKey }: { config: BackendConfig | null; refre
 			{rules.length === 0 && (
 				<div className="monitor-quickstart">
 					<header>
-						<strong>从四条常用规则开始</strong>
+						<strong>从常用规则开始</strong>
 						<span>点击即创建，阈值之后在右侧改；也可以自己新建</span>
 						{notice && <span className="muted">· {notice}</span>}
 					</header>

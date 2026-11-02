@@ -7,32 +7,14 @@
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
-	/* 与其他工作区（连板 / 巡检 / 行情）对齐：左右与顶部留白由 .app-shell 统一给，
-	   这里不再自己加，否则整页内容会比别的页面内缩一圈。
-	   本页锁高不滚动，底部要自己留出与页脚的距离（其他页面靠滚动末尾的间距）。 */
+	/* 页面随内容增高，由页面（Windows 为 app-shell）负责整体滚动。
+	   长表格和侧栏另设高度上限，避免挤掉空态、工具栏及底部操作。 */
 	padding: 0 0 16px;
 	min-width: 0;
 	flex: 1 1 auto;
 	min-height: 0;
 	font-family: var(--font-ui);
 	font-size: var(--fs-body);
-}
-
-/* 视口自适应：监控页把高度锁进窗口，页面本身不再滚动；
-   左栏与面板内容超出窗口高度时，在模块内部出滚动条。 */
-html .app-shell:has(.monitor-workspace) {
-	display: flex;
-	flex-direction: column;
-	min-height: 0;
-	overflow: hidden;
-}
-
-html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
-	height: 100vh;
-}
-
-.desktop-titlebar-overlay .app-shell:has(.monitor-workspace) {
-	height: 100%;
 }
 
 /* ---------------------------------------------------------------- 分段控件 */
@@ -303,7 +285,7 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 .monitor-events-layout-body {
 	display: grid;
 	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-	grid-template-rows: minmax(0, 1fr);
+	grid-template-rows: auto;
 	gap: 12px;
 	align-items: stretch;
 	flex: 1 1 auto;
@@ -315,7 +297,6 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 		grid-template-columns: minmax(0, 1fr);
 		grid-template-rows: none;
 		align-content: start;
-		overflow-y: auto;
 	}
 }
 
@@ -342,8 +323,7 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 	border-bottom: 1px solid var(--line-soft);
 }
 
-/* 面板定高内部滚动：表格区吃掉剩余高度自己滚（面板头保持固定），
-   表头 sticky 相对 wrap 生效，与交易台同款；滑块常显避免"内容被截断"的错觉。 */
+/* 只约束长表格，不限制整个面板；空态和操作区可以撑开页面。 */
 .monitor-workspace .monitor-panel {
 	min-height: 0;
 	overflow: hidden;
@@ -352,7 +332,7 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 .monitor-panel > .trading-table-wrap {
 	flex: 1 1 auto;
 	min-height: 0;
-	max-height: none;
+	max-height: 560px;
 	overflow: auto;
 	scrollbar-color: var(--scrollbar-thumb) transparent;
 }
@@ -718,6 +698,10 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
+}
+
+.monitor-editor > * {
+	flex-shrink: 0;
 }
 
 .monitor-editor > header strong {
@@ -1367,9 +1351,7 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 .monitor-watch-layout {
 	display: grid;
 	grid-template-columns: 300px minmax(0, 1fr);
-	/* 行高锁进容器：只写 align-items:stretch 不够——隐式行仍是 auto，
-	   行会被内容撑开再把整页顶出窗口，外面边框就跟着拉长了。 */
-	grid-template-rows: minmax(0, 1fr);
+	grid-template-rows: auto;
 	gap: 12px;
 	align-items: stretch;
 	flex: 1 1 auto;
@@ -1389,20 +1371,15 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 	flex-direction: column;
 	gap: 10px;
 	min-height: 0;
+	max-height: max(420px, calc(100dvh - 240px));
 	overflow-y: auto;
-	/* 细滚动条会在左栏右侧拉出一条贯穿到底的竖线，像多了一根分隔条；
-	   这里隐藏滚动条、保留滚轮滚动。 */
-	scrollbar-width: none;
-}
-
-.monitor-rail::-webkit-scrollbar {
-	width: 0;
-	height: 0;
+	scrollbar-width: thin;
 }
 
 .monitor-rail-card {
 	display: flex;
 	flex-direction: column;
+	flex-shrink: 0;
 	gap: 8px;
 	padding: 11px 12px 12px;
 	border: 1px solid var(--line);
@@ -1928,21 +1905,19 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 
 /* 窗口收窄时把 3:2 改成 1:1：规则表五列在 400px 里会挤到截名字、动作折行，
    两边等宽后规则栏多出 130px，整表能完整读。 */
-@media (max-width: 1500px) {
+@media (min-width: 981px) and (max-width: 1500px) {
 	.monitor-events-layout-body {
 		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 	}
 }
 
 @media (max-width: 1400px) {
-	/* 堆叠后左栏横排占一行（auto），面板吃掉剩余高度继续内部滚，
-	   不再留出一条内容高度之外的空白。 */
+	/* 堆叠后两行按内容增高，主表和展开详情都能通过页面滚动到达。 */
 	.monitor-radar-body,
 	.monitor-watch-layout {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: auto minmax(0, 1fr);
+		grid-template-rows: auto auto;
 		align-content: stretch;
-		overflow-y: auto;
 	}
 
 	/* 窄屏左栏改横排：四张卡并排，不再拉成一列长条。 */
@@ -2883,6 +2858,7 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 	flex-direction: column;
 	gap: 1px;
 	max-height: 288px;
+	max-width: calc(100vw - 16px);
 	padding: 4px;
 	overflow-y: auto;
 	border: 1px solid var(--line);
@@ -2923,6 +2899,12 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 .monitor-select-option > svg {
 	flex: none;
 	color: var(--blue);
+}
+
+.monitor-select-option > span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* 焦点可见：交易台同款蓝色描边，键盘导航可用性的底线。 */
@@ -3883,28 +3865,6 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 	min-height: 0;
 }
 
-/* 「异动名单个股」吃掉左栏剩余高度。
-   它是左栏里条数最多的一张（常见几十只），原来锁死 320px，
-   高窗口下就会在它下面空出一大片（1920×1400 实测空 508px）。
-   这里让它用 flex 吃掉剩余高度，列表自己内部滚，
-   表头仍然吸顶（.monitor-abn-list-head 已是 sticky）。
-   min-height 是矮窗口的底：窗口够短时列表不被压成一条线，
-   够出来的部分交给左栏自己滚。 */
-@media (min-width: 1401px) {
-	.monitor-abnormal-rail > .monitor-rail-card.is-abn-watchlist-card {
-		flex: 1 1 auto;
-		min-height: 0;
-	}
-
-	.monitor-abnormal-rail > .monitor-rail-card.is-abn-watchlist-card .monitor-abn-watchlist {
-		flex: 1 1 auto;
-		/* 表头 21px + 两行 46px ≈ 120px：再窄就不如交给左栏滚。 */
-		min-height: 120px;
-		max-height: none;
-		overflow-y: auto;
-	}
-}
-
 /* ---------------------------------------------------------------- 窄屏自适应
    1080 一带的窗口是本项目的常见宽度：宽屏排版（左栏 340px 并排 + 12 列主表）
    在那里会把主表压到 440px 左右，触发表格自身的 min-width 横向滚动，
@@ -3915,9 +3875,8 @@ html:not(.desktop-titlebar-overlay) .app-shell:has(.monitor-workspace) {
 	   主表只剩 446px。这里同名补一条，让 12 列拿到整行宽度。 */
 	.monitor-radar-body.is-abnormal {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: auto minmax(0, 1fr);
+		grid-template-rows: auto auto;
 		align-content: stretch;
-		overflow-y: auto;
 	}
 
 	/* 三张摘要卡在窄屏并排，列表内部滚动，为主表保留高度。 */
