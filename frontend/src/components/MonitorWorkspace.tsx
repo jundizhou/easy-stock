@@ -22,6 +22,7 @@ import {
 	type MonitorAbnormalView, type MonitorAbnormalItem, type MonitorAbnormalCalc, type MonitorAbnormalWindow,
 } from '../lib/monitor';
 import { confirmDialog } from './ConfirmDialog';
+import { watchCodeOf } from '../lib/watchlist-registry';
 import { monitorLiveBus, useLiveQuoteVersion, useLiveStreamStatus, liveStatusLabel, selectMonitorQuoteValue } from '../lib/monitorLiveBus';
 import { LivePriceCell, LivePriceText } from './LivePriceCell';
 import './monitor-table.css';
@@ -2681,7 +2682,7 @@ function WatchTab({ config, refreshKey, reloadTick, onOpenRadar, onOpenRules }: 
 	const [fundError, setFundError] = useState('');
 	const [fundRefresh, setFundRefresh] = useState(0);
 	const fundSymbols = useMemo(() => [...new Set(items.map((item) => item.symbol))].sort().join(','), [items]);
-	const fundIndex = useMemo(() => new Map(funds.data.map((item) => [item.symbol || item.code, item])), [funds.data]);
+	const fundIndex = useMemo(() => new Map(funds.data.map((item) => [watchCodeOf(item.symbol || item.code), item])), [funds.data]);
 	const fundColumns = [
 		{ key: 'net_inflow', label: '总净流入', ratio: false },
 		{ key: 'net_inflow_ratio', label: '总净流入率', ratio: true },
@@ -2921,7 +2922,7 @@ function WatchTab({ config, refreshKey, reloadTick, onOpenRadar, onOpenRules }: 
 						<tbody>
 							{items.map((item, index) => {
 								const editingRow = editing === item.symbol;
-								const flow = fundIndex.get(item.symbol);
+								const flow = fundIndex.get(watchCodeOf(item.symbol));
 								const available = (key: string) => Boolean(flow?.meta.available_fields?.includes(key));
 								const detailID = `monitor-watch-note-${item.symbol.replace(/\W/g, '')}`;
 								return (
