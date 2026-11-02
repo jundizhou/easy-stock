@@ -15,6 +15,23 @@ import (
 	"easy-stock/backend/internal/stockanalysis"
 )
 
+// Research workflow tests must not wait for live market data before exercising the model stages.
+func stockResearchTestConfig(gateway agent.Gateway) Config {
+	return Config{
+		Realtime:       stockAnalysisRealtime{},
+		KLinePrimary:   stockAnalysisKLines{},
+		KLineFallback:  stockAnalysisKLines{},
+		LimitUp:        stockAnalysisLimitUps{},
+		StockConcept:   stockAnalysisCatalog{},
+		StockBusiness:  stockAnalysisBusiness{},
+		MarketOverview: &fakeMarketOverviewProvider{},
+		ThemeOverview:  stockAnalysisThemes{},
+		News:           stockAnalysisNews{},
+		ReviewDBPath:   ":memory:",
+		AgentGateway:   gateway,
+	}
+}
+
 type researchBodyProvider struct {
 	*fakeMarketOverviewProvider
 	bodyCalls, listCalls int
@@ -201,7 +218,7 @@ func TestResearchAPIHistorySnapshotAndReportBoundChat(t *testing.T) {
 		}
 		return agent.PromptResult{Content: validHTTPResearchJSON}, nil
 	}}
-	server := NewServer(Config{Realtime: stockAnalysisRealtime{}, KLinePrimary: stockAnalysisKLines{}, KLineFallback: stockAnalysisKLines{}, StockBusiness: stockAnalysisBusiness{}, MarketOverview: &fakeMarketOverviewProvider{}, ReviewDBPath: ":memory:", AgentGateway: gateway})
+	server := NewServer(stockResearchTestConfig(gateway))
 	defer server.Close()
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -271,7 +288,7 @@ func TestStockResearchRecordsTokenUsageByModule(t *testing.T) {
 			return agent.PromptResult{Content: validHTTPResearchJSON, Usage: agent.TokenUsage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 500}}, nil
 		},
 	}
-	server := NewServer(Config{Realtime: stockAnalysisRealtime{}, KLinePrimary: stockAnalysisKLines{}, KLineFallback: stockAnalysisKLines{}, StockBusiness: stockAnalysisBusiness{}, MarketOverview: &fakeMarketOverviewProvider{}, ReviewDBPath: ":memory:", AgentGateway: gateway})
+	server := NewServer(stockResearchTestConfig(gateway))
 	defer server.Close()
 	created := httptest.NewRequest(http.MethodPost, "/api/v1/stocks/research", strings.NewReader(`{"symbol":"600519","purpose":"observe"}`))
 	response := httptest.NewRecorder()

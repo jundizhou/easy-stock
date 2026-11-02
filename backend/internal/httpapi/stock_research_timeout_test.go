@@ -187,7 +187,7 @@ func TestResearchResumeAPIUsesSavedStagesAndRejectsLegacyReports(t *testing.T) {
 		}
 		return agent.PromptResult{Content: validHTTPResearchJSON}, nil
 	}}
-	server := NewServer(Config{Realtime: stockAnalysisRealtime{}, KLinePrimary: stockAnalysisKLines{}, KLineFallback: stockAnalysisKLines{}, StockBusiness: stockAnalysisBusiness{}, MarketOverview: &fakeMarketOverviewProvider{}, ReviewDBPath: ":memory:", AgentGateway: gateway})
+	server := NewServer(stockResearchTestConfig(gateway))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
