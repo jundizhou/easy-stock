@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 
@@ -14,6 +14,7 @@ type Props = {
 	/** 撑满父容器（表单项用），默认按内容宽度。 */
 	block?: boolean;
 	className?: string;
+	indicator?: ReactNode;
 };
 
 /**
@@ -23,7 +24,7 @@ type Props = {
  * 位置按触发按钮实时计算，空间不够自动向上翻。
  */
 export function MonitorSelect({
-	value, onChange, options, ariaLabel, disabled, placeholder, block, className,
+	value, onChange, options, ariaLabel, disabled, placeholder, block, className, indicator,
 }: Props) {
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const menuRef = useRef<HTMLDivElement | null>(null);
@@ -138,7 +139,7 @@ export function MonitorSelect({
 				onClick={toggle}
 			>
 				<span className={current ? '' : 'is-placeholder'}>{current?.label ?? placeholder ?? '请选择'}</span>
-				<ChevronDown size={13} aria-hidden="true" />
+				{indicator ?? <ChevronDown size={13} aria-hidden="true" />}
 			</button>
 			{open && createPortal(
 				<div

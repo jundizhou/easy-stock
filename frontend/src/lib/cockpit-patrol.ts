@@ -1,10 +1,11 @@
 import { BackendConfig, requestJSON } from './backend';
+import type { MarketBillboardItem, SourceMeta } from './backend';
 
 export type PatrolPhase = 'pre_open' | 'intraday' | 'post_close' | 'rest';
 
 export type PatrolStatus = {
-	interval_minutes: number;
-	auto_patrol_enabled: boolean;
+	interval_minutes?: number;
+	auto_patrol_enabled?: boolean;
 	phase: PatrolPhase;
 	session_date: string;
 	trading_day: boolean;
@@ -58,6 +59,7 @@ export type PatrolFacts = {
 	concept_flows?: PatrolFlowBoard;
 	// 题材涨跌的取样口径：按涨跌幅排序的领涨/领跌各若干条，比资金榜样本更大。
 	concept_moves?: PatrolFlowBoard;
+	billboard?: { items: MarketBillboardItem[]; meta: SourceMeta };
 	news?: PatrolNews[];
 	sources: PatrolSource[];
 };
@@ -187,6 +189,9 @@ export async function fetchPatrolStatus(config: BackendConfig, signal?: AbortSig
 }
 
 export const patrolIntervalOptions = [5, 10, 15, 30, 60] as const;
+export const patrolIntervalMinutes = patrolIntervalOptions;
+export type PatrolIntervalMinutes = (typeof patrolIntervalOptions)[number];
+export type PatrolSetting = 'off' | PatrolIntervalMinutes;
 
 export type AutoPatrolUpdate = { enabled?: boolean; interval_minutes?: number };
 

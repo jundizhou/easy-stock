@@ -5,6 +5,7 @@ monkey-patching. `describe` reads only supplied catalogs/local Hermes code;
 gateway mode installs the same provider adapter.
 """
 import copy
+import contextlib
 import json
 import os
 import runpy
@@ -176,6 +177,19 @@ def install_profile(config, capability):
     return managed
 
 
+def install_browser_adapter():
+    wrapper_dir = os.environ.get("A_STOCK_AGENT_BROWSER_WRAPPER_DIR", "").strip()
+    if not wrapper_dir:
+        return
+    from pathlib import Path
+    root = Path(wrapper_dir)
+    wrapper = root / "agent-browser.py"
+    if not wrapper.is_file():
+        wrapper = root / "agent-browser"
+    with contextlib.redirect_stdout(sys.stderr):
+        runpy.run_path(str(wrapper))["install_hermes_adapter"]()
+
+
 def main():
     # Windows pipes default stdio to the ANSI code page (GBK on zh-CN), but the
     # Go host always writes UTF-8. Reconfigure before the first stdin read.
@@ -195,6 +209,7 @@ def main():
         return
     policy = json.loads(os.environ["EASY_STOCK_REASONING_POLICY"])
     install_profile(policy["config"], policy["capability"])
+    install_browser_adapter()
     install_unattended_policy()
     runpy.run_module("tui_gateway.entry", run_name="__main__")
 

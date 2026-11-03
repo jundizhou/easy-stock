@@ -3,9 +3,10 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest import mock
 import reasoning_launcher as bridge
 from providers import get_provider_profile, register_provider
 from hermes_constants import parse_reasoning_effort
@@ -192,6 +193,110 @@ class NativeReasoningTests(unittest.TestCase):
         self.assertEqual(self.request('none')['reasoning_effort'],'none')
 
 
+class NativeBrowserAdapterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.fixture_root = tempfile.TemporaryDirectory(prefix='easy-stock browser 中文 ')
+        root = Path(cls.fixture_root.name)
+        cls.real_browser = root / ('browser.exe' if os.name == 'nt' else 'browser')
+        source = root / 'main.go'
+        source.write_text('''package main
+import ("encoding/json"; "fmt"; "os")
+func main() {
+  log, err := os.OpenFile(os.Getenv("A_STOCK_TEST_CALL_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+  if err != nil { panic(err) }
+  json.NewEncoder(log).Encode(os.Args[1:]); log.Close()
+  for _, arg := range os.Args[1:] {
+    if arg == "load" && os.Getenv("A_STOCK_TEST_STATE_FAIL") == "1" { os.Exit(7) }
+  }
+  fmt.Print(`{"success":true,"data":{"text":"fixture page"}}`)
+}
+''', encoding='utf-8')
+        built = subprocess.run(['go', 'build', '-o', str(cls.real_browser), str(source)],
+                               capture_output=True, env={**os.environ, 'GOMAXPROCS': '2'}, timeout=60)
+        if built.returncode:
+            cls.fixture_root.cleanup()
+            raise RuntimeError(built.stderr.decode('utf-8', 'replace'))
+        cls.addClassCleanup(cls.fixture_root.cleanup)
+
+    def setUp(self):
+        from tools import browser_tool, browser_tool_install, browser_tool_session
+        self.browser, self.discovery, self.session = browser_tool, browser_tool_install, browser_tool_session
+        self.enterContext(mock.patch.object(self.discovery, '_find_agent_browser', self.discovery._find_agent_browser))
+        self.enterContext(mock.patch.object(self.session, '_agent_browser_argv', self.session._agent_browser_argv))
+        self.enterContext(mock.patch.object(self.browser, '_build_browser_env', self.browser._build_browser_env))
+        self.enterContext(mock.patch.object(self.session, '_easy_stock_wrapper', None, create=True))
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='browser adapter 中文 ')))
+        self.wrapper = self.root / 'agent-browser.py'
+        original = Path(__file__).resolve().parents[3] / 'desktop/scripts/browser-bin/agent-browser'
+        self.wrapper.write_bytes(original.read_bytes())
+        self.state = self.root / 'state with spaces.json'
+        self.state.write_text('{"cookies":[],"origins":[]}', encoding='utf-8')
+        self.log = self.root / 'calls.jsonl'
+        self.enterContext(mock.patch.dict(os.environ, {
+            'A_STOCK_AGENT_BROWSER_WRAPPER_DIR': str(self.root),
+            'A_STOCK_AGENT_BROWSER_REAL': str(self.real_browser),
+            'AGENT_BROWSER_STATE': str(self.state),
+            'A_STOCK_TEST_CALL_LOG': str(self.log),
+            'OPENAI_API_KEY': 'fixture-model-secret',
+        }))
+
+    def test_managed_discovery_and_native_argv_load_state_before_navigation(self):
+        bridge.install_browser_adapter()
+        command = self.discovery._find_agent_browser(validate=False)
+        self.assertEqual(command, str(self.wrapper.resolve()))
+        self.assertEqual(self.session._agent_browser_argv(command), [sys.executable, command])
+        first_argv = self.session._agent_browser_argv
+        bridge.install_browser_adapter()
+        self.assertIs(self.session._agent_browser_argv, first_argv)
+        env = self.browser._build_browser_env()
+        self.assertNotIn('OPENAI_API_KEY', env)
+        self.assertEqual(env['A_STOCK_AGENT_BROWSER_REAL'], str(self.real_browser))
+        self.assertEqual(env['AGENT_BROWSER_STATE'], str(self.state))
+        env['AGENT_BROWSER_SOCKET_DIR'] = str(self.root / 'socket')
+        env['A_STOCK_TEST_CALL_LOG'] = str(self.log)
+        url = 'https://example.invalid/a path?x=100%25&name=中文'
+        prefix = self.session._agent_browser_argv(command) + ['--session', 'fixture', '--json']
+        for args in (['open', url], ['open', url], ['eval', 'const x = "100% 中文";\nconsole.log(x);']):
+            result = subprocess.run(prefix + args, env=env, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', 'replace'))
+            self.assertTrue(json.loads(result.stdout)['success'])
+        calls = [json.loads(line) for line in self.log.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(calls, [
+            ['--session', 'fixture', '--json', 'open', 'about:blank'],
+            ['--session', 'fixture', '--json', 'state', 'load', str(self.state.resolve())],
+            ['--session', 'fixture', '--json', 'open', url],
+            ['--session', 'fixture', '--json', 'open', url],
+            ['--session', 'fixture', '--json', 'eval', 'const x = "100% 中文";\nconsole.log(x);'],
+        ])
+
+    def test_missing_managed_binary_fails_without_external_fallback(self):
+        os.environ['A_STOCK_AGENT_BROWSER_REAL'] = str(self.root / 'missing.exe')
+        bridge.install_browser_adapter()
+        with self.assertRaisesRegex(FileNotFoundError, 'runtime is unavailable'):
+            self.discovery._find_agent_browser()
+
+    def test_gateway_installs_browser_adapter_before_entering_gateway(self):
+        self.enterContext(mock.patch.dict(os.environ, {
+            'EASY_STOCK_REASONING_POLICY': '{"config":{},"capability":{}}',
+        }))
+        self.enterContext(mock.patch.object(sys, 'argv', ['reasoning_launcher']))
+        self.enterContext(mock.patch.object(bridge, 'install_profile'))
+        def gateway(module, **options):
+            self.assertEqual(module, 'tui_gateway.entry')
+            self.assertEqual(options, {'run_name': '__main__'})
+            self.assertEqual(self.discovery._find_agent_browser(), str(self.wrapper.resolve()))
+        entry = self.enterContext(mock.patch.object(bridge.runpy, 'run_module', side_effect=gateway))
+        bridge.main()
+        entry.assert_called_once()
+
+    def test_no_managed_wrapper_preserves_external_runtime(self):
+        os.environ.pop('A_STOCK_AGENT_BROWSER_WRAPPER_DIR')
+        original = self.discovery._find_agent_browser
+        bridge.install_browser_adapter()
+        self.assertIs(self.discovery._find_agent_browser, original)
+
+
 class UnattendedOnboardingTests(unittest.TestCase):
     def test_fresh_sandbox_does_not_append_interactive_notes(self):
         from agent import onboarding
@@ -199,11 +304,11 @@ class UnattendedOnboardingTests(unittest.TestCase):
         self.addCleanup(setattr, onboarding, 'first_contact_turn_note', original)
         args = ({'onboarding': {'profile_build': 'off'}}, Path('/unused'))
         kwargs = dict(session_history_empty=True, install_has_prior_sessions=False)
-        with patch.dict(os.environ, {'EASY_STOCK_UNATTENDED': ''}):
+        with mock.patch.dict(os.environ, {'EASY_STOCK_UNATTENDED': ''}):
             bridge.install_unattended_policy()
             self.assertIs(onboarding.first_contact_turn_note, original)
             self.assertIn('/help', onboarding.first_contact_turn_note(*args, **kwargs))
-        with patch.dict(os.environ, {'EASY_STOCK_UNATTENDED': '1'}):
+        with mock.patch.dict(os.environ, {'EASY_STOCK_UNATTENDED': '1'}):
             bridge.install_unattended_policy()
             self.assertIsNone(onboarding.first_contact_turn_note(*args, **kwargs))
             self.assertIsNone(onboarding.first_contact_turn_note(

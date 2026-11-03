@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"easy-stock/backend/internal/foundation"
 )
@@ -12,10 +14,21 @@ import (
 type chainFakeSnapshot struct {
 	rows []foundation.MarketSnapshotRow
 	err  error
+	meta foundation.SourceMeta
 }
 
 func (f chainFakeSnapshot) MarketSnapshot(context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
-	return f.rows, foundation.SourceMeta{Source: "fake"}, f.err
+	meta := f.meta
+	if meta.Source == "" {
+		meta.Source = "fake"
+	}
+	return f.rows, meta, f.err
+}
+
+type chainSnapshotFunc func(context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error)
+
+func (f chainSnapshotFunc) MarketSnapshot(ctx context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+	return f(ctx)
 }
 
 func shortMarketRows(n int) []foundation.MarketSnapshotRow {
@@ -68,5 +81,117 @@ func TestMonitorSnapshotChainAllFailed(t *testing.T) {
 	)
 	if _, _, err := chain.MarketSnapshot(context.Background()); err == nil {
 		t.Fatal("两个源都失败时应返回错误")
+	}
+}
+
+func TestMonitorSnapshotChainFallsBackOnFlaggedFullSnapshot(t *testing.T) {
+	for _, flag := range []string{"stale", "carry_forward", "error"} {
+		t.Run(flag, func(t *testing.T) {
+			primary := chainFakeSnapshot{rows: shortMarketRows(fullMarketMinRows + 100), meta: foundation.SourceMeta{Source: "primary"}}
+			primary.meta.Stale = flag == "stale"
+			primary.meta.CarryForward = flag == "carry_forward"
+			if flag == "error" {
+				primary.err = errors.New("page 59 EOF")
+			}
+			chain := newMonitorSnapshotChain(primary, chainFakeSnapshot{
+				rows: shortMarketRows(fullMarketMinRows), meta: foundation.SourceMeta{Source: "backup"},
+			})
+			rows, meta, err := chain.MarketSnapshot(context.Background())
+			if err != nil || meta.Source != "backup" || meta.Stale || meta.CarryForward || len(rows) != fullMarketMinRows {
+				t.Fatalf("flagged primary must yield to healthy backup: rows=%d meta=%+v err=%v", len(rows), meta, err)
+			}
+		})
+	}
+}
+
+func TestMonitorSnapshotChainRetainsPartialProvenanceWhenBackupFails(t *testing.T) {
+	fetchedAt := time.Date(2026, 10, 28, 10, 39, 50, 0, time.UTC)
+	chain := newMonitorSnapshotChain(
+		chainFakeSnapshot{rows: shortMarketRows(1200), meta: foundation.SourceMeta{
+			Source: "primary", FetchedAt: fetchedAt, Stale: true, FallbackReason: "page 59 EOF",
+		}},
+		chainFakeSnapshot{rows: shortMarketRows(1100), meta: foundation.SourceMeta{
+			Source: "backup", Stale: true, FallbackReason: "page 53 timeout",
+		}},
+	)
+	rows, meta, err := chain.MarketSnapshot(context.Background())
+	if err != nil || len(rows) != 1200 || !meta.Stale || meta.Source != "primary" || !meta.FetchedAt.Equal(fetchedAt) || meta.FallbackReason != "page 59 EOF" {
+		t.Fatalf("partial data must retain its source, failure and original timestamp: rows=%d meta=%+v err=%v", len(rows), meta, err)
+	}
+}
+
+func TestMonitorSnapshotChainReservesDeadlineForBackup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	backupCalled := false
+	chain := newMonitorSnapshotChain(
+		chainSnapshotFunc(func(ctx context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+			<-ctx.Done()
+			return nil, foundation.SourceMeta{}, ctx.Err()
+		}),
+		chainSnapshotFunc(func(ctx context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+			backupCalled = true
+			if err := ctx.Err(); err != nil {
+				t.Fatalf("primary exhausted the backup deadline: %v", err)
+			}
+			return shortMarketRows(fullMarketMinRows), foundation.SourceMeta{Source: "backup"}, nil
+		}),
+	)
+	_, meta, err := chain.MarketSnapshot(ctx)
+	if err != nil || !backupCalled || meta.Source != "backup" {
+		t.Fatalf("healthy backup should run after primary timeout: called=%t meta=%+v err=%v", backupCalled, meta, err)
+	}
+}
+
+func TestMonitorSnapshotChainBoundsCallsWithoutParentDeadline(t *testing.T) {
+	chain := newMonitorSnapshotChain(chainSnapshotFunc(func(ctx context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > 12*time.Second {
+			t.Fatalf("provider call lacks a bounded deadline: %v %t", deadline, ok)
+		}
+		return nil, foundation.SourceMeta{}, errors.New("unavailable")
+	}))
+	if _, _, err := chain.MarketSnapshot(context.Background()); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("source failure must remain visible: %v", err)
+	}
+}
+
+func TestMonitorSnapshotChainGivesLastBackupRemainingParentDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	parentDeadline, _ := ctx.Deadline()
+	backupCalled := false
+	chain := newMonitorSnapshotChain(
+		chainSnapshotFunc(func(ctx context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) > 12*time.Second {
+				t.Fatal("primary must still reserve time for the backup")
+			}
+			return nil, foundation.SourceMeta{}, errors.New("primary disconnected early")
+		}),
+		chainSnapshotFunc(func(ctx context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+			backupCalled = true
+			deadline, ok := ctx.Deadline()
+			if !ok || !deadline.Equal(parentDeadline) || time.Until(deadline) <= 12*time.Second {
+				t.Fatalf("backup discarded remaining parent budget: deadline=%v parent=%v", deadline, parentDeadline)
+			}
+			return shortMarketRows(fullMarketMinRows), foundation.SourceMeta{Source: "backup"}, nil
+		}),
+	)
+	_, meta, err := chain.MarketSnapshot(ctx)
+	if err != nil || !backupCalled || meta.Source != "backup" {
+		t.Fatalf("remaining budget did not reach healthy backup: %+v, %v", meta, err)
+	}
+}
+
+func TestMonitorSnapshotChainStopsOnParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	chain := newMonitorSnapshotChain(chainSnapshotFunc(func(context.Context) ([]foundation.MarketSnapshotRow, foundation.SourceMeta, error) {
+		t.Fatal("cancelled request must not start a provider")
+		return nil, foundation.SourceMeta{}, nil
+	}))
+	if _, _, err := chain.MarketSnapshot(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected original cancellation, got %v", err)
 	}
 }

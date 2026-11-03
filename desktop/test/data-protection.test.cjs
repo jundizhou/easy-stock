@@ -191,6 +191,32 @@ test('backup directory is outside user data and only the latest three backups re
   assert.deepEqual(backups.map((item) => item.manifest.toVersion), ['0.3.4', '0.3.3', '0.3.2']);
 });
 
+test('backup retention uses recorded time with deterministic ties instead of directory mtime', async (t) => {
+  for (const sameRecordedTime of [false, true]) {
+    await t.test(`same recorded time=${sameRecordedTime}`, async (t) => {
+      const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-backup-tied-time-'));
+      t.after(() => fs.rmSync(appData, { recursive: true, force: true }));
+      const userData = path.join(appData, 'easy-stock');
+      fs.mkdirSync(userData);
+      write(userData, 'settings.json', '{}');
+      const backupRoot = resolveBackupRoot(userData);
+      const statSync = fs.statSync;
+      t.mock.method(fs, 'statSync', (file, ...args) => {
+        const stat = statSync(file, ...args);
+        if (path.dirname(path.resolve(file)) === backupRoot && stat.isDirectory()) stat.mtimeMs = 0;
+        return stat;
+      });
+      for (let day = 1; day <= 4; day += 1) {
+        await createUpdateBackup({ userDataPath: userData, backupRoot, fromVersion: '0.3.0', toVersion: `0.3.${day}`,
+          now: new Date(`2026-08-0${sameRecordedTime ? 1 : day}T00:00:00.000Z`) });
+      }
+      const backups = listUpdateBackups(backupRoot);
+      assert.deepEqual(backups.map((item) => item.manifest.toVersion), ['0.3.4', '0.3.3', '0.3.2']);
+      assert.ok(backups.every((item) => fs.readFileSync(path.join(item.path, 'data', 'settings.json'), 'utf8') === '{}'));
+    });
+  }
+});
+
 test('rejects a backup root nested inside user data', () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-backup-'));
   assert.throws(() => resolveBackupRoot(userData, path.join(userData, 'backups')), /不能位于应用数据目录内/);

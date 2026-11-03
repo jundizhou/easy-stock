@@ -18,6 +18,79 @@ type fakeMarketOverviewProvider struct {
 	fail bool
 }
 
+type rankingMarketOverviewProvider struct {
+	fakeMarketOverviewProvider
+	calls []string
+}
+
+func (p *rankingMarketOverviewProvider) MarketFundFlows(_ context.Context, dimension, sortKey string, limit int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+	p.calls = append(p.calls, dimension+":"+sortKey)
+	meta, err := p.source()
+	net := 100.0
+	if sortKey == "outflow" {
+		net = -900
+	}
+	return []foundation.MarketFundFlow{{Dimension: dimension, Code: "600000", Name: sortKey, NetInflow: net, Meta: meta}}, meta, err
+}
+
+func TestMarketStockFlowRankingCachesAreSeparateAndLegacySortIsUnchanged(t *testing.T) {
+	provider := &rankingMarketOverviewProvider{}
+	server := NewServer(Config{MarketOverview: provider})
+	for _, sortKey := range []string{"net", "inflow", "outflow", "inflow", "outflow"} {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/flows?dimension=stock&sort="+sortKey+"&limit=100", nil))
+		var payload struct {
+			Data []foundation.MarketFundFlow `json:"data"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &payload) != nil || len(payload.Data) != 1 || payload.Data[0].Name != sortKey {
+			t.Fatalf("sort=%s status=%d body=%s", sortKey, rec.Code, rec.Body.String())
+		}
+		if sortKey == "outflow" && payload.Data[0].NetInflow != -900 {
+			t.Fatalf("outflow signs changed: %+v", payload.Data)
+		}
+	}
+	if !slices.Equal(provider.calls, []string{"stock:net", "stock:inflow", "stock:outflow"}) {
+		t.Fatalf("ranking caches overlap or are unused: %v", provider.calls)
+	}
+}
+
+func TestMarketSectorFlowRankingCachesSeparateDimensionsAndDirections(t *testing.T) {
+	provider := &rankingMarketOverviewProvider{}
+	server := NewServer(Config{MarketOverview: provider})
+	for _, dimension := range []string{"industry", "theme"} {
+		for _, sortKey := range []string{"net", "inflow", "outflow", "inflow", "outflow"} {
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/flows?dimension="+dimension+"&sort="+sortKey+"&limit=100", nil))
+			var payload struct {
+				Data []foundation.MarketFundFlow `json:"data"`
+			}
+			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &payload) != nil || len(payload.Data) != 1 || payload.Data[0].Name != sortKey || payload.Data[0].Dimension != dimension {
+				t.Fatalf("dimension=%s sort=%s status=%d body=%s", dimension, sortKey, rec.Code, rec.Body.String())
+			}
+			if sortKey == "outflow" && payload.Data[0].NetInflow != -900 {
+				t.Fatalf("outflow signs changed: %+v", payload.Data)
+			}
+		}
+	}
+	if !slices.Equal(provider.calls, []string{"industry:net", "industry:inflow", "industry:outflow", "theme:net", "theme:inflow", "theme:outflow"}) {
+		t.Fatalf("dimension or direction caches overlap: %v", provider.calls)
+	}
+}
+
+func TestMarketFlowDirectionSortsRejectInvalidQueries(t *testing.T) {
+	server := NewServer(Config{MarketOverview: &fakeMarketOverviewProvider{}})
+	for _, query := range []string{
+		"dimension=industry&sort=invalid", "dimension=theme&sort=invalid", "dimension=stock&sort=invalid",
+		"dimension=invalid&sort=outflow",
+	} {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/market/flows?"+query, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("query=%s status=%d", query, rec.Code)
+		}
+	}
+}
+
 type symbolMarketOverviewProvider struct {
 	fakeMarketOverviewProvider
 	calls   int

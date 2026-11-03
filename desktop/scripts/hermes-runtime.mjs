@@ -53,11 +53,11 @@ export function prepareHermesRuntime({
 			else run('curl', ['-fsSL', '--retry', '4', '--retry-delay', '2', '--retry-all-errors', HERMES_AGENT_SOURCE, '-o', archive], staging);
 			const digest = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
 			if (digest !== HERMES_SOURCE_SHA256) throw new Error('Hermes source archive checksum mismatch');
-			const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+			const listing = spawnSync('tar', ['-tzf', path.basename(archive)], { cwd: staging, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true });
 			if (listing.status !== 0 || listing.stdout.split('\n').filter(Boolean).some((entry) => entry.startsWith('/') || entry.includes('\\') || entry.split('/').includes('..'))) throw new Error('Unsafe Hermes source archive');
 			const sourceRoot = path.join(builtRoot, 'source');
 			fs.mkdirSync(sourceRoot);
-			run('tar', ['-xzf', archive, '-C', sourceRoot, '--strip-components=1'], staging);
+			run('tar', ['-xzf', path.basename(archive), '-C', 'runtime/source', '--strip-components=1'], staging);
 			assertNoExternalSymlinks(sourceRoot);
 			const stamp = { schemaVersion: 2, commit: 'bf0203a794a07aac3ff764972ab9087baa4e4f4e', baseVersion: HERMES_AGENT_VERSION, displayVersion: HERMES_AGENT_VERSION, distance: 0, source: 'build', distribution: 'desktop-app', updateMechanism: 'external', payload: 'bootstrap' };
 			fs.writeFileSync(path.join(sourceRoot, 'install-stamp.json'), JSON.stringify(stamp) + '\n');
@@ -91,7 +91,28 @@ export function prepareHermesRuntime({
 		}
 		return manifest;
 	} finally {
-		fs.rmSync(staging, { recursive: true, force: true });
+		robustRemove(staging);
+	}
+}
+
+export function robustRemove(target) {
+	target = path.resolve(target);
+	if (target === path.parse(target).root) throw new Error('Refusing to remove a filesystem root');
+	const options = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+	try {
+		fs.rmSync(target, options);
+	} catch (error) {
+		if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+		// Clear Windows read-only bits without following directory links.
+		const makeWritable = (entry) => {
+			let stat;
+			try { stat = fs.lstatSync(entry); } catch (cause) { if (cause.code === 'ENOENT') return; throw cause; }
+			if (stat.isSymbolicLink()) return;
+			fs.chmodSync(entry, stat.isDirectory() ? 0o700 : 0o600);
+			if (stat.isDirectory()) for (const child of fs.readdirSync(entry)) makeWritable(path.join(entry, child));
+		};
+		makeWritable(target);
+		fs.rmSync(target, options);
 	}
 }
 
@@ -151,7 +172,7 @@ function vendorRuntimePython(runtimeRoot, platform) {
 	const sourcePython = fs.realpathSync(python);
 	const sourceRoot = path.dirname(path.dirname(sourcePython));
 	const bundledRoot = path.join(runtimeRoot, 'python');
-	fs.rmSync(bundledRoot, { recursive: true, force: true });
+	robustRemove(bundledRoot);
 	fs.cpSync(sourceRoot, bundledRoot, { recursive: true });
 	rewriteCopiedSymlinks(bundledRoot, sourceRoot);
 	fs.rmSync(python, { force: true });
@@ -188,7 +209,7 @@ export function bundleWindowsRuntime(runtimeRoot, sourceRoot) {
 	if (!fs.existsSync(sourceSitePackages)) throw new Error(`Hermes virtual environment site-packages not found: ${sourceSitePackages}`);
 
 	const bundledRoot = path.join(runtimeRoot, 'python');
-	fs.rmSync(bundledRoot, { recursive: true, force: true });
+	robustRemove(bundledRoot);
 	fs.cpSync(sourceRealRoot, bundledRoot, { recursive: true, dereference: true });
 
 	const bundledSitePackages = path.join(bundledRoot, 'Lib', 'site-packages');
@@ -198,7 +219,7 @@ export function bundleWindowsRuntime(runtimeRoot, sourceRoot) {
 	// A Windows venv launcher keeps an absolute `home` path in pyvenv.cfg.
 	// Removing the build-only venv ensures the shipped runtime cannot silently
 	// depend on the GitHub Actions runner's uv-managed Python installation.
-	fs.rmSync(path.join(runtimeRoot, 'venv'), { recursive: true, force: true });
+	robustRemove(path.join(runtimeRoot, 'venv'));
 }
 
 function assertNoExternalSymlinks(runtimeRoot) {
@@ -237,14 +258,14 @@ function materializeSymlinks(runtimeRoot) {
 				return;
 			}
 			const replacement = `${entryPath}.materialized`;
-			fs.rmSync(replacement, { recursive: true, force: true });
+			robustRemove(replacement);
 			if (fs.statSync(target).isDirectory()) {
 				fs.cpSync(target, replacement, { recursive: true });
 			} else {
 				fs.copyFileSync(target, replacement);
 				fs.chmodSync(replacement, fs.statSync(target).mode);
 			}
-			fs.rmSync(entryPath, { recursive: true, force: true });
+			robustRemove(entryPath);
 			fs.renameSync(replacement, entryPath);
 			count += 1;
 		});
@@ -311,7 +332,7 @@ function rewriteCopiedSymlinks(runtimeRoot, sourceRoot) {
 function removePythonCaches(root) {
 	walk(root, (entryPath, entry) => {
 		if (entry?.isDirectory() && entry.name === '__pycache__') {
-			fs.rmSync(entryPath, { recursive: true, force: true });
+			robustRemove(entryPath);
 		} else if (entry?.isFile() && entry.name.endsWith('.pyc')) {
 			fs.rmSync(entryPath, { force: true });
 		}

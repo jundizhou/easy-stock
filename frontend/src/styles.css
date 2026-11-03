@@ -7444,6 +7444,7 @@ a:focus-visible {
 
 .market-filter-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 45px; padding: 8px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #ffffff); }
 .market-filter-bar > label:first-child { display: flex; align-items: center; gap: 8px; min-width: 220px; width: min(420px, 100%); margin-right: auto; padding: 0 8px; border: 1px solid var(--theme-line, #d6dfe8); border-radius: 8px; background: var(--theme-surface-soft, #f9fbfd); color: var(--theme-muted, #8491a1); }
+.market-fund-flow-view > .market-filter-bar > label:first-child { order: 1; margin-right: 0; margin-left: auto; }
 .market-filter-bar input { width: 100%; min-height: 30px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--theme-text, #42556c); font: inherit; font-size: var(--fs-body); }
 .market-filter-bar select,
 .market-filter-bar button,
@@ -7452,6 +7453,14 @@ a:focus-visible {
 .market-filter-bar button { display: inline-flex; align-items: center; gap: 4px; background: var(--theme-blue-soft, #edf5ff); color: var(--theme-blue, #2873c4); cursor: pointer; }
 .market-filter-bar .market-date-control { display: flex; align-items: center; gap: 8px; width: auto; margin: 0; background: var(--theme-surface, #fff); }
 .market-sort-hint { color: var(--theme-subtle, #8a97a6); font-size: var(--fs-desc); white-space: nowrap; }
+.market-flow-direction { position: relative; display: grid; grid-template-columns: repeat(2, 1fr); flex-shrink: 0; width: 156px; padding: 3px; border: 1px solid var(--theme-blue-line, #b8d2ef); border-radius: 8px; background: var(--theme-surface-soft, #f9fbfd); }
+.market-flow-direction-thumb { position: absolute; top: 3px; left: 3px; width: calc((100% - 6px) / 2); height: calc(100% - 6px); border-radius: 5px; background: var(--theme-blue-solid, #2476d2); box-shadow: 0 1px 3px var(--theme-shadow, rgba(30, 52, 78, .14)); transition: transform 160ms ease; pointer-events: none; }
+.market-flow-direction[data-direction='outflow'] .market-flow-direction-thumb { transform: translateX(100%); }
+.market-flow-direction button { position: relative; justify-content: center; min-height: 26px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--theme-muted, #5c6e83); font-size: var(--fs-body); white-space: nowrap; }
+.market-flow-direction button:hover { color: var(--theme-blue, #2476d2); }
+.market-flow-direction button[aria-pressed='true'] { color: var(--theme-on-emphasis, #fff); font-weight: 600; }
+.market-flow-direction button:focus-visible { outline: 2px solid var(--theme-blue, #2873c4); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .market-flow-direction-thumb { transition: none; } }
 .market-date-control input { width: 118px; }
 .market-flow-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .market-flow-summary.market-margin-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -7484,6 +7493,9 @@ a:focus-visible {
 .market-data-table > article:hover::before { background: var(--theme-blue-solid, #4d7fc9); }
 /* 个股行可以右键（加入关注 / AI 分析），给指针形状做提示。 */
 .market-data-table > article[data-stock-row] { cursor: context-menu; }
+.market-data-table.flow.stock > article[role='button'] { cursor: pointer; }
+.market-data-table.flow.stock > article[role='button']:focus-visible { outline: 2px solid var(--theme-blue, #2476d2); outline-offset: -2px; }
+.market-data-table.flow.stock > article { grid-template-columns: repeat(9, minmax(84px, 1fr)); min-width: 1080px; }
 /* 龙虎榜卡片：整卡可右键，悬停时抬一档边框色。 */
 .market-billboard-list > article { transition: border-color .12s ease, background .12s ease; }
 .market-billboard-list > article[data-stock-row] { cursor: context-menu; }

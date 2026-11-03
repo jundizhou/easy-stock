@@ -35,6 +35,7 @@ def run_quiet(real_binary: str, arguments: list[str]) -> subprocess.CompletedPro
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
@@ -84,6 +85,51 @@ def ensure_state_loaded(real_binary: str, arguments: list[str], index: int) -> N
         marker.chmod(0o600)
 
 
+def install_hermes_adapter() -> None:
+    """Bind this app's worker to its wrapper, without changing Hermes on disk.
+
+    Hermes 0.21 discovers via PATH and 0.22 prefers PM. Both route actual local
+    commands through these discovery/argv helpers. Use the worker's own Python
+    so Windows never has to execute a shebang or a shell shim.
+    """
+    from tools import browser_tool as browser
+    from tools import browser_tool_install as discovery
+    from tools import browser_tool_session as session
+
+    wrapper = str(Path(__file__).resolve())
+    if getattr(session, "_easy_stock_wrapper", None) == wrapper:
+        return
+    real_binary = os.environ.get("A_STOCK_AGENT_BROWSER_REAL", "").strip()
+    original_argv = session._agent_browser_argv
+    original_env = browser._build_browser_env
+
+    def find_browser(*, validate: bool = True) -> str:
+        if not real_binary or not Path(wrapper).is_file() or not Path(real_binary).is_file():
+            raise FileNotFoundError("easy-stock agent-browser runtime is unavailable")
+        return wrapper
+
+    def browser_argv(command: str) -> list[str]:
+        if command == wrapper:
+            return [sys.executable, wrapper]
+        return original_argv(command)
+
+    def browser_env() -> dict:
+        env = original_env()
+        # Keep upstream credential scrubbing. Only restore app-owned browser
+        # paths; model credentials are never added back to the child process.
+        env["A_STOCK_AGENT_BROWSER_REAL"] = real_binary
+        state = os.environ.get("AGENT_BROWSER_STATE")
+        if state:
+            env["AGENT_BROWSER_STATE"] = state
+            env.pop("AGENT_BROWSER_PROFILE", None)
+        return env
+
+    discovery._find_agent_browser = find_browser
+    session._agent_browser_argv = browser_argv
+    browser._build_browser_env = browser_env
+    session._easy_stock_wrapper = wrapper
+
+
 def main() -> None:
     real_binary = os.environ.get("A_STOCK_AGENT_BROWSER_REAL", "").strip()
     if not real_binary or not Path(real_binary).is_file():
@@ -93,6 +139,14 @@ def main() -> None:
     index = command_index(arguments)
     if index is not None:
         ensure_state_loaded(real_binary, arguments, index)
+    if os.name == "nt":
+        # execv on Windows does not preserve quoting for spaces/newlines. Keep
+        # the inherited stdio and exit code while subprocess quotes argv.
+        raise SystemExit(subprocess.run(
+            [real_binary, *arguments], creationflags=subprocess.CREATE_NO_WINDOW,
+            stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+            check=False,
+        ).returncode)
     os.execv(real_binary, [real_binary, *arguments])
 
 

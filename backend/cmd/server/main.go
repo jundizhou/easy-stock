@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -223,12 +225,70 @@ func resolveHermesRuntimeRoot() string {
 		candidates = append(candidates,
 			filepath.Join(cwd, "desktop", "resources", "hermes-runtime"),
 			filepath.Join(cwd, "..", "desktop", "resources", "hermes-runtime"),
+			// 开发态的运行时缓存：.runtime/hermes-runtime-<version>。
+			//
+			// 必须排在 desktop/resources 之后：安装包用的是那份，它是正式契约；
+			// 这里是"打包流程没跑，但本地有缓存"时的兜底。
+			// 缺了它，开发机上 runtime 目录一旦被重装/清空，LLM 整条链路直接不可用，
+			// 而症状是"运行时不可用"或"缺 providers 模块"——看起来像代码问题，
+			// 排查成本很高（10-24 实际踩过一次）。
+			latestRuntimeCache(cwd),
+			latestRuntimeCache(filepath.Join(cwd, "..")),
 		)
 	}
 	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		if candidate == "" {
+			continue
+		}
+		// 只认"有 Python 解释器"的目录。
+		//
+		// desktop/resources/hermes-runtime 可能只剩一个空 venv（重装时残留），
+		// 目录存在但跑不起来。按"目录存在就用"会让这种半成品被选中，
+		// 然后报一个与真正原因无关的错。
+		if hasRuntimePython(candidate) {
 			return candidate
 		}
 	}
 	return ""
+}
+
+// latestRuntimeCache 在 base/.runtime 下找版本号最大的 hermes-runtime-*。
+//
+// 按版本号排序而不是按修改时间：修改时间会被任意一次解压/触碰改变，
+// 而目录名里的版本号才是"哪个更新、哪个更完整"的可靠依据。
+func latestRuntimeCache(base string) string {
+	pattern := filepath.Join(base, ".runtime", "hermes-runtime-*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
+	for _, match := range matches {
+		if hasRuntimePython(match) {
+			return match
+		}
+	}
+	return ""
+}
+
+// hasRuntimePython 判断一个运行时目录里是否真的存在可执行的 Python。
+//
+// 判断标准必须与 agent.runtimePythonForOS 完全一致：那边在 Windows 找
+// python/python.exe、在类 Unix 找 venv/bin/python。这里如果放宽到
+// "只要有 venv/Scripts/python.exe 就算"，就会选中一个只剩空 venv 的
+// 半成品目录——它真的能启动 Python，但里面没有 hermes 的依赖，
+// 报出来的错是"缺 providers 模块"，与真正的原因（运行时没准备好）无关。
+func hasRuntimePython(root string) bool {
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	var candidate string
+	if runtime.GOOS == "windows" {
+		candidate = filepath.Join(root, "python", "python.exe")
+	} else {
+		candidate = filepath.Join(root, "venv", "bin", "python")
+	}
+	info, err = os.Stat(candidate)
+	return err == nil && !info.IsDir()
 }

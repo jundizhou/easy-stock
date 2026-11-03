@@ -21,16 +21,21 @@ test('xueqiu profiles use stable isolated partitions and state paths', () => {
   assert.equal(partitionForXueqiuProfile('xueqiu-default'), partitionForXueqiuProfile('xueqiu-default'));
   assert.notEqual(partitionForXueqiuProfile('xueqiu-default'), partitionForXueqiuProfile('xueqiu-second'));
   assert.match(partitionForXueqiuProfile('xueqiu-default'), /^persist:a-stock-ai-xueqiu-/);
-  assert.match(statePathForProfile('/tmp/auth', 'xueqiu-default'), /^\/tmp\/auth\/xueqiu\/[a-f0-9]{32}\.json$/);
+  const statePath = statePathForProfile('/tmp/auth', 'xueqiu-default');
+  assert.equal(path.dirname(statePath), path.join('/tmp/auth', 'xueqiu'));
+  assert.match(path.basename(statePath), /^[a-f0-9]{32}\.json$/);
 });
 
 test('taoguba profiles use a separate persistent partition and source state directory', () => {
   assert.notEqual(partitionForTaogubaProfile('shared-profile'), partitionForXueqiuProfile('shared-profile'));
-  assert.match(statePathForProfile('/tmp/auth', 'taoguba-default', 'taoguba'), /^\/tmp\/auth\/taoguba\/[a-f0-9]{32}\.json$/);
+  const statePath = statePathForProfile('/tmp/auth', 'taoguba-default', 'taoguba');
+  assert.equal(path.dirname(statePath), path.join('/tmp/auth', 'taoguba'));
+  assert.match(path.basename(statePath), /^[a-f0-9]{32}\.json$/);
 });
 
-test('electron cookies are exported as Playwright storage state without exposing them in status', () => {
+test('electron cookies are exported as Playwright storage state without exposing them in status', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'a-stock-browser-auth-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const filePath = statePathForProfile(root, 'xueqiu-default');
   const storageState = {
     cookies: [playwrightCookie({
@@ -47,7 +52,10 @@ test('electron cookies are exported as Playwright storage state without exposing
   writeStorageState(filePath, storageState);
 
   assert.equal(hasLoggedInXueqiuSession(storageState), true);
-  assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), storageState);
+  // Windows reports DOS read/write attributes here, not its actual ACL. Keep
+  // the POSIX permission guarantee on platforms where these bits represent it.
+  if (process.platform !== 'win32') assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
   const status = readBrowserAuthStatus(filePath);
   assert.equal(status.configured, true);
   assert.doesNotMatch(JSON.stringify(status), /xq_is_login|cookie/i);

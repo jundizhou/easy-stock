@@ -372,7 +372,7 @@ function buildRuntimeEnv(resourcesRoot) {
   const bundledRuntime = path.join(resourcesRoot, 'hermes-runtime');
   const packagedBrowserWrapperDir = path.join(resourcesRoot, 'agent-browser');
   const developmentBrowserWrapperDir = path.join(__dirname, 'scripts', 'browser-bin');
-  const browserWrapperDir = fs.existsSync(path.join(packagedBrowserWrapperDir, 'agent-browser'))
+  const browserWrapperDir = ['agent-browser.py', 'agent-browser'].some((name) => fs.existsSync(path.join(packagedBrowserWrapperDir, name)))
     ? packagedBrowserWrapperDir
     : developmentBrowserWrapperDir;
   const packagedBrowserReal = path.join(packagedBrowserWrapperDir, process.platform === 'win32' ? 'agent-browser-real.exe' : 'agent-browser-real');

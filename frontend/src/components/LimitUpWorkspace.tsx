@@ -32,7 +32,7 @@ import {
 	MarketEmotionPoint,
 	requestJSON,
 } from '../lib/backend';
-import { KLineChart } from './KLineChart';
+import { KLINE_PERIODS, type KLinePeriodKey, StockKLineModal } from './StockKLineModal';
 import { LadderThemeEntries, LadderThemeEntry, useLadderThemeAI } from '../lib/ladder-theme-ai';
 import { addMonitorWatch } from '../lib/monitor';
 import { isWatched, subscribeWatchlist } from '../lib/watchlist-registry';
@@ -42,24 +42,6 @@ import { ShortTermProgress } from '../lib/short-term-progress';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type BillboardState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
-
-type KLinePeriodKey = 'intraday' | 'five-day' | 'day' | 'week' | 'month';
-
-type KLinePeriod = {
-	key: KLinePeriodKey;
-	label: string;
-	apiPeriod: string;
-	limit: number;
-	mode: 'intraday' | 'daily';
-};
-
-const KLINE_PERIODS: KLinePeriod[] = [
-	{ key: 'intraday', label: '分时', apiPeriod: '1', limit: 240, mode: 'intraday' },
-	{ key: 'five-day', label: '5日', apiPeriod: '5', limit: 240, mode: 'intraday' },
-	{ key: 'day', label: '日K', apiPeriod: 'day', limit: 120, mode: 'daily' },
-	{ key: 'week', label: '周K', apiPeriod: 'week', limit: 80, mode: 'daily' },
-	{ key: 'month', label: '月K', apiPeriod: 'month', limit: 60, mode: 'daily' },
-];
 
 type Props = {
 	config: BackendConfig | null;
@@ -301,7 +283,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 				<ShieldAlert size={14} />
 				<span>当日及本地已留存交易日的涨停结构、连续板数和逐股炒作题材优先采用开盘啦，5 分钟内复用快照；东方财富只补充尚无开盘啦快照的历史交易日、缺失股票和行情字段。主炒题材仍会剔除本股后检验同题材梯队，并对宽泛标签降权。</span>
 			</footer>
-			{selectedStock && <KLineModal stock={selectedStock} lines={selectedKLines} state={selectedKLineState} error={selectedKLineError} periodKey={selectedKLinePeriod} onPeriodChange={setSelectedKLinePeriod} onClose={() => setSelectedStock(null)} />}
+			{selectedStock && <StockKLineModal stock={selectedStock} contextLabel="连板梯队" description={`${selectedStock.streak}板 · ${selectedStock.primary_theme || selectedStock.industry || '题材待归因'}`} lines={selectedKLines} state={selectedKLineState} error={selectedKLineError} periodKey={selectedKLinePeriod} onPeriodChange={setSelectedKLinePeriod} onClose={() => setSelectedStock(null)} />}
 			{selectedBillboard && <BillboardModal stock={selectedBillboard.stock} tradeDate={selectedBillboard.tradeDate} item={billboardItem} detail={billboardDetail} state={billboardState} error={billboardError} onClose={() => setSelectedBillboard(null)} />}
 		</section>
 	);
@@ -612,44 +594,6 @@ function BillboardStat({ label, value, tone }: { label: string; value: string; t
 function BillboardSeatPanel({ title, prefix, seats }: { title: string; prefix: '买' | '卖'; seats: MarketBillboardSeat[] }) {
 	const seatByRank = new Map(seats.map((seat) => [seat.rank, seat]));
 	return <section className={`billboard-seat-panel ${prefix === '买' ? 'buy' : 'sell'}`}><header><strong>{title}</strong><span>{prefix === '买' ? '按买入额排名' : '按卖出额排名'}</span></header><div className="billboard-seat-head"><span>排名 / 席位</span><span>买入</span><span>卖出</span><span>净额</span></div>{Array.from({ length: 5 }, (_, index) => { const rank = index + 1; const seat = seatByRank.get(rank); const label = seat ? classifyBillboardSeat(seat) : null; return <article key={rank}><span className="billboard-seat-name"><i>{prefix}{rank}</i><span><strong title={seat?.name || '数据源未提供'}>{seat?.name || '数据源未提供'}</strong>{label && <small className={`billboard-seat-label ${label.kind}`} title={label.note}>{label.label}</small>}</span></span><span>{seat ? formatMoney(seat.buy_amount) : '--'}</span><span>{seat ? formatMoney(seat.sell_amount) : '--'}</span><strong className={seat ? (seat.net_amount >= 0 ? 'up' : 'down') : ''}>{seat ? formatMoney(seat.net_amount) : '--'}</strong></article>; })}</section>;
-}
-
-function KLineModal({ stock, lines, state, error, periodKey, onPeriodChange, onClose }: { stock: LimitUpLadderStock; lines: KLine[]; state: LoadState; error: string; periodKey: KLinePeriodKey; onPeriodChange: (period: KLinePeriodKey) => void; onClose: () => void }) {
-	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-		window.addEventListener('keydown', onKeyDown);
-		return () => window.removeEventListener('keydown', onKeyDown);
-	}, [onClose]);
-	const latest = lines.length ? [...lines].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()).at(-1) : null;
-	const activePeriod = KLINE_PERIODS.find((item) => item.key === periodKey) || KLINE_PERIODS[2];
-	const periodRangeLabel = activePeriod.mode === 'intraday' ? `${activePeriod.label} · ${lines.length} 个数据点` : `${lines.length} 根${activePeriod.label}`;
-	return (
-		<div className="kline-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-			<section className="kline-modal" role="dialog" aria-modal="true" aria-label={`${stock.name} K线`}>
-				<header className="kline-modal-header">
-					<div><span>连板梯队 · {activePeriod.label}</span><h2>{stock.name}<small>{stock.symbol}</small></h2><p>{stock.streak}板 · {stock.primary_theme || stock.industry || '题材待归因'}</p></div>
-					<button type="button" className="kline-modal-close" onClick={onClose} aria-label="关闭 K 线弹窗"><X size={19} /></button>
-				</header>
-				<div className="kline-period-tabs" role="tablist" aria-label="K线周期">
-					{KLINE_PERIODS.map((period) => <button key={period.key} type="button" role="tab" aria-selected={period.key === periodKey} className={period.key === periodKey ? 'active' : ''} onClick={() => onPeriodChange(period.key)}>{period.label}</button>)}
-				</div>
-				<div className="kline-modal-quote">
-					<div><span>最新</span><strong>{latest?.close?.toFixed(2) || stock.price?.toFixed(2) || '--'}</strong></div>
-					<div><span>涨跌幅</span><strong className={(latest?.change_percent ?? stock.change_percent) >= 0 ? 'up' : 'down'}>{formatSignedPercent(latest?.change_percent ?? stock.change_percent)}</strong></div>
-					<div><span>开盘</span><strong>{latest?.open?.toFixed(2) || '--'}</strong></div>
-					<div><span>最高</span><strong className="up">{latest?.high?.toFixed(2) || '--'}</strong></div>
-					<div><span>最低</span><strong className="down">{latest?.low?.toFixed(2) || '--'}</strong></div>
-					<div><span>成交量</span><strong>{latest ? formatMoney(latest.volume) : '--'}</strong></div>
-					<div><span>成交额</span><strong>{latest?.amount ? formatMoney(latest.amount) : '--'}</strong></div>
-					<div><span>换手率</span><strong>{latest?.turnover_rate != null ? `${latest.turnover_rate.toFixed(2)}%` : '--'}</strong></div>
-				</div>
-				<div className="kline-period-summary"><span>{periodRangeLabel}</span><span>前复权行情</span></div>
-				{state === 'error' && <div className="kline-modal-error"><ShieldAlert size={17} /><span>{error || `${activePeriod.label}数据加载失败`}</span></div>}
-				<KLineChart lines={lines} symbol={stock.symbol} state={state} mode={activePeriod.mode} periodLabel={activePeriod.label} />
-				<footer className="kline-modal-footer">鼠标悬浮图表可查看行情细节；数据源：东方财富 / 新浪，结果仅供研究参考。</footer>
-			</section>
-		</div>
-	);
 }
 
 function summarizeVisibleDay(day: LimitUpLadderDay | undefined, showST: boolean) {

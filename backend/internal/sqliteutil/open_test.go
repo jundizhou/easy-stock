@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -22,7 +23,14 @@ func testDB(t *testing.T, path string) *sql.DB {
 	return db
 }
 func TestWALReaderDoesNotBlockWriterAndSettingsSurviveReconnect(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "review #1?测试.db")
+	// 用例本意是"路径含空格、井号、中文等特殊字符时仍能正常工作"。
+	// Windows 的文件名不允许 '?'（Win32 直接拒绝创建），
+	// 保留它会变成在测文件系统而不是在测 WAL 语义，故在 Windows 上去掉该字符。
+	name := "review #1?测试.db"
+	if runtime.GOOS == "windows" {
+		name = "review #1测试.db"
+	}
+	path := filepath.Join(t.TempDir(), name)
 	writer := testDB(t, path)
 	if _, err := writer.Exec(`CREATE TABLE reports (id INTEGER PRIMARY KEY, content TEXT); INSERT INTO reports VALUES(1,'before')`); err != nil {
 		t.Fatal(err)

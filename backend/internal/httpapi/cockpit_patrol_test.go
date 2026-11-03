@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"easy-stock/backend/internal/appsettings"
 	"easy-stock/backend/internal/cockpit"
 	"easy-stock/backend/internal/foundation"
 )
@@ -121,10 +123,11 @@ func TestCockpitAutoPatrolIntervalEndpoint(t *testing.T) {
 }
 
 func TestCockpitIndexQuotesSplitByMarket(t *testing.T) {
+	quoteTime := time.Date(2026, 10, 27, 8, 0, 0, 0, time.UTC)
 	items := []foundation.MarketIndexSnapshot{
 		{Name: "上证指数", Market: "CN"},
 		{Name: "恒生指数", Market: "HK"},
-		{Name: "道琼斯", Code: ".DJI", Market: "US"},
+		{Name: "道琼斯", Code: ".DJI", Market: "US", Status: "closed", TradeTime: quoteTime, Price: 12345, ChangePercent: -1.25},
 		{Name: "富时100", Code: "UKX", Market: "UK"},
 		{Name: "德国DAX30", Code: "GDAXI", Market: "DE"},
 		{Name: "法国CAC40", Code: "FCHI", Market: "FR"},
@@ -136,6 +139,9 @@ func TestCockpitIndexQuotesSplitByMarket(t *testing.T) {
 	}
 	if len(overseas) != 2 || overseas[0].Name != "恒生指数" || overseas[1].Name != "道琼斯" {
 		t.Fatalf("overseas = %+v", overseas)
+	}
+	if overseas[1].Market != "US" || overseas[1].Status != "closed" || overseas[1].TradeTime != "2026-10-27 16:00" || overseas[1].Price != 12345 || overseas[1].ChangePercent != -1.25 {
+		t.Fatalf("overseas quote provenance or values changed: %+v", overseas[1])
 	}
 }
 
@@ -354,5 +360,263 @@ func TestCockpitTemperatureFallbackExpiryBypassesLiveFactsCache(t *testing.T) {
 		if (result.Data.Facts.Temperature == nil) != expired {
 			t.Fatalf("expired=%v, live cache must respect fallback deadline: %s", expired, recorder.Body.String())
 		}
+	}
+}
+
+func TestCockpitBriefReadsRevalidateHistoricalNarrativesWithoutChangingStore(t *testing.T) {
+	at := time.Date(2026, 10, 28, 11, 10, 0, 0, foundation.AStockLocation)
+	makeBrief := func(id string, started time.Time, temperature float64) cockpit.Brief {
+		return cockpit.Brief{
+			ID: id, Phase: cockpit.PhaseIntraday, SessionDate: "2026-10-28", Status: "ready",
+			NarrativeStatus: "ready", StartedAt: started,
+			Facts: cockpit.Facts{Temperature: &cockpit.Temperature{Value: temperature, UpPercent: 70.47468977742761}},
+		}
+	}
+	prior := makeBrief("prior", at.Add(-30*time.Minute), 71.65396185034605)
+	older := makeBrief("older", at.Add(-time.Hour), 90.12)
+	future := makeBrief("future", at.Add(time.Hour), 93.21)
+	failed := makeBrief("failed", at.Add(-time.Minute), 88.12)
+	failed.Status = "failed"
+	otherPhase := makeBrief("pre-open", at.Add(-2*time.Minute), 77.12)
+	otherPhase.Phase = cockpit.PhasePreOpen
+	otherDate := makeBrief("other-date", at.Add(-3*time.Minute), 76.12)
+	otherDate.SessionDate = "2026-10-27"
+	history := []cockpit.Brief{prior, older, future, failed, otherPhase, otherDate}
+
+	for _, tc := range []struct {
+		name        string
+		narrative   string
+		missing     bool
+		stale       bool
+		preOpen     bool
+		unavailable bool
+		original    []string
+		want        []string
+	}{
+		{name: "missing current temperature cannot reuse earlier cache", missing: true,
+			narrative: "数据缺口：市场温度刷新失败，目前沿用缓存快照（71.654 度、上涨占比 70.4747%）。", want: []string{"71.654", "70.4747%"}},
+		{name: "explicit comparison uses the nearest earlier record outside the result page",
+			narrative: "市场状态：本次市场温度 81.35 度。\n较上次变化：上次市场温度 71.654 度。"},
+		{name: "future record cannot validate historical comparison", narrative: "较上次变化：上次市场温度 93.21 度。", want: []string{"93.21"}},
+		{name: "older record cannot replace actual predecessor", narrative: "较上次变化：上次市场温度 90.12 度。", want: []string{"90.12"}},
+		{name: "failed record is not a predecessor", narrative: "较上次变化：上次市场温度 88.12 度。", want: []string{"88.12"}},
+		{name: "another phase is not a predecessor", narrative: "较上次变化：上次市场温度 77.12 度。", want: []string{"77.12"}},
+		{name: "another session is not a predecessor", narrative: "较上次变化：上次市场温度 76.12 度。", want: []string{"76.12"}},
+		{name: "pre-open does not acquire an intraday comparison", preOpen: true, narrative: "上次市场温度 71.654 度。", want: []string{"71.654"}},
+		{name: "valid cache saved with current facts stays verifiable", stale: true, narrative: "数据缺口：本次市场温度 81.35 度，刷新失败但使用有效缓存。"},
+		{name: "preserves original flags without duplicates or shared slice writes", missing: true,
+			original: []string{"71.654", "legacy-check"}, narrative: "数据缺口：目前沿用缓存 71.654 度、上涨占比 70.4747%。", want: []string{"71.654", "legacy-check", "70.4747%"}},
+		{name: "corrects saved neutral baseline false positive only",
+			original: []string{"50", "legacy-check"}, narrative: "温度读数是本地统计，50 度为中性，本次温度 81.35 度。若温度回落至 50 度中性以下，则转弱。", want: []string{"legacy-check"}},
+		{name: "neutral definition cannot clear a saved false current reading", missing: true,
+			original: []string{"50"}, narrative: "50 度为中性。当前市场温度 50 度。", want: []string{"50"}},
+		{name: "corrected baseline still reports new unsupported numbers",
+			original: []string{"50"}, narrative: "50 度为中性。当前市场温度 99.99 度。", want: []string{"99.99"}},
+		{name: "corrects saved scale false positive only",
+			original: []string{"100", "legacy-check"}, narrative: "市场温度本次读数 81.35（0–100 度，50 度为中性）。", want: []string{"legacy-check"}},
+		{name: "corrects saved pre-open scale false positive", preOpen: true,
+			original: []string{"100"}, narrative: "市场温度本次读数 81.35（0–100 度，50 度为中性）。"},
+		{name: "fixed scale does not require a current reading", missing: true,
+			original: []string{"100"}, narrative: "市场温度量程为 0–100 度，50 度为中性。"},
+		{name: "scale cannot clear a saved unsupported reading",
+			original: []string{"100"}, narrative: "市场温度量程为 0–100 度，当前读数 100 度。", want: []string{"100"}},
+		{name: "scale cannot clear an earlier unsupported reading",
+			original: []string{"100"}, narrative: "当前市场温度 100 度，市场温度量程为 0–100 度。", want: []string{"100"}},
+		{name: "scale cannot clear a saved unrelated reading",
+			original: []string{"100"}, narrative: "市场温度 81.35 度。设备温度为 0–100 度。", want: []string{"100"}},
+		{name: "corrected scale still reports new unsupported numbers",
+			original: []string{"100"}, narrative: "市场温度量程为 0–100 度，当前读数 99.99 度。", want: []string{"99.99"}},
+		{name: "corrects a saved decimal scale endpoint",
+			original: []string{"100.0"}, narrative: "市场温度量程为 0–100.0 度，本次 81.35 度。"},
+		{name: "corrects ASCII scale separator mistaken for a sign",
+			original: []string{"-100"}, narrative: "市场温度量程为 0-100 度，本次 81.35 度。"},
+		{name: "unfinished narrative retains its existing status", missing: true, unavailable: true, narrative: "温度 99.99 度。"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storePath := filepath.Join(t.TempDir(), "briefs.json")
+			store, err := cockpit.OpenStore(storePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, brief := range history {
+				if err := store.Put(brief); err != nil {
+					t.Fatal(err)
+				}
+			}
+			current := makeBrief("selected", at, 81.35)
+			current.Narrative = tc.narrative
+			current.UnverifiedNumbers = append(make([]string, 0, 8), tc.original...)
+			if tc.missing {
+				current.Facts.Temperature = nil
+			} else if tc.stale {
+				current.Facts.Temperature.Stale = true
+				current.Facts.Temperature.FetchedAt = at.Add(-time.Minute).Format(time.RFC3339)
+			}
+			if tc.preOpen {
+				current.Phase = cockpit.PhasePreOpen
+			}
+			if tc.unavailable {
+				current.NarrativeStatus = "unavailable"
+			}
+			if err := store.Put(current); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(storePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings, err := appsettings.Open(filepath.Join(t.TempDir(), "settings.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &Server{cockpit: cockpit.NewService(store, cockpit.Feed{}, nil, nil, settings)}
+			for _, single := range []bool{false, true} {
+				response := httptest.NewRecorder()
+				request := httptest.NewRequest(http.MethodGet, "/api/v1/cockpit/briefs?limit=1", nil)
+				if single {
+					request.SetPathValue("id", current.ID)
+					server.cockpitBrief(response, request)
+				} else {
+					server.cockpitBriefs(response, request)
+				}
+				if response.Code != http.StatusOK {
+					t.Fatalf("single=%v: %s", single, response.Body.String())
+				}
+				var payload struct {
+					Data json.RawMessage `json:"data"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+					t.Fatal(err)
+				}
+				var got cockpit.Brief
+				if single {
+					err = json.Unmarshal(payload.Data, &got)
+				} else {
+					var list []cockpit.Brief
+					err = json.Unmarshal(payload.Data, &list)
+					if len(list) != 1 {
+						t.Fatalf("limit=1 returned %d records", len(list))
+					}
+					got = list[0]
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.ID != current.ID || !slices.Equal(got.UnverifiedNumbers, tc.want) {
+					t.Fatalf("single=%v: id=%s numbers=%v want=%v", single, got.ID, got.UnverifiedNumbers, tc.want)
+				}
+				if got.Narrative != current.Narrative || got.NarrativeStatus != current.NarrativeStatus {
+					t.Fatal("read rewrote the saved narrative or generation status")
+				}
+				gotFacts, _ := json.Marshal(got.Facts)
+				wantFacts, _ := json.Marshal(current.Facts)
+				if string(gotFacts) != string(wantFacts) {
+					t.Fatal("read changed the collected facts")
+				}
+			}
+			after, err := os.ReadFile(storePath)
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("read changed stored history: %v", err)
+			}
+			stored, _ := store.Get(current.ID)
+			if !slices.Equal(stored.UnverifiedNumbers, tc.original) || !slices.Equal(current.UnverifiedNumbers[:cap(current.UnverifiedNumbers)][len(tc.original):], make([]string, cap(current.UnverifiedNumbers)-len(tc.original))) {
+				t.Fatal("read mutated the in-memory store or its shared slice")
+			}
+		})
+	}
+}
+
+type cockpitIndustryFlowFixture struct {
+	fakeSectorFlowProvider
+	items     []foundation.SectorFlowRank
+	err       error
+	dimension string
+	limit     int
+}
+
+func (f *cockpitIndustryFlowFixture) SectorFlowRanking(_ context.Context, dimension string, limit int) ([]foundation.SectorFlowRank, foundation.SourceMeta, error) {
+	f.dimension, f.limit = dimension, limit
+	return f.items, foundation.SourceMeta{Source: "test:main-fund-flow"}, f.err
+}
+
+func (f *cockpitIndustryFlowFixture) MarketFundFlows(context.Context, string, string, int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error) {
+	return nil, foundation.SourceMeta{}, errors.New("must not mix total fund flow with main fund flow")
+}
+
+func TestCockpitIndustryFlowKeepsBothEndsOfMainFundRanking(t *testing.T) {
+	// More than 200 positive boards must not exclude the negative tail.
+	provider := &cockpitIndustryFlowFixture{}
+	for i := range 212 {
+		provider.items = append(provider.items, foundation.SectorFlowRank{Name: "测试流入", MainNetInflow: float64(300-i) * 1e6, ChangePercent: 1.25})
+	}
+	provider.items = append(provider.items,
+		foundation.SectorFlowRank{Name: "测试流出甲", MainNetInflow: -400e6, ChangePercent: -0.5},
+		foundation.SectorFlowRank{Name: "测试流出乙", MainNetInflow: -900e6, ChangePercent: -1.5},
+	)
+	server := &Server{marketOverview: provider}
+	items, err := server.cockpitFeed().Industry(context.Background())
+	if err != nil || provider.dimension != "industry" || provider.limit != 600 || len(items) != 214 {
+		t.Fatalf("industry feed lost the full main-fund ranking: count=%d dimension=%s limit=%d err=%v", len(items), provider.dimension, provider.limit, err)
+	}
+	board := cockpit.BuildFlowBoard(items, 8)
+	if board == nil || len(board.Inflow) != 8 || len(board.Outflow) != 2 {
+		t.Fatalf("both flow directions must remain available: %+v", board)
+	}
+	if board.Inflow[0].NetInflow != 300e6 || board.Outflow[0].Name != "测试流出乙" || board.Outflow[0].NetInflow != -900e6 || board.Outflow[0].ChangePercent != -1.5 {
+		t.Fatalf("main-fund values, signs, or ranking changed: %+v", board)
+	}
+	provider.items = provider.items[:212]
+	items, err = server.cockpitFeed().Industry(context.Background())
+	board = cockpit.BuildFlowBoard(items, 8)
+	if err != nil || board == nil || len(board.Outflow) != 0 {
+		t.Fatalf("an all-positive source must not fabricate outflows: %+v, %v", board, err)
+	}
+}
+
+func TestCockpitIndustryFlowFailureDoesNotMixSources(t *testing.T) {
+	provider := &cockpitIndustryFlowFixture{err: errors.New("main-fund source unavailable")}
+	server := &Server{marketOverview: provider}
+	items, err := server.cockpitFeed().Industry(context.Background())
+	if items != nil || !errors.Is(err, provider.err) {
+		t.Fatalf("source failure must stay explicit: %+v, %v", items, err)
+	}
+}
+
+type cockpitNewsFixture struct {
+	items []foundation.NewsItem
+	err   error
+	limit int
+}
+
+func (f *cockpitNewsFixture) LatestNews(_ context.Context, limit int) ([]foundation.NewsItem, error) {
+	f.limit = limit
+	return f.items, f.err
+}
+
+func TestCockpitNewsFeedPreservesOriginalEvidenceAndLocalPublishDate(t *testing.T) {
+	provider := &cockpitNewsFixture{items: []foundation.NewsItem{
+		{Title: "测试事件", Content: "测试新闻原文", PublishedAt: time.Date(2026, 10, 27, 23, 40, 0, 0, time.UTC), URL: "https://example.invalid/news/1", Tags: []string{"测试题材"}, Meta: foundation.SourceMeta{Source: "test:news"}},
+		{Title: "日期未知的测试新闻"},
+	}}
+	server := &Server{newsProvider: provider}
+	lines, err := server.cockpitFeed().News(context.Background())
+	if err != nil || len(lines) != 2 || provider.limit != 50 {
+		t.Fatalf("news feed failed or fabricated coverage: %+v, %v, limit %d", lines, err, provider.limit)
+	}
+	first := lines[0]
+	if first.PublishedAt != "07:40" || first.PublishedDate != "2026-10-28" || first.Content != provider.items[0].Content || first.Source != "test:news" || first.URL != provider.items[0].URL || first.Tags[0] != "测试题材" {
+		t.Fatalf("news provenance lost: %+v", first)
+	}
+	if lines[1].PublishedAt != "" || lines[1].PublishedDate != "" || lines[1].Source != "" || lines[1].Content != "" {
+		t.Fatalf("unknown news provenance must stay unknown: %+v", lines[1])
+	}
+	first.Tags[0] = "consumer edit"
+	if provider.items[0].Tags[0] != "测试题材" {
+		t.Fatal("news conversion must not mutate provider tags")
+	}
+	provider.err = errors.New("news unavailable")
+	lines, err = server.cockpitFeed().News(context.Background())
+	if !errors.Is(err, provider.err) || lines != nil {
+		t.Fatalf("source failures must remain explicit: %+v, %v", lines, err)
 	}
 }

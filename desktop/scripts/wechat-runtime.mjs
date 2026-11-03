@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { hermesRuntimePython } from './hermes-runtime.mjs';
+import { hermesRuntimePython, robustRemove } from './hermes-runtime.mjs';
 
 export const WECHAT_DOWNLOAD_API_REVISION = process.env.WECHAT_DOWNLOAD_API_REVISION || '043c2f9828401220a00b7b125686b334581745e0';
 export const WECHAT_DOWNLOAD_API_REPOSITORY = 'https://github.com/tmwgsicp/wechat-download-api';
@@ -24,7 +24,7 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 	const resolvedResourcesRoot = path.resolve(resourcesRoot);
 	const resolvedRuntimeRoot = path.resolve(runtimeRoot);
 	const targetRoot = path.join(resolvedResourcesRoot, 'wechat-download-api');
-	fs.rmSync(targetRoot, { recursive: true, force: true });
+	robustRemove(targetRoot);
 
 	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'a-stock-wechat-source-'));
 	try {
@@ -32,7 +32,7 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 		if (!fs.existsSync(path.join(resolvedSource, 'app.py'))) throw new Error(`wechat-download-api source is incomplete: ${resolvedSource}`);
 		fs.cpSync(resolvedSource, targetRoot, { recursive: true });
 	} finally {
-		fs.rmSync(tempRoot, { recursive: true, force: true });
+		robustRemove(tempRoot);
 	}
 
 	const manifest = {
@@ -87,7 +87,7 @@ function downloadSource(tempRoot) {
 	const archiveURL = `${WECHAT_DOWNLOAD_API_REPOSITORY}/archive/${WECHAT_DOWNLOAD_API_REVISION}.tar.gz`;
 	const archivePath = path.join(tempRoot, 'source.tar.gz');
 	run('curl', ['-fsSL', '--retry', '4', '--retry-delay', '2', '--retry-all-errors', '--connect-timeout', '20', archiveURL, '-o', archivePath], tempRoot);
-	run('tar', ['-xzf', archivePath, '-C', tempRoot], tempRoot);
+	run('tar', ['-xzf', path.basename(archivePath), '-C', '.'], tempRoot);
 	const extracted = fs.readdirSync(tempRoot, { withFileTypes: true })
 		.find((entry) => entry.isDirectory() && entry.name.startsWith('wechat-download-api-'));
 	if (!extracted) throw new Error('Unable to locate extracted wechat-download-api source');

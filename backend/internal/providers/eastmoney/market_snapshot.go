@@ -61,28 +61,29 @@ func (c *Client) MarketSnapshot(ctx context.Context) ([]foundation.MarketSnapsho
 		}
 	}
 
-	// 剩余页 6 路并发：单页 ~40KB，串行 60 页要十几秒，引擎缓存只有 10 秒。
+	// 固定 6 个 worker 连续取页：慢页只占一路，不阻塞其他 worker 取下一页。
 	stale := false
 	var staleReason string
 	results := make([][]foundation.MarketSnapshotRow, lastPage)
 	errs := make([]error, lastPage)
-	for batchStart := 2; batchStart <= lastPage; batchStart += marketSnapshotWorkers {
-		batchEnd := batchStart + marketSnapshotWorkers - 1
-		if batchEnd > lastPage {
-			batchEnd = lastPage
-		}
-		var wg sync.WaitGroup
-		for pageNo := batchStart; pageNo <= batchEnd; pageNo++ {
-			wg.Add(1)
-			go func(pageNo int) {
-				defer wg.Done()
+	pages := make(chan int, lastPage)
+	for pageNo := 2; pageNo <= lastPage; pageNo++ {
+		pages <- pageNo
+	}
+	close(pages)
+	var wg sync.WaitGroup
+	for worker := 0; worker < marketSnapshotWorkers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pageNo := range pages {
 				pageRows, _, _, pageErr := c.snapshotPage(ctx, pageNo)
 				results[pageNo-1] = pageRows
 				errs[pageNo-1] = pageErr
-			}(pageNo)
-		}
-		wg.Wait()
+			}
+		}()
 	}
+	wg.Wait()
 	for pageNo := 2; pageNo <= lastPage; pageNo++ {
 		if errs[pageNo-1] != nil {
 			// 少几页只损覆盖面，不值得让整轮扫描作废；
@@ -128,6 +129,9 @@ func (c *Client) MarketSnapshot(ctx context.Context) ([]foundation.MarketSnapsho
 
 // snapshotPage 取一页快照。返回值依次为：行、上游 total、请求 URL、错误。
 func (c *Client) snapshotPage(ctx context.Context, page int) ([]foundation.MarketSnapshotRow, int, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, "", err
+	}
 	endpoint := c.quoteBaseURL + "/api/qt/clist/get"
 	params := standardListParams(marketSnapshotPageSize)
 	params.Set("pn", strconv.Itoa(page))

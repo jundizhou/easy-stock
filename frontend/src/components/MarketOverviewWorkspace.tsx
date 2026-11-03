@@ -22,7 +22,7 @@ import {
 	TrendingUp,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sourceHealthSummary } from '../lib/source-health';
 import type {
 	BackendConfig,
@@ -115,6 +115,10 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	const [seriesLoading, setSeriesLoading] = useState(false);
 	const [industries, setIndustries] = useState<MarketIndustryMomentum[]>([]);
 	const [flows, setFlows] = useState<MarketFundFlow[]>([]);
+	const [flowDirections, setFlowDirections] = useState<Record<'industry' | 'theme' | 'stock', 'inflow' | 'outflow'>>({ industry: 'inflow', theme: 'inflow', stock: 'inflow' });
+	const flowRequestID = useRef(0);
+	const flowDirection = isFlowView(activeView) ? flowDirections[flowDimension(activeView)] : 'inflow';
+	const flowSort = isFlowView(activeView) ? flowDirection : 'net';
 	const [margins, setMargins] = useState<MarketMarginPoint[]>([]);
 	const [marginLimit, setMarginLimit] = useState(120);
 	const [futuresPosition, setFuturesPosition] = useState<MarketFuturesPositionSeries | null>(null);
@@ -167,9 +171,14 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	}, [config]);
 
 	const loadModule = useCallback(async () => {
+		const requestID = ++flowRequestID.current;
 		if (!config || activeView === 'pulse' || activeView === 'sector-flow' || activeView === 'theme-library') return;
 		setModuleState('loading');
 		setModuleError('');
+		if (isFlowView(activeView)) {
+			setFlows([]);
+			setModuleMeta(null);
+		}
 		try {
 			if (activeView === 'core-indexes') {
 				const payload = await requestJSON<{ data: MarketIndexSnapshot[]; meta: SourceMeta }>(config, '/api/v1/market/indexes?scope=core');
@@ -182,8 +191,10 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				setModuleMeta(payload.meta);
 			} else if (isFlowView(activeView)) {
 				const dimension = flowDimension(activeView);
-				const payload = await requestJSON<{ data: MarketFundFlow[]; meta: SourceMeta }>(config, `/api/v1/market/flows?dimension=${dimension}&sort=net&limit=100`);
-				setFlows(payload.data);
+				const payload = await requestJSON<{ data: MarketFundFlow[]; meta: SourceMeta }>(config, `/api/v1/market/flows?dimension=${dimension}&sort=${flowSort}&limit=100`);
+				if (requestID !== flowRequestID.current) return;
+				const netField = !payload.meta.available_fields?.length || payload.meta.available_fields.includes('net_inflow') ? 'net_inflow' : 'main_net_inflow';
+				setFlows(payload.data.filter((item) => flowSort === 'outflow' ? item[netField] < 0 : item[netField] > 0));
 				setModuleMeta(payload.meta);
 			} else if (activeView === 'margin-balance') {
 				const payload = await requestJSON<{ data: MarketMarginPoint[]; meta: SourceMeta }>(config, `/api/v1/market/margin-balance?limit=${marginLimit}`);
@@ -232,10 +243,21 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 			setLastUpdated(new Date().toISOString());
 			setModuleState('ready');
 		} catch (error) {
+			if (isFlowView(activeView) && requestID !== flowRequestID.current) return;
 			setModuleError(errorMessage(error, `${activeModule.name}加载失败`));
 			setModuleState('error');
 		}
-	}, [activeModule.name, activeView, announcementCategory, config, futuresVariety, marginLimit, submittedQuery, tradeDate]);
+	}, [activeModule.name, activeView, announcementCategory, config, flowSort, futuresVariety, marginLimit, submittedQuery, tradeDate]);
+
+	const changeFlowDirection = (direction: 'inflow' | 'outflow') => {
+		if (!isFlowView(activeView) || direction === flowDirection) return;
+		const dimension = flowDimension(activeView);
+		flowRequestID.current++;
+		setFlows([]);
+		setModuleMeta(null);
+		setModuleState('loading');
+		setFlowDirections((current) => ({ ...current, [dimension]: direction }));
+	};
 
 	const requestBillboardDetail = useCallback(async (item: MarketBillboardItem) => {
 		if (!config) throw new Error('后端尚未连接');
@@ -276,6 +298,7 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 	useEffect(() => {
 		if (activeView === 'pulse') void loadPulse();
 		else void loadModule();
+		return () => { flowRequestID.current++; };
 	}, [activeView, loadModule, loadPulse, refreshKey]);
 
 	useEffect(() => {
@@ -404,10 +427,10 @@ export function MarketOverviewWorkspace({ config, refreshKey, onAskAI }: Props) 
 				<div>{activeView !== 'sector-flow' && activeView !== 'theme-library' && <button type="button" className="market-ai-button" onClick={() => void askAI()} disabled={!hasEvidence || aiPreparing}>{aiPreparing ? <LoaderCircle className="spin" size={16} /> : <Bot size={16} />}{aiPreparing ? '正在聚合席位与连板证据' : '交给 AI 解读'}</button>}<button type="button" className="market-refresh-button" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}刷新</button></div>
 			</header>
 
-			{activeView === 'sector-flow' ? <SectorFlowWorkspace config={config} refreshKey={refreshKey + sectorFlowRefreshKey} onAskAI={onAskAI} /> : activeView === 'theme-library' ? <ThemeLibraryWorkspace config={config} refreshKey={refreshKey + themeLibraryRefreshKey} /> : activeView === 'pulse' ? <PulseView news={news} themes={themes} themeMeta={themeMeta} sources={sources} state={pulseState} error={pulseError} lastUpdated={lastUpdated} /> : <ModuleState state={moduleState} error={moduleError}>
+			{activeView === 'sector-flow' ? <SectorFlowWorkspace config={config} refreshKey={refreshKey + sectorFlowRefreshKey} onAskAI={onAskAI} /> : activeView === 'theme-library' ? <ThemeLibraryWorkspace config={config} refreshKey={refreshKey + themeLibraryRefreshKey} /> : activeView === 'pulse' ? <PulseView news={news} themes={themes} themeMeta={themeMeta} sources={sources} state={pulseState} error={pulseError} lastUpdated={lastUpdated} /> : <ModuleState state={isFlowView(activeView) ? 'ready' : moduleState} error={moduleError}>
 				{activeView === 'core-indexes' && <CoreIndexView indexes={indexes} selectedID={selectedIndexID} onSelect={setSelectedIndexID} series={indexSeries} seriesLoading={seriesLoading} meta={moduleMeta} />}
 				{activeView === 'industry-momentum' && <IndustryMomentumView items={industries} meta={moduleMeta} />}
-				{isFlowView(activeView) && <FundFlowView key={activeView} items={flows} dimension={flowDimension(activeView)} meta={moduleMeta} />}
+				{isFlowView(activeView) && <FundFlowView key={activeView} config={config} items={flows} dimension={flowDimension(activeView)} meta={moduleMeta} direction={flowDirection} onDirectionChange={changeFlowDirection} state={moduleState} error={moduleError} />}
 				{activeView === 'margin-balance' && <MarginBalanceView items={margins} limit={marginLimit} onLimit={setMarginLimit} meta={moduleMeta} />}
 				{activeView === 'futures-position' && <FuturesPositionView series={futuresPosition} members={futuresMembers} consensus={futuresConsensus} variety={futuresVariety} onVariety={setFuturesVariety} meta={moduleMeta} />}
 				{activeView === 'billboard' && <BillboardView items={billboard} tradeDate={tradeDate} onTradeDate={setTradeDate} meta={moduleMeta} details={billboardDetails} onLoadDetail={loadBillboardDetail} />}
