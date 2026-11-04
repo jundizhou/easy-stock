@@ -96,6 +96,10 @@ func DueSlot(now time.Time, intervalMinutes int) (Slot, bool) {
 			return Slot{Key: "pre", Phase: PhasePreOpen, SessionDate: state.SessionDate, Label: "盘前巡查"}, true
 		}
 	case PhaseIntraday:
+		// Do not catch up a morning slot during lunch or before the afternoon schedule begins.
+		if !(minutes >= 9*60+40 && minutes < 11*60+30 || minutes >= 13*60+10 && minutes < 15*60) {
+			return Slot{}, false
+		}
 		due := -1
 		for _, slot := range intradaySlots(intervalMinutes) {
 			if minutes >= slot {

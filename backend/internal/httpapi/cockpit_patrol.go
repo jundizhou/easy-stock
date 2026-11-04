@@ -143,6 +143,23 @@ func (s *Server) cockpitFeed() cockpit.Feed {
 		}
 	}
 	if s.marketOverview != nil {
+		feed.Billboard = func(ctx context.Context) (*cockpit.BillboardView, error) {
+			// Match the market overview's default date and 100-row cache key.
+			items, meta, err := loadMarketOverview(ctx, s.marketSnapshots, "billboard::100", func(ctx context.Context) ([]foundation.MarketBillboardItem, foundation.SourceMeta, error) {
+				return s.marketOverview.MarketBillboard(ctx, "", 100)
+			})
+			if err != nil {
+				return nil, err
+			}
+			view := &cockpit.BillboardView{Items: items, Meta: meta}
+			if len(items) == 0 {
+				return view, errors.New("龙虎榜暂无已发布记录，不能视为当日无上榜股票")
+			}
+			if meta.Stale || meta.CarryForward {
+				return view, errors.New("龙虎榜使用缓存或延续数据，请按来源交易日期解读")
+			}
+			return view, nil
+		}
 		feed.Overseas = func(ctx context.Context) ([]cockpit.IndexQuote, error) {
 			items, _, err := s.marketOverview.MarketIndexes(ctx, "global")
 			if err != nil {
@@ -170,6 +187,18 @@ func (s *Server) cockpitFeed() cockpit.Feed {
 			return items, nil
 		}
 		if provider, ok := s.marketOverview.(SectorFlowProvider); ok {
+			feed.Industry = func(ctx context.Context) ([]cockpit.FlowItem, error) {
+				// 与概念侧统一主力资金口径，取完整行业榜，保留净流出尾部。
+				rows, _, err := provider.SectorFlowRanking(ctx, "industry", 600)
+				if err != nil {
+					return nil, err
+				}
+				items := make([]cockpit.FlowItem, 0, len(rows))
+				for _, row := range rows {
+					items = append(items, cockpit.FlowItem{Name: row.Name, NetInflow: row.MainNetInflow, ChangePercent: row.ChangePercent})
+				}
+				return items, nil
+			}
 			feed.Concepts = func(ctx context.Context) ([]cockpit.FlowItem, error) {
 				// 概念板块约 516 个，正流入的常超过 200 个；limit 截小了榜单尾部
 				// 的净流出板块根本进不来，龙卷风图永远只有半边。上游 bkzj 榜单
@@ -189,15 +218,17 @@ func (s *Server) cockpitFeed() cockpit.Feed {
 	}
 	if s.newsProvider != nil {
 		feed.News = func(ctx context.Context) ([]cockpit.NewsLine, error) {
-			items, err := s.newsProvider.LatestNews(ctx, 20)
+			// 上游仍为同一个快讯入口，仅保留它实际返回的更多样本供盘前筛选。
+			items, err := s.newsProvider.LatestNews(ctx, 50)
 			if err != nil {
 				return nil, err
 			}
 			lines := make([]cockpit.NewsLine, 0, len(items))
 			for _, item := range items {
-				line := cockpit.NewsLine{Title: item.Title}
+				line := cockpit.NewsLine{Title: item.Title, Content: item.Content, Source: item.Meta.Source, URL: item.URL, Tags: append([]string(nil), item.Tags...)}
 				if !item.PublishedAt.IsZero() {
 					line.PublishedAt = item.PublishedAt.In(foundation.AStockLocation).Format("15:04")
+					line.PublishedDate = item.PublishedAt.In(foundation.AStockLocation).Format("2006-01-02")
 				}
 				lines = append(lines, line)
 			}
@@ -270,7 +301,7 @@ func cockpitIndexQuotes(items []foundation.MarketIndexSnapshot, mainland bool) [
 		if !mainland && (omittedOverseasCodes[strings.ToUpper(strings.TrimSpace(item.Code))] || omittedOverseasNames[strings.TrimSpace(item.Name)]) {
 			continue
 		}
-		quote := cockpit.IndexQuote{Name: item.Name, Code: item.Code, Price: item.Price, ChangePercent: item.ChangePercent}
+		quote := cockpit.IndexQuote{Name: item.Name, Code: item.Code, Price: item.Price, ChangePercent: item.ChangePercent, Market: item.Market, Status: item.Status}
 		if !item.TradeTime.IsZero() {
 			quote.TradeTime = item.TradeTime.In(foundation.AStockLocation).Format("2006-01-02 15:04")
 		}
@@ -397,7 +428,12 @@ func (s *Server) cockpitBriefs(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": s.cockpit.Store().List(phase, limit)})
+	briefs := s.cockpit.Store().List(phase, limit)
+	history := s.cockpit.Store().List("", 0)
+	for i := range briefs {
+		briefs[i] = revalidateCockpitBrief(briefs[i], history)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": briefs})
 }
 
 // cockpitFacts 返回此刻采集到的事实，供驾驶舱固定模块实时刷新。
@@ -457,7 +493,50 @@ func (s *Server) cockpitBrief(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "巡查记录不存在")
 		return
 	}
+	brief = revalidateCockpitBrief(brief, s.cockpit.Store().List("", 0))
 	writeJSON(w, http.StatusOK, map[string]any{"data": brief})
+}
+
+// Validate a returned copy of historical facts without rewriting the saved record.
+func revalidateCockpitBrief(brief cockpit.Brief, history []cockpit.Brief) cockpit.Brief {
+	if brief.NarrativeStatus != "ready" || strings.TrimSpace(brief.Narrative) == "" {
+		return brief
+	}
+	facts := []cockpit.Facts{brief.Facts}
+	if brief.Phase == cockpit.PhaseIntraday && !brief.StartedAt.IsZero() {
+		var previous *cockpit.Brief
+		for i := range history {
+			candidate := &history[i]
+			if candidate.ID == brief.ID || candidate.Phase != brief.Phase || candidate.SessionDate != brief.SessionDate || candidate.Status != "ready" || candidate.StartedAt.IsZero() || !candidate.StartedAt.Before(brief.StartedAt) {
+				continue
+			}
+			if previous == nil || candidate.StartedAt.After(previous.StartedAt) {
+				previous = candidate
+			}
+		}
+		if previous != nil {
+			facts = append(facts, previous.Facts)
+		}
+	}
+	// 仅移除已确认的中性基准误报；保留其他旧标记，不修改 Store 内切片。
+	numbers := make([]string, 0, len(brief.UnverifiedNumbers))
+	for _, number := range brief.UnverifiedNumbers {
+		if !cockpit.NarrativeNumberIsTemperatureReference(brief.Narrative, number) {
+			numbers = append(numbers, number)
+		}
+	}
+	seen := make(map[string]bool, len(numbers))
+	for _, number := range numbers {
+		seen[number] = true
+	}
+	for _, number := range cockpit.VerifyNarrativeAgainst(brief.Narrative, facts...) {
+		if !seen[number] {
+			numbers = append(numbers, number)
+			seen[number] = true
+		}
+	}
+	brief.UnverifiedNumbers = numbers
+	return brief
 }
 
 func (s *Server) cockpitRun(w http.ResponseWriter, r *http.Request) {

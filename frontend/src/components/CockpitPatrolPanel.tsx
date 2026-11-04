@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, ArrowLeftRight, BarChart3, Bot, ChevronDown, ChevronUp, Clock3, Compass, Gauge, LoaderCircle, Newspaper, Play, Sparkles, TrendingUp } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeftRight, BarChart3, Bot, ChevronDown, ChevronUp, Clock3, Compass, Gauge, LoaderCircle, Newspaper, Play, Power, Sparkles, ToggleLeft, ToggleRight, TrendingUp } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import type { BackendConfig } from '../lib/backend';
 import { type CockpitTarget, cockpitTargetLabels, formatPercent } from '../lib/cockpit';
@@ -11,6 +11,8 @@ import {
 	type PatrolIndexQuote,
 	type PatrolIntraday,
 	type PatrolLimitUp,
+	type PatrolIntervalMinutes,
+	patrolIntervalMinutes,
 	clockText,
 	foldTimeline,
 	latestBriefFor,
@@ -22,13 +24,13 @@ import {
 	stripLeadingTitle,
 	patrolPhaseLabel,
 	patrolPhases,
-	patrolIntervalOptions,
 	sessionIntradayBriefs,
 	TIMELINE_FOLD_LIMIT,
 } from '../lib/cockpit-patrol';
 import { useCockpitLiveFacts } from '../lib/use-cockpit-live-facts';
 import { useCockpitPatrol } from '../lib/use-cockpit-patrol';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
+import { MonitorSelect } from './MonitorSelect';
 import './CockpitPatrolPanel.css';
 
 // 欧洲三项指数已不在采集口径内；不同上游的代码不一致（FTSE/UKX），同时按名称兜底。
@@ -43,6 +45,10 @@ type Props = {
 type PatrolPhaseKey = (typeof patrolPhases)[number]['phase'];
 
 const triggerText: Record<string, string> = { scheduled: '定时巡查', manual: '手动巡查' };
+const patrolFrequencyOptions = [
+	{ value: 'off', label: '巡查关闭' },
+	...patrolIntervalMinutes.map((minutes) => ({ value: String(minutes), label: `${minutes} 分钟/次` })),
+];
 
 // 金额按上游原始单位（元）换算显示；只改变显示精度，不改变数值。
 export function formatMoney(value: number) {
@@ -179,11 +185,26 @@ const TEMPERATURE_FORMULA = [
 	'右侧三项为同一批真实样本的参考统计，不是分项权重；至少需要 1,000 只有效样本。',
 ].join('\n');
 
-function TemperatureGauge({ temperature, missing }: { temperature?: PatrolTemperature; missing?: string }) {
+export function TemperatureGauge({ temperature, missing }: { temperature?: PatrolTemperature; missing?: string }) {
 	const maskID = useId();
 	const valid = Boolean(temperature && Number.isFinite(temperature.value) && temperature.value >= 0 && temperature.value <= 100 && temperature.sample_count > 0);
 	const value = valid ? temperature!.value : 0;
-	const color = valid ? `color-mix(in srgb, var(--theme-green) ${100 - value}%, var(--theme-red))` : undefined;
+	const colorStops = [
+		{ value: 0, color: '#2d68aa' },
+		{ value: 20, color: '#2868b5' },
+		{ value: 35, color: '#b6dcf5' },
+		{ value: 40, color: '#fae6e8' },
+		{ value: 60, color: '#d34c5c' },
+		{ value: 80, color: '#a72138' },
+		{ value: 100, color: '#781429' },
+	];
+	const upperIndex = Math.max(1, colorStops.findIndex((stop) => value <= stop.value));
+	const lower = colorStops[upperIndex - 1];
+	const upper = colorStops[upperIndex];
+	const lowerWeight = (upper.value - value) / (upper.value - lower.value) * 100;
+	const color = valid ? `color-mix(in srgb, ${lower.color} ${lowerWeight}%, ${upper.color})` : undefined;
+	const readingColor = valid ? (value < 50 ? 'var(--theme-blue)' : 'var(--theme-red)') : undefined;
+	const gradient = `conic-gradient(from 0deg in srgb, ${colorStops.map((stop) => `${stop.color} ${stop.value}%`).join(', ')})`;
 	const radius = 50;
 	const circumference = 2 * Math.PI * radius;
 	const metrics = [
@@ -195,7 +216,7 @@ function TemperatureGauge({ temperature, missing }: { temperature?: PatrolTemper
 		<>
 			<div className="emotion" title={valid ? TEMPERATURE_FORMULA : missing || TEMPERATURE_FORMULA}>
 				<div className="emotion-donut is-gauge">
-					<svg viewBox="0 0 120 120" role="img" aria-label={valid ? `市场温度 ${value.toFixed(1)} 度` : '市场温度暂无有效数据'}>
+					<svg viewBox="0 0 120 120" role="img" aria-label={valid ? `市场温度 ${roundNarrativeDecimal(String(value), true)} 度` : '市场温度暂无有效数据'}>
 						<defs>
 							<mask id={maskID} maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="120">
 								<circle className="emotion-value" cx="60" cy="60" r={radius} style={{ stroke: 'white', strokeLinecap: 'butt' }} strokeDasharray={`${value / 100 * circumference} ${circumference}`} transform="rotate(-90 60 60)" />
@@ -204,12 +225,12 @@ function TemperatureGauge({ temperature, missing }: { temperature?: PatrolTemper
 						<circle className="emotion-track" cx="60" cy="60" r={radius} />
 						{valid && value > 0 ? (
 							<foreignObject x="0" y="0" width="120" height="120" mask={`url(#${maskID})`}>
-								<div className="temperature-gradient" />
+								<div className="temperature-gradient" style={{ background: gradient }} />
 							</foreignObject>
 						) : null}
 						{valid && value > 0 && value < 100 ? (
 							<g aria-hidden="true">
-								<circle cx="60" cy="10" r="5" style={{ fill: 'var(--theme-green)', stroke: 'none' }} />
+								<circle cx="60" cy="10" r="5" style={{ fill: colorStops[0].color, stroke: 'none' }} />
 								<circle cx={60 + radius * Math.sin(value / 100 * 2 * Math.PI)} cy={60 - radius * Math.cos(value / 100 * 2 * Math.PI)} r="5" style={{ fill: color, stroke: 'none' }} />
 							</g>
 						) : null}
@@ -219,7 +240,7 @@ function TemperatureGauge({ temperature, missing }: { temperature?: PatrolTemper
 						})}
 					</svg>
 					<div className="emotion-center">
-						<strong style={{ color }}>{valid ? `${value.toFixed(1)}°` : '--'}</strong>
+						<strong style={{ color: readingColor }}>{valid ? `${roundNarrativeDecimal(String(value), true)}°` : '--'}</strong>
 						<span>市场温度</span>
 					</div>
 				</div>
@@ -402,7 +423,8 @@ function FactsView({ facts, intradayFallback, onNavigate }: { facts: PatrolFacts
 	const cn = facts.cn_indexes ?? [];
 	const hasIndexes = Boolean(overseas.length || cn.length);
 	const indexMax = Math.max(0, ...[...overseas, ...cn].map((item) => Math.abs(item.change_percent || 0)));
-	const news = facts.news ?? [];
+	// AI 早报可读取更多新闻，固定快讯卡保留原来的 15 条展示规模。
+	const news = (facts.news ?? []).slice(0, 15);
 	// 题材涨跌用按涨跌幅排序的取样（concept_moves），资金榜样本只按净流入取两端，
 	// 领跌侧常常凑不满；老版本后端没有该字段时回落到资金榜。
 	const theories = facts.concept_moves ?? facts.concept_flows;
@@ -574,15 +596,16 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 	// 已核对通过时不占一条横幅，只在叙述标题旁保留一个状态标签；只有未生成或失败时才需要整行说明。
 	const noticeWorthBanner = Boolean(notice) && !(selected?.narrative_status === 'ready' && !selected?.unverified_numbers?.length);
 	const verified = selected?.narrative_status === 'ready' && !selected?.unverified_numbers?.length;
-	const narrative = selected?.narrative ? stripLeadingTitle(selected.narrative) : '';
+	const narrative = selected?.narrative ? patrolNarrativeText(selected.narrative) : '';
 	const snapshot = useMemo(() => parseNarrativeSnapshot(narrative), [narrative]);
-	const structured = snapshot !== null;
+	const report = useMemo(() => parseNarrativeReport(narrative, selected?.phase), [narrative, selected?.phase]);
+	const structured = snapshot !== null || report !== null;
 	const collapsible = structured || narrative.length > 240;
-	// 新的结构化记录默认展开全部要点，历史长文仍默认收起；切换记录时重置。
+	// 盘前与盘后先展示一句话摘要，完整章节按需展开；盘中保持原有默认状态。
 	useEffect(() => {
-		setNarrativeOpen(structured);
-	}, [selected?.id, structured]);
-	const evidence = useMemo(() => narrativeEvidence(selected?.facts), [selected?.facts]);
+		setNarrativeOpen(narrativeInitiallyExpanded(selected?.phase, snapshot !== null));
+	}, [selected?.id, selected?.phase, snapshot !== null]);
+	const evidence = useMemo(() => narrativeEvidence(selected?.facts, selected?.phase), [selected?.facts, selected?.phase]);
 	// 起止时间同分钟时只显示一次，避免「10:10 – 10:10」这种重复读数。
 	const startText = clockText(selected?.started_at);
 	const endText = selected?.finished_at ? clockText(selected.finished_at) : '';
@@ -592,13 +615,13 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 	const nextRunLabel = patrol.status?.next_run_label || '';
 	const nextRun = nextRunLabel.includes(nextRunTime) ? nextRunLabel : [nextRunTime, nextRunLabel].filter(Boolean).join(' · ') || '--';
 	const runPhase: PatrolPhaseKey = followPhase;
-	// 自动巡查总开关：默认关闭，只有后端明确返回 true 才算开启。
-	// 状态未加载 / 旧后端没有该字段时一律按关闭显示，避免切页回来时开关自己亮起。
-	const autoPatrolKnown = typeof patrol.status?.auto_patrol_enabled === 'boolean';
-	const autoPatrolEnabled = patrol.status?.auto_patrol_enabled === true;
-	const autoOn = autoPatrolEnabled;
-	// 关闭态由右侧「AI 已关闭」胶囊表达，副标题不再重复；开启时才显示下一次计划时间。
-	const patrolHint = !patrol.status ? ' · 读取中' : autoOn ? ` · 下次 ${nextRun}` : '';
+	// 选项同时表达开关和频率，未返回的设置保持未知。
+	const autoOn = patrol.status?.auto_patrol_enabled === true;
+	const intervalMinutes = patrol.status?.interval_minutes;
+	const patrolSetting = patrol.status?.auto_patrol_enabled === false ? 'off' : autoOn && intervalMinutes && patrolIntervalMinutes.some((minutes) => minutes === intervalMinutes) ? String(intervalMinutes) : '';
+	const PatrolSwitchIcon = patrol.status?.auto_patrol_enabled === false ? ToggleLeft : autoOn ? ToggleRight : Power;
+	const patrolHint = !patrol.status ? ' · 读取中' : autoOn ? ` · 下次 ${nextRun}${patrol.status.ai_available ? '' : ' · AI 未配置'}` : '';
+	const nextIntraday = intradayNextRunTime(autoOn, patrol.status?.next_run_at, nextRunLabel);
 
 	if (!config) return null;
 
@@ -618,33 +641,16 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 						</div>
 					</div>
 					<div className="patrol-status-side">
-						<div className="patrol-auto-control">
-						{/* 状态胶囊跟随总开关：关闭即「AI 已关闭」，开启才显示连接状态，避免两处状态各说各话。 */}
-						{patrol.status && (
-							<span
-								className={`patrol-ai${!autoOn ? ' is-off' : patrol.status.ai_available ? ' is-on' : ''}`}
-								title={!autoOn
-									? '自动巡查已关闭：不会按计划自动执行盘前/盘中/盘后巡查'
-									: patrol.status.ai_available
-										? '自动巡查已开启，AI 模型可调用'
-										: '自动巡查已开启，但未配置 AI 模型，只采集事实数据'}
-							>
-								{!autoOn ? 'AI 已关闭' : patrol.status.ai_available ? 'AI 已连接' : 'AI 未配置'}
-							</span>
-						)}
-					{/* 计划巡查总开关：只留滑块，盘前/盘中/盘后的定时巡查由此控制，手动巡查不受影响。 */}
-						<button
-							type="button"
-							role="switch"
-							aria-checked={autoOn}
-							aria-label="自动巡查"
-							className={`patrol-auto${autoOn ? ' is-on' : ''}`}
-							disabled={!patrol.status || patrol.savingAutoPatrol}
-							title={autoOn ? '自动巡查已开启，点击关闭盘前/盘中/盘后定时巡查' : '自动巡查已关闭，点击恢复定时巡查'}
-							onClick={() => void patrol.saveAutoPatrol({ enabled: !autoOn })}
-						>
-							<span className="patrol-auto-track" aria-hidden="true"><i className="patrol-auto-knob" /></span>
-						</button>
+						<div className="patrol-frequency" title="选择频率开启自动巡查，选择“巡查关闭”停止定时执行；午休 11:30–13:00 暂停自动巡查；重启后盘中频率恢复 30 分钟/次">
+							<MonitorSelect
+								ariaLabel="自动巡查设置"
+								indicator={<PatrolSwitchIcon size={14} aria-hidden="true" />}
+								value={patrolSetting}
+								placeholder="--"
+								options={patrolFrequencyOptions}
+								disabled={!patrol.status || patrol.savingSetting}
+								onChange={(value) => void patrol.changeSetting(value === 'off' ? 'off' : Number(value) as PatrolIntervalMinutes)}
+							/>
 						</div>
 						<button type="button" className="patrol-run" disabled={patrol.starting || patrol.running || !currentPhase} onClick={() => void patrol.start(runPhase)}>
 							{patrol.running ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
@@ -652,36 +658,6 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 						</button>
 					</div>
 				</header>
-
-				<div className="patrol-auto-settings">
-					<button
-						type="button"
-						role="switch"
-						aria-label="AI 自动巡查"
-						aria-checked={autoPatrolEnabled}
-						aria-busy={patrol.savingAutoPatrol}
-						className="patrol-auto-toggle"
-						disabled={!autoPatrolKnown || patrol.savingAutoPatrol}
-						title="关闭后暂停定时巡查，已开始的巡查继续完成，仍可手动触发"
-						onClick={() => void patrol.saveAutoPatrol({ enabled: !autoPatrolEnabled })}
-					>
-						<span className="patrol-auto-track" aria-hidden="true"><span /></span>
-						{patrol.savingAutoPatrol ? '保存中…' : !autoPatrolKnown ? '读取中…' : autoPatrolEnabled ? '自动巡查已开' : '自动巡查已关'}
-					</button>
-					<label className="patrol-interval">
-						<span>盘中间隔</span>
-						<select
-							aria-label="自动巡查时间间隔"
-							value={patrol.status?.interval_minutes ?? 30}
-							disabled={!autoPatrolKnown || !patrol.status?.interval_minutes || patrol.savingAutoPatrol}
-							title="上午 09:40、下午 13:10 起按间隔巡查；修改后从下一个计划时点生效"
-							onChange={(event) => void patrol.saveAutoPatrol({ interval_minutes: Number(event.target.value) })}
-						>
-							{patrolIntervalOptions.map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}
-						</select>
-					</label>
-					<small>午间休市不安排新巡查</small>
-				</div>
 
 				<div className="patrol-tabs" role="tablist" aria-label="巡查阶段">
 					{/* 选中态用白色滑块平移表示（档位等分），与行情总览的分段控件同一套视觉。 */}
@@ -702,13 +678,13 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 								onClick={() => setPickedPhase(item.phase)}
 							>
 								{item.label}
-								<small>{latest ? `最近 ${clockText(latest.started_at)}` : '暂无记录'}</small>
+								<small>{item.phase === 'intraday' && nextIntraday ? `下次 ${nextIntraday}` : item.phase === 'intraday' && patrolSetting === 'off' ? 'AI巡查已关闭' : latest ? `最近 ${clockText(latest.started_at)}` : '暂无记录'}</small>
 							</button>
 						);
 					})}
 				</div>
 
-				{activePhase === 'intraday' && timeline.length > 0 && (
+				{activePhase === 'intraday' && autoOn && (timeline.length > 0 || nextIntraday) && (
 					<ol className="patrol-timeline" aria-label="今日盘中巡查时间线">
 						{foldedTimeline.hidden > 0 && (
 							<li>
@@ -733,6 +709,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 								</button>
 							</li>
 						)}
+						{nextIntraday && <li><span className="patrol-timeline-next" data-next-run-at={patrol.status?.next_run_at} aria-label={`下次盘中巡查 ${nextIntraday}`}><Clock3 size={12} aria-hidden="true" />{nextIntraday}<em>待巡查</em></span></li>}
 					</ol>
 				)}
 			</div>
@@ -742,7 +719,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 
 				{!selected && (
 					<p className="patrol-empty">
-						{patrol.loading ? '正在读取巡查记录…' : `暂无${patrolPhaseLabel(activePhase)}巡查记录，${autoPatrolEnabled ? '计划时间到达后自动生成' : '可点击上方按钮手动巡查'}。`}
+						{patrol.loading ? '正在读取巡查记录…' : `暂无${patrolPhaseLabel(activePhase)}巡查记录，计划时间到达后自动生成。`}
 					</p>
 				)}
 
@@ -759,14 +736,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 
 						{selected.caveat && <p className="patrol-notice tone-warn">{selected.caveat}</p>}
 
-						{noticeWorthBanner && notice && <p className={`patrol-notice tone-${notice.tone}`}>{notice.text}</p>}
-
-						{selected.unverified_numbers?.length ? (
-							<div className="patrol-unverified">
-								<strong>以下数值未能在采集数据中找到，请人工核对：{selected.unverified_numbers.length} 个</strong>
-								<span>{selected.unverified_numbers.join('、')}</span>
-							</div>
-						) : null}
+						{noticeWorthBanner && notice && <p className={`patrol-notice tone-${notice.tone}`} title={selected.unverified_numbers?.length ? `待核对原始数值：${selected.unverified_numbers.join('、')}` : undefined}>{notice.text}</p>}
 
 						{/* 巡查面板只留结论：图表与快讯交给下方固定模块，按分钟级刷新实时数据。 */}
 						{narrative && (
@@ -794,7 +764,11 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 
 								{snapshot ? (
 									<div className="patrol-narrative" id={narrativeContentID}>
-										<NarrativeSnapshot snapshot={snapshot} expanded={narrativeOpen} />
+										<NarrativeSnapshot snapshot={snapshot} expanded={narrativeOpen} brief={selected} />
+									</div>
+								) : report ? (
+									<div className="patrol-narrative" id={narrativeContentID}>
+										<NarrativeReport report={report} expanded={narrativeOpen} />
 									</div>
 								) : narrativeOpen || !collapsible ? (
 									<div className="patrol-narrative" id={narrativeContentID}>
@@ -824,7 +798,66 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 	);
 }
 
+export function intradayNextRunTime(enabled: boolean, nextRunAt?: string, nextRunLabel?: string): string {
+	if (!enabled || !nextRunAt || !nextRunLabel?.includes('盘中')) return '';
+	const time = clockText(nextRunAt);
+	return time === '--' ? '' : time;
+}
+
 const SNAPSHOT_FIELDS = ['市场状态', '较上次变化', '资金方向', '主要风险', '接下来盯什么'] as const;
+
+export function narrativeInitiallyExpanded(phase: PatrolBrief['phase'] | undefined, snapshot: boolean): boolean {
+	return phase === 'pre_open' || (phase !== 'post_close' && snapshot);
+}
+
+type NarrativeReportData = { label: string; summary: string; body: string; grouped: boolean };
+
+// 只提取模型明确提供的定调，不根据报告正文推测市场结论；旧记录全文仍可展开。
+export function parseNarrativeReport(markdown: string, phase: PatrolBrief['phase'] | undefined): NarrativeReportData | null {
+	if (!markdown || (phase !== 'pre_open' && phase !== 'post_close')) return null;
+	const label = phase === 'pre_open' ? '盘前定调' : '收盘定调';
+	const lines = markdown.trim().split('\n');
+	const lead = /^(?:[-*]\s+)?(?:\*\*)?(盘前定调|收盘定调)(?:\*\*)?\s*[：:](?:\*\*)?\s*(.+)$/.exec(lines[0]);
+	if (!lead || lead[1] !== label) return { label, summary: '--（未提供一句话总结）', body: markdown, grouped: phase === 'post_close' };
+	const summary = lead[2].match(/^.*?[。！？!?](?:[”」])?/)?.[0] ?? lead[2];
+	// 长定调只把第一句用于收起态，展开时保留整个原段，避免遗漏其余事实或来源限制。
+	const body = summary === lead[2] ? lines.slice(1).join('\n').trim() : markdown;
+	return { label, summary, body, grouped: phase === 'post_close' };
+}
+
+export function NarrativeReport({ report, expanded }: { report: NarrativeReportData; expanded: boolean }) {
+	return (
+		<div className="nv nv-report">
+			<dl className="nv-snapshot">
+				<div className="is-market">
+					<dt className="nv-market-label">{report.label}</dt>
+					<dd><strong className="nv-market-state" title={report.summary}>{renderInline(report.summary, 'report-state', true)}</strong></dd>
+				</div>
+			</dl>
+			{expanded && report.body && (report.label === '盘前定调'
+				? <PreOpenNarrative markdown={report.body} />
+				: <Narrative markdown={report.body} grouped={report.grouped} />)}
+		</div>
+	);
+}
+
+// 提示词不写总标题；模型直接从第一节开始时，不能把节标题误删为重复标题。
+export function patrolNarrativeText(markdown: string): string {
+	// 三时段共用显示入口，仅过滤已知聊天尾注与重复快照说明，不改写历史记录。
+	const text = markdown.replace(/(^|\r?\n)(?:[ \t]*-{3,}[ \t]*\r?\n(?:[ \t]*\r?\n)*)?[ \t]*(?:我是[ \t]*Hermes[，,]|顺带一句[：:]\s*这是你第一次用我[，,])[^\n]*\/help[^\n]*个人偏好[^\n]*(?:以后再说都行|以后再说(?:都)?完全可以)[。.]?[ \t]*(?=\r?\n|$)/g, '$1')
+		.replace(/^[^\r\n]+/gm, (line) => isNarrativePresentationNote(line) ? '' : line)
+		.replace(/本(?:简报|报告)仅用于[^。！？\r\n]*不构成投资建议[。.]?/g, '').trimEnd();
+	return /^\s*#{2,3}\s+[一二三四五六七八九十]+[、.:：]/.test(text) ? text : stripLeadingTitle(text);
+}
+
+function isNarrativePresentationNote(text: string): boolean {
+	const plain = text.replace(/\*\*/g, '').trim();
+	// Only omit known boilerplate. A provenance heading alone cannot tell us
+	// whether the line contains a date restriction or a cross-session warning.
+	return /^本(?:简报|报告)仅用于[^。！？\r\n]*不构成投资建议[。.]?$/.test(plain)
+		|| /^数据时效说明[：:]\s*仅为盘中快照[。.]?$/.test(plain);
+}
+
 type SnapshotField = (typeof SNAPSHOT_FIELDS)[number] | '数据缺口';
 type NarrativeSnapshotData = { fields: Array<{ label: string; text: string }>; gap: string | null; remainder: string };
 
@@ -841,9 +874,12 @@ function compactNarrativeGap(text: string | undefined): string | null {
 
 // 只识别模型明确输出的字段，不根据正文关键词推导市场状态；旧记录仍走原文渲染。
 export function parseNarrativeSnapshot(markdown: string): NarrativeSnapshotData | null {
+	// 分章节的早报/复盘即使提到「市场状态」，也应保留完整章节与表格。
+	if (/^\s*#{2,3}\s+/m.test(markdown)) return null;
 	const values = new Map<SnapshotField, string>();
 	const remainder: string[] = [];
 	for (const raw of markdown.split('\n')) {
+		if (isNarrativePresentationNote(raw)) continue;
 		const line = raw.trim()
 			.replace(/^(?:[-*]\s+|\d+[.)]\s+)/, '')
 			.replace(/^\*\*([^*]+)\*\*\s*[：:]\s*/, '$1：')
@@ -866,19 +902,22 @@ export function parseNarrativeSnapshot(markdown: string): NarrativeSnapshotData 
 	};
 }
 
-export function NarrativeSnapshot({ snapshot, expanded = true }: { snapshot: NarrativeSnapshotData; expanded?: boolean }) {
+export function NarrativeSnapshot({ snapshot, expanded = true, brief }: { snapshot: NarrativeSnapshotData; expanded?: boolean; brief?: PatrolBrief }) {
 	const icons = [Activity, ArrowLeftRight, BarChart3, AlertTriangle, Compass];
+	// 巡查原文描述的是采集当时；无温度事实的旧记录不能继续宣称缓存可用。
+	const unsupportedCache = Boolean(brief && !brief.facts.temperature && snapshot.gap && /市场温度[^；;。]*(?:沿用|使用|现用|基于|以)[^；;。]*(?:缓存|快照)/.test(snapshot.gap));
+	const gap = unsupportedCache ? snapshot.gap!.replace(
+		/市场温度[^；;。]*(?:缓存|快照)[^；;。]*[；;。]?(?:\s*该时间[^；;。]*[；;。]?)?/,
+		'市场温度：该次采集无可用读数，原文引用的旧缓存没有该次事实支持，不能据此判断涨跌分布。',
+	) : snapshot.gap;
 	const remainderLines = snapshot.remainder.split('\n');
 	const isNote = (line: string) => /^本简报仅用于.*不构成投资建议[。.]?$/.test(line.trim());
-	const notes = remainderLines.filter(isNote).join('\n\n');
 	const remainder = remainderLines.filter((line) => !isNote(line)).join('\n').trim();
 	return (
 		<div className="nv">
 			<dl className="nv-snapshot">
 				{snapshot.fields.slice(0, expanded ? snapshot.fields.length : 1).map((field, index) => {
 					const Icon = icons[index] ?? Compass;
-					// 只拆分原文明确写出的「状态；依据」，不从正文推导新的状态词。
-					const market = index === 0 ? /^([^；;]{1,32})[；;]\s*(.+)$/s.exec(field.text) : null;
 					return (
 						<div key={field.label} className={index === 0 ? 'is-market' : `nv-snapshot-item${index === 3 ? ' is-risk' : ''}${index === 4 ? ' is-watch' : ''}`}>
 							<dt className={index === 0 ? 'nv-market-label' : undefined}>
@@ -887,19 +926,18 @@ export function NarrativeSnapshot({ snapshot, expanded = true }: { snapshot: Nar
 							</dt>
 							<dd>
 								{index === 0 ? (
-									<>
-										<strong className="nv-market-state">{renderInline(market?.[1] ?? field.text, 'snapshot-state', true)}</strong>
-										{market && <span className="nv-market-evidence">{renderInline(market[2], 'snapshot-basis', true)}</span>}
-									</>
+									<strong className="nv-market-state" title={field.text}>{renderInline(field.text, 'snapshot-state', true)}</strong>
 								) : renderInline(field.text, `snapshot-${index}`)}
 							</dd>
 						</div>
 					);
 				})}
 			</dl>
-			{snapshot.gap !== null && <p className="nv-snapshot-gap"><strong>数据缺口</strong>{renderInline(snapshot.gap, 'snapshot-gap')}</p>}
+			{gap !== null && <p className="nv-snapshot-gap" title={unsupportedCache ? snapshot.gap! : undefined}>
+				<strong>{brief ? '巡查缺口' : '数据缺口'}</strong>
+				<span>{brief && `${brief.session_date} ${clockText(brief.started_at)} 巡查：`}{renderInline(gap, 'snapshot-gap')}{brief && ' 实时采集状态见下方对应模块。'}</span>
+			</p>}
 			{remainder && <Narrative markdown={remainder} />}
-			{expanded && notes && <footer className="nv-snapshot-footer"><Narrative markdown={notes} /></footer>}
 		</div>
 	);
 }
@@ -920,7 +958,13 @@ function narrativeFallback(status: string): string {
 export type NarrativeBlock =
 	| { kind: 'section'; ordinal: string; title: string }
 	| { kind: 'paragraph'; text: string }
-	| { kind: 'list'; ordered: boolean; items: string[] };
+	| { kind: 'list'; ordered: boolean; items: string[] }
+	| { kind: 'table'; headers: string[]; rows: string[][] };
+
+function narrativeTableCells(line: string): string[] {
+	return line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '')
+		.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, '|'));
+}
 
 // 叙述来自固定提示词模板（小标题 + 自然段 + 少量列表），这里按块解析成可排版的结构，
 // 不引第三方渲染器，才能给标题、数字与来源标注分别上样式。
@@ -943,12 +987,36 @@ function parseNarrative(markdown: string): NarrativeBlock[] {
 		}
 	};
 
-	for (const raw of lines) {
-		const line = raw.trim();
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+		const line = lines[lineIndex].trim();
+		if (isNarrativePresentationNote(line)) {
+			flushParagraph();
+			flushList();
+			continue;
+		}
 		if (!line) {
 			flushParagraph();
 			flushList();
 			continue;
+		}
+		const separator = lines[lineIndex + 1]?.trim() ?? '';
+		if (line.includes('|') && separator.includes('|')) {
+			const headers = narrativeTableCells(line);
+			const delimiters = narrativeTableCells(separator);
+			if (headers.length === delimiters.length && delimiters.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+				flushParagraph();
+				flushList();
+				const rows: string[][] = [];
+				lineIndex++;
+				while (lineIndex + 1 < lines.length && lines[lineIndex + 1].trim().includes('|')) {
+					const cells = narrativeTableCells(lines[lineIndex + 1]);
+					// 未转义的额外竖线保留在最后一格，避免静默丢弃模型原文。
+					rows.push(headers.map((_, cellIndex) => cellIndex === headers.length - 1 ? cells.slice(cellIndex).join(' | ') : cells[cellIndex] ?? ''));
+					lineIndex++;
+				}
+				blocks.push({ kind: 'table', headers, rows });
+				continue;
+			}
 		}
 		const heading = /^#{2,3}\s+(.+)$/.exec(line);
 		if (heading) {
@@ -979,25 +1047,91 @@ function parseNarrative(markdown: string): NarrativeBlock[] {
 	return blocks;
 }
 
-const NARRATIVE_INLINE = /\*\*([^*]+)\*\*|（([^）]{1,32})）|([+-]?\d[\d,]*(?:\.\d+)?%)/g;
+const NARRATIVE_INLINE = /\*\*([^*]+)\*\*|（([^）]{1,32})）/g;
+// 日期和时刻优先整体匹配，避免把日期里的连字符识别成跌幅；代码保留前导零。
+const NARRATIVE_NUMBERS = /\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:\d{2}|Z)?)?|\d{1,2}:\d{2}(?::\d{2})?|[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*(?:万亿|亿|万)?元)?(?:%|°|度)?/g;
 // 括号里是采集来源或推断标记时做成小标签，普通括号说明保持原文。
-const NARRATIVE_TAGS = ['市场温度', 'A股指数', '海外指数', '指数', '涨停梯队', '盘中情绪', '情绪周期', '行业资金', '概念资金', '快讯', '数据源', '外围', '对比上次巡查', '盘中快照', '收盘口径'];
+const NARRATIVE_TAGS = ['市场温度', 'A股指数', '海外指数', '指数', '涨停梯队', '盘中情绪', '情绪周期', '行业资金', '概念资金', '龙虎榜', '快讯', '数据源', '外围', '对比上次巡查', '盘中快照', '收盘口径'];
 
-function renderInline(text: string, prefix: string, omitSnapshotSource = false): ReactNode[] {
-	// 温度仅在展示时四舍五入到一位小数，保留原始叙述及其他指标的精度。
-	text = text.replace(/((?:市场)?温度(?:\s*(?:为|约为|约|是|[:：]))?\s*(?:\*\*\s*)?)(\d+(?:\.\d+)?)(\*\*)?\s*(?:度|°)/g,
-		(_match, label: string, value: string, boldEnd?: string) => `${label}${(Math.round(Number(value) * 10) / 10).toFixed(1)}${boldEnd ?? ''}°`);
+// 直接按十进制数字进位，避免 1.005 之类的二进制浮点边界被舍成 1.00。
+function roundNarrativeDecimal(token: string, fixed = false): string {
+	return token.replace(/^([+-]?)([\d,]+)(?:\.(\d+))?(.*)$/, (_match, sign: string, whole: string, fraction: string | undefined, suffix: string) => {
+		if (fraction === undefined && !fixed) return token;
+		const cents = BigInt(whole.replace(/,/g, '') + (fraction ?? '').padEnd(2, '0').slice(0, 2))
+			+ ((fraction?.[2] ?? '0') >= '5' ? 1n : 0n);
+		const rounded = cents.toString().padStart(3, '0');
+		let integer = rounded.slice(0, -2).padStart(whole.replace(/,/g, '').length, '0');
+		if (whole.includes(',')) integer = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+		return `${sign === '-' && cents === 0n ? '' : sign}${integer}.${rounded.slice(-2)}${suffix}`;
+	});
+}
+
+function renderNarrativeNumbers(text: string, prefix: string, context = ''): ReactNode[] {
+	const nodes: ReactNode[] = [];
+	let last = 0;
+	for (const match of text.matchAll(NARRATIVE_NUMBERS)) {
+		const index = match.index ?? 0;
+		const token = match[0];
+		if (index > last) nodes.push(text.slice(last, index));
+		const dateOrTime = /^\d{4}[-/]\d{1,2}[-/]\d{1,2}|^\d{1,2}:\d{2}/.test(token);
+		const before = (context + text.slice(0, index)).replace(/\*/g, '');
+		const after = text.slice(index + token.length);
+		const amount = /^([+-]?[\d,]+(?:\.\d+)?)(?:\s*(万亿|亿|万)?元)$/.exec(token);
+		const unitHeader = !dateOrTime && /^[+-]?[\d,]+(?:\.\d+)?$/.test(token)
+			&& /(?:资金|金额|净额|买入|卖出|流入|流出|成交额)[^。；\n]*[（(]元[）)]$/.test(context);
+		const price = /(?:股价|价格|收盘价?|开盘价?|均价|每股|目标价|现价|股息)[^。；，,\n\d]{0,8}$/.test(before)
+			|| /^\s*[/／]\s*股/.test(after);
+		let value = token;
+		let original: string | undefined;
+		if ((amount || unitHeader) && !price) {
+			const numeric = Number((amount?.[1] ?? token).replace(/,/g, ''));
+			const multiplier = amount?.[2] === '万亿' ? 1e12 : amount?.[2] === '亿' ? 1e8 : amount?.[2] === '万' ? 1e4 : 1;
+			const yuan = numeric * multiplier;
+			// 大额元数可直接识别；小额必须有明确的金额语义，不能把个股价格当资金。
+			const moneyContext = /(?:资金|金额|净额|流入|流出|净买|净卖|买入|卖出|成交额|营收|利润)[^。；\n\d]{0,16}$/.test(before);
+			if (Number.isFinite(yuan) && (Math.abs(yuan) >= 1e4 || multiplier !== 1 || moneyContext || unitHeader)) {
+				const scaled = yuan / (Math.abs(yuan) >= 1e8 ? 1e8 : 1e4);
+				// 小额回到元单位，避免换算为万元后只剩 0.00。
+				const useYuan = Math.abs(scaled) < 0.01;
+				const unit = useYuan ? '元' : Math.abs(yuan) >= 1e8 ? '亿元' : '万元';
+				value = `${token.startsWith('+') && yuan >= 0 ? '+' : ''}${roundNarrativeDecimal(String(useYuan ? yuan : scaled), true)}${unit}`;
+				original = `原始金额：${token}${unitHeader ? '元' : ''}`;
+			}
+		}
+		// 日期、时刻、股票代码和版本号保持原样，只格式化展示中的数值。
+		if (!dateOrTime && !/[A-Za-z_.／/]$/.test(before) && !/^\.\d/.test(after)) value = roundNarrativeDecimal(value);
+		// 范围/代码中的连接符是文本，不代表跌幅。
+		const connectedSign = /^[+-]/.test(token) && /[\dA-Za-z_.／/]$/.test(before);
+		const directional = !dateOrTime && !connectedSign;
+		const downContext = /(?:下跌|跌停|净流出|净卖出|回落)\s*[：:为约达至]*\s*$/.test(before);
+		const upContext = /(?:上涨|涨停|净流入|净买入)\s*[：:为约达至]*\s*$/.test(before);
+		const tone = !directional ? '' : token.startsWith('-') ? ' is-down' : token.startsWith('+') ? ' is-up' : downContext ? ' is-down' : upContext ? ' is-up' : '';
+		if (connectedSign) {
+			nodes.push(value[0]);
+			value = value.slice(1);
+		}
+		nodes.push(<b key={`${prefix}-n${index}`} className={`nv-num${tone}`} title={original}>{value}</b>);
+		last = index + token.length;
+	}
+	if (last < text.length) nodes.push(text.slice(last));
+	return nodes;
+}
+
+function renderInline(text: string, prefix: string, omitSnapshotSource = false, context = ''): ReactNode[] {
+	// 模型可能只给金额数字加粗、将单位留在外面，展示时仍视为同一个金额。
+	text = text.replace(/\*\*([+-]?[\d,]+(?:\.\d+)?)\*\*(\s*(?:万亿|亿|万)?元)/g, '**$1$2**');
 	const nodes: ReactNode[] = [];
 	let last = 0;
 	for (const match of text.matchAll(NARRATIVE_INLINE)) {
 		const index = match.index ?? 0;
-		if (index > last) nodes.push(text.slice(last, index));
-		const [token, bold, parenthetical, percent] = match;
+		if (index > last) nodes.push(...renderNarrativeNumbers(text.slice(last, index), `${prefix}-${last}`, context + text.slice(0, last)));
+		const [token, bold, parenthetical] = match;
+		const before = context + text.slice(0, index);
 		if (bold) {
-			nodes.push(<strong key={`${prefix}-${index}`}>{bold}</strong>);
+			nodes.push(<strong key={`${prefix}-${index}`}>{renderInline(bold, `${prefix}-b${index}`, omitSnapshotSource, before)}</strong>);
 		} else if (parenthetical !== undefined) {
 			if (parenthetical.startsWith('推断')) {
-				nodes.push(<span key={`${prefix}-${index}`} className="nv-tag is-infer">{parenthetical}</span>);
+				nodes.push(<span key={`${prefix}-${index}`} className="nv-tag is-infer">{renderNarrativeNumbers(parenthetical, `${prefix}-infer${index}`)}</span>);
 			} else {
 				// 「（A股指数、涨停梯队）」这类多来源标注拆成独立小标签，避免一颗长胶囊压住正文。
 				const parts = parenthetical.split(/[、，,]/).map((part) => part.trim()).filter(Boolean);
@@ -1005,20 +1139,16 @@ function renderInline(text: string, prefix: string, omitSnapshotSource = false):
 				if (sources) {
 					parts.forEach((part, partIndex) => {
 						if (omitSnapshotSource && part.endsWith('快照')) return;
-						nodes.push(<span key={`${prefix}-${index}-${partIndex}`} className="nv-tag">{part}</span>);
+						nodes.push(<span key={`${prefix}-${index}-${partIndex}`} className="nv-tag">{renderNarrativeNumbers(part, `${prefix}-tag${index}-${partIndex}`)}</span>);
 					});
 				} else {
-					nodes.push(token);
+					nodes.push(...renderNarrativeNumbers(token, `${prefix}-paren${index}`, before));
 				}
 			}
-		} else if (percent) {
-			// A 股口径：上行红、下行绿；不带符号的百分比只做等宽加重。
-			const tone = percent.startsWith('+') ? ' is-up' : percent.startsWith('-') ? ' is-down' : '';
-			nodes.push(<b key={`${prefix}-${index}`} className={`nv-num${tone}`}>{percent}</b>);
 		}
 		last = index + token.length;
 	}
-	if (last < text.length) nodes.push(text.slice(last));
+	if (last < text.length) nodes.push(...renderNarrativeNumbers(text.slice(last), `${prefix}-${last}`, context + text.slice(0, last)));
 	return nodes;
 }
 
@@ -1026,13 +1156,25 @@ function NarrativeBlocks({ blocks }: { blocks: NarrativeBlock[] }) {
 	return (
 		<>
 			{blocks.map((block, index) => {
+				if (block.kind === 'table') {
+					return (
+						<div className="nv-table-wrap" role="region" aria-label={`叙述表格：${block.headers.join('、')}`} tabIndex={0} key={`t${index}`}>
+							<table className="nv-table">
+								<thead><tr>{block.headers.map((header, cellIndex) => <th scope="col" key={cellIndex}>{renderInline(header || '--', `th${index}-${cellIndex}`)}</th>)}</tr></thead>
+								<tbody>{block.rows.map((row, rowIndex) => (
+									<tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInline(cell || '--', `td${index}-${rowIndex}-${cellIndex}`, false, block.headers[cellIndex])}</td>)}</tr>
+								))}</tbody>
+							</table>
+						</div>
+					);
+				}
 				if (block.kind === 'section') {
 					return (
 						<h5 className="nv-section" key={`s${index}`}>
 							{block.ordinal
 								? <span className="nv-ordinal">{block.ordinal}</span>
 								: <span className="nv-ordinal is-dot" aria-hidden="true">·</span>}
-							<span className="nv-title">{block.title}</span>
+							<span className="nv-title">{renderInline(block.title, `title${index}`)}</span>
 							<i className="nv-rule" aria-hidden="true" />
 						</h5>
 					);
@@ -1057,8 +1199,43 @@ function NarrativeBlocks({ blocks }: { blocks: NarrativeBlock[] }) {
 	);
 }
 
-function Narrative({ markdown }: { markdown: string }) {
+function PreOpenNarrative({ markdown }: { markdown: string }) {
 	const blocks = useMemo(() => parseNarrative(markdown), [markdown]);
+	const groups: NarrativeBlock[][] = [];
+	for (const block of blocks) {
+		if (block.kind === 'section' || groups.length === 0) groups.push([]);
+		groups[groups.length - 1].push(block);
+	}
+	return <div className="nv nv-preopen-sections">{groups.map((group, index) => {
+		const heading = group[0];
+		if (heading.kind !== 'section') return <NarrativeBlocks blocks={group} key={index} />;
+		const content = group.slice(1);
+		const count = content.reduce((total, block) => total + (block.kind === 'table' ? block.rows.length : block.kind === 'list' ? block.items.length : 1), 0);
+		const Icon = /风险|缺口/.test(heading.title) ? AlertTriangle : /消息|新闻|要闻/.test(heading.title) ? Newspaper : /外围|隔夜/.test(heading.title) ? TrendingUp : Compass;
+		return <details className="nv-report-section nv-preopen-section" open={/风险|缺口/.test(heading.title)} key={index}>
+			<summary className="nv-preopen-summary">
+				<span className="nv-ordinal"><Icon size={13} aria-hidden="true" /></span>
+				<span className="nv-title">{renderInline(heading.title, `preopen-${index}`)}</span>
+				<span className="nv-preopen-count">{count} 项</span>
+				<ChevronDown size={14} className="nv-preopen-chevron" aria-hidden="true" />
+			</summary>
+			<div className="nv nv-preopen-content"><NarrativeBlocks blocks={content} /></div>
+		</details>;
+	})}</div>;
+}
+
+export function Narrative({ markdown, grouped = false }: { markdown: string; grouped?: boolean }) {
+	const blocks = useMemo(() => parseNarrative(markdown), [markdown]);
+	if (grouped) {
+		const groups: NarrativeBlock[][] = [];
+		for (const block of blocks) {
+			if (block.kind === 'section' || groups.length === 0) groups.push([]);
+			groups[groups.length - 1].push(block);
+		}
+		return <div className="nv nv-report-sections">{groups.map((group, index) => group[0].kind === 'section'
+			? <section className="nv-report-section" key={index}><NarrativeBlocks blocks={group} /></section>
+			: <NarrativeBlocks blocks={group} key={index} />)}</div>;
+	}
 	return <div className="nv"><NarrativeBlocks blocks={blocks} /></div>;
 }
 
@@ -1070,6 +1247,11 @@ export function previewNarrativeBlocks(markdown: string): NarrativeBlock[] {
 	if (firstParagraph >= 0) return all.slice(0, firstParagraph + 1);
 	// 没有自然段时改成「首个小标题 + 它的前三条」，保证预览一定短于全文。
 	const head = all.slice(0, 2);
+	const tableIndex = head.findIndex((block) => block.kind === 'table');
+	if (tableIndex >= 0) {
+		const table = head[tableIndex];
+		if (table.kind === 'table') return [...head.slice(0, tableIndex), { ...table, rows: table.rows.slice(0, 3) }];
+	}
 	const listIndex = head.findIndex((block) => block.kind === 'list');
 	if (listIndex < 0) return head;
 	const list = head[listIndex];
@@ -1084,17 +1266,18 @@ function NarrativePreview({ markdown }: { markdown: string }) {
 }
 
 // 叙述用到了哪些模块：由本次记录的事实反推，只列真的采到数据的来源。
-function narrativeEvidence(facts?: PatrolFacts | null): string[] {
+export function narrativeEvidence(facts?: PatrolFacts | null, phase?: PatrolBrief['phase']): string[] {
 	if (!facts) return [];
 	const list: string[] = [];
 	if (facts.cn_indexes?.length || facts.overseas?.length) list.push('指数');
 	if (facts.limit_up) list.push('涨停梯队');
 	if (facts.intraday) list.push('盘中情绪');
-	if (facts.emotion) list.push('情绪周期');
+	if (facts.emotion && phase !== 'post_close') list.push('情绪周期');
 	if (facts.temperature) list.push('市场温度');
 	if (facts.industry_flows?.inflow?.length || facts.industry_flows?.outflow?.length) list.push('行业资金');
 	if (facts.concept_flows?.inflow?.length || facts.concept_flows?.outflow?.length) list.push('概念资金');
 	if (facts.news?.length) list.push('快讯');
+	if (facts.billboard?.items?.length) list.push('龙虎榜');
 	return list;
 }
 

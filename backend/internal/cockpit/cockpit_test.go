@@ -3,6 +3,7 @@ package cockpit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,7 +66,6 @@ func TestDueSlotRunsLatestDueIntradaySlotOnly(t *testing.T) {
 		{"pre-open run", at(20, 8, 45), "pre"},
 		{"first intraday slot", at(20, 9, 40), "09:40"},
 		{"catch up to latest slot", at(20, 10, 50), "10:40"},
-		{"lunch break keeps last slot", at(20, 12, 0), "11:10"},
 		{"post close", at(20, 15, 40), "post"},
 		{"weekend evening", at(24, 20, 30), "weekend"},
 	}
@@ -77,7 +77,7 @@ func TestDueSlotRunsLatestDueIntradaySlotOnly(t *testing.T) {
 			}
 		})
 	}
-	for _, quiet := range []time.Time{at(20, 8, 30), at(20, 9, 30), at(24, 10, 0)} {
+	for _, quiet := range []time.Time{at(20, 8, 30), at(20, 9, 30), at(20, 12, 0), at(24, 10, 0)} {
 		if slot, ok := DueSlot(quiet, 30); ok {
 			t.Fatalf("DueSlot(%v) unexpectedly returned %+v", quiet, slot)
 		}
@@ -373,5 +373,35 @@ func TestBuildFlowBoardReturnsNilForAllZeroSamples(t *testing.T) {
 	next := CarryOverBoards(prev, Facts{Concepts: &FlowBoard{}})
 	if next.Concepts == nil || next.Concepts.Inflow[0].Name != "昨日概念" {
 		t.Fatalf("empty board must carry over: %+v", next.Concepts)
+	}
+}
+
+func TestIntradayIntervalsSkipLunchAndDoNotCatchUpAcrossSessions(t *testing.T) {
+	for _, interval := range []int{5, 10, 15, 30, 60} {
+		t.Run(fmt.Sprint(interval), func(t *testing.T) {
+			for _, quiet := range []time.Time{at(20, 9, 39), at(20, 11, 30), at(20, 12, 0), at(20, 12, 59), at(20, 13, 0), at(20, 13, 9), at(20, 15, 0), at(20, 15, 4), at(24, 10, 0), at(1, 10, 0)} {
+				if slot, ok := DueSlot(quiet, interval); ok {
+					t.Fatalf("quiet time %s returned slot %+v", quiet, slot)
+				}
+			}
+			for _, now := range []time.Time{at(20, 9, 40), at(20, 11, 29), at(20, 13, 10), at(20, 14, 59)} {
+				if slot, ok := DueSlot(now, interval); !ok || slot.Phase != PhaseIntraday {
+					t.Fatalf("trading time %s did not return an intraday slot: %+v", now, slot)
+				}
+			}
+			for _, now := range []time.Time{at(20, 11, 30), at(20, 12, 0), at(20, 13, 0)} {
+				if next, name := NextRun(now, interval); !next.Equal(at(20, 13, 10)) || name != "盘中巡查 13:10" {
+					t.Fatalf("lunch next run = %s %q", next, name)
+				}
+			}
+			for _, tc := range []struct {
+				now time.Time
+				key string
+			}{{at(20, 8, 45), "pre"}, {at(20, 15, 40), "post"}, {at(24, 20, 30), "weekend"}} {
+				if slot, ok := DueSlot(tc.now, interval); !ok || slot.Key != tc.key {
+					t.Fatalf("non-intraday schedule changed: %+v, %v", slot, ok)
+				}
+			}
+		})
 	}
 }

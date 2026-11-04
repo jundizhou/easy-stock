@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import runpy
 
 spec = json.loads(os.environ.pop(sys.argv[1]))
 # Provider credentials belong to the model process, never to tool subprocesses.
@@ -45,6 +46,14 @@ async def serve_tools():
         import tools.web_tools
         import tools.code_execution_tool
         import tools.browser_tool
+        wrapper_dir = os.environ.get('A_STOCK_AGENT_BROWSER_WRAPPER_DIR', '').strip()
+        if wrapper_dir:
+            from pathlib import Path
+            root = Path(wrapper_dir)
+            wrapper = root / 'agent-browser.py'
+            if not wrapper.is_file():
+                wrapper = root / 'agent-browser'
+            runpy.run_path(str(wrapper))['install_hermes_adapter']()
     permitted = set()
     if 'web' in spec['toolsets']:
         permitted.update(['web_search', 'web_extract'])

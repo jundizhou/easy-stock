@@ -2,11 +2,88 @@ package eastmoney
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestMarketFundFlowRankingDirectionsUseMainFundsAndPreserveLegacySorts(t *testing.T) {
+	for _, dimension := range []string{"stock", "industry", "theme"} {
+		for _, test := range []struct{ sort, field, po string }{
+			{"net", "f62", "1"}, {"ratio", "f184", "1"}, {"change", "f3", "1"},
+			{"inflow", "f62", "1"}, {"outflow", "f62", "0"},
+		} {
+			t.Run(dimension+"/"+test.sort, func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Query().Get("fid") != test.field || r.URL.Query().Get("po") != test.po {
+						t.Errorf("wrong upstream ranking: %s", r.URL.RawQuery)
+					}
+					_, _ = w.Write([]byte(`{"rc":0,"data":{"diff":[{"f12":"600000","f14":"隔离测试主力资金","f62":-900}]}}`))
+				}))
+				defer upstream.Close()
+				client := NewClient(WithQuoteBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+				items, meta, err := client.MarketFundFlows(context.Background(), dimension, test.sort, 100)
+				if err != nil || len(items) != 1 || items[0].Dimension != dimension || items[0].MainNetInflow != -900 || meta.Source != "eastmoney:fund-flow" {
+					t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+				}
+				for _, field := range meta.AvailableFields {
+					if field == "net_inflow" {
+						t.Fatal("main-only source must not advertise total net funds")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestMarketSectorFundFlowFallbackSortsCompleteSnapshotBeforeLimiting(t *testing.T) {
+	for _, dimension := range []string{"industry", "theme"} {
+		for _, direction := range []string{"inflow", "outflow"} {
+			t.Run(dimension+"/"+direction, func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/api/qt/clist/get" {
+						_, _ = w.Write([]byte(`{"rc":0,"data":{"diff":[]}}`))
+						return
+					}
+					if r.URL.Path != "/dataapi/bkzj/getbkzj" {
+						http.NotFound(w, r)
+						return
+					}
+					wantCode := "m:90+t:2+f:!50"
+					if dimension == "theme" {
+						wantCode = "m:90+t:3+f:!50"
+					}
+					if r.URL.Query().Get("code") != wantCode {
+						t.Errorf("wrong fallback dimension: %s", r.URL.RawQuery)
+					}
+					rows := make([]map[string]any, 150)
+					for index := range rows {
+						rows[index] = map[string]any{"f12": fmt.Sprintf("BK%03d", index), "f14": "隔离测试完整板块", "f62": 100 + index}
+					}
+					rows[148]["f62"] = -1000
+					rows[149]["f62"] = -9000
+					_ = json.NewEncoder(w).Encode(map[string]any{"rc": 0, "data": map[string]any{"total": len(rows), "diff": rows}})
+				}))
+				defer upstream.Close()
+				client := NewClient(WithQuoteBaseURL(upstream.URL), WithDataBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+				items, meta, err := client.MarketFundFlows(context.Background(), dimension, direction, 2)
+				if err != nil || len(items) != 2 || meta.Source != "eastmoney:bkzj" {
+					t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+				}
+				if direction == "outflow" {
+					if items[0].MainNetInflow != -9000 || items[1].MainNetInflow != -1000 || !strings.Contains(meta.FallbackReason, "净流出") {
+						t.Fatalf("limited inflow rows used for outflow ranking: %+v meta=%+v", items, meta)
+					}
+				} else if items[0].MainNetInflow != 247 || items[1].MainNetInflow != 246 {
+					t.Fatalf("inflow fallback is not ranked before limiting: %+v", items)
+				}
+			})
+		}
+	}
+}
 
 func TestMarketOverviewProvidersParsePrimarySources(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

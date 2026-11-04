@@ -31,12 +31,14 @@ export async function prepareCodexRuntime({ runtimeRoot, platform = process.plat
     verifyCodexArchive(bytes, asset.integrity);
     const tarball = path.join(staging, 'codex.tgz');
     fs.writeFileSync(tarball, bytes);
-    const listing = spawnSync('tar', ['-tzf', tarball], { encoding: 'utf8' });
-    if (listing.status !== 0) throw new Error('Cannot inspect Codex archive');
+    // GNU tar 会把 `C:\...` 当成 `host:file` 远程路径（Cannot connect to C:）。
+    // 用 cwd + 相对文件名规避盘符冒号，bsdtar/GNU tar 两种实现都兼容。
+    const listing = spawnSync('tar', ['-tzf', 'codex.tgz'], { encoding: 'utf8', cwd: staging });
+    if (listing.status !== 0) throw new Error(`Cannot inspect Codex archive: status=${listing.status} error=${listing.error?.code ?? '-'} stderr=${(listing.stderr || '').slice(0, 300)}`);
     for (const entry of listing.stdout.trim().split('\n')) {
       if (!entry.startsWith('package/') || entry.split('/').includes('..') || entry.includes('\\')) throw new Error('Unsafe Codex archive entry');
     }
-    const extraction = spawnSync('tar', ['-xzf', tarball, '-C', staging], { encoding: 'utf8' });
+    const extraction = spawnSync('tar', ['-xzf', 'codex.tgz'], { encoding: 'utf8', cwd: staging });
     if (extraction.status !== 0) throw new Error(`Cannot extract Codex archive: ${extraction.stderr}`);
     const vendorRoot = path.join(staging, 'package', 'vendor');
     const targets = fs.readdirSync(vendorRoot);
@@ -75,6 +77,20 @@ export async function verifyCodexRuntime(root) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-codex-check-'));
   const env = { ...process.env, CODEX_HOME: home, HOME: home, USERPROFILE: home };
   try {
+    // Match the app's provider setup without depending on a remote model catalog.
+    // Initialization does not submit a turn or need a model key.
+    fs.writeFileSync(path.join(home, 'config.toml'), [
+      'model = "easy-stock-verification"',
+      'model_provider = "verification"',
+      'check_for_update_on_startup = false',
+      'cli_auth_credentials_store = "ephemeral"',
+      '[model_providers.verification]',
+      'name = "isolated-verification"',
+      'base_url = "http://127.0.0.1:9/v1"',
+      'wire_api = "responses"',
+      'requires_openai_auth = false',
+      '',
+    ].join('\n'));
     const version = spawnSync(executable, ['--version'], { encoding: 'utf8', env, cwd: home, timeout: 10000 });
     if (version.status !== 0 || version.stdout.trim() !== `codex-cli ${codexLock.version}`) throw new Error('Bundled Codex version verification failed');
     await new Promise((resolve, reject) => {

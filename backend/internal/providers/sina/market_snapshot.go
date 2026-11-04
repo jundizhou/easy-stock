@@ -3,8 +3,10 @@ package sina
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -37,49 +39,56 @@ func (c *Client) MarketSnapshot(ctx context.Context) ([]foundation.MarketSnapsho
 	meta := foundation.SourceMeta{Source: "sina:market_center"}
 	firstURL := ""
 
-	page := 1
-	for page <= sinaSnapshotMaxPages {
-		batch := make([]int, 0, sinaSnapshotWorkers)
-		for len(batch) < sinaSnapshotWorkers && page <= sinaSnapshotMaxPages {
-			batch = append(batch, page)
-			page++
-		}
-		results := make([][]foundation.MarketSnapshotRow, len(batch))
-		errs := make([]error, len(batch))
-		var wg sync.WaitGroup
-		for index, pageNo := range batch {
-			wg.Add(1)
-			go func(index, pageNo int) {
-				defer wg.Done()
-				results[index], errs[index] = c.snapshotPage(ctx, pageNo)
-			}(index, pageNo)
-		}
-		wg.Wait()
-
-		short := false
-		for index := range batch {
-			if errs[index] != nil {
-				if len(rows) == 0 && index == 0 {
-					return nil, foundation.SourceMeta{}, errs[index]
+	// 连续调度代替整批等待，仍只并发 6 页。短页/错误出现后停止安排更后面的页。
+	pages := make(chan int, sinaSnapshotMaxPages)
+	for page := 1; page <= sinaSnapshotMaxPages; page++ {
+		pages <- page
+	}
+	close(pages)
+	results := make([][]foundation.MarketSnapshotRow, sinaSnapshotMaxPages)
+	errs := make([]error, sinaSnapshotMaxPages)
+	lastPage := sinaSnapshotMaxPages
+	var limitMu sync.Mutex
+	var wg sync.WaitGroup
+	for worker := 0; worker < sinaSnapshotWorkers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pageNo := range pages {
+				limitMu.Lock()
+				// 保留原有首批探测范围，不能因另一页先返回短页而吞掉已应检测的错误。
+				needed := pageNo <= sinaSnapshotWorkers || pageNo <= lastPage
+				limitMu.Unlock()
+				if !needed {
+					continue
 				}
-				// 已经拿到一部分就先用一部分：少几页会让覆盖面变小，
-				// 但比整页报「快照不可用」好；meta 上标 Stale 让调用方知道。
-				meta.Stale = true
-				meta.FallbackReason = errs[index].Error()
-				short = true
-				continue
+				index := pageNo - 1
+				results[index], errs[index] = c.snapshotPage(ctx, pageNo)
+				if errs[index] != nil || len(results[index]) < sinaSnapshotPageSize {
+					limitMu.Lock()
+					if pageNo < lastPage {
+						lastPage = pageNo
+					}
+					limitMu.Unlock()
+				}
 			}
-			if firstURL == "" {
-				firstURL = c.snapshotPageURL(batch[index])
+		}()
+	}
+	wg.Wait()
+	// 按页序合并，不能因响应完成顺序不同而扰乱代码升序或重复票去重口径。
+	for index := range results {
+		if errs[index] != nil {
+			if len(rows) == 0 && index == 0 {
+				return nil, foundation.SourceMeta{}, errs[index]
 			}
-			rows = append(rows, results[index]...)
-			if len(results[index]) < sinaSnapshotPageSize {
-				short = true
-			}
+			meta.Stale = true
+			meta.FallbackReason = errs[index].Error()
+			continue
 		}
-		if short {
-			break
+		if firstURL == "" {
+			firstURL = c.snapshotPageURL(index + 1)
 		}
+		rows = append(rows, results[index]...)
 	}
 
 	if len(rows) == 0 {
@@ -123,6 +132,36 @@ func (c *Client) snapshotPageURL(page int) string {
 }
 
 func (c *Client) snapshotPage(ctx context.Context, page int) ([]foundation.MarketSnapshotRow, error) {
+	rows, err := c.snapshotPageOnce(ctx, page)
+	if err == nil || ctx.Err() != nil || !retryableSnapshotPageError(err) {
+		return rows, err
+	}
+	// 只重试失败页一次，不重抓已成功的页；遵守整轮采集的取消与超时。
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(100 * time.Millisecond):
+		return c.snapshotPageOnce(ctx, page)
+	}
+}
+
+type snapshotHTTPStatusError int
+
+func (e snapshotHTTPStatusError) Error() string {
+	return fmt.Sprintf("sina market snapshot http status %d", e)
+}
+
+func retryableSnapshotPageError(err error) bool {
+	var networkErr net.Error
+	var status snapshotHTTPStatusError
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &networkErr) ||
+		(errors.As(err, &status) && (status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500))
+}
+
+func (c *Client) snapshotPageOnce(ctx context.Context, page int) ([]foundation.MarketSnapshotRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	requestURL := c.snapshotPageURL(page)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
@@ -136,7 +175,7 @@ func (c *Client) snapshotPage(ctx context.Context, page int) ([]foundation.Marke
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("sina market snapshot http status %d", resp.StatusCode)
+		return nil, snapshotHTTPStatusError(resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

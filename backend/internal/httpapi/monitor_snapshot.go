@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/monitor"
@@ -35,27 +36,47 @@ func (c monitorSnapshotChain) MarketSnapshot(ctx context.Context) ([]foundation.
 	var lastErr error
 	var bestRows []foundation.MarketSnapshotRow
 	var bestMeta foundation.SourceMeta
-	for _, provider := range c.providers {
-		rows, meta, err := provider.MarketSnapshot(ctx)
-		if err == nil && len(rows) >= fullMarketMinRows {
+	for index, provider := range c.providers {
+		if err := ctx.Err(); err != nil {
+			lastErr = err
+			break
+		}
+		// 主源不能耗尽整轮时限：按剩余源数分配时间，给备用源留下请求机会。
+		timeout := 12 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := len(c.providers) - index
+			// 最后一个备用源不再需要给后续源留时间，可用完父请求剩余额度。
+			if share := time.Until(deadline) / time.Duration(remaining); remaining == 1 || share < timeout {
+				timeout = share
+			}
+		}
+		providerCtx, cancel := context.WithTimeout(ctx, timeout)
+		rows, meta, err := provider.MarketSnapshot(providerCtx)
+		if err == nil {
+			err = providerCtx.Err()
+		}
+		cancel()
+		if err == nil && len(rows) >= fullMarketMinRows && !meta.Stale && !meta.CarryForward {
 			return rows, meta, nil
 		}
-		if err == nil && len(rows) > len(bestRows) {
-			// 行数明显不足（上游截断、分页被改）不算成功，但先留作备胎：
-			// 后面的源也拿不到全量时，一半的覆盖面也比空手好。
-			bestRows, bestMeta = rows, meta
-			lastErr = fmt.Errorf("provider %s only returned %d rows (< %d)", meta.Source, len(rows), fullMarketMinRows)
-			continue
-		}
-		if err != nil {
+		switch {
+		case err != nil:
 			lastErr = err
+		case meta.Stale || meta.CarryForward:
+			lastErr = fmt.Errorf("provider %s snapshot incomplete or stale: %s", meta.Source, meta.FallbackReason)
+		default:
+			lastErr = fmt.Errorf("provider %s only returned %d rows (< %d)", meta.Source, len(rows), fullMarketMinRows)
+		}
+		if len(rows) > len(bestRows) {
+			// 不完整快照只保留作降级展示，不能因行数够多而跳过备用源。
+			bestRows, bestMeta = rows, meta
+			bestMeta.Stale = true
+			if bestMeta.FallbackReason == "" {
+				bestMeta.FallbackReason = lastErr.Error()
+			}
 		}
 	}
 	if bestRows != nil {
-		bestMeta.Stale = true
-		if bestMeta.FallbackReason == "" {
-			bestMeta.FallbackReason = lastErr.Error()
-		}
 		return bestRows, bestMeta, nil
 	}
 	if lastErr == nil {

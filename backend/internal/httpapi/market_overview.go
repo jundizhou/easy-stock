@@ -129,8 +129,8 @@ func (s *Server) marketFlowsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortKey := firstNonEmpty(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort"))), "net")
-	if sortKey != "net" && sortKey != "change" && sortKey != "ratio" {
-		writeError(w, http.StatusBadRequest, "sort must be net, change, or ratio")
+	if sortKey != "net" && sortKey != "change" && sortKey != "ratio" && sortKey != "inflow" && sortKey != "outflow" {
+		writeError(w, http.StatusBadRequest, "sort must be net, change, ratio, inflow, or outflow")
 		return
 	}
 	limit, err := marketLimitQuery(r, 50, 200)

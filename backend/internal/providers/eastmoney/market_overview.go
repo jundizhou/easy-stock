@@ -302,6 +302,9 @@ func (c *Client) MarketFundFlows(ctx context.Context, dimension string, sortKey 
 	params := standardListParams(limit)
 	params.Set("fid", fid)
 	params.Set("fs", fs)
+	if sortKey == "outflow" {
+		params.Set("po", "0")
+	}
 	params.Set("fields", "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87")
 	requestURL := endpoint + "?" + params.Encode()
 	start := time.Now()
@@ -324,6 +327,17 @@ func (c *Client) MarketFundFlows(ctx context.Context, dimension string, sortKey 
 		boards, fallbackURL, fallbackErr := c.fetchFundFlowBoards(ctx, code, "", meta)
 		if fallbackErr != nil {
 			return nil, foundation.SourceMeta{}, fallbackErr
+		}
+		if sortKey == "inflow" || sortKey == "outflow" {
+			sort.SliceStable(boards, func(i, j int) bool {
+				if sortKey == "outflow" {
+					return boards[i].MainNetInflow < boards[j].MainNetInflow
+				}
+				return boards[i].MainNetInflow > boards[j].MainNetInflow
+			})
+			if sortKey == "outflow" {
+				meta.FallbackReason = "详细分单资金不可用，使用板块主力净流出榜"
+			}
 		}
 		meta.SourceURL = fallbackURL
 		items := make([]foundation.MarketFundFlow, 0, min(limit, len(boards)))

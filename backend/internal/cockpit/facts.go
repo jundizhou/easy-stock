@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
+
+	"easy-stock/backend/internal/foundation"
 )
 
 type IndexQuote struct {
@@ -13,6 +16,8 @@ type IndexQuote struct {
 	Price         float64 `json:"price"`
 	ChangePercent float64 `json:"change_percent"`
 	TradeTime     string  `json:"trade_time,omitempty"`
+	Market        string  `json:"market,omitempty"`
+	Status        string  `json:"status,omitempty"`
 }
 
 // Scores 是情绪分的三个维度。收盘快照与盘中快照共用同名同权重的维度，
@@ -163,6 +168,13 @@ func SeedCarryFromBriefs(briefs []Brief) Facts {
 type NewsLine struct {
 	Title       string `json:"title"`
 	PublishedAt string `json:"published_at,omitempty"`
+	// PublishedAt 保留原有时分语义；日期单独提供，避免把隔夜新闻误写为今早。
+	PublishedDate    string   `json:"published_date,omitempty"`
+	Content          string   `json:"content,omitempty"`
+	ContentTruncated bool     `json:"content_truncated,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	URL              string   `json:"url,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
 }
 
 type SourceResult struct {
@@ -171,7 +183,15 @@ type SourceResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+// BillboardView uses the same raw amounts and provenance as the market page.
+// Entries may include multiple reasons for one stock; they are not additive.
+type BillboardView struct {
+	Items []foundation.MarketBillboardItem `json:"items"`
+	Meta  foundation.SourceMeta            `json:"meta"`
+}
+
 type Facts struct {
+	CollectedAt string        `json:"collected_at,omitempty"`
 	Overseas    []IndexQuote  `json:"overseas,omitempty"`
 	CNIndexes   []IndexQuote  `json:"cn_indexes,omitempty"`
 	Emotion     *Emotion      `json:"emotion,omitempty"`
@@ -183,6 +203,7 @@ type Facts struct {
 	// ConceptMoves 是题材涨跌卡的取样（按涨跌幅两端各取若干），与资金榜互不影响。
 	ConceptMoves *FlowBoard     `json:"concept_moves,omitempty"`
 	News         []NewsLine     `json:"news,omitempty"`
+	Billboard    *BillboardView `json:"billboard,omitempty"`
 	Sources      []SourceResult `json:"sources"`
 }
 
@@ -197,6 +218,7 @@ type Feed struct {
 	Industry    func(context.Context) ([]FlowItem, error)
 	Concepts    func(context.Context) ([]FlowItem, error)
 	News        func(context.Context) ([]NewsLine, error)
+	Billboard   func(context.Context) (*BillboardView, error)
 }
 
 // BuildFlowBoard 取净流入最多的 n 条与净流出最多的 n 条。
@@ -231,7 +253,7 @@ func boardEmpty(board *FlowBoard) bool {
 // CollectFacts 并发采集本阶段需要的数据。单个数据源失败只记录在 Sources 中，
 // 其余数据仍然保留，驾驶舱不会因为一个接口故障整体空白。
 func CollectFacts(ctx context.Context, phase Phase, feed Feed) Facts {
-	c := &collector{facts: Facts{Sources: []SourceResult{}}}
+	c := &collector{facts: Facts{CollectedAt: time.Now().In(foundation.AStockLocation).Format(time.RFC3339), Sources: []SourceResult{}}}
 	if feed.Overseas != nil {
 		c.run(ctx, "海外指数", func(ctx context.Context) error {
 			v, err := feed.Overseas(ctx)
@@ -298,10 +320,32 @@ func CollectFacts(ctx context.Context, phase Phase, feed Feed) Facts {
 	if feed.News != nil {
 		c.run(ctx, "快讯", func(ctx context.Context) error {
 			v, err := feed.News(ctx)
-			if len(v) > 15 {
-				v = v[:15]
+			limit := 15
+			if phase == PhasePreOpen || phase == PhaseRest {
+				limit = 50
 			}
-			c.set(func(f *Facts) { f.News = v })
+			if len(v) > limit {
+				v = v[:limit]
+			}
+			// 摘取原文而非生成摘要，保留来源；复制后截取，避免改动共享 Feed 数据。
+			news := append([]NewsLine(nil), v...)
+			for i := range news {
+				if len([]rune(news[i].Content)) > 1000 {
+					news[i].Content = truncateRunes(news[i].Content, 1000)
+					news[i].ContentTruncated = true
+				}
+			}
+			c.set(func(f *Facts) { f.News = news })
+			return err
+		})
+	}
+	if phase == PhasePostClose {
+		c.run(ctx, "龙虎榜", func(ctx context.Context) error {
+			if feed.Billboard == nil {
+				return fmt.Errorf("龙虎榜数据源未接入")
+			}
+			value, err := feed.Billboard(ctx)
+			c.set(func(f *Facts) { f.Billboard = value })
 			return err
 		})
 	}

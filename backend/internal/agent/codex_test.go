@@ -429,6 +429,65 @@ func TestBuiltinMCPHandshake(t *testing.T) {
 	}
 }
 
+func TestBuiltinMCPBrowserAdapterStartup(t *testing.T) {
+	python := os.Getenv("EASY_STOCK_HERMES_TEST_PYTHON")
+	if python == "" {
+		t.Skip("packaged Python required")
+	}
+	h := NewHermesRuntime(HermesConfig{Home: t.TempDir(), PythonPath: python})
+	key := "fake"
+	if err := h.SyncLLM(appsettings.LLM{Provider: "custom", BaseURL: "https://example.invalid/v1", Model: "test", APIMode: "responses"}, &key); err != nil {
+		t.Fatal(err)
+	}
+	sandbox, err := h.preparePromptSandbox(PromptOptions{Sandbox: true, AutoApprove: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sandbox.close()
+	wrapperDir := filepath.Join(t.TempDir(), "packaged browser 中文")
+	if err := os.MkdirAll(wrapperDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(wrapperDir, "adapter.json")
+	// Probe the real builtin MCP startup boundary. The adapter implementation
+	// itself is exercised against native browser fixtures by the Python tests.
+	probe := "import json,os,sys\nfrom pathlib import Path\ndef install_hermes_adapter():\n    Path(os.environ['A_STOCK_TEST_ADAPTER_LOG']).write_text(json.dumps({'python':sys.executable,'state':os.getenv('AGENT_BROWSER_STATE'),'model_key':os.getenv('OPENAI_API_KEY')}), encoding='utf-8')\n"
+	if err := os.WriteFile(filepath.Join(wrapperDir, "agent-browser.py"), []byte(probe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(wrapperDir, "state.json")
+	if err := os.WriteFile(state, []byte(`{"cookies":[],"origins":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sandbox.process.env["A_STOCK_AGENT_BROWSER_WRAPPER_DIR"] = wrapperDir
+	sandbox.process.env["A_STOCK_TEST_ADAPTER_LOG"] = logPath
+	sandbox.process.env["AGENT_BROWSER_STATE"] = state
+	spec, err := json.Marshal(map[string]any{"transport": "builtin", "env": sandbox.process.env, "toolsets": []string{"web"}, "browser_state": state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, "-c", mcpLauncher, "EASY_STOCK_MCP_TEST")
+	cmd.Env = append(os.Environ(), "EASY_STOCK_MCP_TEST="+string(spec), "OPENAI_API_KEY=fixture-model-secret")
+	cmd.Dir = sandbox.process.workDir
+	cmd.Stdin = strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}` + "\n")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil || !strings.Contains(string(output), `"protocolVersion"`) {
+		t.Fatalf("MCP adapter startup: %v %s %s", err, output, stderr.String())
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(data, &record); err != nil || record["state"] != state || record["model_key"] != nil || record["python"] == "" {
+		t.Fatalf("adapter was not isolated or did not receive the selected state: %s, %v", data, err)
+	}
+}
+
 func TestMCPStdioLauncherPreservesArgumentsAndPipes(t *testing.T) {
 	python := os.Getenv("EASY_STOCK_HERMES_TEST_PYTHON")
 	if python == "" {

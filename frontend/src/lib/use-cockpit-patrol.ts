@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BackendConfig } from './backend';
-import { type AutoPatrolUpdate, type PatrolBrief, type PatrolStatus, fetchPatrolBriefs, fetchPatrolStatus, runPatrol, updateAutoPatrol } from './cockpit-patrol';
+import { type AutoPatrolUpdate, type PatrolBrief, type PatrolStatus, type PatrolSetting, fetchPatrolBriefs, fetchPatrolStatus, runPatrol, updateAutoPatrol } from './cockpit-patrol';
 
 const STATUS_INTERVAL_MS = 30_000;
 const RUNNING_INTERVAL_MS = 3_000;
@@ -95,5 +95,9 @@ export function useCockpitPatrol(config: BackendConfig | null, refreshKey: numbe
 		}
 	}, [config]);
 
-	return { status, briefs, error: autoPatrolError || error, loading, starting, running, start, savingAutoPatrol, saveAutoPatrol, reload: load } as const;
+	const changeSetting = useCallback((setting: PatrolSetting) => saveAutoPatrol(
+		setting === 'off' ? { enabled: false } : { enabled: true, interval_minutes: setting },
+	), [saveAutoPatrol]);
+
+	return { status, briefs, error: autoPatrolError || error, loading, starting, running, start, savingAutoPatrol, saveAutoPatrol, savingSetting: savingAutoPatrol, changeSetting, reload: load } as const;
 }

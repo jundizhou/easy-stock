@@ -59,98 +59,21 @@
 	flex-wrap: wrap;
 }
 
-.patrol-auto-settings,
-.patrol-interval {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-}
-
-.patrol-auto-settings {
-	flex-wrap: wrap;
-	column-gap: 18px;
-}
-
-.patrol-interval,
-.patrol-auto-settings > small {
-	color: var(--theme-muted);
-	font-size: var(--fs-body);
-}
-
-.patrol-interval select {
-	min-height: 30px;
-	padding: 3px 8px;
-	border: 1px solid var(--line);
-	border-radius: 6px;
-	background: var(--theme-surface, #ffffff);
-	color: var(--theme-text);
-	font: inherit;
-	cursor: pointer;
-}
-
-.patrol-interval select:focus-visible {
-	outline: 2px solid var(--theme-blue);
-	outline-offset: 2px;
-}
-
-.patrol-interval select:disabled {
-	opacity: 0.55;
-	cursor: wait;
-}
-
-.patrol-auto-toggle {
+.patrol-frequency {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
-	min-height: 34px;
-	padding: 0 4px;
-	border: 0;
-	border-radius: 6px;
-	background: transparent;
+	gap: 6px;
 	color: var(--theme-muted);
 	font-size: var(--fs-body);
 	white-space: nowrap;
-	cursor: pointer;
 }
 
-.patrol-auto-toggle[aria-checked="true"] {
-	color: var(--theme-blue);
+.patrol-frequency .monitor-select-trigger {
+	min-width: 106px;
 }
 
-.patrol-auto-toggle:focus-visible {
-	outline: 2px solid var(--theme-blue);
-	outline-offset: 2px;
-}
-
-.patrol-auto-toggle:disabled {
-	opacity: 0.55;
-	cursor: wait;
-}
-
-.patrol-auto-track {
-	display: inline-flex;
-	align-items: center;
-	flex: none;
-	width: 32px;
-	height: 18px;
-	padding: 2px;
-	border-radius: 999px;
-	background: var(--theme-muted);
-}
-
-.patrol-auto-track > span {
-	width: 14px;
-	height: 14px;
-	border-radius: 50%;
-	background: #ffffff;
-}
-
-.patrol-auto-toggle[aria-checked="true"] .patrol-auto-track {
-	background: var(--theme-blue-solid);
-}
-
-.patrol-auto-toggle[aria-checked="true"] .patrol-auto-track > span {
-	transform: translateX(14px);
+.patrol-frequency .monitor-select-trigger > svg {
+	color: inherit;
 }
 
 .patrol-status-main small,
@@ -202,31 +125,8 @@
 	color: var(--theme-green);
 }
 
-.patrol-ai {
-	display: inline-flex;
-	align-items: center;
-	min-height: 20px;
-	padding: 0 8px;
-	border-radius: 999px;
-	background: var(--theme-amber-soft);
-	color: var(--theme-amber);
-	font-size: var(--fs-caption);
-	font-weight: 600;
-	white-space: nowrap;
-}
-
-.patrol-ai.is-on {
-	background: var(--theme-green-soft);
-	color: var(--theme-green);
-}
-
-/* 总开关颜色语义：绿色=开启，黄色=关闭，胶囊与滑块轨道保持一致。 */
-.patrol-ai.is-off {
-	background: var(--theme-amber-soft);
-	color: var(--theme-amber);
-}
-
-/* 主动作按钮：与系统 .refresh-data-button 同规格（34 高 / 8px 圆角 / 12px）。 */
+/* 巡查按钮共用系统规格（34 高 / 8px 圆角 / 12px）。 */
+.patrol-frequency .monitor-select-trigger,
 .patrol-run {
 	display: inline-flex;
 	align-items: center;
@@ -240,90 +140,19 @@
 	color: var(--theme-blue);
 	font-size: var(--fs-body);
 	font-weight: 700;
+	line-height: normal;
 	cursor: pointer;
 }
 
+.patrol-frequency .monitor-select-trigger:hover:not(:disabled),
 .patrol-run:hover:not(:disabled) {
 	border-color: var(--theme-blue-solid);
 }
 
+.patrol-frequency .monitor-select-trigger:disabled,
 .patrol-run:disabled {
 	opacity: 0.55;
 	cursor: not-allowed;
-}
-
-/* 状态与开关共用外框，高度及圆角与右侧巡查按钮一致。 */
-.patrol-auto-control {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	min-height: 34px;
-	padding: 0 8px;
-	border: 1px solid var(--theme-red-line);
-	border-radius: 8px;
-	background: var(--theme-red-soft);
-}
-
-.patrol-auto-control:has(.patrol-auto.is-on) {
-	border-color: var(--theme-blue-line);
-	background: var(--theme-blue-soft);
-}
-
-.patrol-auto-control .patrol-ai {
-	padding: 0;
-	background: transparent;
-	color: var(--theme-red);
-}
-
-.patrol-auto-control:has(.patrol-auto.is-on) .patrol-ai {
-	color: var(--theme-blue);
-}
-
-.patrol-auto {
-	display: inline-flex;
-	align-items: center;
-	padding: 4px;
-	border: 0;
-	background: none;
-	cursor: pointer;
-}
-
-.patrol-auto:disabled {
-	opacity: 0.55;
-	cursor: not-allowed;
-}
-
-.patrol-auto-track {
-	position: relative;
-	display: inline-block;
-	width: 32px;
-	height: 18px;
-	border-radius: 5px;
-	/* 关闭为红色，开启为蓝色，与整组外框保持一致。 */
-	background: var(--theme-red-soft);
-	border: 1px solid var(--theme-red-line);
-	transition: background 0.18s ease, border-color 0.18s ease;
-}
-
-.patrol-auto-knob {
-	position: absolute;
-	top: 1px;
-	left: 1px;
-	width: 14px;
-	height: 14px;
-	border-radius: 3px;
-	background: var(--theme-red);
-	transition: transform 0.18s ease, background 0.18s ease;
-}
-
-.patrol-auto.is-on .patrol-auto-track {
-	background: var(--theme-blue-soft);
-	border-color: var(--theme-blue-line);
-}
-
-.patrol-auto.is-on .patrol-auto-knob {
-	transform: translateX(14px);
-	background: var(--theme-blue);
 }
 
 .patrol-error,
@@ -452,7 +281,8 @@
 	list-style: none;
 }
 
-.patrol-timeline button {
+.patrol-timeline button,
+.patrol-timeline-next {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
@@ -483,6 +313,18 @@
 
 .patrol-timeline em.is-fail {
 	color: var(--theme-red);
+}
+
+.patrol-timeline-next {
+	border-style: dashed;
+	border-color: var(--theme-blue-line);
+	background: var(--theme-blue-soft);
+	color: var(--theme-blue);
+	cursor: default;
+}
+
+.patrol-timeline-next em {
+	color: inherit;
 }
 
 /* 折叠入口比记录胶囊弱一档：它是辅助操作，不该和巡查记录抢注意力。 */
@@ -623,10 +465,79 @@
 }
 
 .nv-num {
-	color: var(--theme-text);
+	color: var(--theme-blue);
 	font-family: var(--font-num);
 	font-variant-numeric: tabular-nums;
 	font-weight: 700;
+}
+
+/* 仅盘后 AI 叙述的展开正文按原有主题分组，固定盘面模块保持原样。 */
+.nv-report-sections {
+	gap: 14px;
+}
+
+.nv-report-section {
+	display: grid;
+	gap: 12px;
+	min-width: 0;
+	padding: 14px;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+	background: var(--theme-surface, #ffffff);
+}
+
+.nv-report-section > .nv-section {
+	margin-top: 0;
+}
+
+.nv-preopen-section {
+	display: block;
+	padding: 0;
+}
+
+.nv-preopen-summary {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	padding: 10px 12px;
+	border-radius: inherit;
+	font-size: var(--fs-subtitle);
+	font-weight: 600;
+	list-style: none;
+	cursor: pointer;
+}
+
+.nv-preopen-summary::-webkit-details-marker {
+	display: none;
+}
+
+.nv-preopen-summary:hover {
+	background: var(--theme-blue-soft);
+}
+
+.nv-preopen-summary:focus-visible {
+	outline: 2px solid var(--theme-blue);
+	outline-offset: 2px;
+}
+
+.nv-preopen-summary > .nv-title {
+	flex: 1;
+}
+
+.nv-preopen-count,
+.nv-preopen-chevron {
+	flex: none;
+	color: var(--theme-muted);
+	font-size: var(--fs-caption);
+	font-weight: 400;
+}
+
+.nv-preopen-section[open] > summary > .nv-preopen-chevron {
+	transform: rotate(180deg);
+}
+
+.nv-preopen-content {
+	padding: 0 12px 12px;
 }
 
 .nv-num.is-up {
@@ -691,6 +602,51 @@
 	counter-increment: nv-item;
 	content: counter(nv-item);
 	font-size: var(--fs-body);
+}
+
+/* 早报与复盘的结构化表格，仅作用于 AI 叙述正文。 */
+.nv-table-wrap {
+	min-width: 0;
+	max-width: 100%;
+	overflow-x: auto;
+	border: 1px solid var(--line-soft);
+	border-radius: 8px;
+}
+
+.nv-table-wrap:focus-visible {
+	outline: 2px solid var(--theme-blue);
+	outline-offset: 2px;
+}
+
+.nv-table {
+	width: 100%;
+	min-width: 540px;
+	border-collapse: collapse;
+	font-size: var(--fs-body);
+	line-height: 1.75;
+}
+
+.nv-table th,
+.nv-table td {
+	min-width: 84px;
+	padding: 10px 12px;
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+
+.nv-table th {
+	background: var(--theme-surface-soft, var(--surface-2));
+	color: var(--theme-muted);
+	font-weight: 600;
+}
+
+.nv-table .nv-num {
+	white-space: nowrap;
+}
+
+.nv-table tbody tr {
+	border-top: 1px solid var(--line-soft);
 }
 
 /* 固定模块：实时盘面。标题很轻，视觉分区交给每张事实卡自己。 */
@@ -1137,10 +1093,16 @@
 	stroke-linecap: round;
 }
 
+.emotion-donut.is-gauge {
+	--temperature-cold: var(--theme-blue);
+	--temperature-neutral: color-mix(in srgb, var(--theme-blue) 18%, var(--theme-red));
+	--temperature-hot: var(--theme-red);
+}
+
 .temperature-gradient {
 	width: 100%;
 	height: 100%;
-	background: conic-gradient(from 0deg, var(--theme-green) 0deg, var(--theme-red) 360deg);
+	background: conic-gradient(from 0deg, var(--temperature-cold) 0deg, var(--temperature-neutral) 180deg, var(--temperature-hot) 360deg);
 }
 
 .emotion-tick {
@@ -2058,25 +2020,20 @@
 }
 
 .nv-snapshot .is-market dd {
-	display: grid;
-	gap: 6px;
+	min-width: 0;
 }
 
 .nv-market-state {
+	display: block;
 	font-size: var(--fs-title);
 	font-weight: 700;
 	line-height: 1.6;
-	text-wrap: wrap;
-	overflow-wrap: break-word;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
-.nv-market-evidence {
-	color: var(--theme-muted);
-	font-size: var(--fs-body);
-}
-
-.nv-market-state .nv-tag,
-.nv-market-evidence .nv-tag {
+.nv-market-state .nv-tag {
 	margin-inline: 5px;
 }
 

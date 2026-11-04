@@ -83,12 +83,17 @@ func (c *Client) StockFundFlows(ctx context.Context, sortKey string, limit int) 
 		sortField = "r0_ratio"
 	} else if sortKey == "change" {
 		sortField = "changeratio"
+	} else if sortKey == "inflow" || sortKey == "outflow" {
+		sortField = "netamount"
 	}
 	values := url.Values{}
 	values.Set("page", "1")
 	values.Set("num", strconv.Itoa(min(400, max(100, limit*2))))
 	values.Set("sort", sortField)
 	values.Set("asc", "0")
+	if sortKey == "outflow" {
+		values.Set("asc", "1")
+	}
 	values.Set("bankuai", "")
 	values.Set("shichang", "")
 	requestURL := c.moneyFlowBaseURL + "?" + values.Encode()
@@ -216,6 +221,9 @@ func (c *Client) sectorFundFlows(ctx context.Context, dimension string, sortKey 
 	values.Set("num", strconv.Itoa(limit))
 	values.Set("sort", sortField)
 	values.Set("asc", "0")
+	if sortKey == "outflow" {
+		values.Set("asc", "1")
+	}
 	values.Set("fenlei", fenlei)
 	requestURL := c.sectorMoneyFlowBaseURL + "?" + values.Encode()
 	start := time.Now()

@@ -9,6 +9,70 @@ import (
 	"testing"
 )
 
+func TestStockFundFlowRankingDirectionsPreserveLegacySorts(t *testing.T) {
+	for _, test := range []struct{ sort, field, asc string }{
+		{"net", "r0_net", "0"}, {"ratio", "r0_ratio", "0"}, {"change", "changeratio", "0"},
+		{"inflow", "netamount", "0"}, {"outflow", "netamount", "1"},
+	} {
+		t.Run(test.sort, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("sort") != test.field || r.URL.Query().Get("asc") != test.asc {
+					t.Errorf("wrong upstream ranking: %s", r.URL.RawQuery)
+				}
+				net := 100
+				if test.sort == "outflow" {
+					net = -900
+				}
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"symbol": "sh600000", "name": "隔离测试资金样本", "netamount": net, "r0_net": 50}})
+			}))
+			defer upstream.Close()
+			client := NewClient(WithMoneyFlowBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+			items, meta, err := client.StockFundFlows(context.Background(), test.sort, 100)
+			if err != nil || len(items) != 1 || meta.Source != "sina:stock-money-flow" {
+				t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+			}
+			if test.sort == "outflow" && (items[0].NetInflow != -900 || items[0].MainNetInflow != 50) {
+				t.Fatalf("source signs or field meanings changed: %+v", items[0])
+			}
+		})
+	}
+}
+
+func TestSectorFundFlowRankingDirectionsPreserveLegacySorts(t *testing.T) {
+	for _, dimension := range []string{"industry", "theme"} {
+		for _, test := range []struct{ sort, field, asc string }{
+			{"net", "netamount", "0"}, {"ratio", "ratioamount", "0"}, {"change", "avg_changeratio", "0"},
+			{"inflow", "netamount", "0"}, {"outflow", "netamount", "1"},
+		} {
+			t.Run(dimension+"/"+test.sort, func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					fenlei := "0"
+					if dimension == "theme" {
+						fenlei = "1"
+					}
+					if r.URL.Query().Get("sort") != test.field || r.URL.Query().Get("asc") != test.asc || r.URL.Query().Get("fenlei") != fenlei {
+						t.Errorf("wrong upstream ranking: %s", r.URL.RawQuery)
+					}
+					net := 100
+					if test.sort == "outflow" {
+						net = -900
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"category": "test_sector", "name": "隔离测试板块资金", "netamount": net}})
+				}))
+				defer upstream.Close()
+				client := NewClient(WithSectorMoneyFlowBaseURL(upstream.URL), WithHTTPClient(upstream.Client()))
+				items, meta, err := client.MarketFundFlows(context.Background(), dimension, test.sort, 100)
+				if err != nil || len(items) != 1 || items[0].Dimension != dimension || meta.Source != "sina:"+dimension+"-money-flow" {
+					t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+				}
+				if test.sort == "outflow" && items[0].NetInflow != -900 {
+					t.Fatalf("source outflow sign changed: %+v", items[0])
+				}
+			})
+		}
+	}
+}
+
 func TestStockFundFlowsParsesAndFiltersAStocks(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

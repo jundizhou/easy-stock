@@ -346,7 +346,10 @@ func TestResumeLegacyVersionRefreshesLockedSnapshotAndProposal(t *testing.T) {
 	legacy.ID, legacy.Version = "legacy-resume", "portfolio-optimization-v1"
 	legacy.Status, legacy.ResumeAvailable = "incomplete", true
 	legacy.LatestTradeDate = LatestSession(time.Now())
-	legacy.SnapshotAt = time.Now().UTC()
+	// 故意往后退一分钟：断言是"刷新后的快照必须晚于旧快照"。
+	// 如果旧快照取 time.Now()，刷新在同一个时钟刻度内完成时两个时间戳相等，
+	// After() 为假——这是一次无法稳定复现的偶发失败的真实来源。
+	legacy.SnapshotAt = time.Now().UTC().Add(-time.Minute)
 	legacy.Proposal = &Proposal{KeepReason: "old missing amount locked every stock"}
 	for i := range legacy.Eligibility {
 		legacy.Eligibility[i].Locked = true

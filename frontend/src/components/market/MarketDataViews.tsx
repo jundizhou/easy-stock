@@ -12,11 +12,14 @@ import {
 	Landmark,
 	LoaderCircle,
 	Search,
+	TrendingDown,
 	TrendingUp,
 	WalletCards,
 } from 'lucide-react';
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+	BackendConfig,
+	KLine,
 	MarketBillboardItem,
 	MarketBillboardDetail,
 	MarketBillboardSeat,
@@ -32,10 +35,13 @@ import type {
 	MarketResearchItem,
 	SourceMeta,
 } from '../../lib/backend';
+import { requestJSON } from '../../lib/backend';
 import { classifyBillboardSeat } from '../../lib/billboard';
 import { formatArticleParagraphs, isIndentedParagraph } from '../../lib/article';
 import { formatFuturesOpeningHands } from '../../lib/futures-position';
 import { useTableSort } from '../../lib/table-tools';
+import { latestTradingDayKLines } from '../../lib/kline';
+import { KLINE_PERIODS, type KLinePeriodKey, StockKLineModal, type StockKLineTarget } from '../StockKLineModal';
 
 type DataState = 'idle' | 'loading' | 'ready' | 'error';
 type SortDirection = 'asc' | 'desc';
@@ -143,29 +149,98 @@ export function IndustryMomentumView({ items, meta }: { items: MarketIndustryMom
 	</div>;
 }
 
-export function FundFlowView({ items, dimension, meta }: {
+export function FundFlowView({ config, items, dimension, meta, direction = 'inflow', onDirectionChange, state = 'ready', error = '' }: {
+	config?: BackendConfig | null;
 	items: MarketFundFlow[];
 	dimension: 'industry' | 'theme' | 'stock';
 	meta: SourceMeta | null;
+	direction?: 'inflow' | 'outflow';
+	onDirectionChange?: (direction: 'inflow' | 'outflow') => void;
+	state?: DataState;
+	error?: string;
 }) {
 	const [query, setQuery] = useState('');
-	const visible = items.filter((item) => !query || `${item.name}${item.code}${item.symbol || ''}${item.leader_name || ''}`.toLowerCase().includes(query.toLowerCase()));
-	const flowValues = items.map((item) => primaryNetInflow(item, meta));
-	const topFlowItem = items.reduce<MarketFundFlow | null>((best, item) => !best || primaryNetInflow(item, meta) > primaryNetInflow(best, meta) ? item : best, null);
+	const [selectedStock, setSelectedStock] = useState<StockKLineTarget | null>(null);
+	useEffect(() => setSelectedStock(null), [direction, dimension]);
+	const selectStock = (item: MarketFundFlow) => {
+		if (!item.symbol) return;
+		setSelectedStock({ symbol: item.symbol, name: item.name, price: hasField(meta, 'price') ? item.price : undefined, change_percent: hasField(meta, 'change_percent') ? item.change_percent : undefined });
+	};
+	const outflow = direction === 'outflow';
+	const flowLabel = outflow ? '流出' : '流入';
+	const dimensionLabel = dimension === 'industry' ? '行业' : dimension === 'theme' ? '题材' : '个股';
+	const rankedItems = items.filter((item) => outflow ? primaryNetInflow(item, meta) < 0 : primaryNetInflow(item, meta) > 0);
+	const visible = rankedItems.filter((item) => !query || `${item.name}${item.code}${item.symbol || ''}${item.leader_name || ''}`.toLowerCase().includes(query.toLowerCase()));
+	const flowValues = rankedItems.map((item) => primaryNetInflow(item, meta));
+	const flowAvailable = hasField(meta, 'net_inflow') || hasField(meta, 'main_net_inflow');
+	const topFlowItem = rankedItems.reduce<MarketFundFlow | null>((best, item) => !best || (outflow ? primaryNetInflow(item, meta) < primaryNetInflow(best, meta) : primaryNetInflow(item, meta) > primaryNetInflow(best, meta)) ? item : best, null);
 	const topFlow = topFlowItem ? primaryNetInflow(topFlowItem, meta) : 0;
-	return <div className="market-data-view">
+	return <div className="market-data-view market-fund-flow-view">
 		<SourceNotice meta={meta} />
-		<MarketFilter query={query} onQuery={setQuery}><span className="market-sort-hint">点击列名排序</span></MarketFilter>
-		<section className="market-flow-summary">
-			<SummaryMetric icon={<TrendingUp size={17} />} label="净流入项目" value={String(flowValues.filter((value) => value > 0).length)} detail={`共 ${items.length} 项`} tone="up" />
-			<SummaryMetric icon={<Building2 size={17} />} label="榜首净流入" value={topFlowItem ? formatMoney(topFlow) : '--'} detail={topFlowItem?.name || '等待数据'} tone={toneClass(topFlow)} />
-			<SummaryMetric icon={<Activity size={17} />} label="口径" value={dimension === 'industry' ? '行业' : dimension === 'theme' ? '题材' : '个股'} detail={fundFlowSourceLabel(meta)} />
-		</section>
+		{state !== 'loading' && state !== 'error' && <section className="market-flow-summary">
+			<SummaryMetric icon={outflow ? <TrendingDown size={17} /> : <TrendingUp size={17} />} label={`净${flowLabel}项目`} value={flowAvailable ? String(flowValues.filter((value) => outflow ? value < 0 : value > 0).length) : '--'} detail={`共 ${rankedItems.length} 项`} tone={outflow ? 'down' : 'up'} />
+			<SummaryMetric icon={<Building2 size={17} />} label={`榜首净${flowLabel}`} value={topFlowItem ? formatMoney(topFlow) : '--'} detail={topFlowItem?.name || '等待数据'} tone={toneClass(topFlow)} />
+			<SummaryMetric icon={<Activity size={17} />} label="口径" value={dimensionLabel} detail={`${fundFlowSourceLabel(meta)}${!hasField(meta, 'net_inflow') && hasField(meta, 'main_net_inflow') ? ' · 主力资金口径' : ''}`} />
+		</section>}
+		<MarketFilter query={query} onQuery={setQuery}>
+			{onDirectionChange && <div className="market-flow-direction" role="group" aria-label={`${dimensionLabel}资金方向`} data-direction={direction}>
+				<span className="market-flow-direction-thumb" aria-hidden="true" />
+				<button type="button" aria-pressed={!outflow} onClick={() => onDirectionChange('inflow')}>资金流入</button>
+				<button type="button" aria-pressed={outflow} onClick={() => onDirectionChange('outflow')}>资金流出</button>
+			</div>}
+		</MarketFilter>
+		<ModuleState state={state} error={error}>
 		{visible.length ? dimension === 'stock'
-			? <StockFundFlowTable items={visible} meta={meta} />
-			: <SectorFundFlowTable items={visible} meta={meta} />
-			: <EmptyData title="没有匹配资金记录" detail="调整搜索条件或刷新资金榜。" />}
+			? <StockFundFlowTable key={`${direction}-${hasField(meta, 'net_inflow')}`} items={visible} meta={meta} direction={direction} onSelectStock={selectStock} />
+			: <SectorFundFlowTable key={`${direction}-${hasField(meta, 'net_inflow')}`} items={visible} meta={meta} direction={direction} />
+			: <EmptyData title="没有匹配资金记录" detail={!query ? `当前数据源暂无净${flowLabel}${dimensionLabel}，请稍后刷新。` : '调整搜索条件或刷新资金榜。'} />}
+		</ModuleState>
+		{selectedStock && <StockFundFlowKLine key={selectedStock.symbol} config={config} stock={selectedStock} description={`资金${flowLabel}榜 · ${fundFlowSourceLabel(meta)}`} onClose={() => setSelectedStock(null)} />}
 	</div>;
+}
+
+function StockFundFlowKLine({ config, stock, description, onClose }: { config?: BackendConfig | null; stock: StockKLineTarget; description: string; onClose: () => void }) {
+	const [periodKey, setPeriodKey] = useState<KLinePeriodKey>('day');
+	const [lines, setLines] = useState<KLine[]>([]);
+	const [state, setState] = useState<DataState>('loading');
+	const [error, setError] = useState('');
+	const cache = useRef(new Map<string, KLine[]>());
+	useEffect(() => {
+		if (!config) {
+			setLines([]);
+			setState('error');
+			setError('后端尚未连接');
+			return;
+		}
+		const period = KLINE_PERIODS.find((item) => item.key === periodKey) || KLINE_PERIODS[2];
+		const cacheKey = `${config.backendUrl}:${stock.symbol}:${period.key}`;
+		const cached = cache.current.get(cacheKey);
+		setError('');
+		if (cached) {
+			setLines(cached);
+			setState('ready');
+			return;
+		}
+		let cancelled = false;
+		const controller = new AbortController();
+		setLines([]);
+		setState('loading');
+		requestJSON<{ data: KLine[] }>(config, `/api/v1/quotes/kline?symbol=${encodeURIComponent(stock.symbol)}&period=${encodeURIComponent(period.apiPeriod)}&limit=${period.limit}`, { signal: controller.signal })
+			.then((payload) => {
+				if (cancelled) return;
+				const nextLines = period.key === 'intraday' ? latestTradingDayKLines(payload.data || []) : payload.data || [];
+				cache.current.set(cacheKey, nextLines);
+				setLines(nextLines);
+				setState('ready');
+			})
+			.catch((reason) => {
+				if (cancelled) return;
+				setState('error');
+				setError(reason instanceof Error ? reason.message : `${period.label}数据加载失败`);
+			});
+		return () => { cancelled = true; controller.abort(); };
+	}, [config, stock.symbol, periodKey]);
+	return <StockKLineModal stock={stock} contextLabel="个股资金" description={description} lines={lines} state={state} error={error} periodKey={periodKey} onPeriodChange={setPeriodKey} onClose={onClose} />;
 }
 
 export function MarginBalanceView({ items, limit, onLimit, meta }: {
@@ -312,10 +387,10 @@ function paddedExtent(values: number[]) {
 	return { min: minimum - padding, max: maximum + padding };
 }
 
-function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: SourceMeta | null }) {
+function SectorFundFlowTable({ items, meta, direction }: { items: MarketFundFlow[]; meta: SourceMeta | null; direction: 'inflow' | 'outflow' }) {
 	const netAvailable = hasField(meta, 'net_inflow');
 	const fallbackMainAvailable = hasField(meta, 'main_net_inflow');
-	const [sortState, setSortState] = useTableSort<SortState>('sector-fund-flow', { key: 'net_value', direction: 'desc' });
+	const [sortState, setSortState] = useTableSort<SortState>(direction === 'outflow' ? 'sector-fund-flow-outflow' : 'sector-fund-flow', { key: 'net_value', direction: direction === 'outflow' ? 'asc' : 'desc' });
 	const sortedItems = useMemo(() => [...items].sort((a, b) => compareSortValues(sectorSortValue(a, sortState.key, meta), sectorSortValue(b, sortState.key, meta), sortState.direction)), [items, meta, sortState]);
 	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => { if (available) setSortState((current) => nextSortState(current, key, defaultDirection)); };
 	return <div className="market-data-table flow sector" data-tt-grid="sector-fund-flow" data-tt-sort-mode="react"><header>
@@ -343,8 +418,8 @@ function SectorFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: S
 	})}</div>;
 }
 
-function StockFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: SourceMeta | null }) {
-	const [sortState, setSortState] = useTableSort<SortState>('stock-fund-flow', { key: 'net_inflow', direction: 'desc' });
+function StockFundFlowTable({ items, meta, direction, onSelectStock }: { items: MarketFundFlow[]; meta: SourceMeta | null; direction: 'inflow' | 'outflow'; onSelectStock: (item: MarketFundFlow) => void }) {
+	const [sortState, setSortState] = useTableSort<SortState>(direction === 'outflow' ? 'stock-fund-flow-outflow' : 'stock-fund-flow', { key: hasField(meta, 'net_inflow') ? 'net_inflow' : 'main_net_inflow', direction: direction === 'outflow' ? 'asc' : 'desc' });
 	const sortedItems = useMemo(() => [...items].sort((a, b) => compareSortValues(stockSortValue(a, sortState.key, meta), stockSortValue(b, sortState.key, meta), sortState.direction)), [items, meta, sortState]);
 	const toggleSort = (key: string, available = true, defaultDirection: SortDirection = 'desc') => { if (available) setSortState((current) => nextSortState(current, key, defaultDirection)); };
 	return <div className="market-data-table flow stock" data-tt-grid="stock-fund-flow" data-tt-sort-mode="react"><header>
@@ -362,6 +437,16 @@ function StockFundFlowTable({ items, meta }: { items: MarketFundFlow[]; meta: So
 		data-stock-row={item.symbol ? 'fund-flow' : undefined}
 		data-symbol={item.symbol || undefined}
 		data-name={item.symbol ? item.name : undefined}
+		role={item.symbol ? 'button' : undefined}
+		tabIndex={item.symbol ? 0 : undefined}
+		aria-label={item.symbol ? `查看${item.name} K线` : undefined}
+		onClick={() => onSelectStock(item)}
+		onKeyDown={(event) => {
+			if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+				event.preventDefault();
+				onSelectStock(item);
+			}
+		}}
 	>
 		<FlowIdentity item={item} index={index} />
 		<strong>{formatAvailable(item.price, hasField(meta, 'price'), formatPrice)}</strong>

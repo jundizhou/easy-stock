@@ -2,12 +2,82 @@ package sina
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestMarketSnapshotSlowPageDoesNotBlockLaterPageRequests(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	var active, peak atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFlight := active.Add(1)
+		defer active.Add(-1)
+		for previous := peak.Load(); inFlight > previous; previous = peak.Load() {
+			if peak.CompareAndSwap(previous, inFlight) {
+				break
+			}
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page == 1 {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if page == sinaSnapshotWorkers+1 {
+			once.Do(func() { close(release) })
+		}
+		count := sinaSnapshotPageSize
+		if page == 8 {
+			count = 1
+		} else if page > 8 {
+			count = 0
+		}
+		items := make([]string, count)
+		for index := range items {
+			items[index] = fmt.Sprintf(`{"symbol":"sz%06d","name":"测试样本","trade":"10","settlement":"9","open":"10","volume":1000}`, 1000+(page-1)*sinaSnapshotPageSize+index)
+		}
+		fmt.Fprintf(w, "[%s]", joinRaw(items))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	rows, meta, err := NewClient(WithListBaseURL(server.URL)).MarketSnapshot(ctx)
+	if err != nil || meta.Stale || len(rows) != 701 {
+		t.Fatalf("slow page blocked later requests: rows=%d meta=%+v err=%v", len(rows), meta, err)
+	}
+	if peak.Load() > sinaSnapshotWorkers {
+		t.Fatalf("concurrency grew beyond %d: %d", sinaSnapshotWorkers, peak.Load())
+	}
+	if rows[0].Symbol != "001000.SZ" || rows[100].Symbol != "001100.SZ" || rows[len(rows)-1].Symbol != "001700.SZ" {
+		t.Fatal("out-of-order completion changed page order or dropped rows")
+	}
+}
+
+func TestMarketSnapshotCancelledPoolDoesNotStartRequests(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		fmt.Fprint(w, "[]")
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := NewClient(WithListBaseURL(server.URL)).MarketSnapshot(ctx)
+	if !errors.Is(err, context.Canceled) || calls.Load() != 0 {
+		t.Fatalf("cancelled pool issued requests or lost cancellation: calls=%d err=%v", calls.Load(), err)
+	}
+}
 
 // 新浪列表按代码升序翻页，每页 100 行；这里造两页数据验证：
 // 字段映射（价格/涨跌幅/换手/市值单位）、代码归一化、翻到短页就停。
@@ -103,4 +173,132 @@ func joinRaw(values []string) string {
 		out += value
 	}
 	return out
+}
+
+func TestMarketSnapshotRetriesOnlyTransientFailedPage(t *testing.T) {
+	var mu sync.Mutex
+	calls := map[int]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		mu.Lock()
+		calls[page]++
+		attempt := calls[page]
+		mu.Unlock()
+		if page == 2 && attempt == 1 {
+			http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+			return
+		}
+		if page == 1 {
+			rows := make([]string, sinaSnapshotPageSize)
+			for index := range rows {
+				rows[index] = fmt.Sprintf(`{"symbol":"sz%06d","name":"测试样本","trade":"10","settlement":"9","open":"10","volume":1000}`, 1000+index)
+			}
+			fmt.Fprintf(w, "[%s]", joinRaw(rows))
+			return
+		}
+		if page == 2 {
+			fmt.Fprint(w, `[{"symbol":"sh600000","name":"测试样本","trade":"10","settlement":"9","open":"10","volume":1000}]`)
+			return
+		}
+		fmt.Fprint(w, "[]")
+	}))
+	defer server.Close()
+	client := NewClient(WithListBaseURL(server.URL))
+	rows, meta, err := client.MarketSnapshot(context.Background())
+	if err != nil || meta.Stale || len(rows) != 101 {
+		t.Fatalf("successful retry must recover a complete snapshot: rows=%d meta=%+v err=%v", len(rows), meta, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for page, count := range calls {
+		want := 1
+		if page == 2 {
+			want = 2
+		}
+		if count != want {
+			t.Fatalf("page %d requested %d times, want %d", page, count, want)
+		}
+	}
+}
+
+func TestMarketSnapshotPersistentPageFailureRemainsStale(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			http.Error(w, "still unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Query().Get("page") == "1" {
+			fmt.Fprint(w, `[{"symbol":"sz001000","name":"测试样本","trade":"10","settlement":"9","open":"10","volume":1000}]`)
+			return
+		}
+		fmt.Fprint(w, "[]")
+	}))
+	defer server.Close()
+	rows, meta, err := NewClient(WithListBaseURL(server.URL)).MarketSnapshot(context.Background())
+	if err != nil || len(rows) != 1 || !meta.Stale || !strings.Contains(meta.FallbackReason, "503") {
+		t.Fatalf("failed retry must retain incomplete flag and error: rows=%d meta=%+v err=%v", len(rows), meta, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("failed page must be attempted exactly twice, got %d", calls)
+	}
+}
+
+func TestSnapshotPageDoesNotRetryPermanentErrorOrCancellation(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				http.Error(w, "permanent failure", status)
+			}))
+			defer server.Close()
+			client := NewClient(WithListBaseURL(server.URL))
+			if _, err := client.snapshotPage(context.Background(), 1); err == nil || calls.Load() != 1 {
+				t.Fatalf("permanent error must not retry: calls=%d err=%v", calls.Load(), err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if _, err := client.snapshotPage(ctx, 1); !errors.Is(err, context.Canceled) || calls.Load() != 1 {
+				t.Fatalf("cancelled page must not issue a request: calls=%d err=%v", calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestSnapshotPageCancellationPreventsSecondAttempt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client := NewClient(WithListBaseURL(server.URL))
+	// 首次响应后取消，即使原错误可重试，也不应再发送第二次请求。
+	client.httpClient.Transport = cancelSnapshotTransport{base: http.DefaultTransport, cancel: cancel}
+	if _, err := client.snapshotPage(ctx, 1); err == nil {
+		t.Fatal("cancelled retry must retain the source error or cancellation")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("cancelled request retried: %d attempts", calls.Load())
+	}
+}
+
+type cancelSnapshotTransport struct {
+	base   http.RoundTripper
+	cancel context.CancelFunc
+}
+
+func (transport cancelSnapshotTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := transport.base.RoundTrip(request)
+	transport.cancel()
+	return response, err
 }

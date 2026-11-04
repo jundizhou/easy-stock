@@ -130,9 +130,17 @@ function pruneBackups(backupRoot, keep = 3) {
     .filter((entry) => entry.isDirectory() && !entry.name.includes('.partial-'))
     .map((entry) => {
       const backupPath = path.join(backupRoot, entry.name);
-      return { path: backupPath, modifiedAt: fs.statSync(backupPath).mtimeMs };
+      let createdAt = fs.statSync(backupPath).mtimeMs;
+      try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(backupPath, 'manifest.json'), 'utf8'));
+        const recordedAt = Date.parse(manifest.createdAt);
+        if (Number.isFinite(recordedAt)) createdAt = recordedAt;
+      } catch {
+        // Keep the existing mtime fallback for older/incomplete manifests.
+      }
+      return { path: backupPath, createdAt };
     })
-    .sort((left, right) => right.modifiedAt - left.modifiedAt);
+    .sort((left, right) => right.createdAt - left.createdAt || right.path.localeCompare(left.path));
   for (const backup of backups.slice(Math.max(1, keep))) {
     fs.rmSync(backup.path, { recursive: true, force: true });
   }
@@ -193,7 +201,7 @@ function listUpdateBackups(backupRoot) {
       }
     })
     .filter(Boolean)
-    .sort((left, right) => String(right.manifest.createdAt).localeCompare(String(left.manifest.createdAt)));
+    .sort((left, right) => String(right.manifest.createdAt).localeCompare(String(left.manifest.createdAt)) || right.path.localeCompare(left.path));
 }
 
 module.exports = {

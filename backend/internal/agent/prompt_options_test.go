@@ -177,8 +177,11 @@ func TestPreparePromptSandboxCanDisableAllTools(t *testing.T) {
 }
 
 func TestSandboxSiteCustomizeBlocksHostFilesAndSubprocesses(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
+	python := strings.TrimSpace(os.Getenv("EASY_STOCK_HERMES_TEST_PYTHON"))
+	if python == "" {
+		python, _ = exec.LookPath("python3")
+	}
+	if python == "" {
 		t.Skip("python3 is unavailable")
 	}
 	hostDir := t.TempDir()
