@@ -18,7 +18,7 @@ const pythonDependencies = [
 	'EbookLib>=0.18',
 ];
 
-export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = process.env.WECHAT_DOWNLOAD_API_SOURCE || '', uv = process.env.UV || 'uv' } = {}) {
+export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = process.env.WECHAT_DOWNLOAD_API_SOURCE || '', repositoryURL = process.env.WECHAT_DOWNLOAD_API_REPOSITORY?.trim() || WECHAT_DOWNLOAD_API_REPOSITORY, uv = process.env.UV || 'uv' } = {}) {
 	if (!resourcesRoot) throw new Error('resourcesRoot is required');
 	if (!runtimeRoot) throw new Error('runtimeRoot is required');
 	const resolvedResourcesRoot = path.resolve(resourcesRoot);
@@ -28,7 +28,7 @@ export function prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath = 
 
 	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'a-stock-wechat-source-'));
 	try {
-		const resolvedSource = sourcePath ? path.resolve(sourcePath) : downloadSource(tempRoot);
+		const resolvedSource = sourcePath ? path.resolve(sourcePath) : downloadSource(tempRoot, repositoryURL);
 		if (!fs.existsSync(path.join(resolvedSource, 'app.py'))) throw new Error(`wechat-download-api source is incomplete: ${resolvedSource}`);
 		fs.cpSync(resolvedSource, targetRoot, { recursive: true });
 	} finally {
@@ -83,8 +83,8 @@ function bundledRuntimePython(runtimeRoot) {
 	return path.join(binRoot, candidate);
 }
 
-function downloadSource(tempRoot) {
-	const archiveURL = `${WECHAT_DOWNLOAD_API_REPOSITORY}/archive/${WECHAT_DOWNLOAD_API_REVISION}.tar.gz`;
+function downloadSource(tempRoot, repositoryURL) {
+	const archiveURL = `${repositoryURL.replace(/\/+$/, '')}/archive/${WECHAT_DOWNLOAD_API_REVISION}.tar.gz`;
 	const archivePath = path.join(tempRoot, 'source.tar.gz');
 	run('curl', ['-fsSL', '--retry', '4', '--retry-delay', '2', '--retry-all-errors', '--connect-timeout', '20', archiveURL, '-o', archivePath], tempRoot);
 	run('tar', ['-xzf', path.basename(archivePath), '-C', '.'], tempRoot);

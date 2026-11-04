@@ -264,19 +264,22 @@ describe('phase-specific structured patrol reports', () => {
 		expect(original).toContain(firstUseFooter);
 	});
 
-	it('omits the repeated snapshot provenance footer but keeps actual source warnings', () => {
+	it('keeps snapshot provenance restrictions while omitting the disclaimer', () => {
 		const note = '市场温度37.912、上涨占比35.8224%，是2026-11-03 13:33:49采集的盘中快照；情绪周期阶段（发酵/主升）取自2026-11-02口径，与盘中情绪分属不同口径。数据为2026-11-03 13:34盘中快照，非收盘结果。本简报仅用于信息整理与研究辅助，不构成投资建议。';
 		const body = '市场状态：合成测试，待验证。\n较上次变化：市场温度由43.4977降至37.912，上涨占比由42.3603%降至35.8224%\n数据缺口：行业资金未接入。';
 		const original = `${body}\n\n${note}`;
 		const text = patrolNarrativeText(original);
-		expect(text).toBe(body);
+		expect(text).toContain(body);
+		expect(text).toContain('非收盘结果');
+		expect(text).toContain('与盘中情绪分属不同口径');
+		expect(text).not.toContain(disclaimer);
 		expect(original).toContain(note);
 		const warning = note + '市场温度刷新失败，缓存已过期。';
 		expect(patrolNarrativeText(`${body}\n\n${warning}`)).toContain('市场温度刷新失败，缓存已过期。');
-		expect(patrolNarrativeText(`${body}\n\n${note.replace('37.912', '**37.912**')}`)).toBe(body);
+		expect(patrolNarrativeText(`${body}\n\n${note.replace('37.912', '**37.912**')}`)).toContain('**37.912**');
 	});
 
-	it.each(['pre_open', 'intraday', 'post_close'] as const)('hides later snapshot wording in %s without suppressing real warnings', (phase) => {
+	it.each(['pre_open', 'intraday', 'post_close'] as const)('retains snapshot timing and status mismatches in %s', (phase) => {
 		const body = `${phase === 'pre_open' ? '盘前定调' : phase === 'post_close' ? '收盘定调' : '市场状态'}：合成样例，等待验证。`;
 		const note = '数据为2026-11-03 14:10盘中快照。市场温度采集于14:10:13，非收盘结果；指数接口的状态标记为收盘口径，与本次采集时点不一致，该数以采集时点为准。情绪周期阶段（发酵/主升）取自2026-11-02，仅引用阶段，不展开分数。' + disclaimer;
 		const gap = '数据缺口：行业资金未接入，市场温度刷新失败。';
@@ -284,10 +287,22 @@ describe('phase-specific structured patrol reports', () => {
 		const text = patrolNarrativeText(original);
 		expect(text).toContain(body);
 		expect(text).toContain(gap);
-		expect(text).not.toContain('市场温度采集于');
-		expect(text).not.toContain('不展开分数');
+		expect(text).toContain('市场温度采集于14:10:13，非收盘结果');
+		expect(text).toContain('与本次采集时点不一致');
 		expect(text).not.toContain(disclaimer);
 		expect(original).toContain(note);
+	});
+
+	it.each([
+		'数据时效说明：本盘前报告为盘后手动生成，使用收盘快照，不能视为盘前已知信息。',
+		'数据口径说明：资金榜日期未核实，仅供历史参考，不能作为今日实时资金。',
+		'数据为上一交易日收盘快照，不代表今日盘中行情。',
+	])('preserves substantive provenance in both text and rendered output: %s', (warning) => {
+		const original = `盘前定调：等待验证。\n\n${warning}`;
+		const text = patrolNarrativeText(original);
+		expect(text).toContain(warning);
+		const output = renderToStaticMarkup(createElement(Narrative, { markdown: text }));
+		expect(output).toContain(warning);
 	});
 
 	it('groups legacy pre-open sections into accessible disclosures and leaves risks open', () => {

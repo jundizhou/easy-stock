@@ -852,11 +852,10 @@ export function patrolNarrativeText(markdown: string): string {
 
 function isNarrativePresentationNote(text: string): boolean {
 	const plain = text.replace(/\*\*/g, '').trim();
-	if (/失败|缺失|未接入|不可用|不足|缓存|过期|无可用|未就绪/.test(plain)) return false;
-	return /^本(?:简报|报告).*不构成投资建议/.test(plain)
-		|| /^数据为.*(?:快照|收盘|采集|抓取|口径)/.test(plain)
-		|| /^(?:数据时效说明|数据口径(?:说明)?|口径说明|采集说明)[：:]/.test(plain)
-		|| (/^市场温度\s*\d/.test(plain) && /上涨占比/.test(plain) && /采集的盘中快照/.test(plain) && /情绪周期.*口径/.test(plain));
+	// Only omit known boilerplate. A provenance heading alone cannot tell us
+	// whether the line contains a date restriction or a cross-session warning.
+	return /^本(?:简报|报告)仅用于[^。！？\r\n]*不构成投资建议[。.]?$/.test(plain)
+		|| /^数据时效说明[：:]\s*仅为盘中快照[。.]?$/.test(plain);
 }
 
 type SnapshotField = (typeof SNAPSHOT_FIELDS)[number] | '数据缺口';

@@ -3,21 +3,21 @@
 // 环境变量由调用方 export：
 //   HERMES_AGENT_SOURCE            hermes tar.gz 的直接 URL（含代理前缀）
 //   WECHAT_DOWNLOAD_API_REPOSITORY wechat 仓库地址（含代理前缀）
-// 这两个值会在对应 *.mjs import 时读取，因此必须在 node 启动前就 export 好。
+// 下载函数调用时读取环境变量；来源记录与 Hermes 固定校验值仍指向原项目。
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareHermesRuntime } from './hermes-runtime.mjs';
-import { prepareWechatRuntime } from './wechat-runtime.mjs';
+import { HERMES_AGENT_SOURCE, prepareHermesRuntime } from './hermes-runtime.mjs';
+import { WECHAT_DOWNLOAD_API_REPOSITORY, prepareWechatRuntime } from './wechat-runtime.mjs';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const resourcesRoot = path.join(desktopRoot, 'resources');
 const hermesRoot = path.join(resourcesRoot, 'hermes-runtime');
 
-console.log('[1/2] Preparing Hermes runtime via', process.env.HERMES_AGENT_SOURCE || '(default github)');
+console.log('[1/2] Preparing Hermes runtime via', process.env.HERMES_AGENT_SOURCE?.trim() || HERMES_AGENT_SOURCE);
 const hermesManifest = prepareHermesRuntime({ runtimeRoot: hermesRoot });
 console.log(`    Hermes ${hermesManifest.version} (${hermesManifest.mode}) ready at ${hermesRoot}`);
 
-console.log('[2/2] Preparing WeChat download-api via', process.env.WECHAT_DOWNLOAD_API_REPOSITORY || '(default github)');
+console.log('[2/2] Preparing WeChat download-api via', process.env.WECHAT_DOWNLOAD_API_REPOSITORY?.trim() || WECHAT_DOWNLOAD_API_REPOSITORY);
 const wechatManifest = prepareWechatRuntime({ resourcesRoot, runtimeRoot: hermesRoot });
 console.log(`    WeChat ${wechatManifest.revision.slice(0, 12)} ready`);
 

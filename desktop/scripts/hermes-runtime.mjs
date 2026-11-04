@@ -28,6 +28,7 @@ export function hermesVenvPython(runtimeRoot, platform = process.platform) {
 export function prepareHermesRuntime({
 	runtimeRoot,
 	sourcePath = process.env.HERMES_RUNTIME_SOURCE || process.env.A_STOCK_HERMES_RUNTIME_SOURCE || '',
+	archiveURL = process.env.HERMES_AGENT_SOURCE?.trim() || HERMES_AGENT_SOURCE,
 	platform = process.platform,
 	arch = process.arch,
 	uv = process.env.UV || 'uv',
@@ -50,7 +51,7 @@ export function prepareHermesRuntime({
 			fs.mkdirSync(builtRoot, { recursive: true });
 			const archive = path.join(staging, 'hermes.tar.gz');
 			if (process.env.HERMES_AGENT_ARCHIVE) fs.copyFileSync(process.env.HERMES_AGENT_ARCHIVE, archive);
-			else run('curl', ['-fsSL', '--retry', '4', '--retry-delay', '2', '--retry-all-errors', HERMES_AGENT_SOURCE, '-o', archive], staging);
+			else run('curl', ['-fsSL', '--retry', '4', '--retry-delay', '2', '--retry-all-errors', archiveURL, '-o', archive], staging);
 			const digest = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
 			if (digest !== HERMES_SOURCE_SHA256) throw new Error('Hermes source archive checksum mismatch');
 			const listing = spawnSync('tar', ['-tzf', path.basename(archive)], { cwd: staging, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true });
