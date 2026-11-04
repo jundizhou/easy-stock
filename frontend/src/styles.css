@@ -7864,7 +7864,11 @@ a:focus-visible {
 .topbar-toggle { position: relative; z-index: 41; }
 .stock-ai-kpi > strong.is-text { display: block; align-self: end; font-family: var(--font-ui); font-size: var(--fs-title); line-height: var(--lh-tight); white-space: normal; overflow: hidden; }
 /* 状态类指标（如“修复/加速”）用标签呈现，避免和 26px 数字并排显得忽大忽小。 */
-.stock-ai-kpi .kpi-chip { display: inline-block; max-width: 100%; padding: 3px 9px; border: 1px solid color-mix(in srgb, currentColor 26%, transparent); border-radius: 7px; background: color-mix(in srgb, currentColor 10%, transparent); font-family: var(--font-ui); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-snug); overflow-wrap: anywhere; }
+/* html2canvas 1.x cannot parse color-mix()'s computed color(srgb ...); use theme tokens. */
+.stock-ai-kpi .kpi-chip { display: inline-block; max-width: 100%; padding: 3px 9px; border: 1px solid var(--theme-blue-line, rgba(23, 94, 169, .26)); border-radius: 7px; background: var(--theme-blue-soft, rgba(23, 94, 169, .1)); font-family: var(--font-ui); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-snug); overflow-wrap: anywhere; }
+.stock-ai-kpi.amber .kpi-chip { border-color: var(--theme-amber-line, rgba(169, 106, 8, .26)); background: var(--theme-amber-soft, rgba(169, 106, 8, .1)); }
+.stock-ai-kpi.purple .kpi-chip { border-color: var(--theme-purple-line, rgba(118, 81, 201, .26)); background: var(--theme-purple-soft, rgba(118, 81, 201, .1)); }
+.stock-ai-kpi.green .kpi-chip { border-color: var(--theme-green-line, rgba(20, 134, 95, .26)); background: var(--theme-green-soft, rgba(20, 134, 95, .1)); }
 
 /* Scrollbars: thin, transparent until the element scrolls, colour follows the theme. */
 :root { --scrollbar-thumb: color-mix(in srgb, var(--muted, #6b7a8c) 42%, transparent); }

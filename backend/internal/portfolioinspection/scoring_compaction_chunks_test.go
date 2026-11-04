@@ -65,3 +65,14 @@ func TestCompactionRejectsUnpackableSourceMetadataWithoutDroppingText(t *testing
 		t.Fatal("oversized provenance silently dropped")
 	}
 }
+
+func TestCompactionSummaryBudgetCountsJSONEscaping(t *testing.T) {
+	summary := strings.Repeat("风险\"<>&🙂\n", 20)
+	encoded, _ := json.Marshal(summary)
+	if len(encoded) <= len(summary) {
+		t.Fatal("fixture must grow when JSON encoded")
+	}
+	if validCompactionSummaryWithin(summary, len(summary)) || validCompactionSummaryWithin(summary, len(encoded)-1) || !validCompactionSummaryWithin(summary, len(encoded)) {
+		t.Fatal("summary budget did not use the exact encoded byte length")
+	}
+}

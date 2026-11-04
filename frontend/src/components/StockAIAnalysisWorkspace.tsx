@@ -71,6 +71,7 @@ import {
 	signedPercent,
 } from '../lib/stock-analysis';
 import { formatArticleParagraphs, isIndentedParagraph } from '../lib/article';
+import { logRuntimeEvent, runtimeErrorDetails } from '../lib/runtime-log';
 import { useStockResearch } from '../lib/use-stock-research';
 import { isResearchRunning, researchPlanText, type ResearchAnalysisLevel, type ResearchRequest } from '../lib/stock-research';
 import { StockResearchHistory, StockResearchProgress, StockResearchReportView } from './StockResearchReport';
@@ -400,6 +401,12 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 			setExportNotice('长图已生成并保存');
 		} catch (exportError) {
 			console.error('Failed to export stock analysis image', exportError);
+			logRuntimeEvent('error', 'stock-analysis', {
+				event: 'analysis_image_export_error',
+				symbol: analysis.symbol,
+				mode,
+				error: runtimeErrorDetails(exportError),
+			});
 			setExportNotice('长图生成失败，请稍后重试');
 		} finally {
 			setExporting(false);

@@ -2,8 +2,11 @@ package portfolioinspection
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +55,26 @@ func TestCompactionCheckpointSurvivesRestartAndInvalidatesChangedInputs(t *testi
 	run("model-a", value, 1)
 }
 
+func TestCompactionCheckpointRespectsChangedSummaryBudget(t *testing.T) {
+	store, err := OpenStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: "budget_summaries"}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	card := PortfolioAssetCard{Symbol: "600519.SH", ReportID: "report1"}
+	value := map[string]any{"counter": "风险须结合来源核验", "source_ids": []string{"s1"}}
+	for _, tc := range []struct{ limit, calls int }{{6144, 1}, {1024, 2}, {1024, 2}, {6144, 2}} {
+		r := &compactionRunner{service: s, ctx: context.Background(), budget: aggregationBudgetFor(time.Minute, ""), hooks: store.compactionHooks("job1", nil), identity: "model-a", summaryBytes: tc.limit}
+		summary, err := r.summarize(card, value)
+		if err != nil || !validCompactionSummaryWithin(summary, tc.limit) || len(g.prompts) != tc.calls {
+			t.Fatalf("wrong summary budget/checkpoint reuse: limit=%d calls=%d want=%d err=%v", tc.limit, len(g.prompts), tc.calls, err)
+		}
+	}
+}
+
 func TestCopiedCompactionCheckpointsAreDeletedOnlyWithTheirOwnJob(t *testing.T) {
 	store, err := OpenStore("")
 	if err != nil {
@@ -92,24 +115,45 @@ func (g *boundCompactGateway) BindTask(ctx context.Context) (context.Context, fu
 }
 
 func TestInspectionResumeReusesCompletedCompaction(t *testing.T) {
-	for _, changedModel := range []bool{false, true} {
-		t.Run(map[bool]string{false: "same_configuration", true: "changed_configuration"}[changedModel], func(t *testing.T) {
-			req, results, _, _, _ := oversizedResearchFixture(1)
-			results[0].Analysis.ResearchReport.Counter[0].Text = strings.Repeat("必须检查风险。", 20000)
+	for _, tc := range []struct {
+		holdings     int
+		changedModel bool
+	}{{1, false}, {1, true}, {10, false}, {10, true}} {
+		t.Run(fmt.Sprintf("holdings_%d_changed_model_%v", tc.holdings, tc.changedModel), func(t *testing.T) {
+			req, results, _, _, _ := sourceRichResearchFixture(tc.holdings)
+			if tc.holdings == 1 {
+				results[0].Analysis.ResearchReport.Counter[0].Text = strings.Repeat("必须检查风险。", 20000)
+			}
+			_, _, _, answer := scoreFixture()
+			conclusion := answer.Holdings[0]
+			answer.Holdings = nil
+			for _, result := range results {
+				conclusion.Symbol = result.Holding.Symbol
+				answer.Holdings = append(answer.Holdings, conclusion)
+			}
+			content, err := json.Marshal(answer)
+			if err != nil {
+				t.Fatal(err)
+			}
 			store, err := OpenStore("")
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer store.Close()
 			binding, update := aggregationTestAgent(t, 300, "medium")
-			g := &boundCompactGateway{compactTestGateway: &compactTestGateway{scoreGateway: &scoreGateway{content: scoreContent(t, scoreJSON(t))}}, binding: binding}
+			g := &boundCompactGateway{compactTestGateway: &compactTestGateway{scoreGateway: &scoreGateway{content: string(content)}, failure: "budget_summaries"}, binding: binding}
 			g.fail.Store(true) // Fail scoring after successful persisted compaction.
 			s := NewService(store, g, nil, nil)
 			defer s.Close()
-			researchCalls := 0
-			s.ConfigureResearch(func(context.Context, Holding, Request, time.Time, bool, string, func(HoldingResult)) (HoldingResult, error) {
-				researchCalls++
-				return results[0], nil
+			var researchCalls atomic.Int32
+			s.ConfigureResearch(func(_ context.Context, holding Holding, _ Request, _ time.Time, _ bool, _ string, _ func(HoldingResult)) (HoldingResult, error) {
+				researchCalls.Add(1)
+				for _, result := range results {
+					if result.Holding.Symbol == holding.Symbol {
+						return result, nil
+					}
+				}
+				return HoldingResult{}, fmt.Errorf("unexpected test holding: %s", holding.Symbol)
 			}, nil)
 			job, err := s.Start(context.Background(), req)
 			if err != nil {
@@ -133,7 +177,7 @@ func TestInspectionResumeReusesCompletedCompaction(t *testing.T) {
 			if before == 0 {
 				t.Fatal("fixture did not compact")
 			}
-			if changedModel {
+			if tc.changedModel {
 				update(300, "high")
 			}
 			g.fail.Store(false)
@@ -143,12 +187,20 @@ func TestInspectionResumeReusesCompletedCompaction(t *testing.T) {
 			}
 			s.wg.Wait()
 			done, err = s.Get(context.Background(), next.ID)
-			if err != nil || done.Status != "succeeded" || researchCalls != 1 {
-				t.Fatalf("resume failed or repeated research: %s %s %v", done.Status, done.Error, err)
+			if err != nil || done.Status != "succeeded" || researchCalls.Load() != int32(tc.holdings) || done.Report == nil || !done.Report.Conclusion.ScoreAvailable || len(done.Report.Conclusion.Holdings) != tc.holdings {
+				t.Fatalf("resume failed or repeated research: %s %s research_calls=%d %v", done.Status, done.Error, researchCalls.Load(), err)
+			}
+			if !strings.Contains(strings.Join(done.Report.Conclusion.DataLimitations, " "), compactionNotice) {
+				t.Fatal("resumed score lost its compaction limitation")
 			}
 			after := countCompaction()
-			if changedModel && after <= before || !changedModel && after != before {
+			if tc.changedModel && after <= before || !tc.changedModel && after != before {
 				t.Fatalf("wrong checkpoint/model reuse: before=%d after=%d", before, after)
+			}
+			for _, prompt := range g.prompts {
+				if len(prompt) > maxScoringPromptBytes {
+					t.Fatalf("scoring or resume prompt exceeded input limit: %d", len(prompt))
+				}
 			}
 		})
 	}
