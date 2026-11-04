@@ -40,10 +40,82 @@ func (g *compactTestGateway) Prompt(ctx context.Context, prompt string) (agent.P
 				data, _ := json.Marshal(map[string]string{"summary": strings.Repeat("风", 1800)})
 				return agent.PromptResult{Content: string(data)}, nil
 			}
+		case "budget_summaries":
+			limit := compactionSummaryBytes
+			if _, budget, ok := strings.Cut(prompt, "summary字符串的JSON编码不得超过"); ok {
+				_, _ = fmt.Sscanf(budget, "%d字节", &limit)
+			}
+			data, _ := json.Marshal(map[string]string{"summary": strings.Repeat("风险须核验。", (min(limit, 3602)-2)/18)})
+			return agent.PromptResult{Content: string(data)}, nil
 		}
 		return agent.PromptResult{Content: `{"summary":"已核验原报告片段；风险及来源待查原研究。"}`}, nil
 	}
 	return g.scoreGateway.Prompt(ctx, prompt)
+}
+
+func TestCompactionBudgetsSummariesAcrossTenHoldings(t *testing.T) {
+	for _, n := range []int{6, 10} {
+		t.Run(fmt.Sprintf("holdings_%d", n), func(t *testing.T) {
+			req, results, metrics, rules, at := sourceRichResearchFixture(n)
+			before, _ := json.Marshal(results)
+			original := buildCompactScoringInput(req, results, metrics, rules, at)
+			g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: "budget_summaries"}
+			s := NewService(nil, g, nil, nil)
+			defer s.Close()
+			prompt, compressed, err := s.prepareScoringPrompt(context.Background(), req, results, metrics, rules, at, aggregationBudgetFor(time.Minute, ""))
+			if err != nil || !compressed || len(prompt) > targetScoringPromptBytes {
+				t.Fatalf("portfolio summary budget failed: bytes=%d compressed=%v err=%v", len(prompt), compressed, err)
+			}
+			_, payload, _ := strings.Cut(prompt, "[组合证据JSON]\n")
+			var got compactScoringInput
+			if err := json.Unmarshal([]byte(payload), &got); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Holdings) != n || !reflect.DeepEqual(got.Evidence, original.Evidence) || !reflect.DeepEqual(got.Actions, original.Actions) || !reflect.DeepEqual(got.Definitions, original.Definitions) {
+				t.Fatal("compaction changed holdings or protected catalogs")
+			}
+			wantFacts, _ := json.Marshal(original.Facts)
+			gotFacts, _ := json.Marshal(got.Facts)
+			if string(wantFacts) != string(gotFacts) {
+				t.Fatal("compaction changed numeric facts")
+			}
+			for i, card := range got.Holdings {
+				if !reflect.DeepEqual(compactionCardSkeleton(card), compactionCardSkeleton(original.Holdings[i])) {
+					t.Fatal("compaction changed conditions or execution constraints")
+				}
+			}
+			for i, source := range got.Sources {
+				want, _ := json.Marshal(sourceProvenance(original.Sources[i]))
+				actual, _ := json.Marshal(sourceProvenance(source))
+				if string(want) != string(actual) {
+					t.Fatal("compaction changed source provenance")
+				}
+			}
+			after, _ := json.Marshal(results)
+			if string(before) != string(after) {
+				t.Fatal("compaction mutated original reports")
+			}
+			_, budget, _ := strings.Cut(g.prompts[0], "summary字符串的JSON编码不得超过")
+			var summaryBytes int
+			_, _ = fmt.Sscanf(budget, "%d字节", &summaryBytes)
+			t.Logf("holdings=%d prompt_bytes=%d summary_budget=%d calls=%d", n, len(prompt), summaryBytes, len(g.prompts))
+		})
+	}
+}
+
+func sourceRichResearchFixture(n int) (Request, []HoldingResult, Metrics, ProfileRules, time.Time) {
+	req, results, _, rules, at := oversizedResearchFixture(n)
+	for i := range results {
+		rr := results[i].Analysis.ResearchReport
+		results[i].Holding.Weight = 90 / n
+		req.Holdings[i] = results[i].Holding
+		for j := 0; j < 24; j++ {
+			id := fmt.Sprintf("source-%02d", j)
+			rr.Sources = append(rr.Sources, stockanalysis.ResearchSource{ID: id, Kind: "announcement", Title: strings.Repeat("公司经营情况与风险提示", 12), Content: "须核验披露时点和原文。"})
+			rr.Counter[0].SourceIDs = append(rr.Counter[0].SourceIDs, id)
+		}
+	}
+	return req, results, CalculateMetrics(req, results, rules), rules, at
 }
 
 func TestLargeSummariesAreCompactedAgain(t *testing.T) {
@@ -304,12 +376,12 @@ func TestResumeOversizedDraftCanRestartWithinExistingAttempt(t *testing.T) {
 }
 
 func TestInvalidSummaryGetsOnlyOneFormatRepair(t *testing.T) {
-	for _, mode := range []string{"invalid_once", "invalid", "provider"} {
+	for _, mode := range []string{"invalid_once", "invalid", "provider", "large_summaries"} {
 		t.Run(mode, func(t *testing.T) {
 			g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: mode}
 			s := NewService(nil, g, nil, nil)
 			defer s.Close()
-			r := &compactionRunner{service: s, ctx: context.Background(), budget: aggregationBudgetFor(time.Minute, "")}
+			r := &compactionRunner{service: s, ctx: context.Background(), budget: aggregationBudgetFor(time.Minute, ""), summaryBytes: 1024}
 			_, err := r.summarize(PortfolioAssetCard{Symbol: "600519.SH"}, map[string]any{"counter": "现金流恶化"})
 			wantCalls := 2
 			if mode == "provider" {

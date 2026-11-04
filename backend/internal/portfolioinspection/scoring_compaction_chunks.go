@@ -152,9 +152,13 @@ func compactionChunks(card PortfolioAssetCard, value any, merging bool) ([]compa
 }
 
 func validCompactionSummary(summary string) bool {
+	return validCompactionSummaryWithin(summary, compactionSummaryBytes)
+}
+
+func validCompactionSummaryWithin(summary string, limit int) bool {
 	if strings.TrimSpace(summary) == "" || !utf8.ValidString(summary) {
 		return false
 	}
 	encoded, err := json.Marshal(summary)
-	return err == nil && len(encoded) <= compactionSummaryBytes
+	return err == nil && len(encoded) <= limit
 }
