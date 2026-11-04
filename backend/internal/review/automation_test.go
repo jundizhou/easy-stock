@@ -584,7 +584,7 @@ func TestAutomationSkipsFailedAuthorSummaryAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.AuthorCount != 2 || summary.ArticleCount != 2 || !strings.Contains(strings.Join(summary.Limitations, "；"), "作者乙") {
+	if summary.AuthorCount != 2 || summary.ArticleCount != 2 || !summary.Partial || len(summary.GenerationErrors) != 1 || !strings.Contains(strings.Join(summary.Limitations, "；"), "作者乙") {
 		t.Fatalf("summary = %+v", summary)
 	}
 	if len(prompter.Prompts()) != 5 {

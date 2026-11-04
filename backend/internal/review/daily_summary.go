@@ -18,13 +18,10 @@ import (
 )
 
 const (
-	dailySummaryPromptVersion    = "daily-viewpoint-consensus-v10"
-	maxDailySummaryAuthors       = 30
-	maxDailySummaryPosts         = 1000
-	maxAuthorSummaryConcurrency  = 3
-	maxAuthorSummaryArticles     = 24
-	maxAuthorSummaryArticleRunes = 2800
-	maxAuthorSummaryTotalRunes   = 42000
+	dailySummaryPromptVersion   = "daily-viewpoint-consensus-v11"
+	maxDailySummaryAuthors      = 30
+	maxDailySummaryPosts        = 1000
+	maxAuthorSummaryConcurrency = 3
 )
 
 var dailySummaryPromptOptions = agent.PromptOptions{
@@ -42,6 +39,8 @@ type reviewFreshnessWindow struct {
 
 type dailySummaryArticle struct {
 	Index       int    `json:"index"`
+	PostID      string `json:"post_id,omitempty"`
+	URL         string `json:"url,omitempty"`
 	Source      string `json:"source"`
 	Author      string `json:"author"`
 	Title       string `json:"title"`
@@ -462,6 +461,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		return DailySummary{}, bindErr
 	}
 	defer release()
+	ctx = withReviewSummarySession(ctx, a.store)
 	if a.store == nil {
 		return DailySummary{}, errors.New("复盘日记存储不可用")
 	}
@@ -521,7 +521,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	articleCount := 0
 	failedAuthors := []string{}
 	fallbackAuthors := []string{}
-	truncatedAuthors := 0
+	compactedAuthors := 0
 	for _, result := range results {
 		if result.Err != nil {
 			failedAuthors = append(failedAuthors, result.Group.Author)
@@ -534,8 +534,8 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		if result.FallbackReason != "" {
 			fallbackAuthors = append(fallbackAuthors, result.View.Author)
 		}
-		if result.View.AvailableArticleCount > result.View.ArticleCount {
-			truncatedAuthors++
+		if original, _ := buildAuthorSummaryPrompt(result.Group.Author, result.Articles); len(original) > targetReviewPromptBytes {
+			compactedAuthors++
 		}
 	}
 	if len(viewpoints) == 0 {
@@ -548,7 +548,7 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 		progress("finalizing", len(selectedGroups), len(selectedGroups), articleCount, "作者观点卡已完成，正在生成跨作者共识与明日预期")
 	}
 
-	marketPrompt, tomorrowPrompt, err := buildDailySummaryPhasePrompts(window, viewpoints, dailyMarket)
+	marketPrompt, tomorrowPrompt, compactedViews, err := a.prepareDailySummaryPhasePrompts(ctx, window, viewpoints, dailyMarket)
 	if err != nil {
 		return DailySummary{}, err
 	}
@@ -601,12 +601,16 @@ func (a *Automation) summarizeWindow(ctx context.Context, window reviewFreshness
 	}
 	if len(failedAuthors) > 0 {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者的单作者归纳失败并已跳过：%s", len(failedAuthors), strings.Join(failedAuthors, "、")))
+		generationErrors = append(generationErrors, fmt.Sprintf("作者观点归纳未完成：%s；已完成作者的检查点可在重试时复用", strings.Join(failedAuthors, "、")))
 	}
 	if len(fallbackAuthors) > 0 {
 		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者的JSON归纳在自动纠错后仍无效，已保留原文摘要作为低置信度观点卡：%s", len(fallbackAuthors), strings.Join(fallbackAuthors, "、")))
 	}
-	if truncatedAuthors > 0 {
-		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者文章较多，作者归纳阶段优先保留较新的文章并按上下文上限截取", truncatedAuthors))
+	if compactedAuthors > 0 {
+		model.Limitations = append(model.Limitations, fmt.Sprintf("%d位作者的可用文章资料已按顺序完整分段提炼后归纳，摘要可能遗漏细节，原文及来源已保留", compactedAuthors))
+	}
+	if compactedViews {
+		model.Limitations = append(model.Limitations, reviewViewCompactionNotice)
 	}
 	model.Limitations = cleanStringList(model.Limitations)
 
@@ -826,11 +830,12 @@ func (a *Automation) summarizeDailyAuthors(ctx context.Context, groups []dailySu
 }
 
 func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummaryAuthorGroup) (DailyAuthorView, []dailySummaryArticle, []DailySummarySource, string, error) {
+	ctx = withReviewSummarySession(ctx, a.store)
 	articles, sources := authorSummaryInputs(group)
 	if len(articles) == 0 {
 		return DailyAuthorView{}, nil, nil, "", errors.New("作者文章正文不足")
 	}
-	prompt, err := buildAuthorSummaryPrompt(group.Author, articles)
+	prompt, err := a.prepareAuthorSummaryPrompt(ctx, group.Author, articles, sources)
 	if err != nil {
 		return DailyAuthorView{}, nil, nil, "", err
 	}
@@ -868,20 +873,16 @@ func (a *Automation) summarizeDailyAuthor(ctx context.Context, group dailySummar
 }
 
 func authorSummaryInputs(group dailySummaryAuthorGroup) ([]dailySummaryArticle, []DailySummarySource) {
-	selected := make([]dailySummaryArticle, 0, min(len(group.Posts), maxAuthorSummaryArticles))
+	selected := make([]dailySummaryArticle, 0, len(group.Posts))
 	sources := make([]DailySummarySource, 0, cap(selected))
-	remaining := maxAuthorSummaryTotalRunes
 	for _, post := range group.Posts {
-		if len(selected) >= maxAuthorSummaryArticles || remaining <= 0 {
-			break
-		}
 		content := strings.TrimSpace(firstNonEmpty(post.ContentText, post.Digest, post.AISummary))
 		if content == "" {
 			continue
 		}
-		content = truncateRunes(content, min(maxAuthorSummaryArticleRunes, remaining))
-		remaining -= len([]rune(content))
 		selected = append(selected, dailySummaryArticle{
+			PostID:      post.ID,
+			URL:         post.OriginalURL,
 			Source:      sourceName(post.Source),
 			Author:      group.Author,
 			Title:       cleanInline(post.Title),
@@ -897,8 +898,8 @@ func authorSummaryInputs(group dailySummaryAuthorGroup) ([]dailySummaryArticle, 
 			PublishedAt: post.PublishedAt.In(shanghaiLocation()).Format(time.RFC3339),
 		})
 	}
-	// Selection is newest-first so recent corrections win the context budget;
-	// present the chosen articles chronologically so the model can see evolution.
+	// Keep every article and present them chronologically so later corrections
+	// can supersede earlier claims without dropping the end of a long article.
 	for left, right := 0, len(selected)-1; left < right; left, right = left+1, right-1 {
 		selected[left], selected[right] = selected[right], selected[left]
 		sources[left], sources[right] = sources[right], sources[left]
@@ -1067,6 +1068,10 @@ func buildDailySummaryPrompt(window reviewFreshnessWindow, viewpoints []DailyAut
 }
 
 func buildDailySummaryPhasePrompts(window reviewFreshnessWindow, viewpoints []DailyAuthorView, dailyMarket DailyUSMarket) (string, string, error) {
+	return buildDailySummaryPhasePromptsWithInput(window, viewpoints, dailyMarket)
+}
+
+func buildDailySummaryPhasePromptsWithInput(window reviewFreshnessWindow, viewpoints any, dailyMarket DailyUSMarket) (string, string, error) {
 	viewpointData, err := json.Marshal(viewpoints)
 	if err != nil {
 		return "", "", fmt.Errorf("整理作者观点卡: %w", err)
@@ -1257,16 +1262,28 @@ func parseDailySummaryModel(content string) (dailySummaryModel, error) {
 	return result, nil
 }
 
-func promptDailySummaryJSON[T any](ctx context.Context, prompter agent.Prompter, prompt, label string, parse func(string) (T, error)) (T, error) {
+func promptDailySummaryJSON[T any](ctx context.Context, prompter agent.Prompter, prompt, label string, parse func(string) (T, error), overrides ...agent.PromptOptions) (T, error) {
 	var empty T
 	ctx = agent.WithUsageModule(ctx, "review-summary")
-	response, err := agent.PromptUsingOptions(ctx, prompter, prompt, dailySummaryPromptOptions)
+	options := dailySummaryPromptOptions
+	if len(overrides) > 0 {
+		options = overrides[0]
+	}
+	key := reviewSummaryCheckpointKey(ctx, label, prompt)
+	if cached, found, err := loadReviewSummaryCheckpoint(ctx, key); err != nil {
+		return empty, err
+	} else if found {
+		if result, err := parse(cached); err == nil {
+			return result, nil
+		}
+	}
+	response, err := promptReviewSummary(ctx, prompter, prompt, options)
 	if err != nil {
 		return empty, fmt.Errorf("Hermes %s失败: %w", label, err)
 	}
 	result, firstErr := parse(response.Content)
 	if firstErr == nil {
-		return result, nil
+		return result, saveReviewSummaryCheckpoint(ctx, key, result)
 	}
 	logInvalidDailySummaryOutput(label, "initial", response.Content, firstErr)
 
@@ -1278,7 +1295,10 @@ func promptDailySummaryJSON[T any](ctx context.Context, prompter agent.Prompter,
 
 [原始任务]
 ` + prompt + "\n\n[上一次无效输出，仅用于纠错]\n" + truncateRunes(response.Content, 4000)
-	repaired, retryErr := agent.PromptUsingOptions(ctx, prompter, repairPrompt, dailySummaryPromptOptions)
+	if len(repairPrompt) > maxReviewPromptBytes {
+		repairPrompt = prompt + "\n上次输出格式错误，请基于相同输入重新返回严格JSON，不要Markdown或解释。"
+	}
+	repaired, retryErr := promptReviewSummary(ctx, prompter, repairPrompt, options)
 	if retryErr != nil {
 		return empty, fmt.Errorf("Hermes %s首次未返回有效JSON（输出%d字符），且自动纠错请求失败：%v: %w", label, len([]rune(response.Content)), firstErr, retryErr)
 	}
@@ -1287,7 +1307,7 @@ func promptDailySummaryJSON[T any](ctx context.Context, prompter agent.Prompter,
 		logInvalidDailySummaryOutput(label, "repair", repaired.Content, retryErr)
 		return empty, &invalidDailySummaryJSONError{message: fmt.Sprintf("Hermes %s未返回有效JSON：首次输出%d字符，解析失败：%v；纠错输出%d字符，解析仍失败：%v", label, len([]rune(response.Content)), firstErr, len([]rune(repaired.Content)), retryErr)}
 	}
-	return result, nil
+	return result, saveReviewSummaryCheckpoint(ctx, key, result)
 }
 
 func logInvalidDailySummaryOutput(label, attempt, content string, parseErr error) {

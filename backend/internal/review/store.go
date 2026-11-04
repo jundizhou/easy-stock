@@ -53,6 +53,11 @@ func (s *Store) Close() error {
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS review_schedule_state (key TEXT PRIMARY KEY, content_json TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS review_summary_checkpoints (
+			input_digest TEXT PRIMARY KEY,
+			content_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
 		CREATE TABLE IF NOT EXISTS review_posts (
 			id TEXT PRIMARY KEY,
 			source TEXT NOT NULL,
@@ -214,7 +219,12 @@ func (s *Store) DeletePost(ctx context.Context, id string) error {
 	if id == "" {
 		return sql.ErrNoRows
 	}
-	result, err := s.db.ExecContext(ctx, `DELETE FROM review_posts WHERE id=?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM review_posts WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("delete review post: %w", err)
 	}
@@ -225,7 +235,10 @@ func (s *Store) DeletePost(ctx context.Context, id string) error {
 	if deleted == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `DELETE FROM review_summary_checkpoints`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) DeleteAuthor(ctx context.Context, source, authorID string) (AuthorDeleteResult, error) {
@@ -261,7 +274,7 @@ func (s *Store) DeleteAuthor(ctx context.Context, source, authorID string) (Auth
 	if err != nil {
 		return AuthorDeleteResult{}, err
 	}
-	for _, table := range []string{"review_daily_summaries", "review_daily_summary_jobs", "review_daily_validations", "review_daily_validation_jobs"} {
+	for _, table := range []string{"review_daily_summaries", "review_daily_summary_jobs", "review_daily_validations", "review_daily_validation_jobs", "review_summary_checkpoints"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table); err != nil {
 			return AuthorDeleteResult{}, fmt.Errorf("clear review summary cache %s: %w", table, err)
 		}
