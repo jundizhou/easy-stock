@@ -7852,7 +7852,11 @@ a:focus-visible {
 .topbar-toggle { position: relative; z-index: 41; }
 .stock-ai-kpi > strong.is-text { display: block; align-self: end; font-family: var(--font-ui); font-size: var(--fs-title); line-height: var(--lh-tight); white-space: normal; overflow: hidden; }
 /* 状态类指标（如“修复/加速”）用标签呈现，避免和 26px 数字并排显得忽大忽小。 */
-.stock-ai-kpi .kpi-chip { display: inline-block; max-width: 100%; padding: 3px 9px; border: 1px solid color-mix(in srgb, currentColor 26%, transparent); border-radius: 7px; background: color-mix(in srgb, currentColor 10%, transparent); font-family: var(--font-ui); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-snug); overflow-wrap: anywhere; }
+/* html2canvas 1.x cannot parse color-mix()'s computed color(srgb ...); use theme tokens. */
+.stock-ai-kpi .kpi-chip { display: inline-block; max-width: 100%; padding: 3px 9px; border: 1px solid var(--theme-blue-line); border-radius: 7px; background: var(--theme-blue-soft); font-family: var(--font-ui); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-snug); overflow-wrap: anywhere; }
+.stock-ai-kpi.amber .kpi-chip { border-color: var(--theme-amber-line); background: var(--theme-amber-soft); }
+.stock-ai-kpi.purple .kpi-chip { border-color: var(--theme-purple-line); background: var(--theme-purple-soft); }
+.stock-ai-kpi.green .kpi-chip { border-color: var(--theme-green-line); background: var(--theme-green-soft); }
 
 /* Scrollbars: thin, transparent until the element scrolls, colour follows the theme. */
 :root { --scrollbar-thumb: color-mix(in srgb, var(--muted, #6b7a8c) 42%, transparent); }
