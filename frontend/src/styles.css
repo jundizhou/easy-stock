@@ -1009,7 +1009,7 @@ a:focus-visible {
 .source-health-list span { display: grid; gap: 1px; min-width: 0; }
 .source-health-list span strong { margin: 0; color: var(--theme-text, #25354b); font-size: var(--fs-body); }
 .source-health-list span small { overflow: hidden; color: var(--theme-muted, #8290a3); font-size: var(--fs-desc); text-overflow: ellipsis; white-space: nowrap; }
-.source-health-list > div > em { color: var(--theme-green, #14865f); font-size: var(--fs-caption); font-style: normal; font-weight: 700; }
+.source-health-list > div > em { max-width: 10em; overflow: hidden; color: var(--theme-green, #14865f); font-size: var(--fs-caption); font-style: normal; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .source-health-list > div.unhealthy > em { color: var(--theme-red, #d8323d); }
 .source-health-list p { margin: 0; padding: 16px; color: var(--theme-muted, #8290a3); text-align: center; font-size: var(--fs-body); }
 
