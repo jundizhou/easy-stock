@@ -37,6 +37,9 @@ jobs:
   quality:
     name: Test release source
     runs-on: ubuntu-latest
+    env:
+      # Frontend schedule fixtures use the A-share market's local time.
+      TZ: Asia/Shanghai
     steps:
       - name: Check out source
         uses: actions/checkout@v4
