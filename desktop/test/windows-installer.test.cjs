@@ -5,11 +5,98 @@ const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { once } = require('node:events');
 const { promisify } = require('node:util');
+const { pathToFileURL } = require('node:url');
+const { gunzipSync } = require('node:zlib');
+const { createHash } = require('node:crypto');
 const test = require('node:test');
 
 const execute = promisify(execFile);
 const helper = path.resolve(__dirname, '../scripts/stop-installed-app.ps1');
 const windows = { skip: process.platform !== 'win32', timeout: 30000 };
+
+async function builderFixture(t, platform, mode = 'release') {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-builder-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, 'scripts');
+  fs.mkdirSync(scripts);
+  fs.copyFileSync(path.resolve(__dirname, '../scripts/electron-builder.mjs'), path.join(scripts, 'electron-builder.mjs'));
+  fs.writeFileSync(path.join(scripts, 'builder-filesystem.mjs'), '');
+  fs.copyFileSync(path.resolve(__dirname, '../package.json'), path.join(root, 'package.json'));
+  fs.mkdirSync(path.join(root, 'assets'));
+  fs.copyFileSync(path.resolve(__dirname, '../assets/installer.nsh'), path.join(root, 'assets/installer.nsh'));
+  fs.writeFileSync(path.join(root, 'update-feed.cjs'), 'exports.resolveUpdateFeed = () => ({ provider: "generic", url: "https://example.invalid" });');
+  const mock = path.join(root, 'mock-builder.mjs');
+  fs.writeFileSync(mock, `
+    import fs from 'node:fs'; import path from 'node:path';
+    export const Arch = { x64: 'x64', arm64: 'arm64' };
+    export const Platform = Object.fromEntries(['MAC', 'WINDOWS'].map(name => [name, {
+      createTarget: (targets, arch) => ({ platform: name, targets, arch })
+    }]));
+    export async function build(options) {
+      fs.writeFileSync('captured.json', JSON.stringify(options));
+      const artifact = path.join(options.config.directories.output, options.config.nsis.artifactName);
+      fs.writeFileSync(artifact, Buffer.alloc(100003, 37));
+      return [artifact];
+    }
+  `);
+  const loader = path.join(root, 'loader.mjs');
+  const blockmapModule = pathToFileURL(require.resolve('app-builder-lib/out/targets/blockmap/blockmap.js')).href;
+  fs.writeFileSync(loader, `
+    import { registerHooks } from 'node:module';
+    const modules = ${JSON.stringify({ 'electron-builder': pathToFileURL(mock).href, 'app-builder-lib/out/targets/blockmap/blockmap.js': blockmapModule })};
+    registerHooks({ resolve(specifier, context, next) {
+      return modules[specifier] ? { url: modules[specifier], shortCircuit: true } : next(specifier, context);
+    }});
+  `);
+  await execute(process.execPath, ['--import', pathToFileURL(loader).href, path.join(scripts, 'electron-builder.mjs'), platform, mode], {
+    cwd: root, windowsHide: true, timeout: 30000,
+    env: { ...process.env, A_STOCK_DESKTOP_ARCH: 'x64', CSC_LINK: '' },
+  });
+  const options = JSON.parse(fs.readFileSync(path.join(root, 'captured.json'), 'utf8'));
+  return { root, options, artifact: path.join(options.config.directories.output, options.config.nsis.artifactName) };
+}
+
+test('Windows release uses direct ZIP extraction and keeps a valid installer blockmap', async (t) => {
+  const { options, artifact } = await builderFixture(t, 'windows');
+  assert.equal(options.config.nsis.useZip, true);
+  assert.equal(options.config.nsis.differentialPackage, false);
+  assert.equal(options.config.nsis.deleteAppDataOnUninstall, false);
+  assert.equal(options.publish, 'never');
+  assert.deepEqual(options.targets, { platform: 'WINDOWS', targets: ['nsis'], arch: 'x64' });
+  const hook = fs.readFileSync(options.config.nsis.include, 'utf8');
+  const extraction = fs.readFileSync(path.join(options.config.directories.output, 'easy-stock-direct-extract.nsh'), 'utf8');
+  assert.match(hook, /-InstallDirectory "\$INSTDIR"/);
+  assert.match(hook, /!ifndef BUILD_UNINSTALLER\s+!include/);
+  assert.ok(extraction.includes(String.raw`StrCpy $R8 "\\?\$INSTDIR"`));
+  assert.ok(extraction.includes(String.raw`StrCpy $R8 "\\?\UNC\$R8"`));
+  assert.match(extraction, /nsisunz::Unzip .* "\$R8"/);
+  assert.match(extraction, /\/SD IDOK/);
+  assert.match(extraction, /SetErrorLevel 2\s+Quit/);
+  assert.match(hook, /!insertmacro easyStockPrepareUpgradeTemp/);
+  assert.match(extraction, /GetTempFileName \$R9 "\$R8"/);
+  assert.match(extraction, /ReadEnvStr \$easyStockPreviousTemp "TEMP"/);
+  assert.match(extraction, /SetEnvironmentVariableW\(w "TEMP", w "\$easyStockPreviousTemp"\)/);
+  assert.match(extraction, /!macro customInstall\s+!insertmacro easyStockRestoreUpgradeTemp/);
+  const map = JSON.parse(gunzipSync(fs.readFileSync(`${artifact}.blockmap`)));
+  assert.equal(map.version, '2');
+  assert.equal(map.files[0].sizes.reduce((sum, size) => sum + size, 0), fs.statSync(artifact).size);
+  assert.equal(map.files[0].checksums.length, map.files[0].sizes.length);
+  assert.equal(createHash('sha256').update(fs.readFileSync(artifact)).digest('hex'),
+    createHash('sha256').update(Buffer.alloc(100003, 37)).digest('hex'));
+});
+
+test('directory and macOS builds do not generate Windows installer blockmaps', async (t) => {
+  for (const [platform, mode] of [['windows', 'dir'], ['mac', 'release']]) {
+    const { artifact } = await builderFixture(t, platform, mode);
+    assert.equal(fs.existsSync(`${artifact}.blockmap`), false);
+  }
+});
+
+test('desktop package version and workspace lock remain synchronized', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package-lock.json'), 'utf8'));
+  assert.equal(lock.packages.desktop.version, manifest.version);
+});
 
 async function prepare(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "easy-stock install's-"));

@@ -3,18 +3,70 @@
  * （--surface / --line / --text / --muted / --blue ...）；
  * 不要引入 --card / --primary / --radius 这类本项目不存在的命名。 */
 
+/* 监控中心使用窗口剩余高度，各列表与侧栏独立滚动。 */
+.workspace-frame.workspace-monitor {
+	height: 100dvh;
+	min-height: 0;
+	grid-template-rows: minmax(0, 1fr);
+	overflow: hidden;
+}
+
+.workspace-frame.workspace-monitor > .app-shell {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.workspace-monitor > .app-sidebar {
+	height: 100%;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.workspace-monitor .workspace-topbar,
+.workspace-monitor .data-footer,
+.monitor-head,
+.monitor-engine-strip,
+.monitor-stat-grid,
+.monitor-quickstart,
+.monitor-radar-strip,
+.monitor-panel > header,
+.monitor-abn-filterbar,
+.monitor-watch-foot {
+	flex-shrink: 0;
+}
+
+.workspace-monitor .data-footer {
+	width: 100%;
+}
+
+.monitor-workspace > .monitor-events-layout,
+.monitor-workspace > .monitor-radar-layout,
+.monitor-workspace > .monitor-watch {
+	overflow: hidden;
+}
+
+.monitor-panel > .monitor-empty-state {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	justify-content: safe center;
+}
+
 .monitor-workspace {
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
-	/* 页面随内容增高，由页面（Windows 为 app-shell）负责整体滚动。
-	   长表格和侧栏另设高度上限，避免挤掉空态、工具栏及底部操作。 */
+	/* 高度由监控工作区分配，长内容在对应模块内部滚动。 */
 	padding: 0 0 16px;
 	min-width: 0;
 	flex: 1 1 auto;
 	min-height: 0;
 	font-family: var(--font-ui);
 	font-size: var(--fs-body);
+	overflow: hidden;
 }
 
 /* ---------------------------------------------------------------- 分段控件 */
@@ -285,18 +337,31 @@
 .monitor-events-layout-body {
 	display: grid;
 	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-	grid-template-rows: auto;
+	grid-template-rows: minmax(0, 1fr);
 	gap: 12px;
 	align-items: stretch;
 	flex: 1 1 auto;
 	min-height: 0;
+	overflow: hidden;
 }
 
 @media (max-width: 980px) {
 	.monitor-events-layout-body {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: none;
+		grid-template-rows: repeat(2, minmax(0, 1fr));
 		align-content: start;
+	}
+}
+
+/* 最小桌面窗口上下堆叠时，保留列表可读高度，超出部分在页签内滚动。 */
+@media (max-width: 980px) and (max-height: 760px) {
+	.monitor-workspace > .monitor-events-layout {
+		overflow-y: auto;
+	}
+
+	.monitor-events-layout-body {
+		flex: 1 0 340px;
+		min-height: 340px;
 	}
 }
 
@@ -323,7 +388,7 @@
 	border-bottom: 1px solid var(--line-soft);
 }
 
-/* 只约束长表格，不限制整个面板；空态和操作区可以撑开页面。 */
+/* 面板在分配的高度内伸缩，表格与空态各自在内部滚动。 */
 .monitor-workspace .monitor-panel {
 	min-height: 0;
 	overflow: hidden;
@@ -332,7 +397,7 @@
 .monitor-panel > .trading-table-wrap {
 	flex: 1 1 auto;
 	min-height: 0;
-	max-height: 560px;
+	max-height: none;
 	overflow: auto;
 	scrollbar-color: var(--scrollbar-thumb) transparent;
 }
@@ -1367,11 +1432,12 @@
 .monitor-watch-layout {
 	display: grid;
 	grid-template-columns: 300px minmax(0, 1fr);
-	grid-template-rows: auto;
+	grid-template-rows: minmax(0, 1fr);
 	gap: 12px;
 	align-items: stretch;
 	flex: 1 1 auto;
 	min-height: 0;
+	overflow: hidden;
 }
 
 .monitor-watch-layout {
@@ -1387,7 +1453,7 @@
 	flex-direction: column;
 	gap: 10px;
 	min-height: 0;
-	max-height: max(420px, calc(100dvh - 240px));
+	max-height: 100%;
 	overflow-y: auto;
 	scrollbar-width: thin;
 }
@@ -1928,11 +1994,11 @@
 }
 
 @media (max-width: 1400px) {
-	/* 堆叠后两行按内容增高，主表和展开详情都能通过页面滚动到达。 */
+	/* 保留上下排列，摘要限制在上部，主表使用剩余高度并独立滚动。 */
 	.monitor-radar-body,
 	.monitor-watch-layout {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: auto auto;
+		grid-template-rows: minmax(0, min(32%, 240px)) minmax(0, 1fr);
 		align-content: stretch;
 	}
 
@@ -3128,8 +3194,8 @@
 .monitor-abn-tile dd { margin: 0; font-size: var(--fs-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .monitor-abnormal-panel > .trading-table-wrap {
-	/* 计算器展开时列表仍要露出几行，余量不够就在各自内部滚动。 */
-	min-height: 168px;
+	/* 允许短窗口收缩，展开内容沿用表格与计算器各自的滚动区域。 */
+	min-height: 0;
 }
 
 .monitor-abnormal-rail .monitor-rail-kind {
@@ -3891,21 +3957,21 @@
 	   主表只剩 446px。这里同名补一条，让 12 列拿到整行宽度。 */
 	.monitor-radar-body.is-abnormal {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: auto auto;
+		grid-template-rows: minmax(0, min(32%, 240px)) minmax(0, 1fr);
 		align-content: stretch;
 	}
 
 	/* 三张摘要卡在窄屏并排，列表内部滚动，为主表保留高度。 */
 	.monitor-abnormal-rail {
 		grid-template-columns: repeat(3, minmax(0, 1fr));
-		max-height: 420px;
+		max-height: 100%;
 		align-content: start;
 		align-items: start;
 	}
 
 	.monitor-watch-layout > .monitor-rail {
 		grid-template-columns: repeat(3, minmax(0, 1fr));
-		max-height: 430px;
+		max-height: 100%;
 		align-items: start;
 	}
 

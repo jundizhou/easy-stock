@@ -305,6 +305,41 @@ describe('phase-specific structured patrol reports', () => {
 		expect(output).toContain(warning);
 	});
 
+	it('renders the independent theme-clue table and hides its redundant inference footer without changing the original', () => {
+		const note = '以上关联均属推断，仅依据新闻能直接支持的方向，不推定主线或龙头；本次未提供个股、产业链环节及对应行情，故不列标的。';
+		const markdown = [
+			'盘前定调：合成测试，等待验证。',
+			'## 三、题材线索与发酵',
+			'| 候选题材 | 事件依据 | 已有盘面证据 | 开盘验证 | 失效条件 |',
+			'| --- | --- | --- | --- | --- |',
+			'| 测试方向（推断） | 合成事件，仅供测试 | --（数据不足） | 承接待确认 | 测试条件不成立 |',
+			note,
+			'## 五、主要风险',
+			'数据缺口：行业资金未接入。',
+		].join('\n');
+		const text = patrolNarrativeText(markdown);
+		const report = parseNarrativeReport(text, 'pre_open')!;
+		const output = renderToStaticMarkup(createElement(NarrativeReport, { report, expanded: true }));
+		expect(output).toContain('题材线索与发酵');
+		expect(output.match(/scope="col"/g)).toHaveLength(5);
+		for (const header of ['候选题材', '事件依据', '已有盘面证据', '开盘验证', '失效条件']) expect(output).toContain(header);
+		expect(output.replace(/<[^>]*>/g, '')).toContain('测试方向推断');
+		expect(output).toContain('--（数据不足）');
+		expect(output).toContain('行业资金未接入');
+		expect(output).not.toContain('以上关联均属推断');
+		expect(markdown).toContain(note);
+		expect(patrolNarrativeText(text)).toBe(text);
+	});
+
+	it('keeps substantive warnings adjacent to the recognized inference footer', () => {
+		const footer = '以上关联均属推断，仅依据新闻能直接支持的方向，不推定主线或龙头；本次未提供个股、产业链环节及对应行情，故不列标的。';
+		for (const warning of [
+			footer + '行业资金缺失，无法核实。',
+			'以上关联均属推断，但行业资金缺失，无法核实。',
+			'以上关联均属推断；来源日期未核实，不代表今日盘中行情。',
+		]) expect(patrolNarrativeText('盘前定调：等待验证。\n\n' + warning)).toContain(warning);
+	});
+
 	it('groups legacy pre-open sections into accessible disclosures and leaves risks open', () => {
 		const markdown = '盘前定调：合成测试，等待验证。\n\n## 一、外围市场与隔夜变化\n| 市场/指数 | 涨跌幅 | 行情时间/状态 |\n| --- | --- | --- |\n| 测试市场 | -1.255 | 日期未核实 |\n\n## 二、消息线索\n- 测试消息仍待验证。\n\n## 三、主要风险\n- 行业资金未接入。\n- 测试方向走弱时失效。';
 		const report = parseNarrativeReport(markdown, 'pre_open')!;

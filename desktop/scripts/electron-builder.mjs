@@ -103,6 +103,10 @@ const config = {
   },
   nsis: {
     include: path.join(desktopRoot, 'assets', 'installer.nsh'),
+    // Extract directly into the install directory; the 7z path first writes
+    // every runtime file to a temporary directory and then copies it again.
+    useZip: true,
+    differentialPackage: false,
     oneClick: false,
     perMachine: false,
     allowElevation: true,
@@ -112,10 +116,101 @@ const config = {
   },
 };
 
+if (platform === 'windows' && mode === 'release') {
+  // The ZIP plugin needs an extended path when Windows long paths are disabled.
+  // Override only decompression, after the stock macros have been defined.
+  const originalInclude = config.nsis.include;
+  const hook = fs.readFileSync(originalInclude, 'utf8');
+  const hookStart = '!macro customCheckAppRunning';
+  if (hook.indexOf(hookStart) < 0 || hook.indexOf(hookStart) !== hook.lastIndexOf(hookStart)
+    || (hook.match(/!macroend/g) || []).length !== 1) {
+    throw new Error('Expected one customCheckAppRunning installer hook');
+  }
+  const override = path.join(outputDirectory, 'easy-stock-direct-extract.nsh');
+  fs.writeFileSync(override, String.raw`
+!macro easyStockPrepareUpgradeTemp
+  Var /GLOBAL easyStockUpgradeTempDir
+  Var /GLOBAL easyStockPreviousTemp
+  Var /GLOBAL easyStockPreviousTmp
+  Push $0
+  Push $R7
+  Push $R8
+  Push $R9
+  StrCpy $easyStockUpgradeTempDir ""
+  StrCpy $R8 "$INSTDIR" 3
+  StrCpy $R7 "$R8" "" 1
+  StrCmp $R7 ":\" 0 easyStockTempDone
+  ClearErrors
+  GetTempFileName $R9 "$R8"
+  IfErrors easyStockTempDone
+  Delete "$R9"
+  ClearErrors
+  CreateDirectory "$R9"
+  IfErrors easyStockTempDone
+  StrCpy $easyStockUpgradeTempDir "$R9"
+  ReadEnvStr $easyStockPreviousTemp "TEMP"
+  ReadEnvStr $easyStockPreviousTmp "TMP"
+  System::Call 'kernel32::SetEnvironmentVariableW(w "TEMP", w "$R9") i.r0'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "TMP", w "$R9") i.r0'
+  easyStockTempDone:
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $0
+!macroend
+
+!macro easyStockRestoreUpgradeTemp
+  Push $0
+  StrCmp $easyStockUpgradeTempDir "" +5
+    System::Call 'kernel32::SetEnvironmentVariableW(w "TEMP", w "$easyStockPreviousTemp") i.r0'
+    System::Call 'kernel32::SetEnvironmentVariableW(w "TMP", w "$easyStockPreviousTmp") i.r0'
+    RMDir /r "$easyStockUpgradeTempDir"
+    StrCpy $easyStockUpgradeTempDir ""
+  Pop $0
+!macroend
+
+!macroundef decompress
+!macro decompress
+  Push $R8
+  StrCpy $R8 "$INSTDIR" 4
+  StrCmp $R8 "\\?\" easyStockExtendedPath
+  StrCpy $R8 "$INSTDIR" 2
+  StrCmp $R8 "\\" easyStockUNCPath
+  StrCpy $R8 "\\?\$INSTDIR"
+  Goto easyStockUnzip
+  easyStockUNCPath:
+    StrCpy $R8 "$INSTDIR" "" 2
+    StrCpy $R8 "\\?\UNC\$R8"
+    Goto easyStockUnzip
+  easyStockExtendedPath:
+    StrCpy $R8 "$INSTDIR"
+  easyStockUnzip:
+  nsisunz::Unzip "$PLUGINSDIR\app-$packageArch.zip" "$R8"
+  Pop $R0
+  Pop $R8
+  StrCmp $R0 "success" easyStockExtractionDone
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(decompressionFailed)$\n$R0" /SD IDOK
+    !insertmacro easyStockRestoreUpgradeTemp
+    SetErrorLevel 2
+    Quit
+  easyStockExtractionDone:
+!macroend
+
+!macro customInstall
+  !insertmacro easyStockRestoreUpgradeTemp
+!macroend
+`);
+  const escapedOverride = override.replace(/\$/g, () => '$$').replace(/"/g, () => '$\\"');
+  config.nsis.include = path.join(outputDirectory, 'easy-stock-installer.nsh');
+  fs.writeFileSync(config.nsis.include, hook.replace(hookStart,
+    `${hookStart}\n!ifndef BUILD_UNINSTALLER\n!include "${escapedOverride}"\n!endif`)
+    .replace('!macroend', '!ifndef BUILD_UNINSTALLER\n!insertmacro easyStockPrepareUpgradeTemp\n!endif\n!macroend'));
+}
+
 const { Arch, build, Platform } = await import('electron-builder');
 const targetPlatform = platform === 'mac' ? Platform.MAC : Platform.WINDOWS;
 const targetArch = Arch[arch];
-await build({
+const artifacts = await build({
   targets: mode === 'dir'
     ? targetPlatform.createTarget(['dir'], targetArch)
     : targetPlatform.createTarget(platform === 'mac' ? ['zip'] : ['nsis'], targetArch),
@@ -123,6 +218,15 @@ await build({
   projectDir: desktopRoot,
   publish: 'never',
 });
+
+if (platform === 'windows' && mode === 'release') {
+  // ZIP payloads bypass electron-builder's automatic blockmap generation.
+  // Keep external installer blockmaps for the existing updater and checks.
+  const { buildBlockMap } = await import('app-builder-lib/out/targets/blockmap/blockmap.js');
+  for (const artifact of artifacts.filter((file) => file.endsWith('-setup.exe'))) {
+    await buildBlockMap(artifact, 'gzip', `${artifact}.blockmap`);
+  }
+}
 
 function resolveSigningCertificate(value) {
   const certificate = value?.trim();

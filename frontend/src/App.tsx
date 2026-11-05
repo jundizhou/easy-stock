@@ -483,7 +483,7 @@ export function App() {
 	const topbarMark = workspaceTopbarMarks[workspaceMode];
 
 	return (
-		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${workspaceMode === 'ai' ? 'workspace-ai' : ''} ${workspaceMode === 'cockpit' ? 'workspace-cockpit' : ''}`}>
+		<main className={`workspace-frame ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${workspaceMode === 'ai' ? 'workspace-ai' : ''} ${workspaceMode === 'cockpit' ? 'workspace-cockpit' : ''} ${workspaceMode === 'monitor' ? 'workspace-monitor' : ''}`}>
 			<div className="desktop-titlebar" aria-hidden="true" />
 			<aside className="app-sidebar" aria-label="功能导航">
 				<div className="sidebar-brand"><div className="sidebar-logo"><img src={`${import.meta.env.BASE_URL}easy-stock-mark.svg`} alt="easy-stock" /></div>{sidebarExpanded && <div className="sidebar-brand-name"><strong>easy-stock</strong><span>AI STOCK LAB</span></div>}<SidebarUpdateNotice onOpenUpdates={() => { setSettingsInitialSection('updates'); setSettingsOpen(true); }} /></div>
