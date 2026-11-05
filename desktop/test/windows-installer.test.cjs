@@ -61,6 +61,36 @@ test('installer embeds the path-scoped helper in both install and uninstall chec
   assert.match(hook, /-NoProfile -NonInteractive -ExecutionPolicy Bypass -File/);
   assert.match(hook, /-InstallDirectory "\$INSTDIR"/);
   assert.match(hook, /SetErrorLevel 2[\s\S]*Quit/);
+  assert.match(hook, /!ifndef BUILD_UNINSTALLER[\s\S]*\$\{isUpdated\}[\s\S]*repair-legacy-windows-paths\.ps1/);
+});
+
+test('upgrade removes long legacy Hermes document paths before the old uninstaller runs', windows, async (t) => {
+  const { root } = await prepare(t);
+  const app = path.join(root, 'installed-easy-stock-with-a-long-enough-path-for-windows-nsis-upgrade-test');
+  fs.mkdirSync(app);
+  fs.writeFileSync(path.join(app, 'Uninstall easy-stock.exe'), 'fixture');
+  const website = path.join(app, 'resources', 'resources', 'hermes-runtime', 'source', 'website');
+  const longFile = path.join(website, 'i18n', 'zh-Hans', 'docusaurus-plugin-content-docs', 'current', 'user-guide', 'skills', 'bundled', 'software-development', 'software-development-hermes-agent-skill-authoring.md');
+  assert.ok(longFile.length > 260, 'fixture must exceed MAX_PATH');
+  const extended = (value) => `\\\\?\\${value}`;
+  fs.mkdirSync(extended(path.dirname(longFile)), { recursive: true });
+  fs.writeFileSync(extended(longFile), 'old documentation');
+  fs.mkdirSync(path.join(website, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(website, 'docs', 'guide.md'), 'old documentation');
+  fs.mkdirSync(path.join(website, 'static'), { recursive: true });
+  fs.writeFileSync(path.join(website, 'static', 'model-catalog.json'), 'keep');
+  const sibling = `${app}-backup`;
+  fs.mkdirSync(sibling);
+  fs.writeFileSync(path.join(sibling, 'keep'), 'keep');
+
+  const script = path.resolve(__dirname, '../scripts/repair-legacy-windows-paths.ps1');
+  const { stdout } = await execute('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-InstallDirectory', app], { windowsHide: true, timeout: 30000 });
+  assert.match(stdout, /Legacy Hermes documentation paths removed/);
+  assert.equal(fs.existsSync(extended(longFile)), false);
+  assert.equal(fs.existsSync(path.join(website, 'docs')), false);
+  assert.equal(fs.readFileSync(path.join(website, 'static', 'model-catalog.json'), 'utf8'), 'keep');
+  assert.equal(fs.readFileSync(path.join(sibling, 'keep'), 'utf8'), 'keep');
+  assert.equal(fs.existsSync(path.join(app, 'Uninstall easy-stock.exe')), true);
 });
 
 test('installer closes its directory and detached descendants without touching a prefix sibling', windows, async (t) => {

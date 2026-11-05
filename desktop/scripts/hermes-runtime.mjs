@@ -78,6 +78,7 @@ export function prepareHermesRuntime({
 		removePythonCaches(builtRoot);
 		assertNoExternalSymlinks(builtRoot);
 		materializeSymlinks(builtRoot);
+		pruneBundledHermesDocs(builtRoot);
 		const manifest = { schema_version: 2, package: 'hermes-agent', version: HERMES_AGENT_VERSION, source: HERMES_AGENT_SOURCE, source_sha256: HERMES_SOURCE_SHA256, mode, target_platform: platform, target_arch: arch, created_at: new Date().toISOString() };
 		fs.writeFileSync(path.join(builtRoot, 'runtime-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 		verifyHermesPython(builtRoot);
@@ -93,6 +94,15 @@ export function prepareHermesRuntime({
 		return manifest;
 	} finally {
 		robustRemove(staging);
+	}
+}
+
+export function pruneBundledHermesDocs(runtimeRoot) {
+	// Docusaurus sources are build-time documentation, not desktop runtime data.
+	// Their translated paths can exceed MAX_PATH when NSIS moves an old install
+	// into %TEMP%/old-install during an automatic Windows update.
+	for (const directory of ['docs', 'i18n']) {
+		robustRemove(path.join(runtimeRoot, 'source', 'website', directory));
 	}
 }
 

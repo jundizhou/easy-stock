@@ -39,6 +39,11 @@ if (platform === 'macos') verifyMacBundle(packageRoot);
 if (platform === 'windows' && fs.existsSync(path.join(resourcesRoot, 'hermes-runtime', 'venv'))) {
 	throw new Error('Windows release still contains the build-only Hermes venv');
 }
+for (const directory of ['docs', 'i18n']) {
+	if (fs.existsSync(path.join(resourcesRoot, 'hermes-runtime', 'source', 'website', directory))) {
+		throw new Error(`Release package still contains Hermes website ${directory} sources`);
+	}
+}
 
 const forbiddenComponents = new Set([
 	'.runtime',

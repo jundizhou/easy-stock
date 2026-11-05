@@ -11,6 +11,21 @@ test('Windows runtime uses a standalone interpreter outside the build venv', asy
   assert.equal(hermesRuntimePython(root, 'win32'), path.join(root, 'python', 'python.exe'));
 });
 
+test('bundled Hermes excludes website documents while retaining runtime data', async (t) => {
+  const { pruneBundledHermesDocs, robustRemove } = await import('../scripts/hermes-runtime.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-hermes-docs-'));
+  t.after(() => robustRemove(root));
+  for (const name of ['docs/guide.md', 'i18n/zh-Hans/guide.md', 'static/api/model-catalog.json']) {
+    const file = path.join(root, 'source', 'website', name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, name);
+  }
+  pruneBundledHermesDocs(root);
+  assert.equal(fs.existsSync(path.join(root, 'source', 'website', 'docs')), false);
+  assert.equal(fs.existsSync(path.join(root, 'source', 'website', 'i18n')), false);
+  assert.equal(fs.readFileSync(path.join(root, 'source', 'website', 'static', 'api', 'model-catalog.json'), 'utf8'), 'static/api/model-catalog.json');
+});
+
 test('bundleWindowsRuntime copies base Python and merges installed packages', async (t) => {
   const { bundleWindowsRuntime, robustRemove } = await import('../scripts/hermes-runtime.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-hermes-runtime-'));
