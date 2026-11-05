@@ -182,6 +182,7 @@ func (s *Service) compactScoringEvidence(ctx context.Context, input compactScori
 	// Detach slices before modifying the model view, including on failure.
 	input.Holdings = append([]PortfolioAssetCard(nil), input.Holdings...)
 	input.Sources = append([]map[string]any(nil), input.Sources...)
+	originalInput := input
 	minimum := input
 	minimum.Holdings = make([]PortfolioAssetCard, len(input.Holdings))
 	minimum.Sources = make([]map[string]any, len(input.Sources))
@@ -200,7 +201,7 @@ func (s *Service) compactScoringEvidence(ctx context.Context, input compactScori
 	// portfolio even when every individual summary passes its length check.
 	summaryBytes := (targetScoringPromptBytes-len(minimumPrompt))/max(1, len(input.Holdings)) - len(`,"compacted_research":`)
 	if summaryBytes < compactionMinSummaryBytes {
-		return input, fmt.Errorf("组合的事实、来源目录或交易条件本身占用%d字节，无法在%d字节输入预算内为%d只标的保留足够摘要空间，无法仅靠摘要压缩；原研究已保留", len(minimumPrompt), targetScoringPromptBytes, len(input.Holdings))
+		return s.stageScoringEvidence(input, runner, instructions)
 	}
 	runner.summaryBytes = min(compactionSummaryBytes, summaryBytes)
 	if s.logger != nil {
@@ -271,7 +272,7 @@ func (s *Service) compactScoringEvidence(ctx context.Context, input compactScori
 			return input, nil
 		}
 	}
-	return input, errors.New("组合资料经自动压缩后仍超过输入预算，原研究已保留")
+	return s.stageScoringEvidence(originalInput, runner, instructions)
 }
 
 func (s *Service) prepareScoringPrompt(ctx context.Context, request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, at time.Time, budget aggregationBudget) (string, bool, error) {

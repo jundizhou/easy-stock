@@ -23,12 +23,9 @@ func portfolioScoreForPrompt(t *testing.T, prompt string) string {
 		t.Fatal("missing scoring payload")
 	}
 	var input struct {
-		Version  string `json:"contract_version"`
-		Evidence []struct {
-			ID  string                          `json:"evidence_id"`
-			Ref portfolioinspection.EvidenceRef `json:"reference"`
-		} `json:"evidence_catalog"`
-		Actions []portfolioinspection.ScoringAction `json:"action_catalog"`
+		Version  string                                     `json:"contract_version"`
+		Evidence map[string]portfolioinspection.EvidenceRef `json:"evidence_catalog"`
+		Actions  []portfolioinspection.ScoringAction        `json:"action_catalog"`
 	}
 	if err := json.NewDecoder(strings.NewReader(payload)).Decode(&input); err != nil {
 		t.Fatal(err)
@@ -38,9 +35,9 @@ func portfolioScoreForPrompt(t *testing.T, prompt string) string {
 	report.ContractVersion = input.Version
 	for i := range report.Dimensions {
 		for j, ref := range report.Dimensions[i].EvidenceRefs {
-			for _, e := range input.Evidence {
-				if ref == e.Ref {
-					report.Dimensions[i].EvidenceRefs[j] = portfolioinspection.EvidenceRef{EvidenceID: e.ID}
+			for id, evidenceRef := range input.Evidence {
+				if ref == evidenceRef {
+					report.Dimensions[i].EvidenceRefs[j] = portfolioinspection.EvidenceRef{EvidenceID: id}
 				}
 			}
 		}

@@ -88,8 +88,23 @@ func TestLiveTenHoldingCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write("preflight.json", map[string]any{"holdings": request.Holdings, "evaluated_at": at, "initial_bytes": len(prompt), "target_bytes": targetScoringPromptBytes, "hard_limit_bytes": maxScoringPromptBytes})
-	t.Logf("holdings=10 initial_bytes=%d target_bytes=%d hard_limit_bytes=%d", len(prompt), targetScoringPromptBytes, maxScoringPromptBytes)
+	minimum := input
+	minimum.Holdings = make([]PortfolioAssetCard, len(input.Holdings))
+	minimum.Sources = make([]map[string]any, len(input.Sources))
+	for i, card := range input.Holdings {
+		minimum.Holdings[i] = compactionCardSkeleton(card)
+	}
+	for i, source := range input.Sources {
+		minimum.Sources[i] = sourceProvenance(source)
+	}
+	minimumPrompt, err := renderCompactScoringPrompt(instructions+compactionInstructions, minimum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaryBytes := (targetScoringPromptBytes-len(minimumPrompt))/len(input.Holdings) - len(`,"compacted_research":`)
+	stagedRequired := len(prompt) > targetScoringPromptBytes && summaryBytes < compactionMinSummaryBytes
+	write("preflight.json", map[string]any{"holdings": request.Holdings, "evaluated_at": at, "initial_bytes": len(prompt), "protected_bytes": len(minimumPrompt), "staged_required": stagedRequired, "target_bytes": targetScoringPromptBytes, "hard_limit_bytes": maxScoringPromptBytes})
+	t.Logf("holdings=10 initial_bytes=%d protected_bytes=%d staged_required=%v target_bytes=%d hard_limit_bytes=%d", len(prompt), len(minimumPrompt), stagedRequired, targetScoringPromptBytes, maxScoringPromptBytes)
 	if os.Getenv("EASY_STOCK_TEN_HOLDINGS_PREFLIGHT") == "1" {
 		return
 	}

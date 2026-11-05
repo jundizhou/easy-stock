@@ -84,7 +84,17 @@ func fixtureModelScoringResponse(content, prompt string) string {
 	}
 	var catalog scoringCatalog
 	if json.NewDecoder(strings.NewReader(payload)).Decode(&catalog) != nil {
-		return content
+		var compact struct {
+			Evidence map[string]EvidenceRef `json:"evidence_catalog"`
+			Actions  []ScoringAction        `json:"action_catalog"`
+		}
+		if json.NewDecoder(strings.NewReader(payload)).Decode(&compact) != nil {
+			return content
+		}
+		catalog.Actions = compact.Actions
+		for id, ref := range compact.Evidence {
+			catalog.Evidence = append(catalog.Evidence, scoringEvidence{ID: id, Ref: ref})
+		}
 	}
 
 	report, err := decodeScoringReport(content)

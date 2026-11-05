@@ -103,6 +103,84 @@ func TestCompactionBudgetsSummariesAcrossTenHoldings(t *testing.T) {
 	}
 }
 
+func TestEightHoldingsFitWhenLegacyProtectedInputExceededBudget(t *testing.T) {
+	req, results, _, rules, at := sourceRichResearchFixture(8)
+	for i := range results {
+		// Simulate the reported eight-report case with about 197 KiB of protected input.
+		// Keep the trading prerequisite intact; only the wire encoding may shrink.
+		rr := results[i].Analysis.ResearchReport
+		rr.Decision.ExecutionPrerequisites = append(rr.Decision.ExecutionPrerequisites, strings.Repeat("交易状态及限制必须逐项核验。", 148))
+	}
+	metrics := CalculateMetrics(req, results, rules)
+	instructions, original, _, err := buildScoringPromptParts(req, results, metrics, rules, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minimum := original
+	minimum.Holdings = make([]PortfolioAssetCard, len(original.Holdings))
+	for i, card := range original.Holdings {
+		minimum.Holdings[i] = compactionCardSkeleton(card)
+	}
+	minimum.Sources = make([]map[string]any, len(original.Sources))
+	for i, source := range original.Sources {
+		minimum.Sources[i] = sourceProvenance(source)
+	}
+	newMinimum, err := renderCompactScoringPrompt(instructions+compactionInstructions, minimum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type objectFact compactFact // Historical field-name encoding without MarshalJSON.
+	legacyFacts := make(map[string]objectFact, len(minimum.Facts))
+	for key, fact := range minimum.Facts {
+		legacyFacts[key] = objectFact(fact)
+	}
+	legacyEvidence := make([]scoringEvidence, 0, len(minimum.Evidence))
+	for id, ref := range minimum.Evidence {
+		legacyEvidence = append(legacyEvidence, scoringEvidence{ID: id, Ref: ref})
+	}
+	newFactsJSON, _ := json.Marshal(minimum.Facts)
+	legacyFactsJSON, _ := json.Marshal(legacyFacts)
+	newEvidenceJSON, _ := json.Marshal(minimum.Evidence)
+	legacyEvidenceJSON, _ := json.Marshal(legacyEvidence)
+	legacyProtectedBytes := len(newMinimum) + len(legacyFactsJSON) - len(newFactsJSON) + len(legacyEvidenceJSON) - len(newEvidenceJSON)
+	if legacyProtectedBytes <= targetScoringPromptBytes || len(newMinimum) >= targetScoringPromptBytes-len(original.Holdings)*(compactionMinSummaryBytes+len(`,"compacted_research":`)) {
+		t.Fatalf("fixture misses the protected-input boundary: legacy=%d compact=%d", legacyProtectedBytes, len(newMinimum))
+	}
+	g := &compactTestGateway{scoreGateway: &scoreGateway{}}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	prompt, compressed, err := s.prepareScoringPrompt(context.Background(), req, results, metrics, rules, at, aggregationBudgetFor(time.Minute, ""))
+	if err != nil || !compressed || len(prompt) > targetScoringPromptBytes {
+		t.Fatalf("eight-holding scoring input failed: bytes=%d compressed=%v err=%v", len(prompt), compressed, err)
+	}
+	_, payload, _ := strings.Cut(prompt, "[组合证据JSON]\n")
+	var got compactScoringInput
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Evidence, original.Evidence) || !reflect.DeepEqual(got.Actions, original.Actions) || !reflect.DeepEqual(got.Definitions, original.Definitions) {
+		t.Fatal("protected evidence or action catalog changed")
+	}
+	wantFacts, _ := json.Marshal(original.Facts)
+	gotFacts, _ := json.Marshal(got.Facts)
+	if string(wantFacts) != string(gotFacts) {
+		t.Fatal("facts changed after compact encoding")
+	}
+	for i, card := range got.Holdings {
+		if !reflect.DeepEqual(compactionCardSkeleton(card), compactionCardSkeleton(original.Holdings[i])) {
+			t.Fatalf("holding %d lost trading constraints", i)
+		}
+	}
+	for i, source := range got.Sources {
+		want, _ := json.Marshal(sourceProvenance(original.Sources[i]))
+		actual, _ := json.Marshal(sourceProvenance(source))
+		if string(want) != string(actual) {
+			t.Fatalf("source %d lost provenance", i)
+		}
+	}
+	t.Logf("legacy_protected_bytes=%d compact_protected_bytes=%d prompt_bytes=%d", legacyProtectedBytes, len(newMinimum), len(prompt))
+}
+
 func sourceRichResearchFixture(n int) (Request, []HoldingResult, Metrics, ProfileRules, time.Time) {
 	req, results, _, rules, at := oversizedResearchFixture(n)
 	for i := range results {
@@ -344,16 +422,138 @@ func TestCompactionKeepsSmallHoldingAndOriginalInputUnchanged(t *testing.T) {
 	}
 }
 
-func TestCompactionPreflightStopsBeforeModelWhenProtectedDataCannotFit(t *testing.T) {
+func TestStagedScoringProcessesOversizedTradingConditions(t *testing.T) {
 	req, results, metrics, rules, at := oversizedResearchFixture(1)
 	input := buildCompactScoringInput(req, results, metrics, rules, at)
 	input.Holdings[0].Conditions[0].Text = strings.Repeat("关键条件", 30000)
+	before, _ := json.Marshal(input)
+	g := &compactTestGateway{scoreGateway: &scoreGateway{}}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	got, err := s.compactScoringEvidence(context.Background(), input, aggregationBudgetFor(time.Minute, ""), "评估规则")
+	if err != nil || len(g.prompts) == 0 || got.Holdings[0].CompactedResearch == "" || len(got.StageCoverage) != 1 {
+		t.Fatalf("staged processing failed: %v calls=%d", err, len(g.prompts))
+	}
+	prompt, err := renderCompactScoringPrompt("评估规则", got)
+	if err != nil || len(prompt) > targetScoringPromptBytes || !reflect.DeepEqual(got.Actions, input.Actions) {
+		t.Fatalf("staged portfolio view lost actions or exceeded budget: %v bytes=%d", err, len(prompt))
+	}
+	for _, modelPrompt := range g.prompts {
+		if len(modelPrompt) > maxScoringPromptBytes {
+			t.Fatal("oversized per-holding stage request")
+		}
+	}
+	after, _ := json.Marshal(input)
+	if string(before) != string(after) {
+		t.Fatal("staging mutated the original report view")
+	}
+}
+
+func TestStagedScoringKeepsTenHoldingCoverageAndBackendSelectors(t *testing.T) {
+	req, results, _, rules, at := sourceRichResearchFixture(10)
+	for i := range results {
+		rr := results[i].Analysis.ResearchReport
+		rr.Decision.ExecutionPrerequisites = append(rr.Decision.ExecutionPrerequisites, strings.Repeat("交易限制须核验。", 900))
+	}
+	metrics := CalculateMetrics(req, results, rules)
+	before := buildCompactScoringInput(req, results, metrics, rules, at)
+	g := &compactTestGateway{scoreGateway: &scoreGateway{}}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	prompt, compressed, err := s.prepareScoringPrompt(context.Background(), req, results, metrics, rules, at, aggregationBudgetFor(time.Minute, ""))
+	if err != nil || !compressed || len(prompt) > targetScoringPromptBytes {
+		t.Fatalf("staged portfolio failed: bytes=%d compressed=%v err=%v", len(prompt), compressed, err)
+	}
+	_, payload, _ := strings.Cut(prompt, "[组合证据JSON]\n")
+	var got compactScoringInput
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Holdings) != 10 || len(got.StageCoverage) != 10 || !reflect.DeepEqual(got.Actions, before.Actions) {
+		t.Fatal("staged input lost holdings, coverage or backend actions")
+	}
+	for i, card := range got.Holdings {
+		if card.CompactedResearch == "" || got.StageCoverage[i].SourcesRead != 25 || got.StageCoverage[i].SourceRefs != 25 || got.StageCoverage[i].FactsRead == 0 {
+			t.Fatalf("holding %d was not fully staged: %+v", i, got.StageCoverage[i])
+		}
+	}
+	for id, ref := range got.Evidence {
+		if original, ok := before.Evidence[id]; !ok || original != ref {
+			t.Fatalf("evidence selector %s no longer maps to its original source", id)
+		}
+	}
+	if len(g.prompts) == 0 || len(g.prompts) > compactionMaxCalls {
+		t.Fatalf("unexpected staged model call count: %d", len(g.prompts))
+	}
+}
+
+func TestStagedScoreRetainsOriginalActionGuardAndDisclosesSummaryLimit(t *testing.T) {
+	req, results, _, rules, at := oversizedResearchFixture(1)
+	rr := results[0].Analysis.ResearchReport
+	rr.Conditions[0].Text = strings.Repeat("关键失效条件须核验。", 12000)
+	rr.Decision.ExecutionPrerequisites = []string{"核验实际交易状态与成交限制"}
+	metrics := CalculateMetrics(req, results, rules)
+	raw := scoreJSON(t)
+	raw["confidence_level"] = "高"
+	g := &compactTestGateway{scoreGateway: &scoreGateway{content: scoreContent(t, raw)}}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	report, err := s.scorePortfolio(context.Background(), req, results, metrics, rules, at)
+	if err != nil || !report.ScoreAvailable || len(report.DataLimitations) == 0 || report.DataLimitations[0] != compactionNotice {
+		t.Fatalf("staged score missing validated output or limitation: %+v %v", report, err)
+	}
+	if len(report.Actions) == 0 || !reflect.DeepEqual(report.Actions[0].ExecutionPrerequisites, rr.Decision.ExecutionPrerequisites) {
+		t.Fatal("staged score lost the original backend action guard")
+	}
+	if report.ConfidenceLevel != "中" || !strings.Contains(report.ConfidenceReason, "逐标的摘要") {
+		t.Fatal("staged score overstated evidence confidence")
+	}
+}
+
+func TestStagedScoringDistributesCitationBudgetAcrossHoldings(t *testing.T) {
+	req, results, metrics, rules, at := sourceRichResearchFixture(2)
+	input := buildCompactScoringInput(req, results, metrics, rules, at)
+	first := input.Holdings[0].ReportID
+	for i := 0; i < 4000; i++ {
+		id := fmt.Sprintf("extra-%04d", i)
+		input.Sources = append(input.Sources, map[string]any{"report_id": first, "id": id, "title": "资料", "kind": "announcement", "excerpt": "经营资料待核验"})
+		input.Evidence["ev-"+id] = EvidenceRef{ReportID: first, SourceID: id}
+	}
+	g := &compactTestGateway{scoreGateway: &scoreGateway{}}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	runner := &compactionRunner{service: s, ctx: context.Background(), budget: aggregationBudgetFor(time.Minute, "")}
+	got, err := s.stageScoringEvidence(input, runner, "评估规则")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := renderCompactScoringPrompt("评估规则", got)
+	if err != nil || len(prompt) > targetScoringPromptBytes || len(got.Evidence) >= len(input.Evidence) {
+		t.Fatalf("citation budget was not bounded: bytes=%d err=%v", len(prompt), err)
+	}
+	for _, coverage := range got.StageCoverage {
+		if coverage.SourceRefs == 0 || coverage.ChunksRead == 0 {
+			t.Fatalf("holding lost source coverage: %+v", coverage)
+		}
+	}
+	for id, ref := range got.Evidence {
+		if original, ok := input.Evidence[id]; !ok || original != ref {
+			t.Fatalf("unexpected citation: %s", id)
+		}
+	}
+}
+
+func TestStagedScoringRejectsUnboundedSharedFactsBeforeModel(t *testing.T) {
+	req, results, metrics, rules, at := oversizedResearchFixture(1)
+	input := buildCompactScoringInput(req, results, metrics, rules, at)
+	input.Definitions["shared"] = strings.Repeat("无法分片的组合事实", 30000)
+	input.Facts["global_unbounded"] = compactFact{Value: 1, Available: true, Method: "shared"}
 	g := &compactTestGateway{scoreGateway: &scoreGateway{}}
 	s := NewService(nil, g, nil, nil)
 	defer s.Close()
 	_, err := s.compactScoringEvidence(context.Background(), input, aggregationBudgetFor(time.Minute, ""), "评估规则")
-	if err == nil || len(g.prompts) != 0 || !strings.Contains(err.Error(), "无法仅靠摘要压缩") {
-		t.Fatalf("unnecessary calls before protected-data failure: %v %d", err, len(g.prompts))
+	if err == nil || len(g.prompts) != 0 || !strings.Contains(err.Error(), "共享事实与动作目录") {
+		t.Fatalf("unbounded shared facts should stop before model: %v calls=%d", err, len(g.prompts))
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 const assetCardVersion = "portfolio-asset-card-v1"
-const compactInputVersion = "portfolio-input-v1"
+const compactInputVersion = "portfolio-input-v2"
 
 // Decision cards are deterministic views until the optional oversized-input
 // compaction step. Original reports remain immutable.
@@ -56,6 +56,32 @@ type compactFact struct {
 	Method     string     `json:"method_id,omitempty"`
 	Limitation string     `json:"limitation_id,omitempty"`
 }
+
+// Fact selectors remain the map keys. Encoding their five values as a tuple
+// avoids repeating the same JSON field names for every holding and metric.
+// The order is part of compactInputVersion and is described in the prompt.
+func (f compactFact) MarshalJSON() ([]byte, error) {
+	return json.Marshal([5]any{f.Value, f.Available, f.AsOf, f.Method, f.Limitation})
+}
+
+func (f *compactFact) UnmarshalJSON(data []byte) error {
+	var fields []json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields) != 5 {
+		return fmt.Errorf("compact fact requires 5 fields, got %d", len(fields))
+	}
+	var decoded compactFact
+	for i, target := range []any{&decoded.Value, &decoded.Available, &decoded.AsOf, &decoded.Method, &decoded.Limitation} {
+		if err := json.Unmarshal(fields[i], target); err != nil {
+			return fmt.Errorf("compact fact field %d: %w", i, err)
+		}
+	}
+	*f = decoded
+	return nil
+}
+
 type compactAction struct {
 	ID         string   `json:"action_id"`
 	Symbol     string   `json:"symbol"`
@@ -63,6 +89,14 @@ type compactAction struct {
 	Status     string   `json:"execution_status"`
 	Conditions []string `json:"condition_ids,omitempty"`
 	Anchors    []string `json:"anchor_ids,omitempty"`
+}
+type stagedCoverage struct {
+	Symbol      string `json:"symbol"`
+	ReportID    string `json:"report_id"`
+	ChunksRead  int    `json:"chunks_read"`
+	SourcesRead int    `json:"sources_read"`
+	SourceRefs  int    `json:"source_refs_visible"`
+	FactsRead   int    `json:"holding_facts_read"`
 }
 type compactScoringInput struct {
 	InputVersion    string                 `json:"input_version"`
@@ -76,8 +110,9 @@ type compactScoringInput struct {
 	Definitions     map[string]string      `json:"definitions"`
 	Holdings        []PortfolioAssetCard   `json:"holdings"`
 	Sources         []map[string]any       `json:"sources"`
-	Evidence        []scoringEvidence      `json:"evidence_catalog"`
+	Evidence        map[string]EvidenceRef `json:"evidence_catalog"`
 	Actions         []compactAction        `json:"action_catalog"`
+	StageCoverage   []stagedCoverage       `json:"stage_coverage,omitempty"`
 }
 
 func compactCatalog(c scoringCatalog) scoringCatalog {
@@ -93,10 +128,18 @@ func compactCatalog(c scoringCatalog) scoringCatalog {
 	return c
 }
 
+func compactEvidenceCatalog(catalog []scoringEvidence) map[string]EvidenceRef {
+	evidence := make(map[string]EvidenceRef, len(catalog))
+	for _, item := range catalog {
+		evidence[item.ID] = item.Ref
+	}
+	return evidence
+}
+
 func buildCompactScoringInput(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, at time.Time) compactScoringInput {
 	catalog := compactCatalog(buildScoringCatalog(request, results, metrics, at))
 	in := compactScoringInput{InputVersion: compactInputVersion, CardVersion: assetCardVersion, ContractVersion: scoringContractVersion, PromptVersion: PromptVersion, ScoringVersion: AlgorithmVersion,
-		Request: map[string]any{"horizon": request.Horizon, "trader_profile": request.TraderProfile}, Profile: ScoringProfile(rules), Evidence: catalog.Evidence, Facts: map[string]compactFact{}, Definitions: map[string]string{}}
+		Request: map[string]any{"horizon": request.Horizon, "trader_profile": request.TraderProfile}, Profile: ScoringProfile(rules), Evidence: compactEvidenceCatalog(catalog.Evidence), Facts: map[string]compactFact{}, Definitions: map[string]string{}}
 	definitions := map[string]string{}
 	intern := func(text string) string {
 		if text == "" {
@@ -190,13 +233,13 @@ const maxScoringPromptBytes = 256 * 1024
 const targetScoringPromptBytes = 192 * 1024
 
 func buildScoringPromptParts(request Request, results []HoldingResult, metrics Metrics, rules ProfileRules, at time.Time) (string, compactScoringInput, string, error) {
-	legacy, err := buildLegacyScoringPromptAt(request, results, metrics, rules, at)
 	mode := os.Getenv("EASY_STOCK_PORTFOLIO_INPUT")
-	if err != nil || mode == "legacy" {
+	if mode == "legacy" {
+		legacy, err := buildLegacyScoringPromptAt(request, results, metrics, rules, at)
 		return legacy, compactScoringInput{}, mode, err
 	}
 	input := buildCompactScoringInput(request, results, metrics, rules, at)
-	instructions, _, _ := strings.Cut(legacy, "[组合证据JSON]\n")
+	instructions, _, _ := strings.Cut(scoringPromptInstructions(results), "[组合证据JSON]\n")
 	return instructions, input, mode, nil
 }
 
@@ -205,7 +248,11 @@ func renderCompactScoringPrompt(instructions string, input compactScoringInput) 
 	if err != nil {
 		return "", err
 	}
-	prompt := instructions + "除明确标记的压缩摘要外，决策卡是原报告的确定性视图。definitions解析method_id/limitation_id；相关性对称项只列一次。反证、缺口、条件与执行前提不可忽略。动作种类observe/hold/reassess仅观察；conditional_reduce/conditional_exit须满足卡片全部执行前提及对应条件，当前不代表可成交。编号仅在本次输入内有效。每条理由建议120字以内，不重复转述原报告，必须保留关键冲突与风险。\n[组合证据JSON]\n" + string(data)
+	view := "除明确标记的压缩摘要外，决策卡是原报告的确定性视图。"
+	if len(input.StageCoverage) > 0 {
+		view = "每只标的的决策卡、评分事实及其引用来源已逐分片处理；compacted_research是有损摘要，stage_coverage记录读取数量及本次可引用来源数。原始报告及执行约束由后端保管并校验，摘要遗漏不能视为无风险；来源目录仅供核对编号。"
+	}
+	prompt := instructions + view + "facts每项按[value,available,as_of,method_id,limitation_id]排列，null表示无值或无时点，definitions解析后两个ID；evidence_catalog的键就是可引用的evidence_id，值是原始事实或来源归属；相关性对称项只列一次。反证、缺口、条件与执行前提不可忽略。动作种类observe/hold/reassess仅观察；conditional_reduce/conditional_exit须满足卡片全部执行前提及对应条件，当前不代表可成交。编号仅在本次输入内有效。每条理由建议120字以内，不重复转述原报告，必须保留关键冲突与风险。\n[组合证据JSON]\n" + string(data)
 	return prompt, nil
 }
 
