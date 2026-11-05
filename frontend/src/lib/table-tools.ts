@@ -329,13 +329,15 @@ function syncTableWidth(table: HTMLTableElement, count: number) {
 function freezeUnsetColumns(table: HTMLTableElement, order: number[], widths: Record<number, number>) {
 	const head = headerRow(table);
 	if (!head) return;
+	// 先一次性测量，再写入；写入某列会改变剩余自动列的实际宽度。
+	const measured = [...head.cells].map((th) => Math.round(th.getBoundingClientRect().width));
 	order.forEach((logical, display) => {
 		if (typeof widths[logical] === 'number') return;
 		if (readColumnWidth(table, display) !== null) return;
 		const th = head.cells[display];
 		if (!th) return;
-		const measured = Math.round(th.getBoundingClientRect().width);
-		if (measured >= MIN_COL_WIDTH) writeColumnWidth(table, display, measured);
+		const px = measured[display];
+		if (px >= MIN_COL_WIDTH) writeColumnWidth(table, display, px);
 	});
 }
 
@@ -345,11 +347,12 @@ function freezeUnsetColumns(table: HTMLTableElement, order: number[], widths: Re
 function freezeColumnWidths(table: HTMLTableElement, width: number) {
 	const head = headerRow(table);
 	if (!head) return;
+	const measured = [...head.cells].map((th) => Math.round(th.getBoundingClientRect().width));
 	for (let display = 0; display < width; display++) {
 		const th = head.cells[display];
 		if (!th) continue;
-		const measured = Math.round(th.getBoundingClientRect().width);
-		if (measured >= MIN_COL_WIDTH) writeColumnWidth(table, display, measured);
+		const px = measured[display];
+		if (px >= MIN_COL_WIDTH) writeColumnWidth(table, display, px);
 	}
 	table.style.tableLayout = 'fixed';
 	syncTableWidth(table, width);
@@ -999,6 +1002,8 @@ export function resetTablePrefs(table?: HTMLTableElement) {
 /** 仅供单测：把列宽应用逻辑暴露出来，好在没有完整 DOM 的环境里验证
  *  「用户没存过列宽时一个字节都不动」这条不变量。生产代码不要调用。 */
 export const applyColumnWidthsForTest = applyColumnWidths;
+/** 仅供单测：首次拖动须保留全部列在拖动前的实际宽度。 */
+export const freezeColumnWidthsForTest = freezeColumnWidths;
 /** 仅供单测：校验表头先恢复、正文后加载时的列序同步。 */
 export const applyColumnOrderForTest = applyColumnOrder;
 /** 仅供单测：同上（重置路径必须还原 JSX 设计列宽，不能留空）。 */

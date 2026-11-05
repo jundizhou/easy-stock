@@ -3,6 +3,7 @@ import {
 	applyColumnOrderForTest,
 	applyColumnWidthsForTest,
 	compareSortValues,
+	freezeColumnWidthsForTest,
 	isOrderApplied,
 	moveInOrder,
 	parseSortValue,
@@ -232,6 +233,28 @@ function fakeTable(widths: (string | null)[]) {
 const asTable = (fake: ReturnType<typeof fakeTable>) => fake as unknown as HTMLTableElement;
 
 describe('applyColumnWidths', () => {
+	it('首次拖宽前先读取整表，后面的列不受前列写入导致的重新布局影响', () => {
+		const table = fakeTable([null, null, null]);
+		const original = [120, 180, 240];
+		table.ths.forEach((th, index) => {
+			th.getBoundingClientRect = () => ({ width: original[index] - (table.cols.some((col) => col.style.width.endsWith('px')) ? 20 : 0) });
+		});
+		freezeColumnWidthsForTest(asTable(table), 3);
+		expect(table.cols.map((col) => col.style.width)).toEqual(['120px', '180px', '240px']);
+		expect(table.style.width).toBe('540px');
+	});
+
+	it('部分列有保存宽度时，其余自动列也须先完成测量再一起写入', () => {
+		const table = fakeTable(['20%', '30%', '50%']);
+		const original = [120, 180, 240];
+		table.ths.forEach((th, index) => {
+			th.getBoundingClientRect = () => ({ width: original[index] - (table.cols.slice(1).some((col) => col.style.width.endsWith('px')) ? 20 : 0) });
+		});
+		applyColumnWidthsForTest(asTable(table), [0, 1, 2], { 0: 200 });
+		expect(table.cols.map((col) => col.style.width)).toEqual(['200px', '180px', '240px']);
+		expect(table.style.width).toBe('620px');
+	});
+
 	it('用户从没存过列宽时，一个字节都不动（回归：曾把 JSX 的百分比列宽擦成全列等宽）', () => {
 		const table = fakeTable(['15%', '9%', '12%']);
 		applyColumnWidthsForTest(asTable(table), [0, 1, 2], {});

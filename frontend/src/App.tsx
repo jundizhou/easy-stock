@@ -555,7 +555,7 @@ export function App() {
 								<div className={source.ok ? 'healthy' : 'unhealthy'} key={source.id}>
 									<i aria-hidden="true" />
 									<span><strong>{source.name}</strong><small>{sourceCategoryLabel(source.category)}</small></span>
-									<em>{sourceStatusLabel(source)}</em>
+									<em title={source.message || sourceStatusLabel(source)}>{sourceStatusLabel(source)}</em>
 								</div>
 							))}
 							{!sources.length && !sourcesError && <p>数据源状态加载中…</p>}

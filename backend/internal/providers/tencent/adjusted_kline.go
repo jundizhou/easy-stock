@@ -18,7 +18,11 @@ func (c *Client) AdjustedKLine(ctx context.Context, symbol string, limit int) ([
 		return nil, err
 	}
 	params := url.Values{"param": {normalized.Sina + ",day,,," + strconv.Itoa(limit) + ",qfq"}}
-	requestURL := c.klineBaseURL + "?" + params.Encode()
+	baseURL := c.klineBaseURL
+	if baseURL == "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get" {
+		baseURL = "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
+	}
+	requestURL := baseURL + "?" + params.Encode()
 	var payload struct {
 		Code int `json:"code"`
 		Data map[string]struct {

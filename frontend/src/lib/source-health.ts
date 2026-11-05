@@ -15,5 +15,5 @@ export function sourceStatusLabel(source: SourceHealth): string {
 	if (source.enabled === false || source.status === 'disabled') return '未启用（预留）';
 	if (source.status === 'unknown') return '尚未检测';
 	if (source.ok) return '探测通过';
-	return source.message === 'requires token' ? '需要 Token' : source.message || '探测失败';
+	return source.message === 'requires token' ? '需要 Token' : '探测失败';
 }

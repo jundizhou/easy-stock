@@ -7,6 +7,7 @@ const {
   findFreePort,
   resolveBackendCommand,
   startBackend,
+  terminateChild,
   waitForHealth,
 } = require('./backend-process.cjs');
 const {
@@ -84,6 +85,9 @@ let wechatServiceConfig;
 let wechatServiceError = '';
 let updateManager;
 let updateCheckTimer;
+let runtimeStopping = false;
+let runtimeStopPromise;
+let shutdownComplete = false;
 const reviewLoginWindows = new Map();
 
 function featureLogger(feature) {
@@ -117,6 +121,7 @@ async function bootWechatService() {
   syncWechatServiceSource({ sourceDir, workDir });
 
   const port = await findFreePort('127.0.0.1', 30000, 39999);
+  if (runtimeStopping) return;
   const baseURL = `http://127.0.0.1:${port}`;
   wechatServiceProcess = startWechatService({ python, workDir, port, baseURL });
 	wechatServiceProcess.stdout?.on('data', (chunk) => logChildOutput('wechat-service', 'info', chunk));
@@ -139,6 +144,7 @@ async function bootWechatService() {
 async function bootBackend() {
 	desktopLogger.event('info', 'backend-process', 'starting');
   const port = await findFreePort();
+  if (runtimeStopping) return;
   const token = crypto.randomBytes(24).toString('hex');
   const addr = `127.0.0.1:${port}`;
   const backendUrl = `http://${addr}`;
@@ -193,6 +199,11 @@ async function createWindow() {
     },
   });
   mainWindow = window;
+  window.on('close', (event) => {
+    if (process.platform !== 'win32' || shutdownComplete) return;
+    event.preventDefault();
+    app.quit();
+  });
   window.on('closed', () => { if (mainWindow === window) mainWindow = undefined; });
   if (process.platform === 'win32') {
     window.webContents.on('dom-ready', () => {
@@ -233,15 +244,15 @@ async function createWindow() {
         bootTaogubaBrowserBridge(),
         bootEastmoneySessionBridge(),
         bootEastmoneyPush2Bridge(),
-        bootWechatService().catch((error) => {
+        bootWechatService().catch(async (error) => {
           wechatServiceError = error.message || String(error);
           desktopLogger.event('error', 'wechat-service', 'startup failed', error);
-          if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
+          await terminateChild(wechatServiceProcess).catch((stopError) => desktopLogger.event('error', 'wechat-service', 'stop failed', stopError));
           wechatServiceProcess = undefined;
           wechatServiceConfig = undefined;
         }),
       ]);
-      if (!window.isDestroyed() && !app.isQuitting) await bootBackend();
+      if (!window.isDestroyed() && !app.isQuitting && !runtimeStopping) await bootBackend();
     },
     load: async () => {
       const rendererURL = process.env.ELECTRON_RENDERER_URL;
@@ -255,50 +266,13 @@ async function createWindow() {
   });
 }
 
-function killChildTree(child) {
-  if (child.killed || child.exitCode !== null) return;
-  if (process.platform === 'win32' && child.pid) {
-    // TerminateProcess (child.kill) leaves grandchildren such as the Hermes
-    // Python runtime alive; they keep userData files locked and the pre-update
-    // backup then fails with EBUSY. taskkill /T walks the tree first, the
-    // plain kill right after remains the fallback for a vanished taskkill.
-    try {
-      const { spawn } = require('node:child_process');
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-    } catch {}
-  }
-  child.kill();
+function stopRuntime() {
+  runtimeStopping = true;
+  runtimeStopPromise ||= stopRuntimeOnce();
+  return runtimeStopPromise;
 }
 
-function terminateChild(child, timeoutMs = 10000) {
-  if (!child || child.killed || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer;
-    let forceTimer;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearTimeout(forceTimer);
-      resolve();
-    };
-    child.once('exit', finish);
-    killChildTree(child);
-    timer = setTimeout(() => {
-      if (child.exitCode !== null) return finish();
-      try { child.kill('SIGKILL'); } catch {}
-      forceTimer = setTimeout(() => {
-        if (child.exitCode !== null) return finish();
-        if (settled) return;
-        settled = true;
-        reject(new Error('本机后台服务未能及时停止'));
-      }, 2000);
-    }, timeoutMs);
-  });
-}
-
-async function stopRuntime() {
+async function stopRuntimeOnce() {
   const loginSessions = [...reviewLoginWindows.values()]
     .filter((entry) => !entry.window.isDestroyed())
     .map((entry) => entry.window.webContents.session);
@@ -740,16 +714,25 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  if (app.isQuitting) return;
 	desktopLogger.event('info', 'runtime', 'stopping');
   app.isQuitting = true;
   clearInterval(updateCheckTimer);
-  if (xueqiuBrowserBridge) void xueqiuBrowserBridge.close();
-  if (taogubaBrowserBridge) void taogubaBrowserBridge.close();
-  if (eastmoneySessionBridge) void eastmoneySessionBridge.close();
-  if (eastmoneyPush2Bridge) void eastmoneyPush2Bridge.close();
-  if (backendProcess && !backendProcess.killed) killChildTree(backendProcess);
-  if (wechatServiceProcess && !wechatServiceProcess.killed) killChildTree(wechatServiceProcess);
+  const deadline = setTimeout(() => {
+    desktopLogger.event('error', 'runtime', 'shutdown deadline exceeded');
+    app.exit(1);
+  }, 15000);
+  void stopRuntime()
+    .then(() => desktopLogger.event('info', 'runtime', 'all local services stopped'))
+    .catch((error) => desktopLogger.event('error', 'runtime', 'shutdown failed', error))
+    .finally(() => {
+      clearTimeout(deadline);
+      shutdownComplete = true;
+      app.quit();
+    });
 });
 
 app.on('window-all-closed', () => {

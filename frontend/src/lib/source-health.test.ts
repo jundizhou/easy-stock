@@ -15,3 +15,15 @@ it('excludes reserved and untested sources from outage alerts', () => {
 	expect(sourceStatusLabel(sources[2])).toBe('尚未检测');
 	expect(buildCockpitBriefPrompt({ sources }, [])).toContain('1/2');
 });
+
+it('keeps long connection errors out of status labels without hiding failures', () => {
+	const source: SourceHealth = {
+		id: 'eastmoney', name: '东方财富', category: 'kline', enabled: true, ok: false, status: 'unhealthy',
+		message: '探测失败：Get "https://push2his.eastmoney.com/api/qt/stock/kline/get?fields2=' + 'f51%2C'.repeat(40) + '": EOF',
+	};
+	expect(sourceStatusLabel(source)).toBe('探测失败');
+	expect(sourceHealthSummary([source])).toEqual({ total: 1, healthy: 0, failed: [source], unknown: 0 });
+	expect(source.message).toContain('EOF');
+	expect(sourceStatusLabel({ ...source, message: 'requires token' })).toBe('需要 Token');
+	expect(sourceStatusLabel({ ...source, ok: true, status: 'healthy' })).toBe('探测通过');
+});

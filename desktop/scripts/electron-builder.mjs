@@ -11,6 +11,11 @@ const mode = process.argv[3] || 'release';
 const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
 if (!['mac', 'windows'].includes(platform) || !['release', 'dir'].includes(mode)) throw new Error('Usage: node electron-builder.mjs <mac|windows> <release|dir>');
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported desktop architecture: ${arch}`);
+if (platform === 'windows') {
+  // The bundled NSIS extractor cannot decode modern ARM64 branch filters.
+  // Runtime bundles can contain ARM64 helper executables even in an x64 app.
+  process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ';
+}
 
 const signingCertificate = resolveSigningCertificate(process.env.CSC_LINK);
 if (process.env.CSC_LINK !== undefined && !signingCertificate) {
@@ -98,6 +103,7 @@ const config = {
     ...(signingCertificate ? {} : { signExecutable: false }),
   },
   nsis: {
+    include: path.join(desktopRoot, 'assets', 'installer.nsh'),
     oneClick: false,
     perMachine: false,
     allowElevation: true,

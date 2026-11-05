@@ -1,5 +1,6 @@
 const { spawn } = require('node:child_process');
 const net = require('node:net');
+const path = require('node:path');
 
 function buildBackendEnv({ addr, token, baseEnv = process.env, extraEnv = {} }) {
   return {
@@ -63,6 +64,74 @@ function startBackend({ command, args, cwd, addr, token, extraEnv }) {
   });
 }
 
+function hasExited(child) {
+  return child.exitCode != null || child.signalCode != null;
+}
+
+async function terminateChild(child, timeoutMS = 10000, { platform = process.platform, spawnImpl = spawn } = {}) {
+  // `killed` only means a signal was sent; it does not mean the process exited.
+  if (!child?.pid || hasExited(child)) return;
+  let exited = false;
+  let exitTimer;
+  let forceTimer;
+  let onExit;
+  const exit = new Promise((resolve, reject) => {
+    onExit = () => { exited = true; resolve(); };
+    child.once('exit', onExit);
+    exitTimer = setTimeout(() => {
+      if (platform === 'win32') {
+        reject(new Error('本机后台进程树未能及时停止'));
+        return;
+      }
+      try { child.kill('SIGKILL'); } catch (error) { reject(error); return; }
+      forceTimer = setTimeout(() => reject(new Error('本机后台服务未能及时停止')), 2000);
+    }, timeoutMS);
+  });
+  // Attach immediately: the exit deadline can expire while taskkill is running.
+  exit.catch(() => {});
+  try {
+    if (platform === 'win32') {
+      await new Promise((resolve, reject) => {
+        let killer;
+        let timer;
+        let settled = false;
+        let details = '';
+        const finish = (error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (error) reject(error); else resolve();
+        };
+        try {
+          const command = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe');
+          killer = spawnImpl(command, ['/PID', String(child.pid), '/T', '/F'], {
+            stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+          });
+          killer.stdout?.on('data', (chunk) => { details = (details + chunk).slice(-4096); });
+          killer.stderr?.on('data', (chunk) => { details = (details + chunk).slice(-4096); });
+          killer.once('error', (error) => finish(error));
+          killer.once('close', (code) => {
+            if (code !== 0 && !exited && !hasExited(child)) {
+              finish(new Error(`停止本机后台进程树失败（${code}）：${details.trim()}`));
+            } else finish();
+          });
+          timer = setTimeout(() => {
+            finish(new Error('停止本机后台进程树超时'));
+            try { killer.kill(); } catch {}
+          }, timeoutMS);
+        } catch (error) { finish(error); }
+      });
+    } else {
+      child.kill();
+    }
+    await exit;
+  } finally {
+    clearTimeout(exitTimer);
+    clearTimeout(forceTimer);
+    child.removeListener('exit', onExit);
+  }
+}
+
 async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
   const startedAt = Date.now();
   let lastError;
@@ -101,5 +170,6 @@ module.exports = {
   findFreePort,
   resolveBackendCommand,
   startBackend,
+  terminateChild,
   waitForHealth,
 };
