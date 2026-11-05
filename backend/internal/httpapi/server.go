@@ -174,7 +174,7 @@ func NewServer(config any) *Server {
 		if cfg.StockValuation == nil {
 			cfg.StockValuation = tencentClient
 		}
-		cfg.Realtime = sinaClient
+		cfg.Realtime = realtimeFallback{primary: sinaClient, fallback: tencentClient}
 	}
 	if cfg.KLinePrimary == nil {
 		cfg.KLinePrimary = eastMoneyClient

@@ -1,6 +1,7 @@
 import {
 	Activity,
 	BadgeCent,
+	BookMarked,
 	ChevronDown,
 	Database,
 	Flame,
@@ -53,9 +54,10 @@ type Props = {
 	emotionError?: string;
 	progress?: ShortTermProgress<LimitUpLadderData> | null;
 	onRefresh: () => void;
+	onOpenMastery: () => void;
 };
 
-export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, progress, onRefresh }: Props) {
+export function LimitUpWorkspace({ config, data, state, error, emotionData, emotionState, emotionError, progress, onRefresh, onOpenMastery }: Props) {
 	const [showST, setShowST] = useState(false);
 	const [previousExpanded, setPreviousExpanded] = useState(false);
 	const [selectedStock, setSelectedStock] = useState<LimitUpLadderStock | null>(null);
@@ -184,6 +186,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 	const intraday = data?.intraday || emotionData?.intraday;
 	const intradayState = state === 'error' ? 'error' : progress?.steps.quotes === 'loading' ? 'loading' : progress?.steps.quotes === 'error' ? 'error' : state;
 	const intradayError = progress?.errors.quotes || (!intraday && state === 'error' ? error : undefined);
+	const otherErrors = progress && Object.keys(progress.errors).length ? Object.entries(progress.errors).filter(([step]) => step !== 'quotes').map(([, message]) => message).join('；') : error;
 
 	return (
 		<section className="limit-up-workspace">
@@ -203,9 +206,14 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 					<button type="button" className="refresh-data-button" onClick={onRefresh} disabled={state === 'loading'}><RefreshCw className={state === 'loading' ? 'spin' : ''} size={15} />刷新梯队</button>
 				</div>
 			</header>
-			{themeAI.enabled && <p className="short-term-status" role="status">{themeAI.busy ? `本轮识别 ${themeAI.progress.completed}/${themeAI.progress.total}` : '本轮已结束'} · 当前范围 {new Set(aiStocks.map(stock => stock.symbol)).size} 只 · 已缓存 {aiEntries.filter(e => e.result).length} 只 · 排队等待 {themeAI.progress.remaining} 只。{themeAI.busy && themeAI.progress.active.length > 0 && `正在检索：${themeAI.progress.active.join('、')}。`}按当前范围持续识别，同时处理2只，可随时暂停。{themeAI.error && <span role="alert"> {themeAI.error}</span>}</p>}
-			{data && <p className="short-term-status" role="status">{progress?.stale || data.meta.stale ? '显示上次快照' : updating ? '基础梯队已显示，补充数据更新中' : '梯队已更新'} · 数据时间 {formatDateTimeClock(data.meta.fetched_at)}{updating && ' · 返回的数据会陆续显示'}</p>}
-			{error && data && <p className="short-term-status error" role="status">部分数据更新失败：{error}<button type="button" onClick={onRefresh}>重试</button></p>}
+			<div className="limit-up-status-area">
+				<div className="limit-up-status-copy">
+					{themeAI.enabled && <p className="short-term-status" role="status">{themeAI.busy ? `本轮识别 ${themeAI.progress.completed}/${themeAI.progress.total}` : '本轮已结束'} · 当前范围 {new Set(aiStocks.map(stock => stock.symbol)).size} 只 · 已缓存 {aiEntries.filter(e => e.result).length} 只 · 排队等待 {themeAI.progress.remaining} 只。{themeAI.busy && themeAI.progress.active.length > 0 && `正在检索：${themeAI.progress.active.join('、')}。`}按当前范围持续识别，同时处理2只，可随时暂停。{themeAI.error && <span role="alert"> {themeAI.error}</span>}</p>}
+					{data && <p className="short-term-status" role="status">{progress?.stale || data.meta.stale ? '显示上次快照' : updating ? '基础梯队已显示，补充数据更新中' : '梯队已更新'} · 数据时间 {formatDateTimeClock(data.meta.fetched_at)}{updating && ' · 返回的数据会陆续显示'}</p>}
+					{otherErrors && data && <p className="short-term-status error" role="status">部分数据更新失败：{otherErrors}<button type="button" onClick={onRefresh}>重试</button></p>}
+				</div>
+				<button type="button" className="refresh-data-button mastery-open-button" onClick={onOpenMastery} aria-haspopup="dialog"><BookMarked size={15} aria-hidden="true" />游资心法</button>
+			</div>
 
 			<div className="limit-up-summary">
 				<SummaryCard icon={<Flame size={17} />} label="涨停家数" value={data ? current.limitUpCount : '—'} detail={data ? stSummaryLabel(showST, current.stCount) : '等待涨停池'} tone="hot" />

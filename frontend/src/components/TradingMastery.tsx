@@ -22,13 +22,12 @@ import {
 
 type Props = {
 	config: BackendConfig | null;
-	refreshKey: number;
 	onAskAI: (traderName: string) => void;
 };
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
-export function TradingMastery({ config, refreshKey, onAskAI }: Props) {
+export function TradingMastery({ config, onAskAI }: Props) {
 	const [snapshot, setSnapshot] = useState<MasterySnapshot | null>(null);
 	const [detail, setDetail] = useState<MasteryTraderDetail | null>(null);
 	const [activeTraderID, setActiveTraderID] = useState('');
@@ -57,7 +56,7 @@ export function TradingMastery({ config, refreshKey, onAskAI }: Props) {
 
 	useEffect(() => {
 		void loadIndex();
-	}, [loadIndex, refreshKey]);
+	}, [loadIndex]);
 
 	useEffect(() => {
 		if (!config || !activeTraderID) {

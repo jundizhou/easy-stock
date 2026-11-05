@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackendConfig, LimitUpLadderData, MarketEmotionHistory } from './backend';
-import { pollShortTermProgress, ShortTermProgress } from './short-term-progress';
+import { pollShortTermProgress, shortTermErrorMessage, ShortTermProgress } from './short-term-progress';
 import { logRuntimeEvent } from './runtime-log';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -41,7 +41,7 @@ function useShortTermResource<T>(config: BackendConfig | null, active: boolean, 
 		}, { signal: abort.signal, refresh: force, budgetMS }).catch(error => {
 			if (disposed) return;
 			setState('error');
-			setError(error instanceof Error ? error.message : '数据加载失败');
+			setError(shortTermErrorMessage(error instanceof Error ? error.message : '数据加载失败'));
 		});
 		return () => { disposed = true; abort.abort(); };
 	}, [config, active, refreshKey, path, budgetMS]);

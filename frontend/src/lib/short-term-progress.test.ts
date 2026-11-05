@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestJSON } from './backend';
-import { pollShortTermProgress, ShortTermProgress } from './short-term-progress';
+import { pollShortTermProgress, shortTermErrorMessage, ShortTermProgress } from './short-term-progress';
 
 vi.mock('./backend', () => ({ requestJSON: vi.fn() }));
 const request = vi.mocked(requestJSON);
@@ -9,6 +9,11 @@ const value = (refreshing: boolean): ShortTermProgress<string> => ({ data: '基�
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });
 
 describe('short term progressive polling', () => {
+	it('keeps upstream request URLs out of visible quote errors', () => {
+		const raw = 'Get "https://hq.sinajs.cn/rn=123&list=sh600519,sz000001": context deadline exceeded';
+		expect(shortTermErrorMessage(raw, 'quotes')).toBe('实时行情暂不可用，最新情绪待更新，请重试');
+		expect(shortTermErrorMessage('缺少可对照的上一交易日梯队', 'quotes')).toBe('缺少可对照的上一交易日梯队');
+	});
 	it('accepts a complete response from an older backend awaiting restart', async () => {
 		request.mockResolvedValue({ data: '完整梯队' });
 		const publish = vi.fn();

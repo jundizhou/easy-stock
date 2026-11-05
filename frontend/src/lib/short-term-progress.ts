@@ -10,6 +10,11 @@ export type ShortTermProgress<T> = {
 	errors: Record<string, string>;
 };
 
+export function shortTermErrorMessage(message: string, step?: string): string {
+	if (!/https?:\/\/|context deadline exceeded|Client\.Timeout exceeded/i.test(message)) return message;
+	return step === 'quotes' ? '实时行情暂不可用，最新情绪待更新，请重试' : '数据源暂不可用，请重试';
+}
+
 // One request at a time, with an absolute budget (including a hung HTTP request).
 // Aborted generations never publish, even if a transport ignores cancellation.
 export async function pollShortTermProgress<T>(config: BackendConfig, path: string, publish: (value: ShortTermProgress<T>) => void, options: { signal: AbortSignal; refresh: boolean; budgetMS: number }) {
@@ -30,7 +35,7 @@ export async function pollShortTermProgress<T>(config: BackendConfig, path: stri
 			const received = await abortable(requestJSON<ShortTermProgress<T>>(config, `${path}?${query}`, { signal: abort.signal }), abort.signal);
 			if (abort.signal.aborted) break;
 			// A desktop backend awaiting restart may still return the complete legacy payload.
-			const value: ShortTermProgress<T> = { ...received, refresh_id: received.refresh_id || '', revision: received.revision || 0, refreshing: !!received.refreshing, stale: !!received.stale, steps: received.steps || {}, errors: received.errors || {} };
+			const value: ShortTermProgress<T> = { ...received, refresh_id: received.refresh_id || '', revision: received.revision || 0, refreshing: !!received.refreshing, stale: !!received.stale, steps: received.steps || {}, errors: Object.fromEntries(Object.entries(received.errors || {}).map(([step, message]) => [step, shortTermErrorMessage(message, step)])) };
 			if (value.refresh_id !== id || value.revision >= revision) publish(value);
 			id = value.refresh_id;
 			revision = value.revision;
