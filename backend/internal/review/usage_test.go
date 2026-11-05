@@ -22,7 +22,7 @@ func TestBrowserNormalizationOnlySendsNewArticleMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompter := &recordingPrompter{content: `{"articles":[{"original_url":"https://www.tgb.cn/a/old","title":"不得改写的旧标题"},{"original_url":"https://www.tgb.cn/a/new","title":"新标题整理后","content_text":"不得使用模型正文","published_at":"2026-09-17T15:00:00+08:00"}]}`}
-	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, prompter)
 	raw := hermesXueqiuCollection{AuthorName: "作者", Articles: []hermesXueqiuArticle{
 		{Title: "旧标题", OriginalURL: oldURL, ContentText: "旧正文", PublishedAt: "2026-09-16 15:00"},
 		{Title: "新标题", OriginalURL: newURL, ContentText: "浏览器原始新正文", PublishedAt: "2026-09-17 15:00"},
@@ -62,7 +62,7 @@ func TestBrowserNormalizationSkipsAIWhenDeduplicationFails(t *testing.T) {
 	}
 	store.Close()
 	prompter := &recordingPrompter{}
-	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, prompter)
 	_, err = automation.normalizeBrowserBridgeCollection(context.Background(), Subscription{Source: "taoguba"}, hermesXueqiuCollection{
 		Articles: []hermesXueqiuArticle{{OriginalURL: "https://www.tgb.cn/a/new", Title: "新文章"}},
 	})

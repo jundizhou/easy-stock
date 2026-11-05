@@ -18,7 +18,7 @@ func TestImporterParsesSupportedPublicArticle(t *testing.T) {
 		body := `<html><head><meta property="og:title" content="8月4日复盘"><meta name="author" content="交易者甲"><meta name="description" content="市场高低切观察"><meta property="article:published_time" content="2026-08-04T15:30:00+08:00"></head><body><article><h1>8月4日复盘</h1><p>机器人板块走强。</p><script>alert(1)</script></article></body></html>`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})}
-	post, err := NewImporter(client, "").ImportURL(context.Background(), "https://www.tgb.cn/a/123")
+	post, err := NewImporter(client).ImportURL(context.Background(), "https://www.tgb.cn/a/123")
 	if err != nil {
 		t.Fatalf("ImportURL failed: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestImporterRejectsPublicArticleWithoutPublishedTime(t *testing.T) {
 		body := `<html><head><meta property="og:title" content="旧文章"><meta name="author" content="作者"></head><body><article>正文内容</article></body></html>`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})}
-	_, err := NewImporter(client, "").ImportURL(context.Background(), "https://www.tgb.cn/a/old")
+	_, err := NewImporter(client).ImportURL(context.Background(), "https://www.tgb.cn/a/old")
 	if err == nil || !strings.Contains(err.Error(), "可靠的发布时间") {
 		t.Fatalf("error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestPublicPagePublishedAtParsesUnixMilliseconds(t *testing.T) {
 }
 
 func TestImporterRejectsUnsupportedHost(t *testing.T) {
-	_, err := NewImporter(nil, "").ImportURL(context.Background(), "https://example.com/article")
+	_, err := NewImporter(nil).ImportURL(context.Background(), "https://example.com/article")
 	if err == nil || !strings.Contains(err.Error(), "只支持") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,22 +77,21 @@ func TestImporterRejectsPublicPageCSSColorTable(t *testing.T) {
 		body := `<html><head><meta property="og:title" content="错误正文"><meta property="article:published_time" content="2026-08-13T15:30:00+08:00"></head><body><article>aliceblue:[240,248,255],magenta:[255,0,255],mediumaquamarine:[102,205,170],mediumslateblue:[123,104,238]</article></body></html>`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})}
-	_, err := NewImporter(client, "").ImportURL(context.Background(), "https://mp.weixin.qq.com/s/test")
+	_, err := NewImporter(client).ImportURL(context.Background(), "https://mp.weixin.qq.com/s/test")
 	if err == nil || !strings.Contains(err.Error(), "样式数据") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestImporterRecoversWechatBodyWhenSidecarReturnsPageBundle(t *testing.T) {
+func TestImporterReadsWechatPublicPageDirectly(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method == http.MethodPost {
-			body := `{"success":true,"data":{"title":"坚守","plain_content":"aliceblue:[240,248,255],magenta:[255,0,255],mediumaquamarine:[102,205,170]","author":"我是股公子","publish_time":1786581780}}`
-			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json; charset=utf-8"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+		if request.Method != http.MethodGet {
+			t.Fatalf("unexpected request method: %s", request.Method)
 		}
 		body := `<html><head><meta property="og:title" content="坚守"><meta name="author" content="我是股公子"><script>var create_time = "1786581780";var colors={magenta:[255,0,255],mediumaquamarine:[102,205,170]};</script></head><body><div class="rich_media_content" id="js_content"><p>人最怕的就是不知行合一。</p><p>最好的操作就是不操作。</p></div><script>Object.defineProperty(x.prototype,"x",{})</script></body></html>`
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/html; charset=utf-8"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})}
-	post, err := NewImporter(client, "http://127.0.0.1:30000").ImportURL(context.Background(), "https://mp.weixin.qq.com/s/tjMOgByp7Borq90c8O66EQ")
+	post, err := NewImporter(client).ImportURL(context.Background(), "https://mp.weixin.qq.com/s/tjMOgByp7Borq90c8O66EQ")
 	if err != nil {
 		t.Fatalf("ImportURL failed: %v", err)
 	}

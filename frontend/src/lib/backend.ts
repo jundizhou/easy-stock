@@ -38,8 +38,6 @@ export type BackendBridge = {
 	getRuntimeLogStatus?: () => Promise<RuntimeLogStatus>;
 	openRuntimeLogs?: () => Promise<void>;
 	logRuntimeEvent?: (entry: RuntimeLogEntry) => Promise<boolean>;
-  getWechatServiceStatus?: () => Promise<WechatServiceStatus>;
-  openWechatLogin?: () => Promise<WechatServiceStatus>;
   getBrowserAuthStatus?: (profileId: string, source?: 'xueqiu' | 'taoguba') => Promise<BrowserAuthStatus>;
   openReviewSourceLogin?: (source: 'xueqiu' | 'taoguba', profileId: string, homepageURL: string) => Promise<BrowserAuthStatus>;
   openXueqiuLogin?: (profileId: string, homepageURL: string) => Promise<BrowserAuthStatus>;
@@ -84,18 +82,6 @@ export type AppUpdateStatus = {
 	backupCreatedAt?: string;
 };
 
-export type WechatServiceStatus = {
-	available: boolean;
-	configured: boolean;
-	authenticated: boolean;
-	state: 'starting' | 'not_logged_in' | 'authenticated' | 'expired' | 'error' | string;
-	account?: string;
-	fakeid?: string;
-	expires_at?: string;
-	message: string;
-	login_url?: string;
-};
-
 export type BrowserAuthStatus = {
 	configured: boolean;
 	updated_at?: string;
@@ -134,7 +120,6 @@ export type AppSettings = {
 		ths_cookie: SecretSettingStatus;
 		xueqiu_cookie: SecretSettingStatus;
 		eastmoney_cookie: SecretSettingStatus;
-		wechat_api_token: SecretSettingStatus;
 	};
 	review_automation: {
 		profiles: ReviewAutomationProfile[];

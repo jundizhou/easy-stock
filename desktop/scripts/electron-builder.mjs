@@ -67,7 +67,6 @@ const config = {
     'update-feed.cjs',
     'update-manager.cjs',
     'user-data.cjs',
-    'wechat-service.cjs',
     'xueqiu-browser-bridge.cjs',
     'package.json',
     '!dist{,/**/*}',

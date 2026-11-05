@@ -146,39 +146,29 @@ func TestSettingsAPIValidatesAndClearsSecrets(t *testing.T) {
 	}
 }
 
-func TestSettingsAPISupportsMultipleReviewProfilesAndMasksCredentials(t *testing.T) {
+func TestSettingsAPISupportsReviewProfilesAndRejectsWechatAutomation(t *testing.T) {
 	store, err := appsettings.Open("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(Config{SettingsStore: store})
-	body := `{"review_automation":{"profiles":[
-		{"id":"wx-1","source":"wechat","name":"微信实例一","base_url":"http://127.0.0.1:5000","credential":"wx-secret-1234","sync_hour":7,"auto_analyze":true,"enabled":true},
-		{"id":"wx-2","source":"wechat","name":"微信实例二","base_url":"http://127.0.0.1:5001","sync_hour":9,"auto_analyze":false,"enabled":true},
-		{"id":"xq-1","source":"xueqiu","name":"雪球账号一","base_url":"https://xueqiu.com","credential":"xq-cookie-5678","sync_hour":8,"auto_analyze":true,"enabled":true}
-	]}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body))
+	bad := httptest.NewRecorder()
+	server.ServeHTTP(bad, httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(`{"review_automation":{"profiles":[{"id":"wx-1","source":"wechat","name":"旧公众号","sync_hour":7,"enabled":true}]}}`)))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("wechat profile status = %d", bad.Code)
+	}
+	body := `{"review_automation":{"profiles":[{"id":"xq-1","source":"xueqiu","name":"雪球账号一","base_url":"https://xueqiu.com","sync_hour":8,"auto_analyze":true,"enabled":true},{"id":"tgb-1","source":"taoguba","name":"淘股吧账号一","base_url":"https://www.tgb.cn","credential":"secret-5678","sync_hour":9,"auto_analyze":true,"enabled":true}]}}`
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "wx-secret") || strings.Contains(rec.Body.String(), "xq-cookie") {
+	if strings.Contains(rec.Body.String(), "secret-5678") {
 		t.Fatalf("profile secret leaked: %s", rec.Body.String())
 	}
-	values := store.Snapshot()
-	if len(values.ReviewAutomation.Profiles) != 3 || values.ReviewAutomation.Profiles[0].Credential != "wx-secret-1234" {
-		t.Fatalf("profiles=%+v", values.ReviewAutomation.Profiles)
-	}
-	if values.ReviewAutomation.Profiles[2].Credential != "" {
-		t.Fatalf("legacy xueqiu cookie should be discarded: %+v", values.ReviewAutomation.Profiles[2])
-	}
-	update := `{"review_automation":{"profiles":[{"id":"wx-1","source":"wechat","name":"微信实例一改名","base_url":"http://127.0.0.1:5000","sync_hour":10,"auto_analyze":true,"enabled":true}]}}`
-	req = httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(update))
-	rec = httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || store.Snapshot().ReviewAutomation.Profiles[0].Credential != "wx-secret-1234" {
-		t.Fatalf("credential was not preserved: status=%d values=%+v", rec.Code, store.Snapshot().ReviewAutomation.Profiles)
+	profiles := store.Snapshot().ReviewAutomation.Profiles
+	if len(profiles) != 2 || profiles[0].Credential != "" || profiles[1].Credential != "secret-5678" {
+		t.Fatalf("profiles=%+v", profiles)
 	}
 }
 

@@ -97,7 +97,7 @@ test('desktop resolves packaged Python wrappers without falling back to absent d
     app: { getPath: () => path.join(fixture.root, 'user'), getVersion: () => 'test', isPackaged: true },
     runtimeLogDirectory: path.join(fixture.root, 'logs'), resolveHermesRuntimeRoot: () => path.join(resourcesRoot, 'hermes-runtime'),
     xueqiuBrowserBridgeConfig: null, taogubaBrowserBridgeConfig: null,
-    eastmoneySessionBridgeConfig: null, eastmoneyPush2BridgeConfig: null, wechatServiceConfig: null,
+    eastmoneySessionBridgeConfig: null, eastmoneyPush2BridgeConfig: null,
     agentBrowserBinaryName: () => 'unused',
   });
   const env = buildRuntimeEnv(resourcesRoot);

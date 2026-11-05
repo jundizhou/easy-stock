@@ -101,7 +101,6 @@ type Server struct {
 	stockResearchStore       *stockanalysis.ResearchStore
 	stockResearch            *stockanalysis.ResearchService
 	reviewImporter           ReviewImporter
-	wechatAPIURL             string
 	settingsStore            *appsettings.Store
 	notificationSender       notificationSender
 	notifications            *notification.Dispatcher
@@ -371,10 +370,10 @@ func NewServer(config any) *Server {
 		service.RestoreSelection(cfg.SettingsStore.Snapshot().AgentRuntime)
 	}
 	if cfg.ReviewImporter == nil {
-		cfg.ReviewImporter = review.NewImporter(cfg.ReviewHTTP, cfg.WeChatAPIURL)
+		cfg.ReviewImporter = review.NewImporter(cfg.ReviewHTTP)
 	}
 	if cfg.ReviewAutomation == nil {
-		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, cfg.WeChatAPIURL, usageGateway)
+		cfg.ReviewAutomation = review.NewAutomation(cfg.ReviewStore, cfg.ReviewImporter, cfg.SettingsStore, cfg.ReviewHTTP, usageGateway)
 	}
 	if dailyMarketProvider := newReviewDailyMarketProvider(cfg.MarketOverview); dailyMarketProvider != nil {
 		cfg.ReviewAutomation.SetDailyMarketProvider(dailyMarketProvider)
@@ -426,7 +425,6 @@ func NewServer(config any) *Server {
 		portfolioStore:           cfg.PortfolioStore,
 		stockResearchStore:       cfg.StockResearchStore,
 		reviewImporter:           cfg.ReviewImporter,
-		wechatAPIURL:             strings.TrimSpace(cfg.WeChatAPIURL),
 		settingsStore:            cfg.SettingsStore,
 		notificationSender:       notification.NewSender(),
 		ladderThemeAI:            newLadderThemeAI(cfg.SettingsPath),

@@ -52,7 +52,7 @@ func TestDailyScheduleExchangeSlots(t *testing.T) {
 func TestDailySchedulePersistenceBusyAndDuplicatePrevention(t *testing.T) {
 	ctx := context.Background()
 	store := scheduleStore(t)
-	a := NewAutomation(store, nil, nil, nil, "", &fakeBrowserPrompter{})
+	a := NewAutomation(store, nil, nil, nil, &fakeBrowserPrompter{})
 	done := make(chan DailySummaryJob, 2)
 	a.SetDailySummaryCompleted(func(j DailySummaryJob, _ *DailySummary) { done <- j })
 	s := NewDailyScheduler(store, a, fixtureCalendar())

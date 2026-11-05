@@ -133,7 +133,7 @@ func TestReviewChunksPreserveExactEscapedTextAndProvenance(t *testing.T) {
 
 func TestReviewLongAuthorUsesAllFragmentsAndBoundedMerge(t *testing.T) {
 	p := &reviewCompactionPrompter{largeSummaries: true}
-	a := NewAutomation(nil, nil, nil, nil, "", p)
+	a := NewAutomation(nil, nil, nil, nil, p)
 	post := newPost("taoguba", "https://example.invalid/long", "作者甲", "长文", strings.Repeat("早先观点，需要核验。", 15000)+"文末独有修正：跌破则原判断失效", "", time.Now())
 	group := dailySummaryAuthorGroups([]Post{post})[0]
 	view, articles, sources, fallback, err := a.summarizeDailyAuthor(context.Background(), group)
@@ -173,7 +173,7 @@ func TestReviewThirtyAuthorsFitBothFinalPhaseBudgets(t *testing.T) {
 	}
 	before, _ := json.Marshal(views)
 	p := &reviewCompactionPrompter{largeSummaries: true}
-	a := NewAutomation(nil, nil, nil, nil, "", p)
+	a := NewAutomation(nil, nil, nil, nil, p)
 	market, tomorrow, compacted, err := a.prepareDailySummaryPhasePrompts(context.Background(), effectiveReviewWindow(time.Now()), views, DailyUSMarket{})
 	if err != nil || !compacted || max(len(market), len(tomorrow)) > targetReviewPromptBytes {
 		t.Fatalf("30-author budget failed: %d/%d %v", len(market), len(tomorrow), err)
@@ -202,7 +202,7 @@ func TestReviewThirtyAuthorsFitBothFinalPhaseBudgets(t *testing.T) {
 
 func TestReviewCompactionFailureDoesNotSendOversizedAuthorPrompt(t *testing.T) {
 	p := &reviewCompactionPrompter{invalidSummary: true}
-	a := NewAutomation(nil, nil, nil, nil, "", p)
+	a := NewAutomation(nil, nil, nil, nil, p)
 	post := newPost("taoguba", "https://example.invalid/invalid", "作者甲", "长文", strings.Repeat("反证与风险。", 20000), "", time.Now())
 	_, _, _, _, err := a.summarizeDailyAuthor(context.Background(), dailySummaryAuthorGroups([]Post{post})[0])
 	if err == nil || len(p.prompts) != 2 {
@@ -225,7 +225,7 @@ func TestReviewAuthorCheckpointsSurviveRestartAndInvalidateChanges(t *testing.T)
 	post := newPost("taoguba", "https://example.invalid/cache", "作者甲", "复盘", "原始观点", "", time.Now())
 	run := func(identity string, wantCalls int) {
 		t.Helper()
-		a := NewAutomation(store, nil, nil, nil, "", p)
+		a := NewAutomation(store, nil, nil, nil, p)
 		view, _, _, _, err := a.summarizeDailyAuthor(checkpointContext(store, identity), dailySummaryAuthorGroups([]Post{post})[0])
 		if err != nil || view.Author != "作者甲" || len(p.prompts) != wantCalls {
 			t.Fatalf("checkpoint reuse: calls=%d want=%d err=%v", len(p.prompts), wantCalls, err)
@@ -283,7 +283,7 @@ func TestReviewPartialSummaryReusesAuthorsAndKeepsOneVoteEach(t *testing.T) {
 		}
 	}
 	p := &reviewCompactionPrompter{failFinal: true}
-	a := NewAutomation(store, nil, nil, nil, "", p)
+	a := NewAutomation(store, nil, nil, nil, p)
 	summary, err := a.summarizeWindow(checkpointContext(store, "model-a"), window, nil)
 	if err != nil || !summary.Partial {
 		t.Fatalf("expected recoverable partial result: %v", err)
@@ -312,7 +312,7 @@ func TestReviewSingleArticleAnalysisIncludesTextAfterOldCutoff(t *testing.T) {
 
 func TestReviewProtectedCatalogFailureStopsBeforeModel(t *testing.T) {
 	p := &reviewCompactionPrompter{}
-	a := NewAutomation(nil, nil, nil, nil, "", p)
+	a := NewAutomation(nil, nil, nil, nil, p)
 	views := []DailyAuthorView{{Author: "作者甲", Sources: []DailySummarySource{{Title: strings.Repeat("来源", 50000)}}}}
 	_, _, _, err := a.prepareDailySummaryPhasePrompts(context.Background(), effectiveReviewWindow(time.Now()), views, DailyUSMarket{})
 	if err == nil || len(p.prompts) != 0 {

@@ -544,17 +544,17 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 				</div>
 
 				<details className="review-automation" open={subscriptionsExpanded} onToggle={(event) => setSubscriptionsExpanded(event.currentTarget.open)}>
-					<summary><span><RadioTower size={16} /><strong>自动订阅与每日同步</strong><small>{subscriptions.length ? `${subscriptions.length} 个主页 · 后台定时检查` : '添加大V主页后，系统会每天自动获取新文章'}</small></span><button type="button" disabled={!subscriptions.length || !!syncing} onClick={(event) => { event.preventDefault(); void syncSubscriptions(); }}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></summary>
+					<summary><span><RadioTower size={16} /><strong>自动订阅与每日同步</strong><small>{subscriptions.filter((sub) => sub.source !== 'wechat').length ? `${subscriptions.filter((sub) => sub.source !== 'wechat').length} 个主页 · 后台定时检查` : '添加大V主页后，系统会每天自动获取新文章'}</small></span><button type="button" disabled={!subscriptions.some((sub) => sub.source !== 'wechat') || !!syncing} onClick={(event) => { event.preventDefault(); void syncSubscriptions(); }}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></summary>
 					<div className="review-automation-body">
-						<div className="review-wechat-import-hint"><FileInput size={16} /><span><strong>微信公众号自动订阅暂不可用</strong><small>微信已停用历史文章列表接口；已知文章仍可将具体链接粘贴到上方“导入文章”。</small></span></div>
+						<div className="review-wechat-import-hint"><FileInput size={16} /><span><strong>微信公众号仅支持链接导入</strong><small>将具体文章链接粘贴到上方“导入文章”；不提供公众号自动订阅。</small></span></div>
 						<form className="review-subscription-form" onSubmit={addSubscription}>
-							<select value={subscriptionSource} onChange={(event) => setSubscriptionSource(event.target.value)}><option value="xueqiu">雪球</option><option value="taoguba">淘股吧</option><option value="wechat" disabled>微信公众号（仅链接导入）</option></select>
+							<select value={subscriptionSource} onChange={(event) => setSubscriptionSource(event.target.value)}><option value="xueqiu">雪球</option><option value="taoguba">淘股吧</option></select>
 							<select value={subscriptionConfigID} onChange={(event) => setSubscriptionConfigID(event.target.value)} aria-label="采集配置">{reviewProfiles.filter((profile) => profile.source === subscriptionSource).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select>
-							<input value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder={subscriptionSource === 'wechat' ? '公众号名称（推荐填写）' : '作者名称（可选）'} />
-							<input value={homepageURL} onChange={(event) => setHomepageURL(event.target.value)} placeholder={subscriptionSource === 'wechat' ? '公众号名称或 FakeID' : '粘贴大V主页地址'} />
+							<input value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder="作者名称（可选）" />
+							<input value={homepageURL} onChange={(event) => setHomepageURL(event.target.value)} placeholder="粘贴大V主页地址" />
 							<button type="submit" disabled={!homepageURL.trim() || !subscriptionConfigID || savingSubscription}>{savingSubscription ? <RefreshCw className="spin" size={14} /> : <Plus size={14} />}添加订阅</button>
 						</form>
-						<div className="review-subscription-list">{subscriptions.map((sub) => <div key={sub.id}><span className={`author-avatar ${sub.source}`}>{sub.name.slice(0, 1)}</span><span><strong>{sub.name}</strong><small>{sourceLabel(sub.source)} · {reviewProfiles.find((profile) => profile.id === sub.config_id)?.name || '默认配置'} · {sub.last_sync_at ? `上次 ${formatDateTime(sub.last_sync_at)}` : '等待首次同步'}{sub.last_error ? ` · ${sub.last_error}` : ''}</small></span><i className={`source-dot ${sub.last_status === 'ok' ? 'ready' : sub.last_status === 'error' ? 'limited' : 'experimental'}`} /><button type="button" title="立即同步该主页" disabled={!!syncing} onClick={() => void syncSubscriptions(sub.id)}>{syncing === sub.id ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}</button><button type="button" title="删除订阅" onClick={() => void deleteSubscription(sub.id)}><Trash2 size={14} /></button></div>)}</div>
+						<div className="review-subscription-list">{subscriptions.map((sub) => <div key={sub.id}><span className={`author-avatar ${sub.source}`}>{sub.name.slice(0, 1)}</span><span><strong>{sub.name}</strong><small>{sourceLabel(sub.source)} · {sub.source === 'wechat' ? '旧订阅已停用，请通过链接导入文章' : `${reviewProfiles.find((profile) => profile.id === sub.config_id)?.name || '默认配置'} · ${sub.last_sync_at ? `上次 ${formatDateTime(sub.last_sync_at)}` : '等待首次同步'}`}{sub.last_error ? ` · ${sub.last_error}` : ''}</small></span><i className={`source-dot ${sub.source === 'wechat' ? 'limited' : sub.last_status === 'ok' ? 'ready' : sub.last_status === 'error' ? 'limited' : 'experimental'}`} /><button type="button" title="立即同步该主页" disabled={!!syncing || sub.source === 'wechat'} onClick={() => void syncSubscriptions(sub.id)}>{syncing === sub.id ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}</button><button type="button" title="删除订阅" onClick={() => void deleteSubscription(sub.id)}><Trash2 size={14} /></button></div>)}</div>
 					</div>
 				</details>
 
@@ -1054,7 +1054,7 @@ function readableAPIError(message: string) {
 
 function isWechatListUnavailableMessage(message: string) {
 	const normalized = message.toLowerCase();
-	return normalized.includes('微信已停用公众号历史文章列表接口') || normalized.includes('ret=200013') || normalized.includes('freq control');
+	return normalized.includes('微信公众号不提供自动订阅') || normalized.includes('微信已停用公众号历史文章列表接口') || normalized.includes('ret=200013') || normalized.includes('freq control');
 }
 
 function toDateTimeLocal(value: Date) {

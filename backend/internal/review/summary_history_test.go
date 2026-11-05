@@ -73,7 +73,7 @@ func TestSummaryCacheIgnoresFreshnessLabelChanges(t *testing.T) {
 	if _, err := store.SaveDailySummaryJob(ctx, cachedDailySummaryJob(summary)); err != nil {
 		t.Fatal(err)
 	}
-	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", nil)
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, nil)
 	got, err := automation.GetTodaySummary(ctx)
 	if err != nil || got == nil || got.TradeDate != summary.TradeDate {
 		t.Fatalf("summary should survive a label change: summary=%+v err=%v", got, err)

@@ -38,7 +38,6 @@ type settingsView struct {
 		THSCookie       secretSettingStatus `json:"ths_cookie"`
 		XueqiuCookie    secretSettingStatus `json:"xueqiu_cookie"`
 		EastMoneyCookie secretSettingStatus `json:"eastmoney_cookie"`
-		WeChatAPIToken  secretSettingStatus `json:"wechat_api_token"`
 	} `json:"credentials"`
 	ReviewAutomation struct {
 		Profiles []reviewSourceProfileView `json:"profiles"`
@@ -110,7 +109,6 @@ type settingsUpdateRequest struct {
 		THSCookie       *string `json:"ths_cookie"`
 		XueqiuCookie    *string `json:"xueqiu_cookie"`
 		EastMoneyCookie *string `json:"eastmoney_cookie"`
-		WeChatAPIToken  *string `json:"wechat_api_token"`
 	} `json:"credentials"`
 	ClearSecrets     []string `json:"clear_secrets"`
 	ReviewAutomation struct {
@@ -239,7 +237,6 @@ func (s *Server) settingsUpdate(w http.ResponseWriter, r *http.Request) {
 		// partitions. Remove the legacy shared cookie whenever settings are saved.
 		values.Credentials.XueqiuCookie = ""
 		applyOptionalSecret(&values.Credentials.EastMoneyCookie, request.Credentials.EastMoneyCookie)
-		applyOptionalSecret(&values.Credentials.WeChatAPIToken, request.Credentials.WeChatAPIToken)
 		for _, key := range request.ClearSecrets {
 			switch key {
 			case "llm_api_key":
@@ -252,8 +249,6 @@ func (s *Server) settingsUpdate(w http.ResponseWriter, r *http.Request) {
 				values.Credentials.XueqiuCookie = ""
 			case "eastmoney_cookie":
 				values.Credentials.EastMoneyCookie = ""
-			case "wechat_api_token":
-				values.Credentials.WeChatAPIToken = ""
 			}
 		}
 		if request.ReviewAutomation.Profiles != nil {
@@ -452,7 +447,7 @@ func validateSingleLLM(request settingsUpdateRequest) error {
 			return fmt.Errorf("too many review automation profiles")
 		}
 		for _, profile := range *request.ReviewAutomation.Profiles {
-			if profile.Source != "wechat" && profile.Source != "xueqiu" && profile.Source != "taoguba" {
+			if profile.Source != "xueqiu" && profile.Source != "taoguba" {
 				return fmt.Errorf("unsupported review source: %s", profile.Source)
 			}
 			if strings.TrimSpace(profile.Name) == "" || len([]rune(profile.Name)) > 80 {
@@ -478,7 +473,6 @@ func validateSingleLLM(request settingsUpdateRequest) error {
 		request.Credentials.THSCookie,
 		request.Credentials.XueqiuCookie,
 		request.Credentials.EastMoneyCookie,
-		request.Credentials.WeChatAPIToken,
 	}
 	for _, secret := range secrets {
 		if secret != nil && len(*secret) > 16<<10 {
@@ -487,7 +481,7 @@ func validateSingleLLM(request settingsUpdateRequest) error {
 	}
 	allowedClear := map[string]bool{
 		"llm_api_key": true, "tushare_token": true, "ths_cookie": true,
-		"xueqiu_cookie": true, "eastmoney_cookie": true, "wechat_api_token": true,
+		"xueqiu_cookie": true, "eastmoney_cookie": true,
 	}
 	for _, key := range request.ClearSecrets {
 		if !allowedClear[key] {
@@ -553,7 +547,6 @@ func (s *Server) buildSettingsView(values appsettings.Values) settingsView {
 	view.Credentials.THSCookie = secretStatus(values.Credentials.THSCookie)
 	view.Credentials.XueqiuCookie = secretStatus(values.Credentials.XueqiuCookie)
 	view.Credentials.EastMoneyCookie = secretStatus(values.Credentials.EastMoneyCookie)
-	view.Credentials.WeChatAPIToken = secretStatus(values.Credentials.WeChatAPIToken)
 	view.ReviewAutomation.Profiles = make([]reviewSourceProfileView, 0, len(values.ReviewAutomation.Profiles))
 	for _, profile := range values.ReviewAutomation.Profiles {
 		view.ReviewAutomation.Profiles = append(view.ReviewAutomation.Profiles, reviewSourceProfileView{ID: profile.ID, Source: profile.Source, Name: profile.Name, BaseURL: profile.BaseURL, Credential: secretStatus(profile.Credential), SyncHour: profile.SyncHour, AutoAnalyze: profile.AutoAnalyze, Enabled: profile.Enabled})

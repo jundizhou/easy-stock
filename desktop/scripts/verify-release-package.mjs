@@ -27,11 +27,13 @@ const requiredPaths = [
 	runtimePython,
 	path.join(resourcesRoot, 'frontend', 'dist', 'index.html'),
 	path.join(resourcesRoot, 'hermes-runtime', 'runtime-manifest.json'),
-	path.join(resourcesRoot, 'wechat-download-api', 'easy-stock-wechat-runtime.json'),
 	path.join(resourcesRoot, 'agent-browser'),
 ];
 for (const requiredPath of requiredPaths) {
 	if (!fs.existsSync(requiredPath)) throw new Error(`Release package is incomplete: ${requiredPath}`);
+}
+if (fs.existsSync(path.join(resourcesRoot, 'wechat-download-api'))) {
+	throw new Error('Release package must not include the removed WeChat download service');
 }
 if (platform === 'macos') verifyMacBundle(packageRoot);
 if (platform === 'windows' && fs.existsSync(path.join(resourcesRoot, 'hermes-runtime', 'venv'))) {
@@ -67,7 +69,6 @@ if (violations.length) {
 }
 await verifyCodexRuntime(path.join(resourcesRoot, 'codex-runtime'));
 verifyHermesRuntime(path.join(resourcesRoot, 'hermes-runtime'));
-verifyBundledPython(runtimePython, path.join(resourcesRoot, 'wechat-download-api'));
 console.log(`Release package verified: ${packageRoot}`);
 
 function verifyMacBundle(appPath) {
@@ -86,29 +87,6 @@ function verifyMacBundle(appPath) {
 	if (result.error) throw result.error;
 	if (result.status !== 0) {
 		throw new Error(`macOS release failed code-signature validation: ${(result.stderr || result.stdout || '').trim()}`);
-	}
-}
-
-function verifyBundledPython(python, wechatRoot) {
-	const script = 'import sys; sys.path.insert(0, sys.argv[1]); import hermes_cli, tui_gateway, app';
-	// Windows executes the copied base interpreter directly, so isolated mode
-	// proves it does not resolve packages from the build runner. The macOS
-	// launcher intentionally supplies its package-local PYTHONPATH.
-	const args = platform === 'windows' ? ['-I', '-c', script, wechatRoot] : ['-c', script, wechatRoot];
-	const result = spawnSync(python, args, {
-		cwd: packageRoot,
-		encoding: 'utf8',
-		env: {
-			...process.env,
-			PYTHONNOUSERSITE: '1',
-			PYTHONDONTWRITEBYTECODE: '1',
-			ENABLE_MCP: '0',
-			SKIP_BACKGROUND_TASKS: '1',
-		},
-	});
-	if (result.error) throw result.error;
-	if (result.status !== 0) {
-		throw new Error(`Bundled Python runtime failed its isolated import check: ${(result.stderr || '').trim() || `exit status ${result.status}`}`);
 	}
 }
 

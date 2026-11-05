@@ -18,7 +18,7 @@ Electron desktop host
   ├─ Hermes / Python ◄── agent.Service ──► Codex App Server
   │       └─ selected model endpoint          └─ Responses endpoint
   ├─ Xueqiu / TaoGuba Browser Bridges ──► review ingestion
-  ├─ WeChat FastAPI link parser ─────────► review importer
+  ├─ WeChat article URL import ──────────► review importer
   └─ Persistent sessions / logs / updater / backups
 ```
 
@@ -86,13 +86,13 @@ Hermes 与 Codex 是可选运行时。应用共享模型连接、Skills 与 MCP 
 
 板块分时价格走另一条上游路径（东财 `trends2` 的逐分钟行情，`/api/v1/market/sector-price-intraday`）：该路径不按会话拦截，无会话也能直接取到（在桌面端同样经由 push2 桥转发）；涨跌幅按昨收换算，多板块叠在同一纵轴上对照。它按板块缓存 30 秒、最多 3 个并发，与分时资金流是相互独立的两条链路，一边失败不会影响另一边。
 
-微信链接由本机 Python / FastAPI 解析服务或配置的兼容服务导入。当前内置服务支持已知文章链接解析；代码明确处理公众号历史文章列表不可用的状态。
+微信公众号仅支持粘贴具体文章链接导入。Go 导入器直接读取公开文章页、提取正文和发布时间；公众号自动订阅已停用。
 
 公共每日复盘由 `RemoteDailySync` 拉取清单与文章，验证结构和正文摘要后写入本地复盘库。游资心法优先使用包内资料，定时刷新远端缓存，并生成 Skills references 与 Hermes `MEMORY.md` 的资料索引。
 
 后端入口启动四类调度：订阅复盘同步、公共每日复盘同步、市场情绪同步与心法缓存刷新。个股研究、持仓巡检、综合复盘及次日验证通过 API 提交后台任务，前端轮询进度；行情和 AI 交互使用 WebSocket。
 
-关键入口：[automation.go](../internal/review/automation.go)、[remote_daily.go](../internal/review/remote_daily.go)、[daily_summary.go](../internal/review/daily_summary.go)、[daily_validation.go](../internal/review/daily_validation.go)、[xueqiu-browser-bridge.cjs](../../desktop/xueqiu-browser-bridge.cjs)、[taoguba-browser-bridge.cjs](../../desktop/taoguba-browser-bridge.cjs)、[eastmoney-session-bridge.cjs](../../desktop/eastmoney-session-bridge.cjs)、[wechat-service.cjs](../../desktop/wechat-service.cjs)。
+关键入口：[automation.go](../internal/review/automation.go)、[remote_daily.go](../internal/review/remote_daily.go)、[daily_summary.go](../internal/review/daily_summary.go)、[daily_validation.go](../internal/review/daily_validation.go)、[xueqiu-browser-bridge.cjs](../../desktop/xueqiu-browser-bridge.cjs)、[taoguba-browser-bridge.cjs](../../desktop/taoguba-browser-bridge.cjs)、[eastmoney-session-bridge.cjs](../../desktop/eastmoney-session-bridge.cjs)。
 
 ## 本地持久化与运行保障
 
@@ -111,4 +111,4 @@ Provider 结果通过 `foundation.SourceMeta` 保留来源、抓取时间、延�
 
 Electron 在本机可用端口启动 Go 服务，每次启动生成 Token，并通过 Preload 提供客户端配置。桌面、前端与后端日志按组件保存并脱敏、轮转。更新安装前停止本机服务、持久化浏览器会话并备份用户目录。macOS 当前使用手动下载安装流程，Windows 支持应用内更新安装。
 
-发行资源由 `desktop/scripts` 装配，包含前端、Go 二进制、Hermes / Python、原生 Codex、agent-browser 与微信解析服务；平台运行时按目标系统与架构准备和验证。
+发行资源由 `desktop/scripts` 装配，包含前端、Go 二进制、Hermes / Python、原生 Codex与 agent-browser；平台运行时按目标系统与架构准备和验证。

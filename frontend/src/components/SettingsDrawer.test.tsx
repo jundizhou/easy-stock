@@ -39,7 +39,7 @@ beforeEach(() => {
 		agent_runtime: 'hermes', agent: { available: false, configured: false, api_key_configured: false },
 		llm: { provider: 'openai', base_url: '', model: '', api_mode: 'chat_completions', response_timeout_seconds: 300, api_key: secret },
 		llm_profiles: [], active_llm_profile_id: 'llm-default',
-		credentials: { tushare_token: secret, ths_cookie: secret, xueqiu_cookie: secret, eastmoney_cookie: secret, wechat_api_token: secret },
+		credentials: { tushare_token: secret, ths_cookie: secret, xueqiu_cookie: secret, eastmoney_cookie: secret },
 		review_automation: { profiles: [] }, notifications: emptyNotifications(),
 	};
 	vi.mocked(requestJSON).mockReset();

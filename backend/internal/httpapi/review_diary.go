@@ -32,7 +32,7 @@ func (s *Server) reviewSources(w http.ResponseWriter, r *http.Request) {
 		{ID: "official", Name: "每日复盘", Status: "configured", Message: "收盘后每30分钟刷新远程大V清单；每位作者本地已有当日文章后不再重复下载", ImportReady: false, SyncReady: s.remoteDailySync != nil},
 		{ID: "xueqiu", Name: "雪球", Status: map[bool]string{true: "configured", false: "limited"}[ready["xueqiu"]], Message: map[bool]string{true: "内置浏览器登录态有效，Hermes 可复用会话采集", false: "请在设置中打开雪球登录窗口并完成登录验证"}[ready["xueqiu"]], ImportReady: true, SyncReady: ready["xueqiu"]},
 		{ID: "taoguba", Name: "淘股吧", Status: map[bool]string{true: "configured", false: "limited"}[ready["taoguba"]], Message: map[bool]string{true: "内置浏览器登录态有效，Hermes 可复用会话采集", false: "请在设置中打开淘股吧登录窗口并完成登录验证"}[ready["taoguba"]], ImportReady: true, SyncReady: ready["taoguba"]},
-		{ID: "wechat", Name: "微信公众号", Status: "limited", Message: "支持已知文章链接导入；微信已停用历史文章列表接口，自动订阅暂不可用", ImportReady: true, SyncReady: false},
+		{ID: "wechat", Name: "微信公众号", Status: "limited", Message: "仅支持具体文章链接导入；微信已停用历史文章列表接口，不提供自动订阅", ImportReady: true, SyncReady: false},
 	}})
 }
 

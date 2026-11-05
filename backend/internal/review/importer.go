@@ -1,11 +1,9 @@
 package review
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -38,26 +36,20 @@ var (
 )
 
 type Importer struct {
-	httpClient   *http.Client
-	wechatAPIURL string
+	httpClient *http.Client
 }
 
-func NewImporter(httpClient *http.Client, wechatAPIURL string) *Importer {
+func NewImporter(httpClient *http.Client) *Importer {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 25 * time.Second}
 	}
-	return &Importer{httpClient: httpClient, wechatAPIURL: strings.TrimRight(strings.TrimSpace(wechatAPIURL), "/")}
+	return &Importer{httpClient: httpClient}
 }
 
 func (i *Importer) ImportURL(ctx context.Context, rawURL string) (Post, error) {
 	parsed, source, err := classifyURL(rawURL)
 	if err != nil {
 		return Post{}, err
-	}
-	if source == "wechat" && i.wechatAPIURL != "" {
-		if post, sidecarErr := i.importWeChat(ctx, parsed.String()); sidecarErr == nil {
-			return post, nil
-		}
 	}
 	return i.importPublicPage(ctx, parsed.String(), source, nil)
 }
@@ -68,54 +60,6 @@ func (i *Importer) ImportURLWithHeaders(ctx context.Context, rawURL string, head
 		return Post{}, err
 	}
 	return i.importPublicPage(ctx, parsed.String(), source, headers)
-}
-
-func (i *Importer) importWeChat(ctx context.Context, articleURL string) (Post, error) {
-	body, _ := json.Marshal(map[string]string{"url": articleURL})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.wechatAPIURL+"/api/article", bytes.NewReader(body))
-	if err != nil {
-		return Post{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := i.httpClient.Do(req)
-	if err != nil {
-		return Post{}, fmt.Errorf("微信公众号解析服务不可用: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Post{}, fmt.Errorf("微信公众号解析服务返回 HTTP %d", resp.StatusCode)
-	}
-	var payload struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Title          string   `json:"title"`
-			PlainContent   string   `json:"plain_content"`
-			Author         string   `json:"author"`
-			PublishTime    int64    `json:"publish_time"`
-			PublishTimeStr string   `json:"publish_time_str"`
-			Images         []string `json:"images"`
-		} `json:"data"`
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxArticleBytes)).Decode(&payload); err != nil {
-		return Post{}, fmt.Errorf("解析微信公众号响应: %w", err)
-	}
-	if !payload.Success {
-		return Post{}, errors.New(firstNonEmpty(payload.Error, "微信公众号文章解析失败"))
-	}
-	if payload.Data.PublishTime <= 0 {
-		return Post{}, errors.New("微信公众号响应没有可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
-	}
-	publishedAt := time.Unix(payload.Data.PublishTime, 0)
-	content, err := normalizeImportedContent(payload.Data.PlainContent)
-	if err != nil {
-		// The bundled parser may occasionally flatten the whole WeChat page and
-		// return its JavaScript/CSS bundle as plain_content. The original page
-		// still contains a clean #js_content node, so recover from that source
-		// instead of persisting the polluted payload or failing the import.
-		return i.importPublicPage(ctx, articleURL, "wechat", nil)
-	}
-	return newPost("wechat", articleURL, payload.Data.Author, payload.Data.Title, content, "", publishedAt), nil
 }
 
 func (i *Importer) importPublicPage(ctx context.Context, articleURL, source string, headers http.Header) (Post, error) {

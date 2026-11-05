@@ -128,7 +128,6 @@ func main() {
 		SectorFlowSampleDBPath:   sectorFlowSampleDBPath,
 		SectorFlowSampleInterval: sectorFlowSampleInterval(),
 		DuanxianxiaBaseURL:       os.Getenv("A_STOCK_DUANXIANXIA_BASE_URL"),
-		WeChatAPIURL:             os.Getenv("A_STOCK_WECHAT_API_URL"),
 		SettingsPath:             settingsPath,
 		AgentGateway:             agentGateway,
 		MasteryLibrary:           masteryLibrary,

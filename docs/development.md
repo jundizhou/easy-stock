@@ -30,7 +30,7 @@
 
 | 工具 | 使用场景 |
 | --- | --- |
-| Python 3.11 与 `uv` | 准备包含 Hermes 和微信公众号服务的桌面发布包 |
+| Python 3.11 与 `uv` | 准备包含 Hermes 的桌面发布包 |
 | Hermes Runtime | 本地调试 AI 对话、文章分析、每日共识和模型连接 |
 | macOS `hdiutil` | 生成 macOS DMG |
 | PowerShell | 生成 Windows 发布压缩包 |
@@ -157,7 +157,6 @@ Electron 桌面模式
 | `A_STOCK_MASTERY_CACHE` | 游资心法缓存目录 |
 | `A_STOCK_LOG_DIR` | 运行日志目录；桌面端默认使用用户数据目录下的 `logs` |
 | `A_STOCK_DUANXIANXIA_BASE_URL` | 短线侠服务地址覆盖，主要用于测试 |
-| `A_STOCK_WECHAT_API_URL` | 微信公众号采集服务地址 |
 
 ### Hermes 开发配置
 
@@ -223,7 +222,7 @@ npm run build:desktop
 npm run prepare:desktop-package
 ```
 
-该步骤会构建前端和 Go 后端，并准备 Hermes、微信公众号服务及浏览器辅助程序到 `desktop/resources/`。
+该步骤会构建前端和 Go 后端，并准备 Hermes 及浏览器辅助程序到 `desktop/resources/`。
 
 如果已经有验证过的 Hermes Runtime，可以显式指定：
 

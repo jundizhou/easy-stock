@@ -146,7 +146,7 @@ func TestReviewDailySummaryWindowEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	automation := review.NewAutomation(store, fakeReviewImporter{}, nil, http.DefaultClient, "", fakeReviewSummaryPrompter{})
+	automation := review.NewAutomation(store, fakeReviewImporter{}, nil, http.DefaultClient, fakeReviewSummaryPrompter{})
 	server := NewServer(Config{
 		ReviewStore:      store,
 		ReviewImporter:   fakeReviewImporter{},

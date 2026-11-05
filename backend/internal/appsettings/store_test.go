@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,32 @@ func TestAutoPatrolDefaultsAndPersistence(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStoreDropsLegacyWechatServiceSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	legacy := `{"credentials":{"wechat_api_token":"old-secret"},"review_automation":{"wechat_api_url":"http://127.0.0.1:30000","profiles":[{"id":"wechat-default","source":"wechat","name":"旧公众号","base_url":"http://127.0.0.1:30000","credential":"old-secret","enabled":true},{"id":"xueqiu-default","source":"xueqiu","name":"雪球","base_url":"https://xueqiu.com","enabled":true}]}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := store.Snapshot().ReviewAutomation.Profiles
+	if len(profiles) != 1 || profiles[0].Source != "xueqiu" {
+		t.Fatalf("profiles = %+v", profiles)
+	}
+	if _, err := store.Update(func(*Values) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "old-secret") || strings.Contains(string(data), "wechat_api_url") || strings.Contains(string(data), "wechat_api_token") {
+		t.Fatalf("legacy WeChat service settings were persisted: %s", data)
 	}
 }
 

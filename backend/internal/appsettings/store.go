@@ -51,14 +51,12 @@ type Credentials struct {
 	THSCookie       string `json:"ths_cookie"`
 	XueqiuCookie    string `json:"xueqiu_cookie"`
 	EastMoneyCookie string `json:"eastmoney_cookie"`
-	WeChatAPIToken  string `json:"wechat_api_token"`
 }
 
 type ReviewAutomation struct {
-	Profiles     []ReviewSourceProfile `json:"profiles"`
-	WeChatAPIURL string                `json:"wechat_api_url,omitempty"`
-	SyncHour     int                   `json:"sync_hour,omitempty"`
-	AutoAnalyze  bool                  `json:"auto_analyze,omitempty"`
+	Profiles    []ReviewSourceProfile `json:"profiles"`
+	SyncHour    int                   `json:"sync_hour,omitempty"`
+	AutoAnalyze bool                  `json:"auto_analyze,omitempty"`
 }
 
 type ReviewSourceProfile struct {
@@ -235,7 +233,6 @@ func defaultValues() Values {
 		CockpitAutoPatrolEnabled:     true,
 		Notifications:                Notifications{Events: NotificationEvents{StockResearch: true, PortfolioInspection: true, TaskFailed: true}},
 		ReviewAutomation: ReviewAutomation{Profiles: []ReviewSourceProfile{
-			{ID: "wechat-default", Source: "wechat", Name: "微信公众号默认配置", SyncHour: 7, AutoAnalyze: true, Enabled: true},
 			{ID: "xueqiu-default", Source: "xueqiu", Name: "雪球默认配置", BaseURL: "https://xueqiu.com", SyncHour: 7, AutoAnalyze: true, Enabled: true},
 			{ID: "taoguba-default", Source: "taoguba", Name: "淘股吧默认配置", BaseURL: "https://www.tgb.cn", SyncHour: 7, AutoAnalyze: true, Enabled: true},
 		}},
@@ -243,14 +240,17 @@ func defaultValues() Values {
 }
 
 func (s *Store) normalizeReviewProfiles() {
-	if len(s.values.ReviewAutomation.Profiles) == 0 {
-		defaults := defaultValues().ReviewAutomation.Profiles
-		if strings.TrimSpace(s.values.ReviewAutomation.WeChatAPIURL) != "" {
-			defaults[0].BaseURL = s.values.ReviewAutomation.WeChatAPIURL
-			defaults[0].Credential = s.values.Credentials.WeChatAPIToken
+	profiles := s.values.ReviewAutomation.Profiles[:0]
+	for _, profile := range s.values.ReviewAutomation.Profiles {
+		if profile.Source != "wechat" {
+			profiles = append(profiles, profile)
 		}
+	}
+	s.values.ReviewAutomation.Profiles = profiles
+	if len(profiles) == 0 {
+		defaults := defaultValues().ReviewAutomation.Profiles
 		if strings.TrimSpace(s.values.Credentials.XueqiuCookie) != "" {
-			defaults[1].Credential = s.values.Credentials.XueqiuCookie
+			defaults[0].Credential = s.values.Credentials.XueqiuCookie
 		}
 		if s.values.ReviewAutomation.SyncHour >= 0 {
 			for index := range defaults {

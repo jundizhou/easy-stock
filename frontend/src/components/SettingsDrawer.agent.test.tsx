@@ -32,7 +32,7 @@ beforeEach(() => {
   saved = {
     agent_runtime: 'hermes', agent: { available: false, configured: false, api_key_configured: false },
     llm: { ...profile, response_timeout_seconds: 300 }, llm_profiles: [profile], active_llm_profile_id: profile.id,
-    credentials: { tushare_token: secret, ths_cookie: secret, xueqiu_cookie: secret, eastmoney_cookie: secret, wechat_api_token: secret },
+    credentials: { tushare_token: secret, ths_cookie: secret, xueqiu_cookie: secret, eastmoney_cookie: secret },
     review_automation: { profiles: [{ id: 'audit-review', source: 'xueqiu', name: 'audit review', base_url: 'https://xueqiu.com', credential: secret, enabled: true, auto_analyze: true, sync_hour: 7 }] },
     notifications: emptyNotifications(),
   };

@@ -28,8 +28,6 @@ test('update backup preserves models, articles, memories and login state byte-fo
     'hermes-workspace/imported/article.md': '# imported article',
     'browser-auth/xueqiu.json': '{"cookies":[{"name":"xq_a_token"}]}',
     'Partitions/persist_xueqiu/Cookies': Buffer.from([1, 2, 3, 4, 5]),
-    'wechat-download-api/.env': 'WX_KEY=keep\n',
-    'wechat-download-api/data/account.json': '{"fakeid":"123"}',
     'trading-mastery/index.json': '{"items":["keep"]}',
   };
   for (const [relativePath, content] of Object.entries(fixtures)) write(userData, relativePath, content);

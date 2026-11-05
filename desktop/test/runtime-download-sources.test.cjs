@@ -58,38 +58,5 @@ for (const proxy of [false, true]) {
     assert.deepEqual(fs.readdirSync(root), ['runtime']);
   });
 
-  test(`WeChat ${proxy ? 'proxy' : 'default'} downloads preserve canonical source notices`, async (t) => {
-    const { WECHAT_DOWNLOAD_API_REPOSITORY, WECHAT_DOWNLOAD_API_REVISION, prepareWechatRuntime } = await import('../scripts/wechat-runtime.mjs');
-    const mirror = 'https://mirror.example.invalid/tmwgsicp/wechat-download-api';
-    environment(t, 'WECHAT_DOWNLOAD_API_REPOSITORY', proxy ? ` ${mirror}/// ` : undefined);
-    const root = fixtureRoot(t);
-    const runtimeRoot = path.join(root, 'runtime');
-    const resourcesRoot = path.join(root, 'resources');
-    fs.mkdirSync(path.join(runtimeRoot, 'venv', 'lib', 'python3.14', 'site-packages'), { recursive: true });
-    fs.mkdirSync(path.join(runtimeRoot, 'python', 'bin'), { recursive: true });
-    fs.writeFileSync(path.join(runtimeRoot, 'python', 'bin', 'python3.14'), 'fixture interpreter');
-    const downloads = [];
-    mockCommands(t, (command, args, options) => {
-      if (command === 'curl') {
-        const output = args.indexOf('-o');
-        downloads.push(args[output - 1]);
-        fs.writeFileSync(args[output + 1], 'fixture archive');
-      } else if (command === 'tar') {
-        const source = path.join(options.cwd, 'wechat-download-api-fixture');
-        fs.mkdirSync(source);
-        fs.writeFileSync(path.join(source, 'app.py'), '# source fixture');
-        fs.writeFileSync(path.join(source, 'LICENSE'), 'fixture license');
-      }
-      return { status: 0 };
-    });
 
-    const manifest = prepareWechatRuntime({ resourcesRoot, runtimeRoot, sourcePath: '' });
-    const expectedRepository = proxy ? mirror : WECHAT_DOWNLOAD_API_REPOSITORY;
-    assert.deepEqual(downloads, [`${expectedRepository}/archive/${WECHAT_DOWNLOAD_API_REVISION}.tar.gz`]);
-    assert.equal(manifest.repository, 'https://github.com/tmwgsicp/wechat-download-api');
-    const targetRoot = path.join(resourcesRoot, 'wechat-download-api');
-    assert.equal(JSON.parse(fs.readFileSync(path.join(targetRoot, 'easy-stock-wechat-runtime.json'), 'utf8')).repository, manifest.repository);
-    assert.ok(fs.readFileSync(path.join(targetRoot, 'EASY_STOCK_SOURCE_NOTICE.md'), 'utf8').includes(manifest.repository));
-    assert.equal(fs.readFileSync(path.join(targetRoot, 'app.py'), 'utf8'), '# source fixture');
-  });
 }

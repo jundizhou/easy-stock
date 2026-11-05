@@ -28,7 +28,7 @@ type URLImporter interface {
 	ImportURL(ctx context.Context, rawURL string) (Post, error)
 }
 
-const WechatArticleListUnavailableMessage = "微信已停用公众号历史文章列表接口，自动订阅暂不可用；请粘贴具体文章链接导入"
+const WechatArticleListUnavailableMessage = "微信公众号不提供自动订阅；请粘贴具体文章链接导入"
 
 type Automation struct {
 	store                  *Store
@@ -36,7 +36,6 @@ type Automation struct {
 	settings               *appsettings.Store
 	httpClient             *http.Client
 	prompter               agent.Prompter
-	fallbackWechat         string
 	browserStateDir        string
 	browserBridgeURL       string
 	browserBridgeToken     string
@@ -60,7 +59,7 @@ func (a *Automation) SetDailyMarketProvider(provider DailyMarketProvider) {
 	a.dailyMarketProvider = provider
 }
 
-func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Store, httpClient *http.Client, fallbackWechat string, prompters ...agent.Prompter) *Automation {
+func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Store, httpClient *http.Client, prompters ...agent.Prompter) *Automation {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 25 * time.Second}
 	}
@@ -78,7 +77,6 @@ func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Sto
 		settings:               settings,
 		httpClient:             httpClient,
 		prompter:               prompter,
-		fallbackWechat:         strings.TrimRight(strings.TrimSpace(fallbackWechat), "/"),
 		browserStateDir:        strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_STATE_DIR")),
 		browserBridgeURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_BRIDGE_URL")), "/"),
 		browserBridgeToken:     strings.TrimSpace(os.Getenv("A_STOCK_BROWSER_BRIDGE_TOKEN")),
@@ -93,40 +91,29 @@ func (a *Automation) AddSubscription(ctx context.Context, source, homepageURL, n
 	source = strings.TrimSpace(strings.ToLower(source))
 	homepageURL = strings.TrimSpace(homepageURL)
 	name = strings.TrimSpace(name)
-	if source != "wechat" && source != "xueqiu" && source != "taoguba" {
-		return Subscription{}, errors.New("只支持微信公众号、雪球和淘股吧")
+	if source == "wechat" {
+		return Subscription{}, errors.New(WechatArticleListUnavailableMessage)
+	}
+	if source != "xueqiu" && source != "taoguba" {
+		return Subscription{}, errors.New("只支持雪球和淘股吧")
 	}
 	if homepageURL == "" {
 		return Subscription{}, errors.New("主页地址或公众号名称不能为空")
 	}
 	externalID := ""
-	if source == "wechat" {
-		if strings.HasPrefix(homepageURL, "Mz") || strings.HasSuffix(homepageURL, "==") {
-			externalID = homepageURL
-		}
-		if strings.HasPrefix(homepageURL, "http") {
-			if parsed, err := url.Parse(homepageURL); err == nil {
-				externalID = firstNonEmpty(parsed.Query().Get("__biz"), parsed.Query().Get("fakeid"), homepageURL)
-			}
-		}
-		if name == "" {
-			name = firstNonEmpty(externalID, homepageURL)
-		}
-	} else {
-		parsed, err := url.Parse(homepageURL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return Subscription{}, errors.New("请输入有效的作者主页 URL")
-		}
-		if source == "xueqiu" && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "xueqiu.com") {
-			return Subscription{}, errors.New("请输入雪球主页 URL")
-		}
-		if source == "taoguba" && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "taoguba.com.cn") && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "tgb.cn") {
-			return Subscription{}, errors.New("请输入淘股吧主页 URL")
-		}
-		externalID = lastPathPart(parsed.Path)
-		if name == "" {
-			name = externalID
-		}
+	parsed, err := url.Parse(homepageURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return Subscription{}, errors.New("请输入有效的作者主页 URL")
+	}
+	if source == "xueqiu" && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "xueqiu.com") {
+		return Subscription{}, errors.New("请输入雪球主页 URL")
+	}
+	if source == "taoguba" && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "taoguba.com.cn") && !strings.HasSuffix(strings.ToLower(parsed.Hostname()), "tgb.cn") {
+		return Subscription{}, errors.New("请输入淘股吧主页 URL")
+	}
+	externalID = lastPathPart(parsed.Path)
+	if name == "" {
+		name = externalID
 	}
 	profile, err := a.profileFor(source, configID)
 	if err != nil {
@@ -144,11 +131,7 @@ func (a *Automation) SyncAll(ctx context.Context) []SyncResult {
 	}
 	results := []SyncResult{}
 	for _, sub := range subs {
-		if sub.Enabled {
-			if subscriptionHasUnavailableWechatList(sub) {
-				results = append(results, SyncResult{SubscriptionID: sub.ID, Error: WechatArticleListUnavailableMessage})
-				continue
-			}
+		if sub.Enabled && !subscriptionHasUnavailableWechatList(sub) {
 			results = append(results, a.syncOneUnlocked(ctx, sub))
 		}
 	}
@@ -166,6 +149,9 @@ func (a *Automation) SyncOne(ctx context.Context, id string) SyncResult {
 }
 
 func (a *Automation) syncOneUnlocked(ctx context.Context, sub Subscription) SyncResult {
+	if sub.Source == "wechat" {
+		return SyncResult{SubscriptionID: sub.ID, Error: WechatArticleListUnavailableMessage}
+	}
 	ctx, release, bindErr := agent.BindTask(ctx, a.prompter)
 	if bindErr != nil {
 		return SyncResult{SubscriptionID: sub.ID, Error: bindErr.Error()}
@@ -189,9 +175,6 @@ func (a *Automation) syncOneUnlocked(ctx context.Context, sub Subscription) Sync
 	if err != nil {
 		result.Error = err.Error()
 		next := a.nextRun(profile)
-		if isWechatArticleListUnavailableText(result.Error) {
-			next = time.Now().AddDate(10, 0, 0)
-		}
 		_ = a.store.SetSubscriptionSync(ctx, sub.ID, "error", result.Error, next)
 		return result
 	}
@@ -280,12 +263,6 @@ func (a *Automation) syncBrowserSourceWithHermesUnlocked(ctx context.Context, su
 }
 
 func (a *Automation) importForSubscription(ctx context.Context, sub Subscription, profile appsettings.ReviewSourceProfile, link string) (Post, error) {
-	if sub.Source == "wechat" {
-		base, token := strings.TrimRight(profile.BaseURL, "/"), profile.Credential
-		if base != "" {
-			return a.importWechat(ctx, base, token, link)
-		}
-	}
 	if sub.Source == "taoguba" {
 		if importer, ok := a.importer.(interface {
 			ImportURLWithHeaders(context.Context, string, http.Header) (Post, error)
@@ -302,8 +279,6 @@ func (a *Automation) importForSubscription(ctx context.Context, sub Subscription
 
 func (a *Automation) discover(ctx context.Context, sub Subscription, profile appsettings.ReviewSourceProfile) ([]string, string, string, error) {
 	switch sub.Source {
-	case "wechat":
-		return a.discoverWechat(ctx, sub, profile)
 	case "xueqiu":
 		return nil, "", "", errors.New("雪球订阅必须使用内置浏览器登录态采集")
 	case "taoguba":
@@ -313,76 +288,9 @@ func (a *Automation) discover(ctx context.Context, sub Subscription, profile app
 	}
 }
 
-func (a *Automation) discoverWechat(ctx context.Context, sub Subscription, profile appsettings.ReviewSourceProfile) ([]string, string, string, error) {
-	base, token := strings.TrimRight(profile.BaseURL, "/"), profile.Credential
-	if base == "" {
-		return nil, "", "", errors.New("请先在设置中配置微信公众号解析服务地址")
-	}
-	fakeID := sub.ExternalID
-	name := sub.Name
-	if fakeID == "" || strings.Contains(fakeID, "/") || strings.HasPrefix(fakeID, "http") {
-		endpoint := base + "/api/public/searchbiz?query=" + url.QueryEscape(firstNonEmpty(name, sub.HomepageURL))
-		var response struct {
-			Success bool `json:"success"`
-			Data    struct {
-				List []struct {
-					FakeID   string `json:"fakeid"`
-					Nickname string `json:"nickname"`
-				} `json:"list"`
-			} `json:"data"`
-			Error string `json:"error"`
-		}
-		if err := a.getJSON(ctx, endpoint, token, &response); err != nil {
-			return nil, "", "", normalizeWechatArticleListError(err)
-		}
-		if !response.Success || len(response.Data.List) == 0 {
-			return nil, "", "", normalizeWechatArticleListError(errors.New(firstNonEmpty(response.Error, "没有搜索到该公众号")))
-		}
-		fakeID = response.Data.List[0].FakeID
-		name = response.Data.List[0].Nickname
-	}
-	endpoint := base + "/api/public/articles?fakeid=" + url.QueryEscape(fakeID) + "&begin=0&count=20"
-	var response struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Articles []struct {
-				Link string `json:"link"`
-				URL  string `json:"url"`
-			} `json:"articles"`
-		} `json:"data"`
-		Error string `json:"error"`
-	}
-	if err := a.getJSON(ctx, endpoint, token, &response); err != nil {
-		return nil, "", "", normalizeWechatArticleListError(err)
-	}
-	if !response.Success {
-		return nil, "", "", normalizeWechatArticleListError(errors.New(firstNonEmpty(response.Error, "公众号文章列表获取失败，请检查扫码登录状态")))
-	}
-	links := []string{}
-	for _, item := range response.Data.Articles {
-		if link := firstNonEmpty(item.Link, item.URL); link != "" {
-			links = append(links, link)
-		}
-	}
-	return uniqueStrings(links), name, fakeID, nil
-}
-
-func normalizeWechatArticleListError(err error) error {
-	if err != nil && isWechatArticleListUnavailableText(err.Error()) {
-		return errors.New(WechatArticleListUnavailableMessage)
-	}
-	return err
-}
-
-func isWechatArticleListUnavailableText(message string) bool {
-	message = strings.ToLower(strings.TrimSpace(message))
-	return strings.Contains(message, "ret=200013") ||
-		strings.Contains(message, "freq control") ||
-		strings.Contains(message, "微信已停用公众号历史文章列表接口")
-}
-
+// Legacy WeChat subscriptions are retained for history but never scheduled.
 func subscriptionHasUnavailableWechatList(sub Subscription) bool {
-	return sub.Source == "wechat" && isWechatArticleListUnavailableText(sub.LastError)
+	return sub.Source == "wechat"
 }
 
 type hermesXueqiuArticle struct {
@@ -795,28 +703,18 @@ func (a *Automation) profileFor(source, configID string) (appsettings.ReviewSour
 		profiles := a.settings.Snapshot().ReviewAutomation.Profiles
 		for _, profile := range profiles {
 			if profile.Source == source && profile.Enabled && profile.ID == configID {
-				return a.withRuntimeProfile(profile), nil
+				return profile, nil
 			}
 		}
 		for _, profile := range profiles {
 			if profile.Source == source && profile.Enabled {
-				return a.withRuntimeProfile(profile), nil
+				return profile, nil
 			}
 		}
-	}
-	if source == "wechat" && a.fallbackWechat != "" {
-		return appsettings.ReviewSourceProfile{ID: "wechat-env", Source: "wechat", Name: "环境变量配置", BaseURL: a.fallbackWechat, SyncHour: 7, AutoAnalyze: true, Enabled: true}, nil
 	}
 	return appsettings.ReviewSourceProfile{}, fmt.Errorf("请先在设置中添加并启用%s采集配置", sourceName(source))
 }
 
-func (a *Automation) withRuntimeProfile(profile appsettings.ReviewSourceProfile) appsettings.ReviewSourceProfile {
-	if profile.Source == "wechat" && a.fallbackWechat != "" {
-		profile.BaseURL = a.fallbackWechat
-		profile.Credential = ""
-	}
-	return profile
-}
 func (a *Automation) RunScheduler(ctx context.Context, loggers ...*log.Logger) {
 	var logger *log.Logger
 	if len(loggers) > 0 {
@@ -886,71 +784,6 @@ func (a *Automation) due(ctx context.Context) bool {
 	return false
 }
 
-func (a *Automation) getJSON(ctx context.Context, endpoint, token string, target any) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		var payload struct {
-			Error string `json:"error"`
-			Data  struct {
-				Error string `json:"error"`
-			} `json:"data"`
-		}
-		if json.Unmarshal(body, &payload) == nil {
-			if message := firstNonEmpty(payload.Error, payload.Data.Error); message != "" {
-				return errors.New(message)
-			}
-		}
-		return fmt.Errorf("内容服务返回 HTTP %d", resp.StatusCode)
-	}
-	return json.NewDecoder(io.LimitReader(resp.Body, maxArticleBytes)).Decode(target)
-}
-func (a *Automation) importWechat(ctx context.Context, base, token, link string) (Post, error) {
-	body, _ := json.Marshal(map[string]string{"url": link})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/article", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return Post{}, err
-	}
-	defer resp.Body.Close()
-	var payload struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Title        string `json:"title"`
-			PlainContent string `json:"plain_content"`
-			Author       string `json:"author"`
-			PublishTime  int64  `json:"publish_time"`
-		} `json:"data"`
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxArticleBytes)).Decode(&payload); err != nil {
-		return Post{}, err
-	}
-	if !payload.Success {
-		return Post{}, errors.New(firstNonEmpty(payload.Error, "微信文章解析失败"))
-	}
-	if payload.Data.PublishTime <= 0 {
-		return Post{}, errors.New("微信公众号响应没有可靠的发布时间，为避免旧文章被误判为今日内容，本次不导入")
-	}
-	published := time.Unix(payload.Data.PublishTime, 0)
-	content, err := normalizeImportedContent(payload.Data.PlainContent)
-	if err != nil {
-		return Post{}, err
-	}
-	return newPost("wechat", link, payload.Data.Author, payload.Data.Title, content, "", published), nil
-}
 func lastPathPart(path string) string {
 	parts := strings.FieldsFunc(strings.Trim(path, "/"), func(r rune) bool { return r == '/' })
 	if len(parts) == 0 {

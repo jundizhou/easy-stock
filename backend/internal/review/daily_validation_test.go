@@ -20,7 +20,7 @@ func newValidationTestAutomation(t *testing.T, date string) (*Automation, *Store
 	if _, err := store.SaveDailySummary(context.Background(), DailySummary{TradeDate: date}); err != nil {
 		t.Fatal(err)
 	}
-	return NewAutomation(store, nil, nil, nil, ""), store
+	return NewAutomation(store, nil, nil, nil), store
 }
 
 func TestDailyValidationWaitingForNextSessionClose(t *testing.T) {

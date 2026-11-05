@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1576" viewBox="0 0 1680 1576" role="img" aria-labelledby="title desc">
 <title id="title">easy-stock AI 原生架构：本地证据与 Hermes / Codex 双运行时</title>
-<desc id="desc">基于开源版当前代码。Electron 管理本地 Go 服务、Hermes 与 Codex 运行时、浏览器桥接和微信解析服务。React 工作台通过 HTTP 与 WebSocket 访问 Go API。领域服务直接使用多源行情、统一证据模型与本地 SQLite，并按需通过统一 Agent 服务调用一个所选运行时。深度个股研究先计算量化基线，再生成问题、由 Go 只读补证、生成判断和交易条件、校验引用，保存阶段检查点。持仓巡检复用个股报告，持仓优化完成候选筛选、程序配仓与独立复评，并保存分块检查点。模型服务、行情源与内容平台位于本机边界之外。</desc>
+<desc id="desc">基于开源版当前代码。Electron 管理本地 Go 服务、Hermes 与 Codex 运行时、浏览器桥接。React 工作台通过 HTTP 与 WebSocket 访问 Go API。领域服务直接使用多源行情、统一证据模型与本地 SQLite，并按需通过统一 Agent 服务调用一个所选运行时。深度个股研究先计算量化基线，再生成问题、由 Go 只读补证、生成判断和交易条件、校验引用，保存阶段检查点。持仓巡检复用个股报告，持仓优化完成候选筛选、程序配仓与独立复评，并保存分块检查点。模型服务、行情源与内容平台位于本机边界之外。</desc>
 <defs>
 <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#ffffff"/><stop offset=".5" stop-color="#ffffff"/><stop offset="1" stop-color="#eaf1fc"/></linearGradient>
 <marker id="arrowData" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M1 1 7 4 1 7" fill="none" stroke="#2476d2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
@@ -53,7 +53,7 @@
 <text x="96" y="715" font-size="19" fill="#172033" font-weight="650">内容采集与导入</text>
 <text x="96" y="743" font-size="14" fill="#56657a" font-weight="400">雪球 / 淘股吧浏览器桥接</text>
 <text x="96" y="768" font-size="14" fill="#56657a" font-weight="400">agent-browser 回退采集</text>
-<text x="96" y="793" font-size="14" fill="#56657a" font-weight="400">微信 FastAPI 链接解析</text>
+<text x="96" y="793" font-size="14" fill="#56657a" font-weight="400">微信文章链接导入</text>
 <rect x="80" y="842" width="200" height="142" rx="10" fill="#ffffff" stroke="#e8edf3" />
 <g transform="translate(96 860)" fill="none" stroke="#2476d2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 <path d="m5 12 4 4L19 6"/>

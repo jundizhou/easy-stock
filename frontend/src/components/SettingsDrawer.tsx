@@ -14,14 +14,12 @@ import {
 	PlugZap,
 	Plus,
 	RefreshCw,
-	QrCode,
 	Save,
-	Server,
 	Trash2,
 	X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, RuntimeLogStatus, SecretSettingStatus, WechatServiceStatus, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, RuntimeLogStatus, SecretSettingStatus, requestJSON } from '../lib/backend';
 import { llmBaseURLForAPIMode, llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
@@ -39,8 +37,8 @@ type Props = {
 	onSaved?: () => void;
 };
 
-type SecretKey = 'llm_api_key' | 'tushare_token' | 'ths_cookie' | 'xueqiu_cookie' | 'eastmoney_cookie' | 'wechat_api_token';
-type ReviewSource = 'wechat' | 'xueqiu' | 'taoguba';
+type SecretKey = 'llm_api_key' | 'tushare_token' | 'ths_cookie' | 'xueqiu_cookie' | 'eastmoney_cookie';
+type ReviewSource = 'xueqiu' | 'taoguba';
 type ReviewProfileDraft = Omit<ReviewAutomationProfile, 'credential'> & { credential: SecretSettingStatus; credential_value: string; clear_credential: boolean };
 type ModelListState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -53,7 +51,6 @@ const emptySecrets = (): Record<SecretKey, string> => ({
 	ths_cookie: '',
 	xueqiu_cookie: '',
 	eastmoney_cookie: '',
-	wechat_api_token: '',
 });
 
 export function SettingsDrawer({ config, open, initialSection, onClose, onSaved }: Props) {
@@ -87,9 +84,6 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	const [manualModel, setManualModel] = useState(true);
 	const [browserAuthStatuses, setBrowserAuthStatuses] = useState<Record<string, BrowserAuthStatus>>({});
 	const [openingBrowserProfile, setOpeningBrowserProfile] = useState('');
-	const [wechatServiceStatus, setWechatServiceStatus] = useState<WechatServiceStatus>({ available: false, configured: false, authenticated: false, state: 'starting', message: '内置微信公众号服务正在启动' });
-	const [wechatLoginURL, setWechatLoginURL] = useState('');
-	const [wechatLoginBaseline, setWechatLoginBaseline] = useState('');
 	const [runtimeLogStatus, setRuntimeLogStatus] = useState<RuntimeLogStatus | null>(null);
 	const [openingRuntimeLogs, setOpeningRuntimeLogs] = useState(false);
 	const modelFetchSequence = useRef(0);
@@ -176,29 +170,6 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		}
 		void window.aStock.getRuntimeLogStatus().then(setRuntimeLogStatus).catch(() => setRuntimeLogStatus(null));
 	}, [open]);
-
-	useEffect(() => {
-		if (!open) {
-			setWechatLoginURL('');
-			return;
-		}
-		let cancelled = false;
-		const refresh = async () => {
-			const status = await getWechatServiceStatus();
-			if (cancelled) return;
-			setWechatServiceStatus(status);
-			if (wechatLoginURL && status.authenticated && (!wechatLoginBaseline || status.expires_at !== wechatLoginBaseline)) {
-				setWechatLoginURL('');
-				setWechatLoginBaseline('');
-			}
-		};
-		void refresh();
-		const timer = window.setInterval(refresh, wechatLoginURL ? 2000 : 8000);
-		return () => {
-			cancelled = true;
-			window.clearInterval(timer);
-		};
-	}, [open, wechatLoginBaseline, wechatLoginURL]);
 
 	const selectedModelCapability = modelOptions.find((option) => option.id === model)?.reasoning;
 	const selectedLLMProfile = useMemo(() => llmProfiles.find((profile) => profile.id === activeLLMProfileID), [activeLLMProfileID, llmProfiles]);
@@ -407,21 +378,6 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		}
 	};
 
-	const openWechatLogin = async () => {
-		if (!window.aStock?.openWechatLogin) {
-			setWechatServiceStatus({ available: false, configured: false, authenticated: false, state: 'error', message: '扫码登录仅在桌面应用中可用' });
-			return;
-		}
-		try {
-			const status = await window.aStock.openWechatLogin();
-			setWechatServiceStatus(status);
-			setWechatLoginBaseline(status.expires_at || '');
-			setWechatLoginURL(status.login_url || '');
-		} catch (error) {
-			setWechatServiceStatus((current) => ({ ...current, state: 'error', message: error instanceof Error ? error.message : '打开微信公众号扫码页面失败' }));
-		}
-	};
-
 	const readSavedModelKey = async (signal: AbortSignal) => {
 		if (!config) throw new Error('后端尚未连接');
 		const payload = await requestJSON<{ data: { api_key: string } }>(config, '/api/v1/settings/llm/api-key/reveal', {
@@ -476,7 +432,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		const payload = await requestJSON<{ data: AppSettings; agent_settings?: AgentSettings }>(config, '/api/v1/settings', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ agent_settings: agent.dirty ? agent.update : undefined, notifications: notificationsUpdate(notifications), agent_runtime: agentRuntime, llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.source === 'wechat' ? '' : profile.base_url.trim(), credential: profile.source === 'wechat' ? undefined : profile.credential_value.trim() || undefined, clear_credential: profile.source === 'wechat' || profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key').concat('wechat_api_token') }),
+			body: JSON.stringify({ agent_settings: agent.dirty ? agent.update : undefined, notifications: notificationsUpdate(notifications), agent_runtime: agentRuntime, llm: { response_timeout_seconds: responseTimeoutSeconds }, llm_profiles: modelProfiles, active_llm_profile_id: activeLLMProfileID, credentials, review_automation: { profiles: reviewProfiles.map((profile) => ({ id: profile.id, source: profile.source, name: profile.name.trim(), base_url: profile.base_url.trim(), credential: profile.credential_value.trim() || undefined, clear_credential: profile.clear_credential, sync_hour: profile.sync_hour, auto_analyze: profile.auto_analyze, enabled: profile.enabled })) }, clear_secrets: [...clearSecrets].filter((key) => key !== 'llm_api_key') }),
 		});
 		if (agent.dirty) {
 			if (!payload.agent_settings) throw new Error('保存响应缺少 Skill/MCP 配置，请重新读取确认');
@@ -607,14 +563,13 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 						</SettingsSection>
 
 						<SettingsSection title="大V复盘自动化" description="按平台管理多套采集配置，每个大V订阅可以绑定其中一套。" icon={<Clock3 size={18} />}>
-							<div className="review-profile-tabs">{(['xueqiu', 'taoguba', 'wechat'] as ReviewSource[]).map((source) => <button type="button" className={reviewSource === source ? 'active' : ''} onClick={() => setReviewSource(source)} key={source}>{reviewSourceLabel(source)}<em>{reviewProfiles.filter((profile) => profile.source === source).length}</em></button>)}</div>
-							{reviewSource === 'wechat' && <WechatServiceCard status={wechatServiceStatus} loginURL={wechatLoginURL} onLogin={() => void openWechatLogin()} onCloseLogin={() => { setWechatLoginURL(''); setWechatLoginBaseline(''); }} />}
+							<div className="review-profile-tabs">{(['xueqiu', 'taoguba'] as ReviewSource[]).map((source) => <button type="button" className={reviewSource === source ? 'active' : ''} onClick={() => setReviewSource(source)} key={source}>{reviewSourceLabel(source)}<em>{reviewProfiles.filter((profile) => profile.source === source).length}</em></button>)}</div>
 							<div className="review-profile-list">
-								{reviewProfiles.filter((profile) => profile.source === reviewSource).map((profile) => <ReviewProfileCard profile={profile} browserAuthStatus={browserAuthStatuses[profile.id]} openingBrowser={openingBrowserProfile === profile.id} onOpenBrowserLogin={() => void openReviewSourceLogin(profile)} onChange={(patch) => updateReviewProfile(profile.id, patch)} onRemove={() => removeReviewProfile(profile.id)} canRemove={profile.source !== 'wechat' || reviewProfiles.filter((item) => item.source === 'wechat').length > 1} key={profile.id} />)}
+								{reviewProfiles.filter((profile) => profile.source === reviewSource).map((profile) => <ReviewProfileCard profile={profile} browserAuthStatus={browserAuthStatuses[profile.id]} openingBrowser={openingBrowserProfile === profile.id} onOpenBrowserLogin={() => void openReviewSourceLogin(profile)} onChange={(patch) => updateReviewProfile(profile.id, patch)} onRemove={() => removeReviewProfile(profile.id)} canRemove key={profile.id} />)}
 								{!reviewProfiles.some((profile) => profile.source === reviewSource) && <div className="review-profile-empty"><strong>还没有{reviewSourceLabel(reviewSource)}配置</strong><span>可以添加多套配置，并让不同大V订阅使用不同登录态或同步时段。</span></div>}
 							</div>
-							{reviewSource !== 'wechat' && <button type="button" className="review-profile-add" onClick={() => addReviewProfile(reviewSource)}><Plus size={14} />添加{reviewSourceLabel(reviewSource)}配置</button>}
-							<p className="settings-field-note">雪球和淘股吧通过内置浏览器保存独立登录态；微信公众号扫码仅用于解析已知文章链接，历史文章列表接口已停用，暂不提供自动订阅。所有登录凭据仅保存在本机。</p>
+							<button type="button" className="review-profile-add" onClick={() => addReviewProfile(reviewSource)}><Plus size={14} />添加{reviewSourceLabel(reviewSource)}配置</button>
+							<p className="settings-field-note">雪球和淘股吧通过内置浏览器保存独立登录态。微信公众号文章请在“大V复盘日记”粘贴具体链接导入。所有登录凭据仅保存在本机。</p>
 						</SettingsSection>
 
 						<SettingsSection title="行情与内容数据源" description="现有公共接口继续直接使用；以下凭据为增强数据与后续接入准备。" icon={<Database size={18} />}>
@@ -652,57 +607,22 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	);
 }
 
-function WechatServiceCard({ status, loginURL, onLogin, onCloseLogin }: { status: WechatServiceStatus; loginURL: string; onLogin: () => void; onCloseLogin: () => void }) {
-	const ready = status.authenticated;
-	const statusLabel = ready ? '已登录' : status.state === 'expired' ? '登录已过期' : status.state === 'starting' ? '正在启动' : status.available ? '等待扫码' : '服务异常';
-	const expiresAt = status.expires_at ? new Date(status.expires_at).toLocaleString('zh-CN', { hour12: false }) : '';
-	return <div className={`wechat-service-panel ${status.state}`}>
-		<div className="wechat-service-summary">
-			<div className="wechat-service-icon">{status.available ? ready ? <CheckCircle2 size={20} /> : <QrCode size={20} /> : <CircleAlert size={20} />}</div>
-			<span><strong>内置微信公众号服务<em>{statusLabel}</em></strong><small>{status.message}</small>{ready && expiresAt && <i>登录有效期至 {expiresAt}</i>}</span>
-			<button type="button" onClick={onLogin} disabled={!status.available || status.state === 'starting'}>{loginURL ? <LoaderCircle className="spin" size={14} /> : <QrCode size={14} />}{loginURL ? '等待扫码' : ready ? '重新扫码' : '扫码登录'}</button>
-		</div>
-		{loginURL && <div className="wechat-login-embedded">
-			<header><span><QrCode size={14} />请使用微信扫码并在手机上确认</span><button type="button" onClick={onCloseLogin}>关闭扫码</button></header>
-			<webview src={loginURL} partition="persist:a-stock-wechat-login" title="微信公众号扫码登录" />
-		</div>}
-		<p><Server size={12} />服务随 App 自动启动，扫码登录仅用于解析你粘贴的具体文章链接；登录凭据只保存在本机用户数据目录。</p>
-	</div>;
-}
-
-async function getWechatServiceStatus(): Promise<WechatServiceStatus> {
-	if (!window.aStock?.getWechatServiceStatus) {
-		return { available: false, configured: false, authenticated: false, state: 'error', message: '内置微信公众号服务仅在桌面应用中可用' };
-	}
-	try {
-		return await window.aStock.getWechatServiceStatus();
-	} catch (error) {
-		return { available: false, configured: false, authenticated: false, state: 'error', message: error instanceof Error ? error.message : '读取微信公众号服务状态失败' };
-	}
-}
-
 function ReviewProfileCard({ profile, browserAuthStatus, openingBrowser, onOpenBrowserLogin, onChange, onRemove, canRemove }: { profile: ReviewProfileDraft; browserAuthStatus?: BrowserAuthStatus; openingBrowser: boolean; onOpenBrowserLogin: () => void; onChange: (patch: Partial<ReviewProfileDraft>) => void; onRemove: () => void; canRemove: boolean }) {
 	const sourceLabel = reviewSourceLabel(profile.source as ReviewSource);
-	const isWechat = profile.source === 'wechat';
-	const usesBrowserLogin = profile.source === 'xueqiu' || profile.source === 'taoguba';
 	return <article className={`review-profile-card ${profile.enabled ? '' : 'disabled'}`}>
-		<header><div><span className={`review-profile-source ${profile.source}`}>{reviewSourceLabel(profile.source as ReviewSource)}</span><strong>{profile.name || '未命名配置'}</strong></div><div><button type="button" className={profile.enabled ? 'profile-enabled active' : 'profile-enabled'} onClick={() => onChange({ enabled: !profile.enabled })}>{profile.enabled ? '已启用' : '已停用'}</button>{canRemove && <button type="button" className="profile-remove" title="删除配置" onClick={onRemove}><Trash2 size={14} /></button>}</div></header>
+		<header><div><span className={`review-profile-source ${profile.source}`}>{sourceLabel}</span><strong>{profile.name || '未命名配置'}</strong></div><div><button type="button" className={profile.enabled ? 'profile-enabled active' : 'profile-enabled'} onClick={() => onChange({ enabled: !profile.enabled })}>{profile.enabled ? '已启用' : '已停用'}</button>{canRemove && <button type="button" className="profile-remove" title="删除配置" onClick={onRemove}><Trash2 size={14} /></button>}</div></header>
 		<div className="review-profile-grid">
-			<label><span>配置名称</span><input value={profile.name} onChange={(event) => onChange({ name: event.target.value })} placeholder={`${reviewSourceLabel(profile.source as ReviewSource)}配置名称`} /></label>
-			{!isWechat && <label><span>每日同步时间</span><select value={profile.sync_hour} onChange={(event) => onChange({ sync_hour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option value={hour} key={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label>}
+			<label><span>配置名称</span><input value={profile.name} onChange={(event) => onChange({ name: event.target.value })} placeholder={`${sourceLabel}配置名称`} /></label>
+			<label><span>每日同步时间</span><select value={profile.sync_hour} onChange={(event) => onChange({ sync_hour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option value={hour} key={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label>
 		</div>
-		{!isWechat && <label><span>平台地址</span><input value={profile.base_url} onChange={(event) => onChange({ base_url: event.target.value })} placeholder={profile.source === 'xueqiu' ? 'https://xueqiu.com' : 'https://www.tgb.cn'} /></label>}
-		{usesBrowserLogin ? <div className={`profile-browser-auth ${browserAuthStatus?.configured ? 'ready' : ''}`}><Globe2 size={18} /><span><strong>{browserAuthStatus?.configured ? `${sourceLabel}浏览器已登录` : `使用内置浏览器登录${sourceLabel}`}</strong><small>{browserAuthStatus?.message || '打开后由你亲自完成登录或安全验证，然后点击“我已完成登录”保存登录态。'}</small>{browserAuthStatus?.updated_at && <em>最近保存 {new Date(browserAuthStatus.updated_at).toLocaleString('zh-CN', { hour12: false })}</em>}</span><button type="button" onClick={onOpenBrowserLogin} disabled={openingBrowser}>{openingBrowser ? <LoaderCircle className="spin" size={14} /> : <LogIn size={14} />}{openingBrowser ? '等待确认登录' : browserAuthStatus?.configured ? '重新登录' : '打开登录窗口'}</button></div> : isWechat ? <div className="profile-builtin-service"><Server size={16} /><span><strong>内置文章解析 API</strong><small>无需填写服务地址或 Token；扫码登录仅用于解析已知文章链接，不会读取公众号历史文章列表。</small></span></div> : null}
-		{!isWechat && <label className="profile-ai-toggle"><span>抓取后自动 AI 提炼</span><button type="button" className={profile.auto_analyze ? 'active' : ''} onClick={() => onChange({ auto_analyze: !profile.auto_analyze })}>{profile.auto_analyze ? '已开启' : '已关闭'}</button></label>}
+		<label><span>平台地址</span><input value={profile.base_url} onChange={(event) => onChange({ base_url: event.target.value })} placeholder={profile.source === 'xueqiu' ? 'https://xueqiu.com' : 'https://www.tgb.cn'} /></label>
+		<div className={`profile-browser-auth ${browserAuthStatus?.configured ? 'ready' : ''}`}><Globe2 size={18} /><span><strong>{browserAuthStatus?.configured ? `${sourceLabel}浏览器已登录` : `使用内置浏览器登录${sourceLabel}`}</strong><small>{browserAuthStatus?.message || '打开后由你亲自完成登录或安全验证，然后点击“我已完成登录”保存登录态。'}</small>{browserAuthStatus?.updated_at && <em>最近保存 {new Date(browserAuthStatus.updated_at).toLocaleString('zh-CN', { hour12: false })}</em>}</span><button type="button" onClick={onOpenBrowserLogin} disabled={openingBrowser}>{openingBrowser ? <LoaderCircle className="spin" size={14} /> : <LogIn size={14} />}{openingBrowser ? '等待确认登录' : browserAuthStatus?.configured ? '重新登录' : '打开登录窗口'}</button></div>
+		<label className="profile-ai-toggle"><span>抓取后自动 AI 提炼</span><button type="button" className={profile.auto_analyze ? 'active' : ''} onClick={() => onChange({ auto_analyze: !profile.auto_analyze })}>{profile.auto_analyze ? '已开启' : '已关闭'}</button></label>
 	</article>;
 }
 
 function toProfileDrafts(profiles: ReviewAutomationProfile[]): ReviewProfileDraft[] {
-	const drafts = profiles.map((profile) => ({ ...profile, base_url: profile.source === 'wechat' ? '' : profile.base_url, credential_value: '', clear_credential: profile.source === 'wechat' }));
-	if (!drafts.some((profile) => profile.source === 'wechat')) {
-		drafts.unshift({ id: 'wechat-default', source: 'wechat', name: '微信公众号默认配置', base_url: '', credential: { configured: false }, credential_value: '', clear_credential: true, sync_hour: 7, auto_analyze: true, enabled: true });
-	}
-	return drafts;
+	return profiles.filter((profile) => profile.source === 'xueqiu' || profile.source === 'taoguba').map((profile) => ({ ...profile, credential_value: '', clear_credential: false }));
 }
 
 function normalizeLLMProfiles(settings: AppSettings): LLMProfile[] {
@@ -718,10 +638,10 @@ function normalizeLLMProfiles(settings: AppSettings): LLMProfile[] {
 
 function newProfileDraft(source: ReviewSource): ReviewProfileDraft {
 	const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-	return { id: `${source}-${suffix}`, source, name: `${reviewSourceLabel(source)}配置`, base_url: source === 'wechat' ? '' : source === 'xueqiu' ? 'https://xueqiu.com' : 'https://www.tgb.cn', credential: { configured: false }, credential_value: '', clear_credential: false, sync_hour: 7, auto_analyze: true, enabled: true };
+	return { id: `${source}-${suffix}`, source, name: `${reviewSourceLabel(source)}配置`, base_url: source === 'xueqiu' ? 'https://xueqiu.com' : 'https://www.tgb.cn', credential: { configured: false }, credential_value: '', clear_credential: false, sync_hour: 7, auto_analyze: true, enabled: true };
 }
 
-function reviewSourceLabel(source: ReviewSource) { return source === 'wechat' ? '微信公众号' : source === 'xueqiu' ? '雪球' : '淘股吧'; }
+function reviewSourceLabel(source: ReviewSource) { return source === 'xueqiu' ? '雪球' : '淘股吧'; }
 
 function modelOptionLabel(option: LLMModelOption) {
 	const detail = option.display_name || option.owned_by;

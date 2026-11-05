@@ -18,126 +18,31 @@ import (
 	"easy-stock/backend/internal/appsettings"
 )
 
-func TestAutomationSyncsWechatSubscription(t *testing.T) {
-	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/public/searchbiz":
-			_, _ = w.Write([]byte(`{"success":true,"data":{"list":[{"fakeid":"MzTest==","nickname":"测试复盘号"}]}}`))
-		case "/api/public/articles":
-			_, _ = w.Write([]byte(`{"success":true,"data":{"articles":[{"link":"https://mp.weixin.qq.com/s/test-1"}]}}`))
-		case "/api/article":
-			_, _ = w.Write([]byte(`{"success":true,"data":{"title":"每日复盘","plain_content":"市场情绪回暖，明日观察核心股承接。","author":"测试复盘号","publish_time":1785800000}}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer service.Close()
+func TestAutomationRejectsNewWechatSubscriptionAndSkipsLegacy(t *testing.T) {
 	store, err := OpenStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	settings, _ := appsettings.Open("")
-	_, _ = settings.Update(func(values *appsettings.Values) error {
-		values.ReviewAutomation.Profiles[0].BaseURL = service.URL
-		return nil
-	})
-	automation := NewAutomation(store, NewImporter(service.Client(), ""), settings, service.Client(), "")
-	sub, err := automation.AddSubscription(context.Background(), "wechat", "测试复盘号", "", "wechat-default")
+	automation := NewAutomation(store, nil, nil, nil)
+	if _, err := automation.AddSubscription(context.Background(), "wechat", "测试复盘号", "", ""); err == nil || err.Error() != WechatArticleListUnavailableMessage {
+		t.Fatalf("new WeChat subscription error = %v", err)
+	}
+	legacy, err := store.UpsertSubscription(context.Background(), Subscription{Source: "wechat", Name: "旧公众号", HomepageURL: "https://mp.weixin.qq.com/s/old", Enabled: true})
 	if err != nil {
-		t.Fatal(err)
-	}
-	result := automation.SyncOne(context.Background(), sub.ID)
-	if result.Error != "" || result.Imported != 1 {
-		t.Fatalf("sync result = %+v", result)
-	}
-	posts, total, err := store.ListPosts(context.Background(), Query{Limit: 10})
-	if err != nil || total != 1 || posts[0].AuthorName != "测试复盘号" {
-		t.Fatalf("posts=%+v total=%d err=%v", posts, total, err)
-	}
-}
-
-func TestAutomationMapsWechatFreqControlAndStopsScheduledRetries(t *testing.T) {
-	articleRequests := 0
-	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/public/searchbiz":
-			_, _ = w.Write([]byte(`{"success":true,"data":{"list":[{"fakeid":"MzBlocked==","nickname":"受限公众号"}]}}`))
-		case "/api/public/articles":
-			articleRequests++
-			_, _ = w.Write([]byte(`{"success":false,"error":"获取文章列表失败: ret=200013, msg=freq control"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer service.Close()
-
-	store, err := OpenStore(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	settings, _ := appsettings.Open("")
-	_, _ = settings.Update(func(values *appsettings.Values) error {
-		values.ReviewAutomation.Profiles[0].BaseURL = service.URL
-		return nil
-	})
-	automation := NewAutomation(store, NewImporter(service.Client(), ""), settings, service.Client(), "")
-	sub, err := automation.AddSubscription(context.Background(), "wechat", "受限公众号", "", "wechat-default")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result := automation.SyncOne(context.Background(), sub.ID)
-	if result.Error != WechatArticleListUnavailableMessage {
-		t.Fatalf("sync error = %q, want %q", result.Error, WechatArticleListUnavailableMessage)
-	}
-	stored, err := store.GetSubscription(context.Background(), sub.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.LastError != WechatArticleListUnavailableMessage || stored.NextSyncAt.Before(time.Now().AddDate(9, 0, 0)) {
-		t.Fatalf("stored subscription = %+v", stored)
-	}
-
-	if err := store.SetSubscriptionSync(context.Background(), sub.ID, "error", "ret=200013, msg=freq control", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if automation.due(context.Background()) {
-		t.Fatal("blocked WeChat subscription must not make the scheduler due")
+		t.Fatal("legacy WeChat subscription must not be scheduled")
 	}
 	if results := automation.syncDue(context.Background()); len(results) != 0 {
-		t.Fatalf("scheduled results = %+v, want none", results)
+		t.Fatalf("scheduled results = %+v", results)
 	}
-	if articleRequests != 1 {
-		t.Fatalf("scheduled article requests = %d, want 1 total", articleRequests)
+	if result := automation.SyncOne(context.Background(), legacy.ID); result.Error != WechatArticleListUnavailableMessage {
+		t.Fatalf("manual result = %+v", result)
 	}
-
-	results := automation.SyncAll(context.Background())
-	if len(results) != 1 || results[0].Error != WechatArticleListUnavailableMessage || articleRequests != 1 {
-		t.Fatalf("manual sync-all results=%+v articleRequests=%d", results, articleRequests)
-	}
-	manual := automation.SyncOne(context.Background(), sub.ID)
-	if manual.Error != WechatArticleListUnavailableMessage || articleRequests != 2 {
-		t.Fatalf("manual sync-one result=%+v articleRequests=%d", manual, articleRequests)
-	}
-}
-
-func TestAutomationPrefersBundledWechatServiceOverPersistedProfileAddress(t *testing.T) {
-	settings, _ := appsettings.Open("")
-	_, _ = settings.Update(func(values *appsettings.Values) error {
-		values.ReviewAutomation.Profiles[0].BaseURL = "http://127.0.0.1:5000"
-		values.ReviewAutomation.Profiles[0].Credential = "legacy-token"
-		return nil
-	})
-	automation := NewAutomation(nil, nil, settings, http.DefaultClient, "http://127.0.0.1:32001")
-
-	profile, err := automation.profileFor("wechat", "wechat-default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile.BaseURL != "http://127.0.0.1:32001" || profile.Credential != "" {
-		t.Fatalf("wechat runtime profile = %+v", profile)
+	if results := automation.SyncAll(context.Background()); len(results) != 0 {
+		t.Fatalf("sync all = %+v", results)
 	}
 }
 
@@ -150,7 +55,7 @@ func TestAutomationAnalyzesPostWithConfiguredLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompter := &recordingPrompter{content: `{"summary":"情绪回暖","key_points":["观察核心承接"],"outlook":"明日关注分歧转强"}`}
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), settings, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), settings, http.DefaultClient, prompter)
 	analyzed, err := automation.AnalyzePost(context.Background(), post.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +110,7 @@ func TestAutomationSummarizesTodayAcrossIndependentAuthors(t *testing.T) {
 		"catalysts":["资金回流"],"risks":["共识拥挤"],"verification_checklist":["核心股是否承接"],"limitations":["仅两位作者"]
 	}`,
 	}
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), nil, http.DefaultClient, prompter)
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -282,7 +187,7 @@ func TestAutomationCapturesUSMarketAtSummaryStartAndIncludesItInFinalPrompt(t *t
 		authorContent: map[string]string{"作者甲": `{"core_view":"市场等待明日确认","market_interpretation":"分歧","view_evolution":[],"themes":[],"today_surprises":[],"tomorrow_focus":[],"tomorrow_outlook":"等待确认","catalysts":[],"risks":[],"confidence":"中","evidence":[]}`},
 		finalContent:  validDailySummaryJSONWithUS("综合结论"),
 	}
-	automation := NewAutomation(store, nil, nil, nil, "", prompter)
+	automation := NewAutomation(store, nil, nil, nil, prompter)
 	automation.SetDailyMarketProvider(fakeDailyMarketProvider{})
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
@@ -338,7 +243,7 @@ func TestAutomationRepairsInvalidAuthorSummaryJSON(t *testing.T) {
 		{content: "Hermes is still analyzing the articles."},
 		{content: validAuthorSummaryJSON("自动纠错后的观点")},
 	}}
-	automation := NewAutomation(nil, nil, nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(nil, nil, nil, http.DefaultClient, prompter)
 	post := newPost("taoguba", "https://www.tgb.cn/a/repair-author", "作者甲", "收盘复盘", "核心承接仍需观察。", "", time.Now())
 	group := dailySummaryAuthorGroup{Author: "作者甲", Source: "taoguba", Posts: []Post{post}, LatestAt: post.PublishedAt}
 
@@ -372,7 +277,7 @@ func TestAutomationRetainsAuthorFallbackWhenJSONRepairFails(t *testing.T) {
 		{content: validDailySummaryJSON("保底作者卡已进入跨作者总结")},
 		{content: validDailySummaryJSON("保底作者卡已进入跨作者总结")},
 	}}
-	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, prompter)
 
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
@@ -406,7 +311,7 @@ func TestAutomationRepairsInvalidFinalSummaryJSON(t *testing.T) {
 		market:   []queuedPromptResponse{{content: "Hermes final analysis follows later."}, {content: validDailySummaryJSON("自动纠错后的跨作者结论")}},
 		tomorrow: []queuedPromptResponse{{content: validDailySummaryJSON("明日阶段结论")}},
 	}
-	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, prompter)
 
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
@@ -433,7 +338,7 @@ func TestAutomationRetainsLocalFallbackWhenFinalJSONRepairFails(t *testing.T) {
 		market:   []queuedPromptResponse{{content: "Hermes final analysis follows later."}, {content: "The repaired response is still not JSON."}},
 		tomorrow: []queuedPromptResponse{{content: "Hermes final analysis follows later."}, {content: "The repaired response is still not JSON."}},
 	}
-	automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, nil, nil, http.DefaultClient, prompter)
 
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
@@ -490,7 +395,7 @@ func TestAutomationPreservesSuccessfulFinalPhaseWhenOtherPhaseFails(t *testing.T
 				market:   test.market,
 				tomorrow: test.tomorrow,
 			}
-			automation := NewAutomation(store, nil, nil, http.DefaultClient, "", prompter)
+			automation := NewAutomation(store, nil, nil, http.DefaultClient, prompter)
 			summary, err := automation.SummarizeToday(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -579,7 +484,7 @@ func TestAutomationSkipsFailedAuthorSummaryAndContinues(t *testing.T) {
 		authorErrors: map[string]error{"作者乙": errors.New("上游模型暂时不可用")},
 		finalContent: validDailySummaryJSON("两位成功作者的综合结论"),
 	}
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), nil, http.DefaultClient, prompter)
 	summary, err := automation.SummarizeToday(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -610,7 +515,7 @@ func TestAutomationRunsDailySummaryAsPersistentBackgroundJob(t *testing.T) {
 		release:      make(chan struct{}),
 		finalContent: validDailySummaryJSON("后台综合结论"),
 	}
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), nil, http.DefaultClient, "", prompter)
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), nil, http.DefaultClient, prompter)
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
 	job, err := automation.StartTodaySummary(requestCtx, false)
 	if err != nil {
@@ -672,7 +577,7 @@ func TestAutomationMarksPersistedRunningSummaryAsInterruptedAfterRestart(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), nil, http.DefaultClient, "", fakePrompter{})
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), nil, http.DefaultClient, fakePrompter{})
 	job, err := automation.GetTodaySummaryJob(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -704,7 +609,7 @@ func TestAutomationUsesHermesWithPersistedXueqiuBrowserState(t *testing.T) {
 		return nil, context.Canceled
 	})}
 	prompter := &fakeBrowserPrompter{content: `{"author_name":"测试大V","external_id":"2799158966","articles":[{"title":"盘后复盘","original_url":"https://xueqiu.com/2799158966/123456789","content_text":"今天市场先分歧后回流，核心方向出现承接。","published_at":"2026-08-07T15:30:00+08:00"}],"error":""}`}
-	automation := NewAutomation(store, NewImporter(client, ""), settings, client, "", prompter)
+	automation := NewAutomation(store, NewImporter(client), settings, client, prompter)
 	statePath := automation.browserStatePath("xueqiu-default")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
 		t.Fatal(err)
@@ -773,7 +678,7 @@ func TestAutomationUsesElectronBrowserBridgeBeforeHermesNormalization(t *testing
 		return nil
 	})
 	prompter := &recordingPrompter{content: `{"author_name":"测试大V","external_id":"2799158966","articles":[{"title":"盘后复盘","original_url":"https://xueqiu.com/2799158966/123456789","content_text":"模型不得替换这段正文","published_at":"2026-08-07T15:30:00+08:00"}],"error":""}`}
-	automation := NewAutomation(store, NewImporter(bridge.Client(), ""), settings, bridge.Client(), "", prompter)
+	automation := NewAutomation(store, NewImporter(bridge.Client()), settings, bridge.Client(), prompter)
 	statePath := automation.browserStatePath("xueqiu-default")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
 		t.Fatal(err)
@@ -846,7 +751,7 @@ func TestAutomationUsesElectronBrowserBridgeForTaoguba(t *testing.T) {
 		return nil
 	})
 	prompter := &recordingPrompter{content: `{"author_name":"延边刺客","external_id":"5894557","articles":[{"title":"807复盘","original_url":"https://www.tgb.cn/a/2u4fmoTIX4i","content_text":"模型不得替换正文","published_at":"2026-08-07T16:06:00+08:00"}],"error":""}`}
-	automation := NewAutomation(store, NewImporter(bridge.Client(), ""), settings, bridge.Client(), "", prompter)
+	automation := NewAutomation(store, NewImporter(bridge.Client()), settings, bridge.Client(), prompter)
 	statePath := automation.browserStatePath("taoguba-default", "taoguba")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
 		t.Fatal(err)
@@ -880,7 +785,7 @@ func TestAutomationRequiresXueqiuBrowserLoginState(t *testing.T) {
 	store, _ := OpenStore(":memory:")
 	defer store.Close()
 	settings, _ := appsettings.Open("")
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), settings, http.DefaultClient, "", &fakeBrowserPrompter{})
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), settings, http.DefaultClient, &fakeBrowserPrompter{})
 	sub, err := automation.AddSubscription(context.Background(), "xueqiu", "https://xueqiu.com/u/2799158966", "测试大V", "xueqiu-default")
 	if err != nil {
 		t.Fatal(err)
@@ -907,7 +812,7 @@ func TestAutomationRequiresTaogubaBrowserLoginState(t *testing.T) {
 	store, _ := OpenStore(":memory:")
 	defer store.Close()
 	settings, _ := appsettings.Open("")
-	automation := NewAutomation(store, NewImporter(http.DefaultClient, ""), settings, http.DefaultClient, "", &fakeBrowserPrompter{})
+	automation := NewAutomation(store, NewImporter(http.DefaultClient), settings, http.DefaultClient, &fakeBrowserPrompter{})
 	sub, err := automation.AddSubscription(context.Background(), "taoguba", "https://www.tgb.cn/blog/5894557", "延边刺客", "taoguba-default")
 	if err != nil {
 		t.Fatal(err)

@@ -216,7 +216,6 @@ type Config struct {
 	SectorFlowSampleStore    *sectorflowsample.Store
 	SectorFlowSampleInterval time.Duration
 	DuanxianxiaBaseURL       string
-	WeChatAPIURL             string
 	ReviewHTTP               *http.Client
 	ReviewStore              *review.Store
 	PortfolioStore           *portfolioinspection.Store
