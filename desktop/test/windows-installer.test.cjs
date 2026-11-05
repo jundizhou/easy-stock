@@ -73,11 +73,44 @@ test('installer closes its directory and detached descendants without touching a
   const sentinel = path.join(app, 'test-user-data.txt');
   fs.writeFileSync(sentinel, 'isolated fixture: preserve on upgrade');
   const result = await runHelper(app);
-  assert.match(result.stdout, /Installation processes stopped/);
-  assert.throws(() => process.kill(target.child.pid, 0), /ESRCH/);
-  assert.throws(() => process.kill(target.descendant, 0), /ESRCH/);
+  assert.match(result.stdout, /Installation processes stopped; verified [1-9]\d* process identities\./);
+  assert.throws(() => process.kill(target.child.pid, 0), /ESRCH/, result.stdout);
+  assert.throws(() => process.kill(target.descendant, 0), /ESRCH/, result.stdout);
   assert.doesNotThrow(() => process.kill(outside.child.pid, 0));
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'isolated fixture: preserve on upgrade');
+});
+
+test('installer matches long and DOS short installation paths in both directions', windows, async (t) => {
+  const { app, owned } = await prepare(t);
+  const script = `
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+using System.Text;
+public static class FixturePaths {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern uint GetLongPathName(string path, StringBuilder result, uint capacity);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern uint GetShortPathName(string path, StringBuilder result, uint capacity);
+}
+'@
+$long = [Text.StringBuilder]::new(32768)
+$short = [Text.StringBuilder]::new(32768)
+if (-not [FixturePaths]::GetLongPathName('${app.replaceAll("'", "''")}', $long, $long.Capacity)) { throw 'Cannot expand fixture path' }
+if (-not [FixturePaths]::GetShortPathName($long.ToString(), $short, $short.Capacity)) { throw 'Cannot shorten fixture path' }
+@{ long = $long.ToString(); short = $short.ToString() } | ConvertTo-Json -Compress
+`;
+  const { stdout } = await execute('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 20000 });
+  const paths = JSON.parse(stdout.trim());
+  if (paths.long.toLowerCase() === paths.short.toLowerCase()) {
+    t.skip('DOS short names are unavailable on this volume');
+    return;
+  }
+  for (const [install, launch] of [[paths.long, paths.short], [paths.short, paths.long]]) {
+    const fixture = await startFixture(path.join(launch, 'easy-stock.exe'), owned);
+    const result = await runHelper(install);
+    assert.match(result.stdout, /verified [1-9]\d* process identities\./);
+    assert.throws(() => process.kill(fixture.child.pid, 0), /ESRCH/, result.stdout);
+  }
 });
 
 test('installer excludes its own process identity from directory cleanup', windows, async (t) => {

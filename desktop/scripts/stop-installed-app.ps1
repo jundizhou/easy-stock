@@ -24,6 +24,31 @@ try {
     if ((Get-Item -LiteralPath $directory).Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw 'Refusing an installation directory that is a symbolic link or junction.'
     }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace EasyStock {
+    public static class InstallerPaths {
+        [DllImport("kernel32.dll", EntryPoint = "GetLongPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern uint GetLongPathName(string path, StringBuilder result, uint capacity);
+    }
+}
+'@
+    function Get-LongInstallationPath([string]$Path, [switch]$Required) {
+        if (-not $Path) { return '' }
+        $buffer = [Text.StringBuilder]::new(32768)
+        $length = [EasyStock.InstallerPaths]::GetLongPathName($Path, $buffer, $buffer.Capacity)
+        if ($length -gt 0 -and $length -lt $buffer.Capacity) { return $buffer.ToString() }
+        if ($Required) { throw 'Unable to normalize the installation directory.' }
+        # A process may exit or become inaccessible between snapshots. Keep its
+        # original path so an already-long installation path can still match.
+        return $Path
+    }
+    # CIM can report DOS 8.3 names even when the installer used a long path.
+    # Expand both sides before comparing, retaining the directory separator
+    # boundary so an adjacent installation is never included.
+    $directory = (Get-LongInstallationPath $directory -Required).TrimEnd([char[]]'\/')
     $appPath = Join-Path $directory $AppExecutable
     $uninstallerPath = Join-Path $directory ('Uninstall ' + $AppExecutable)
     $backendPath = Join-Path $directory 'resources\resources\backend\easy-stock-backend.exe'
@@ -54,7 +79,8 @@ try {
             $rowId = [int]$row.ProcessId
             if ($protected.Contains($rowId) -or -not $row.CreationDate) { continue }
             $identity = $row.CreationDate.ToUniversalTime().Ticks
-            if (($row.ExecutablePath -and $row.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) -or
+            $executablePath = Get-LongInstallationPath $row.ExecutablePath
+            if (($executablePath -and $executablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) -or
                 ($tracked.ContainsKey($rowId) -and $tracked[$rowId] -eq $identity)) {
                 $active[$rowId] = $row
                 $tracked[$rowId] = $identity
@@ -81,7 +107,8 @@ try {
     $targets = @(Get-InstallationProcesses)
     $requestedClose = $false
     foreach ($target in $targets) {
-        if (-not [string]::Equals($target.ExecutablePath, $appPath, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $executablePath = Get-LongInstallationPath $target.ExecutablePath
+        if (-not [string]::Equals($executablePath, $appPath, [StringComparison]::OrdinalIgnoreCase)) { continue }
         try {
             $appProcess = [Diagnostics.Process]::GetProcessById([int]$target.ProcessId)
             if ($appProcess.CloseMainWindow()) { $requestedClose = $true }
