@@ -855,7 +855,8 @@ function isNarrativePresentationNote(text: string): boolean {
 	// Only omit known boilerplate. A provenance heading alone cannot tell us
 	// whether the line contains a date restriction or a cross-session warning.
 	return /^本(?:简报|报告)仅用于[^。！？\r\n]*不构成投资建议[。.]?$/.test(plain)
-		|| /^数据时效说明[：:]\s*仅为盘中快照[。.]?$/.test(plain);
+		|| /^数据时效说明[：:]\s*仅为盘中快照[。.]?$/.test(plain)
+		|| /^以上关联均(?:属|为)推断，仅依据新闻能直接支持的方向，不推定主线或龙头；本次未提供个股、产业链环节及对应行情，故不列标的[。.]?$/.test(plain);
 }
 
 type SnapshotField = (typeof SNAPSHOT_FIELDS)[number] | '数据缺口';
