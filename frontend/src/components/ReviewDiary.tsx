@@ -58,6 +58,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	const [authors, setAuthors] = useState<ReviewAuthor[]>([]);
 	const [posts, setPosts] = useState<ReviewPost[]>([]);
 	const [subscriptions, setSubscriptions] = useState<ReviewSubscription[]>([]);
+	const [subscriptionsExpanded, setSubscriptionsExpanded] = useState(true);
 	const [reviewProfiles, setReviewProfiles] = useState<ReviewAutomationProfile[]>([]);
 	const [total, setTotal] = useState(0);
 	const [activeSource, setActiveSource] = useState('all');
@@ -542,7 +543,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 					</nav>
 				</div>
 
-				<details className="review-automation" open={!subscriptions.length}>
+				<details className="review-automation" open={subscriptionsExpanded} onToggle={(event) => setSubscriptionsExpanded(event.currentTarget.open)}>
 					<summary><span><RadioTower size={16} /><strong>自动订阅与每日同步</strong><small>{subscriptions.length ? `${subscriptions.length} 个主页 · 后台定时检查` : '添加大V主页后，系统会每天自动获取新文章'}</small></span><button type="button" disabled={!subscriptions.length || !!syncing} onClick={(event) => { event.preventDefault(); void syncSubscriptions(); }}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></summary>
 					<div className="review-automation-body">
 						<div className="review-wechat-import-hint"><FileInput size={16} /><span><strong>微信公众号自动订阅暂不可用</strong><small>微信已停用历史文章列表接口；已知文章仍可将具体链接粘贴到上方“导入文章”。</small></span></div>
