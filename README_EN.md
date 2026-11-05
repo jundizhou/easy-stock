@@ -64,6 +64,36 @@ easy-stock is an AI-native workbench that speaks this language. It unifies quote
 
 > Compared with [v1.5.0](https://github.com/jundizhou/easy-stock/releases/tag/v1.5.0), the current main branch includes fixes for news and earnings-disclosure evidence assessment, portfolio optimization recovery, and score presentation. These fixes are not included in the v1.5.0 installers.
 
+Follow the main workflow from market discovery through stock research, portfolio review, and monitoring. Click any screenshot to view it at full size. Quotes and scores illustrate the interface and change with the data.
+
+<table>
+  <tr>
+    <td width="50%" align="center"><strong>AI Dashboard</strong><br /><sub>Market signals, daily tasks, and portfolio health</sub><br /><a href="./docs/assets/readme-ai-dashboard-2026-11.webp"><img src="./docs/assets/readme-ai-dashboard-2026-11.webp" alt="AI dashboard with market signals, tasks, and portfolio health" /></a></td>
+    <td width="50%" align="center"><strong>Stock Analysis</strong><br /><sub>Research conclusions, evidence, and scores</sub><br /><a href="./docs/assets/readme-stock-analysis-2026-11.webp"><img src="./docs/assets/readme-stock-analysis-2026-11.webp" alt="Stock analysis with a conclusion, evidence, and scores" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>Portfolio AI Inspection</strong><br /><sub>Four scoring dimensions and risk checks</sub><br /><a href="./docs/assets/readme-portfolio-inspection-2026-11.webp"><img src="./docs/assets/readme-portfolio-inspection-2026-11.webp" alt="Portfolio AI inspection with a conclusion and four scoring dimensions" /></a></td>
+    <td width="50%" align="center"><strong>AI Portfolio Optimization</strong><br /><sub>Compare current and proposed holdings</sub><br /><a href="./docs/assets/readme-portfolio-optimization-2026-11.webp"><img src="./docs/assets/readme-portfolio-optimization-2026-11.webp" alt="AI portfolio optimization comparing current and proposed holdings" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>Monitoring Center</strong><br /><sub>Watchlist, risk alerts, and monitoring rules</sub><br /><a href="./docs/assets/readme-monitor-2026-11.webp"><img src="./docs/assets/readme-monitor-2026-11.webp" alt="Monitoring center with watchlist and alerts" /></a></td>
+    <td width="50%" align="center"><strong>Limit-Up Ladder</strong><br /><sub>Sentiment history, limit-up tiers, and follow-through</sub><br /><a href="./docs/assets/readme-short-term-2026-11.webp"><img src="./docs/assets/readme-short-term-2026-11.webp" alt="Limit-up ladder with sentiment history and stock tiers" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>Theme Radar</strong><br /><sub>Leading themes, stock tiers, and price charts</sub><br /><a href="./docs/assets/readme-theme-radar-2026-11.webp"><img src="./docs/assets/readme-theme-radar-2026-11.webp" alt="Theme radar with leading themes and stock tiers" /></a></td>
+    <td width="50%" align="center"><strong>Market Overview</strong><br /><sub>News, theme signals, and capital-flow rankings</sub><br /><a href="./docs/assets/readme-market-overview-2026-11.webp"><img src="./docs/assets/readme-market-overview-2026-11.webp" alt="Market overview with news and theme signals" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>Automated Post-Market Review</strong><br /><sub>Sync, import, and archive author articles</sub><br /><a href="./docs/assets/easy-stock-auto-review.png"><img src="./docs/assets/easy-stock-auto-review.png" alt="Automated post-market review with synced and archived articles" /></a></td>
+    <td width="50%" align="center"><strong>AI Chat</strong><br /><sub>Model conversations and research tasks</sub><br /><a href="./docs/assets/easy-stock-ai-copilot.jpg"><img src="./docs/assets/easy-stock-ai-copilot.jpg" alt="AI chat workspace for model conversations and research tasks" /></a></td>
+  </tr>
+</table>
+
+The detailed descriptions below also cover the trading wisdom library.
+
+<details>
+<summary><strong>Expand the full feature descriptions</strong></summary>
+
 ### 01 · Automated Post-Market Review Digest
 
 #### Let AI collect and organize what multiple market writers actually said
@@ -203,6 +233,8 @@ Applying a proposal starts a new inspection of its target holdings. It **does no
 <p align="center">
   <img src="./docs/assets/easy-stock-trading-mastery.png" width="1280" alt="easy-stock trading wisdom library, trader profiles and Hermes deep reading" />
 </p>
+
+</details>
 
 ### The Daily Research Loop
 

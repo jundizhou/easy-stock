@@ -73,6 +73,36 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 
 ## 核心产品能力
 
+从市场全景到个股与持仓，主要界面可以沿着「发现机会 → 研究证据 → 检查组合 → 持续监控」的流程阅读。点击截图可查看大图；图中行情和评分仅用于展示界面。
+
+<table>
+  <tr>
+    <td width="50%" align="center"><strong>AI 总控台</strong><br /><sub>市场信号、今日任务与持仓健康集中查看</sub><br /><a href="./docs/assets/readme-ai-dashboard-2026-11.webp"><img src="./docs/assets/readme-ai-dashboard-2026-11.webp" alt="AI 总控台：市场信号、任务和持仓健康" /></a></td>
+    <td width="50%" align="center"><strong>个股分析</strong><br /><sub>证据、评分与研究结论逐层展开</sub><br /><a href="./docs/assets/readme-stock-analysis-2026-11.webp"><img src="./docs/assets/readme-stock-analysis-2026-11.webp" alt="个股分析：研究结论、证据和评分" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>持仓 AI 巡检</strong><br /><sub>四维评分、逐股依据与风险检查</sub><br /><a href="./docs/assets/readme-portfolio-inspection-2026-11.webp"><img src="./docs/assets/readme-portfolio-inspection-2026-11.webp" alt="持仓 AI 巡检：组合结论和四维评分" /></a></td>
+    <td width="50%" align="center"><strong>AI 持仓优化</strong><br /><sub>原组合与建议组合并排比较</sub><br /><a href="./docs/assets/readme-portfolio-optimization-2026-11.webp"><img src="./docs/assets/readme-portfolio-optimization-2026-11.webp" alt="AI 持仓优化：原组合与建议组合对照" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>监控中心</strong><br /><sub>自选标的、风险提醒与监控规则</sub><br /><a href="./docs/assets/readme-monitor-2026-11.webp"><img src="./docs/assets/readme-monitor-2026-11.webp" alt="监控中心：自选标的和监控提醒" /></a></td>
+    <td width="50%" align="center"><strong>短线连板</strong><br /><sub>情绪曲线、涨停梯队与昨日反馈</sub><br /><a href="./docs/assets/readme-short-term-2026-11.webp"><img src="./docs/assets/readme-short-term-2026-11.webp" alt="短线连板：情绪曲线和涨停梯队" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>趋势题材</strong><br /><sub>主线热度、题材梯队与 K 线</sub><br /><a href="./docs/assets/readme-theme-radar-2026-11.webp"><img src="./docs/assets/readme-theme-radar-2026-11.webp" alt="趋势题材：主线热度和题材梯队" /></a></td>
+    <td width="50%" align="center"><strong>行情总览</strong><br /><sub>新闻快讯、题材信号与资金榜单</sub><br /><a href="./docs/assets/readme-market-overview-2026-11.webp"><img src="./docs/assets/readme-market-overview-2026-11.webp" alt="行情总览：新闻快讯和题材信号" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>大 V 自动复盘</strong><br /><sub>作者文章同步、导入与归档</sub><br /><a href="./docs/assets/easy-stock-auto-review.png"><img src="./docs/assets/easy-stock-auto-review.png" alt="大 V 自动复盘：作者文章同步与归档" /></a></td>
+    <td width="50%" align="center"><strong>AI 对话</strong><br /><sub>模型对话与研究任务入口</sub><br /><a href="./docs/assets/easy-stock-ai-copilot.jpg"><img src="./docs/assets/easy-stock-ai-copilot.jpg" alt="AI 对话：模型对话与研究任务入口" /></a></td>
+  </tr>
+</table>
+
+游资心法等能力可在下方详细说明中查看。
+
+<details>
+<summary><strong>展开完整功能说明</strong></summary>
+
 
 ### 01 · 大 V 自动复盘
 
@@ -214,6 +244,8 @@ easy-stock 希望构建一套真正理解 A股语境的 AI 原生工作台，把
 <p align="center">
   <img src="./docs/assets/easy-stock-trading-mastery.png" width="1280" alt="easy-stock 游资心法库、人物资料与 Hermes 深度研读" />
 </p>
+
+</details>
 
 ### 每日研究闭环
 
