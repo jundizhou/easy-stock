@@ -197,8 +197,8 @@ jobs:
           $installer = "desktop/dist/release/easy-stock-$env:RELEASE_TAG-windows-x64-setup.exe"
           7z x $installer "-o$verifyRoot/installer" -y
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Windows installer' }
-          $payload = @(Get-ChildItem "$verifyRoot/installer" -Recurse -Filter 'app-64.7z')
-          if ($payload.Count -ne 1) { throw 'Expected exactly one x64 application payload in the installer' }
+          $payload = @(Get-ChildItem "$verifyRoot/installer" -Recurse -Filter 'app-64.zip')
+          if ($payload.Count -ne 1) { throw 'Expected exactly one x64 ZIP application payload in the installer' }
           7z x $payload[0].FullName "-o$verifyRoot/app" -y
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Windows application payload' }
           node desktop/scripts/verify-release-package.mjs "$verifyRoot/app" windows
