@@ -312,6 +312,7 @@ func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]a
 	facts := pi.OptimizationUnionReport(job.Source.Request, results, job.SnapshotAt).Facts
 	table := stockFactTable(facts, results)
 	if detail <= 0 {
+		compactETFStockFacts(table, results)
 		compactCorrelationTable(table, results)
 		compactSharedStockFacts(table)
 		// Lossless row encoding: null already represents unknown columns.
@@ -371,6 +372,9 @@ func compactSharedStockFacts(table map[string]any) {
 // No price anchors are offered in this mode: new conditions must be semantic.
 func compactStockDossier(r pi.HoldingResult) map[string]any {
 	d := stockDossier(r, 12)
+	if r.Analysis.InstrumentType == "etf" && r.Analysis.ETF != nil {
+		d["etf"] = compactETFEvidence(r)
+	}
 	for _, key := range []string{"support", "catalysts", "anchors", "limitations"} {
 		d[key] = nil
 	}
@@ -423,6 +427,243 @@ func compactStockDossier(r pi.HoldingResult) map[string]any {
 	}
 	d["sources"] = sources
 	return d
+}
+
+// compactETFEvidence keeps the ETF facts that change an allocation decision:
+// mandate, direction, execution state and the research's own judgments. The
+// direction summary, technical trend, holdings and premium notices stay
+// citable through compactETFStockFacts, but only in bounded form: repeating
+// both full structures is what pushed ETF-heavy portfolios past the evidence
+// budget.
+func compactETFEvidence(r pi.HoldingResult) map[string]any {
+	a := r.Analysis.ETF
+	if a == nil {
+		return nil
+	}
+	out := map[string]any{
+		"instrument_type": "etf",
+		"asset_class":     a.Profile.AssetClass,
+		"cross_border":    a.Profile.CrossBorder,
+		"tracking_target": a.Profile.TrackingTarget,
+		"execution": map[string]any{
+			"comparable":                  a.Execution.Comparable,
+			"premium_percent":             a.Execution.PremiumPercent,
+			"observation_premium_percent": a.Execution.ObservationPremiumPercent,
+		},
+	}
+	if dir := a.PortfolioDirection(); dir != nil {
+		d := map[string]any{
+			"primary":       dir.Classification.Primary,
+			"status":        dir.Classification.Status,
+			"news_coverage": map[string]any{"status": dir.NewsCoverage.Status, "count": dir.NewsCoverage.Count},
+		}
+		if dir.Technical != nil {
+			d["trend"] = dir.Technical.Trend
+			d["technical_as_of"] = dir.Technical.AsOf
+		}
+		out["direction"] = d
+	}
+	if rr := r.Analysis.ResearchReport; rr != nil && rr.ETFJudgments != nil {
+		known := map[string]bool{}
+		for _, source := range rr.Sources {
+			known[source.ID] = true
+		}
+		judgments := map[string]any{}
+		for _, item := range []struct {
+			key   string
+			value *etfanalysis.Judgment
+		}{{"technical", rr.ETFJudgments.Technical}, {"news", rr.ETFJudgments.News}, {"underlying", &rr.ETFJudgments.Underlying}, {"product", &rr.ETFJudgments.Product}, {"entry", &rr.ETFJudgments.Entry}} {
+			if item.value == nil {
+				continue
+			}
+			judgment := map[string]any{"status": item.value.Status, "text": shortText(item.value.Text, 30)}
+			for _, id := range item.value.SourceIDs {
+				if known[id] {
+					judgment["source_ids"] = []string{id}
+					break
+				}
+			}
+			judgments[item.key] = judgment
+		}
+		out["judgments"] = judgments
+	}
+	return out
+}
+
+// compactETFStockFacts trims the structured ETF evidence in the shared fact
+// table to the fields an allocation decision can use. Canonical keys stay
+// citable; only detail is bounded. Plain numeric facts are untouched.
+func compactETFStockFacts(table map[string]any, results []pi.HoldingResult) {
+	etfs := map[string]bool{}
+	for _, r := range results {
+		if r.Analysis.InstrumentType == "etf" && r.Analysis.ETF != nil {
+			etfs[r.Holding.Symbol] = true
+		}
+	}
+	if len(etfs) == 0 {
+		return
+	}
+	columns, _ := table["columns"].([]string)
+	rows, _ := table["rows"].([]any)
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		symbol, _ := row["symbol"].(string)
+		if !etfs[symbol] {
+			continue
+		}
+		values, ok := row["values"].([]any)
+		if !ok {
+			continue
+		}
+		unavailable := map[int]bool{}
+		if list, ok := row["unavailable"].([]int); ok {
+			for _, i := range list {
+				unavailable[i] = true
+			}
+		}
+		for i, name := range columns {
+			if unavailable[i] || i >= len(values) {
+				continue
+			}
+			if compact, ok := compactETFStockFact(name, values[i]); ok {
+				values[i] = compact
+			}
+		}
+	}
+}
+
+func compactETFStockFact(name string, value any) (any, bool) {
+	switch name {
+	case "etf.direction.technical", "etf.direction.classification", "etf.direction.news_coverage", "etf.holdings", "etf.premium_announcements", "etf.execution_blockers", "etf.diversification":
+	default:
+		return nil, false
+	}
+	// Fact values are typed report structures here. Normalise them to plain
+	// JSON shapes so the same bounded projection applies to every producer.
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var generic any
+	if json.Unmarshal(encoded, &generic) != nil {
+		return nil, false
+	}
+	value = generic
+	keep := func(m map[string]any) (map[string]any, bool) {
+		keys, ok := map[string][]string{
+			"etf.direction.technical":      {"relationship", "as_of", "trend"},
+			"etf.direction.classification": {"primary", "status"},
+			"etf.direction.news_coverage":  {"status", "count"},
+			"etf.diversification":          {"bonus"},
+		}[name]
+		if !ok {
+			return nil, false
+		}
+		out := map[string]any{}
+		for _, key := range keys {
+			if v, ok := m[key]; ok {
+				out[key] = v
+			}
+		}
+		return out, true
+	}
+	m, isMap := value.(map[string]any)
+	switch name {
+	case "etf.direction.technical":
+		if !isMap {
+			return nil, false
+		}
+		return keep(m)
+	case "etf.direction.classification", "etf.direction.news_coverage", "etf.diversification":
+		if !isMap {
+			return nil, false
+		}
+		return keep(m)
+	case "etf.holdings":
+		list, ok := value.([]any)
+		if !ok {
+			return nil, false
+		}
+		out := []any{}
+		for i, raw := range list {
+			if i == 2 {
+				break
+			}
+			group, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			compact := map[string]any{}
+			for _, key := range []string{"symbol", "report_date"} {
+				if v, ok := group[key]; ok {
+					compact[key] = v
+				}
+			}
+			items, _ := group["items"].([]any)
+			kept := []any{}
+			for n, rawItem := range items {
+				if n == 3 {
+					break
+				}
+				item, ok := rawItem.(map[string]any)
+				if !ok {
+					continue
+				}
+				row := map[string]any{}
+				for _, key := range []string{"symbol", "weight_percent"} {
+					if v, ok := item[key]; ok {
+						row[key] = v
+					}
+				}
+				kept = append(kept, row)
+			}
+			compact["items"] = kept
+			out = append(out, compact)
+		}
+		return out, true
+	case "etf.premium_announcements":
+		list, ok := value.([]any)
+		if !ok {
+			return nil, false
+		}
+		out := []any{}
+		for i, raw := range list {
+			if i == 1 {
+				break
+			}
+			notice, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			compact := map[string]any{}
+			for _, key := range []string{"title", "published_at"} {
+				if v, ok := notice[key]; ok {
+					compact[key] = v
+				}
+			}
+			out = append(out, compact)
+		}
+		return out, true
+	case "etf.execution_blockers":
+		list, ok := value.([]any)
+		if !ok {
+			return nil, false
+		}
+		out := []any{}
+		for i, v := range list {
+			if i == 1 {
+				break
+			}
+			if text, ok := v.(string); ok {
+				out = append(out, shortText(text, 60))
+			}
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 // Lossless triangular correlation encoding avoids repeating long pair keys.
