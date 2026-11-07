@@ -1,9 +1,12 @@
 package portfoliooptimization
 
 import (
+	"easy-stock/backend/internal/etfanalysis"
+	"easy-stock/backend/internal/foundation"
 	pi "easy-stock/backend/internal/portfolioinspection"
 	"easy-stock/backend/internal/stockanalysis"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -342,5 +345,189 @@ func TestCompactStockFactsPreserveSharedUnknownAndZero(t *testing.T) {
 				t.Fatal("fact value changed", key, f, v)
 			}
 		}
+	}
+}
+
+// etfCapacityFixture builds an ETF holding with the bulky evidence a real
+// research report carries: six direction news items, ten technical metrics,
+// disclosed holdings and five research judgments.
+func etfCapacityFixture(symbol string) pi.HoldingResult {
+	at := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	value := 1.0
+	news := []etfanalysis.DirectionNews{}
+	for i := 0; i < 6; i++ {
+		news = append(news, etfanalysis.DirectionNews{
+			SourceID:     "e-news",
+			Item:         foundation.NewsItem{ID: fmt.Sprint(i), Title: strings.Repeat("方向消息标题", 8), Content: strings.Repeat("方向消息正文", 40)},
+			MatchedTerms: []string{"主题", "行业"},
+			Relevance:    "high",
+		})
+	}
+	metrics := []etfanalysis.Metric{}
+	for i := 0; i < 10; i++ {
+		metrics = append(metrics, etfanalysis.Metric{Label: fmt.Sprintf("MA%d", i), Value: &value, Unit: "%", AsOf: "2026-11-06", Method: strings.Repeat("口径说明", 20)})
+	}
+	holdings := []foundation.ETFHoldings{}
+	for i := 0; i < 3; i++ {
+		items := []foundation.ETFHolding{}
+		for n := 0; n < 10; n++ {
+			items = append(items, foundation.ETFHolding{Code: fmt.Sprintf("6000%02d", n), Symbol: fmt.Sprintf("6000%02d.SH", n), Name: strings.Repeat("成分股", 4), WeightPercent: float64(10 - n)})
+		}
+		holdings = append(holdings, foundation.ETFHoldings{Symbol: symbol, AssetType: "equity", ReportDate: fmt.Sprintf("2026-0%d-30", i+1), Scope: strings.Repeat("部分持仓口径", 4), Items: items})
+	}
+	data := etfanalysis.Analysis{
+		Profile: foundation.ETFProfile{Instrument: foundation.Instrument{Symbol: symbol}, AssetClass: "equity", TrackingTarget: strings.Repeat("跟踪标的", 8)},
+		Direction: &etfanalysis.DirectionAnalysis{
+			Classification: etfanalysis.DirectionClassification{
+				Primary:       etfanalysis.DirectionTag{Key: "tech", Label: "科技"},
+				Tags:          []etfanalysis.DirectionTag{{Key: "growth", Label: "成长"}},
+				Focus:         strings.Repeat("方向焦点", 8),
+				Basis:         strings.Repeat("披露依据", 20),
+				Status:        "unclassified",
+				Queries:       []string{strings.Repeat("查询", 20)},
+				MatchTerms:    []string{strings.Repeat("匹配", 20)},
+				ResearchFocus: []string{strings.Repeat("研究焦点", 20)},
+			},
+			Technical: &etfanalysis.DirectionTechnical{Symbol: symbol, Name: symbol, Relationship: "etf_price_proxy", AsOf: "2026-11-06", Trend: "mixed", Metrics: metrics, Limitations: []string{strings.Repeat("技术限制", 20)}},
+			News:      news,
+			NewsCoverage: etfanalysis.DirectionNewsCoverage{
+				Status: "covered", Count: 6, Queries: []string{strings.Repeat("检索词", 20)}, FailedQueries: []string{strings.Repeat("失败检索", 20)},
+			},
+			Limitations: []string{strings.Repeat("方向限制", 20)},
+		},
+		Holdings:          holdings,
+		Limitations:       []string{strings.Repeat("基金限制", 40)},
+		ExecutionBlockers: []string{strings.Repeat("执行阻断", 40)},
+	}
+	judgment := func() etfanalysis.Judgment {
+		return etfanalysis.Judgment{Status: "mixed", Text: strings.Repeat("研究方向判断", 25), EvidenceLevel: "sufficient", SourceIDs: []string{"e-news", "e-extra"}}
+	}
+	judgments := &etfanalysis.Judgments{Technical: &etfanalysis.Judgment{Status: "mixed", Text: strings.Repeat("技术判断", 25), EvidenceLevel: "sufficient", SourceIDs: []string{"e-missing", "e-news"}}, News: &etfanalysis.Judgment{Status: "supported", Text: strings.Repeat("消息判断", 25), EvidenceLevel: "limited", SourceIDs: []string{"e-news"}}, Underlying: judgment(), Product: judgment(), Entry: judgment()}
+	rr := &stockanalysis.ResearchReport{
+		ResearchSynthesis: stockanalysis.ResearchSynthesis{Headline: "测试逻辑", Thesis: stockanalysis.ResearchClaim{Text: "ETF研究逻辑", SourceIDs: []string{"e-profile"}}, EvidenceLevel: "sufficient", ETFJudgments: judgments},
+		Sources:           []stockanalysis.ResearchSource{{ID: "e-profile", Kind: "fund_profile", Content: "冻结基金档案"}, {ID: "e-news", Kind: "news", ContentStatus: "excerpt", Content: strings.Repeat("新闻正文", 40)}},
+		Request:           stockanalysis.ResearchRequest{Symbol: symbol, Horizon: "swing"},
+		GeneratedAt:       at, CutoffAt: at, Validation: "references_checked",
+	}
+	return pi.HoldingResult{
+		Holding:           pi.Holding{Symbol: symbol, Name: symbol, Weight: 10},
+		Status:            "succeeded",
+		AnalysisID:        "report-" + symbol,
+		ResearchCutoffAt:  at,
+		ReportCompletedAt: at,
+		Analysis:          &stockanalysis.Analysis{InstrumentType: "etf", Symbol: symbol, ETF: &data, AI: stockanalysis.AISynthesisStatus{Status: "ready"}, ResearchReport: rr},
+	}
+}
+
+func TestCompactETFEvidenceBoundsDirectionAndJudgments(t *testing.T) {
+	result := etfCapacityFixture("510300.SH")
+	dossier := compactStockDossier(result)
+	encoded, err := json.Marshal(dossier["etf"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 1500 {
+		t.Fatalf("capacity ETF card still %d bytes", len(encoded))
+	}
+	etf := dossier["etf"].(map[string]any)
+	direction := etf["direction"].(map[string]any)
+	if _, ok := direction["news"]; ok {
+		t.Fatal("direction news repeated in the card")
+	}
+	if _, ok := direction["basis"]; ok {
+		t.Fatal("classification basis repeated in the card")
+	}
+	if direction["primary"].(etfanalysis.DirectionTag).Key != "tech" || direction["trend"] != "mixed" {
+		t.Fatal("direction judgment lost", direction)
+	}
+	for key, raw := range etf["judgments"].(map[string]any) {
+		judgment := raw.(map[string]any)
+		if text := judgment["text"].(string); len([]rune(text)) > 31 {
+			t.Fatalf("judgment %s text not bounded: %d runes", key, len([]rune(text)))
+		}
+		if ids := judgment["source_ids"].([]string); len(ids) != 1 {
+			t.Fatalf("judgment %s sources not bounded: %v", key, ids)
+		} else if ids[0] != "e-news" {
+			t.Fatalf("judgment %s kept an unresolvable source: %v", key, ids)
+		}
+	}
+}
+
+func TestCompactETFStockFactsTrimStructuredEvidence(t *testing.T) {
+	results := []pi.HoldingResult{etfCapacityFixture("510300.SH"), etfCapacityFixture("510500.SH")}
+	facts := map[string]pi.Fact{}
+	for _, result := range results {
+		symbol := result.Holding.Symbol
+		etf := result.Analysis.ETF
+		facts[symbol+".price"] = pi.Fact{Value: 4.0, Available: true}
+		facts[symbol+".etf.holdings"] = pi.Fact{Value: etf.Holdings, Available: true}
+		facts[symbol+".etf.direction.technical"] = pi.Fact{Value: etf.Direction.Technical, Available: true}
+		facts[symbol+".etf.direction.classification"] = pi.Fact{Value: etf.Direction.Classification, Available: true}
+		facts[symbol+".etf.direction.news_coverage"] = pi.Fact{Value: etf.Direction.NewsCoverage, Available: true}
+		facts[symbol+".etf.execution_blockers"] = pi.Fact{Value: etf.ExecutionBlockers, Available: true}
+	}
+	table := stockFactTable(facts, results)
+	before, _ := json.Marshal(table)
+	compactETFStockFacts(table, results)
+	after, _ := json.Marshal(table)
+	if len(after) >= len(before) {
+		t.Fatalf("ETF facts not bounded: %d -> %d", len(before), len(after))
+	}
+	columns := table["columns"].([]string)
+	for _, item := range table["rows"].([]any) {
+		row := item.(map[string]any)
+		symbol := row["symbol"].(string)
+		values := row["values"].([]any)
+		for i, name := range columns {
+			value := values[i]
+			switch name {
+			case "price":
+				if value != 4.0 {
+					t.Fatal("numeric fact changed", symbol, value)
+				}
+			case "etf.direction.technical":
+				technical := value.(map[string]any)
+				if _, ok := technical["metrics"]; ok || len(technical) != 3 {
+					t.Fatalf("technical metrics not bounded: %v", technical)
+				}
+			case "etf.holdings":
+				groups := value.([]any)
+				if len(groups) != 2 {
+					t.Fatalf("holding groups not bounded: %d", len(groups))
+				}
+				if items := groups[0].(map[string]any)["items"].([]any); len(items) != 3 {
+					t.Fatalf("holding items not bounded: %d", len(items))
+				}
+			case "etf.execution_blockers":
+				if list := value.([]any); len(list) != 1 {
+					t.Fatalf("execution blockers not bounded: %v", list)
+				}
+			}
+		}
+	}
+}
+
+func TestETFHeavyCapacityDossierFitsEvidenceBudget(t *testing.T) {
+	job := fixtureJob()
+	job.Results = nil
+	request := job.Source.Request
+	request.Holdings = nil
+	for i := 0; i < 8; i++ {
+		result := etfCapacityFixture(fmt.Sprintf("51030%d.SH", i))
+		job.Results = append(job.Results, result)
+		request.Holdings = append(request.Holdings, result.Holding)
+	}
+	job.Source.Request = request
+	dossier := commonDossier(job, job.Results, 0)
+	encoded, _ := json.Marshal(dossier)
+	if len(encoded) > 32*1024 {
+		t.Fatalf("eight researched ETFs still need %d bytes of evidence", len(encoded))
+	}
+	prompt, err := proposalPrompt(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prompt) > MaxEvidenceModelPromptBytes {
+		t.Fatalf("ETF-heavy prompt still %d bytes", len(prompt))
 	}
 }
