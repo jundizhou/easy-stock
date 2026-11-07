@@ -6,7 +6,7 @@
 
 <p align="center"><strong>从行情与题材，到个股研究、持仓巡检与 AI 持仓优化</strong></p>
 
-<p align="center"><sub><a href="./README_EN.md">English</a> | 简体中文</sub></p>
+<p align="center"><sub><a href="./README_EN.md">English</a> | 简体中文 | <a href="./README_JA.md">日本語</a></sub></p>
 
 <p align="center">
   让 AI 看懂市场，让每一次判断都有证据。<br />

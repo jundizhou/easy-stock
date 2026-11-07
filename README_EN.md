@@ -6,7 +6,7 @@
 
 <p align="center"><strong>A local-first desktop workbench for market discovery, stock research, portfolio inspection, and AI portfolio optimization</strong></p>
 
-<p align="center"><sub>English | <a href="./README.md">简体中文</a></sub></p>
+<p align="center"><sub>English | <a href="./README.md">简体中文</a> | <a href="./README_JA.md">日本語</a></sub></p>
 
 <p align="center">
   Let AI actually understand the market — and make every judgment traceable to evidence.<br />
