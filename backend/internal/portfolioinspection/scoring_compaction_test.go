@@ -35,6 +35,20 @@ func (g *compactTestGateway) Prompt(ctx context.Context, prompt string) (agent.P
 		case "oversized":
 			data, _ := json.Marshal(map[string]string{"summary": strings.Repeat("风", compactionSummaryBytes)})
 			return agent.PromptResult{Content: string(data)}, nil
+		case "bare":
+			return agent.PromptResult{Content: strings.Repeat("已核验原报告片段与来源，风险待查原研究。", 6)}, nil
+		case "slightly_over":
+			limit := compactionSummaryBytes
+			if _, budget, ok := strings.Cut(prompt, "summary字符串的JSON编码不得超过"); ok {
+				_, _ = fmt.Sscanf(budget, "%d字节", &limit)
+			}
+			n := limit * 11 / 10 / 3
+			data, _ := json.Marshal(map[string]string{"summary": strings.Repeat("风", n)})
+			return agent.PromptResult{Content: string(data)}, nil
+		case "invalid_first_chunk":
+			if len(g.prompts) <= 2 {
+				return agent.PromptResult{Content: `{}`}, nil
+			}
 		case "large_summaries":
 			if !strings.Contains(prompt, `"fragment_is_summary":true`) {
 				data, _ := json.Marshal(map[string]string{"summary": strings.Repeat("风", 1800)})
@@ -591,5 +605,46 @@ func TestInvalidSummaryGetsOnlyOneFormatRepair(t *testing.T) {
 				t.Fatalf("wrong bounded repair behavior: %v calls=%d", err, len(g.prompts))
 			}
 		})
+	}
+}
+
+func TestCompactionAcceptsBareAndSlightlyOversizedSummaries(t *testing.T) {
+	for _, mode := range []string{"bare", "slightly_over"} {
+		t.Run(mode, func(t *testing.T) {
+			g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: mode}
+			s := NewService(nil, g, nil, nil)
+			defer s.Close()
+			r := &compactionRunner{service: s, ctx: context.Background(), budget: aggregationBudgetFor(time.Minute, ""), summaryBytes: 2328}
+			summary, err := r.summarize(PortfolioAssetCard{Symbol: "513820.SH"}, map[string]any{"counter": strings.Repeat("风险资料。", 2000)})
+			if err != nil {
+				t.Fatalf("usable summary was rejected: %v", err)
+			}
+			if !validCompactionSummaryWithin(summary, 2328) {
+				t.Fatalf("summary exceeds the chunk budget: %d bytes", len(summary))
+			}
+			if len(g.prompts) != 1 {
+				t.Fatalf("usable first answer still cost %d calls", len(g.prompts))
+			}
+		})
+	}
+}
+
+func TestUnusableSummaryDegradesToStagedEvidence(t *testing.T) {
+	req, results, metrics, rules, at := oversizedResearchFixture(2)
+	input := buildCompactScoringInput(req, results, metrics, rules, at)
+	g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: "invalid_first_chunk"}
+	s := NewService(nil, g, nil, nil)
+	defer s.Close()
+	got, err := s.compactScoringEvidence(context.Background(), input, aggregationBudgetFor(time.Minute, ""), "评估规则")
+	if err != nil {
+		t.Fatalf("one uncompactable holding failed the inspection: %v", err)
+	}
+	if len(got.StageCoverage) != len(input.Holdings) {
+		t.Fatalf("did not fall back to the staged path: coverage=%d", len(got.StageCoverage))
+	}
+	for i, card := range got.Holdings {
+		if card.CompactedResearch == "" {
+			t.Fatalf("holding %d lost its staged summary", i)
+		}
 	}
 }
