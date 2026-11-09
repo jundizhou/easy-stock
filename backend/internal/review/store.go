@@ -52,6 +52,16 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS review_journals (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			entry_date TEXT NOT NULL,
+			content TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS review_journals_date ON review_journals(entry_date DESC, updated_at DESC, id);
 		CREATE TABLE IF NOT EXISTS review_schedule_state (key TEXT PRIMARY KEY, content_json TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS review_summary_checkpoints (
 			input_digest TEXT PRIMARY KEY,

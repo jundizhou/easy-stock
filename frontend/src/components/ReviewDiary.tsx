@@ -34,6 +34,7 @@ import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
 import { applyTheme } from '../lib/theme';
 import { validationResultMessage } from '../lib/review-validation';
 import { confirmDialog } from './ConfirmDialog';
+import { PersonalReviewJournal } from './PersonalReviewJournal';
 
 type Props = {
 	config: BackendConfig | null;
@@ -47,6 +48,7 @@ type SummaryWindowDraft = { start: string; end: string };
 
 const sourceTabs: Array<{ id: string; name: string }> = [
 	{ id: 'all', name: '全部' },
+	{ id: 'personal', name: '我的复盘日记' },
 	{ id: 'official', name: '每日复盘' },
 	{ id: 'xueqiu', name: '雪球' },
 	{ id: 'taoguba', name: '淘股吧' },
@@ -83,6 +85,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	const [storedDailyValidation, setDailyValidation] = useState<ReviewDailyValidation | null>(null);
 	const [storedDailyValidationJob, setDailyValidationJob] = useState<ReviewDailyValidationJob | null>(null);
 	const [reviewView, setReviewView] = useState<ReviewView>('library');
+	const personalActive = reviewView === 'library' && activeSource === 'personal';
 	const [summarizingDaily, setSummarizingDaily] = useState(false);
 	const [validatingDaily, setValidatingDaily] = useState(false);
 	const [loadingSummaryWindow, setLoadingSummaryWindow] = useState(false);
@@ -98,7 +101,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	validationDateRef.current = validationSummaryDate;
 
 	const loadDiary = useCallback(async () => {
-		if (!config) return;
+		if (!config || activeSource === 'personal') return;
 		setState('loading');
 		setError('');
 		const params = new URLSearchParams({ limit: '80' });
@@ -485,6 +488,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	return (
 		<section className="review-diary">
 			{summaryWindow && <SummaryWindowDialog value={summaryWindow} onChange={setSummaryWindow} onClose={() => setSummaryWindow(null)} onConfirm={confirmSummaryWindow} submitting={summarizingDaily} />}
+			{!personalActive && <>
 			<header className="review-hero">
 				<div>
 					<div className="eyebrow">TRADER REVIEW JOURNAL</div>
@@ -504,6 +508,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 			</header>
 
 			<ReviewSchedulePanel config={config} onOpenSettings={onOpenNotificationSettings} onView={(start) => viewSavedSummary(toDateTimeLocal(new Date(start)).slice(0, 10))} />
+			</>}
 
 			<nav className="review-view-tabs" aria-label="复盘日记视图">
 				<button type="button" className={reviewView === 'library' ? 'active' : ''} onClick={() => setReviewView('library')}><BookOpen size={16} /><span><strong>原文资料</strong><small>{total} 篇本地文章</small></span></button>
@@ -512,6 +517,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 				<button type="button" className={reviewView === 'authors' ? 'active' : ''} onClick={() => setReviewView('authors')}><Users size={16} /><span><strong>作者观点</strong><small>{visibleDailySummary?.author_views?.length || 0} 位作者观点卡</small></span></button>
 			</nav>
 
+			{!personalActive && <>
 			<ReviewSummaryHistory {...summaryHistory} onSelect={viewSavedSummary} onPage={summaryHistory.setOffset} onRetry={summaryHistory.refresh} />
 
 			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { viewSavedSummary(dailySummaryJob.trade_date); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => { const fallback = fallbackSummaryWindow(); setSummaryWindow({ start: dailySummaryJob.window_start ? toDateTimeLocal(new Date(dailySummaryJob.window_start)) : fallback.start, end: dailySummaryJob.window_end ? toDateTimeLocal(new Date(dailySummaryJob.window_end)) : fallback.end }); }} />}
@@ -519,6 +525,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 
 			{error && <div className="review-error"><ShieldAlert size={16} /><span>{error}</span>{!isWechatListUnavailableMessage(error) && <button type="button" onClick={() => void loadDiary()}>刷新页面</button>}</div>}
 			{notice && <div className="review-notice"><Sparkles size={15} /><span>{notice}</span></div>}
+			</>}
 
 			{(reviewView === 'summary' || reviewView === 'authors') && summaryHistory.loadingSummary && <div className="review-empty" role="status"><RefreshCw className="spin" size={20} /><strong>正在读取已保存的复盘…</strong></div>}
 			{reviewView === 'summary' && !summaryHistory.loadingSummary && (visibleDailySummary
@@ -543,6 +550,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 					</nav>
 				</div>
 
+				{activeSource === 'personal' ? <PersonalReviewJournal config={config} refreshKey={refreshKey} /> : <>
 				<details className="review-automation" open={subscriptionsExpanded} onToggle={(event) => setSubscriptionsExpanded(event.currentTarget.open)}>
 					<summary><span><RadioTower size={16} /><strong>自动订阅与每日同步</strong><small>{subscriptions.filter((sub) => sub.source !== 'wechat').length ? `${subscriptions.filter((sub) => sub.source !== 'wechat').length} 个主页 · 后台定时检查` : '添加大V主页后，系统会每天自动获取新文章'}</small></span><button type="button" disabled={!subscriptions.some((sub) => sub.source !== 'wechat') || !!syncing} onClick={(event) => { event.preventDefault(); void syncSubscriptions(); }}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></summary>
 					<div className="review-automation-body">
@@ -601,6 +609,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 					</> : <div className="review-reader-empty"><BookOpen size={28} /><strong>选择一篇复盘开始阅读</strong><span>文章正文只展示经过清洗的纯文本，原始页面可通过“查看原文”打开。</span></div>}
 				</article>
 				</div>
+				</>}
 			</>}
 		</section>
 	);
