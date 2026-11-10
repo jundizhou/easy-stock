@@ -28,6 +28,8 @@ func (g *compactTestGateway) Prompt(ctx context.Context, prompt string) (agent.P
 			return agent.PromptResult{}, errors.New("provider failed")
 		case "invalid":
 			return agent.PromptResult{Content: `{}`}, nil
+		case "wrapped_error":
+			return agent.PromptResult{Content: `以下是压缩失败的原因，请检查原研究是否完整：{"error":"无法读取输入资料"}`}, nil
 		case "invalid_once":
 			if len(g.prompts) == 1 {
 				return agent.PromptResult{Content: `{}`}, nil
@@ -37,13 +39,17 @@ func (g *compactTestGateway) Prompt(ctx context.Context, prompt string) (agent.P
 			return agent.PromptResult{Content: string(data)}, nil
 		case "bare":
 			return agent.PromptResult{Content: strings.Repeat("已核验原报告片段与来源，风险待查原研究。", 6)}, nil
-		case "slightly_over":
+		case "slightly_over", "unsafe_over":
 			limit := compactionSummaryBytes
 			if _, budget, ok := strings.Cut(prompt, "summary字符串的JSON编码不得超过"); ok {
 				_, _ = fmt.Sscanf(budget, "%d字节", &limit)
 			}
-			n := limit * 11 / 10 / 3
-			data, _ := json.Marshal(map[string]string{"summary": strings.Repeat("风", n)})
+			unit := "风险须核验。"
+			if g.failure == "unsafe_over" {
+				unit = "原研究仍须核验，"
+			}
+			n := (limit*11/10 - 2) / len(unit)
+			data, _ := json.Marshal(map[string]string{"summary": strings.Repeat(unit, n)})
 			return agent.PromptResult{Content: string(data)}, nil
 		case "invalid_first_chunk":
 			if len(g.prompts) <= 2 {
@@ -297,7 +303,7 @@ func TestScoringCompactsEightOversizedHoldingsAndPreservesCatalogs(t *testing.T)
 }
 
 func TestCompactionFailureDoesNotPublishScore(t *testing.T) {
-	for _, mode := range []string{"provider", "invalid", "oversized"} {
+	for _, mode := range []string{"provider", "invalid", "wrapped_error", "unsafe_over", "oversized"} {
 		t.Run(mode, func(t *testing.T) {
 			req, results, metrics, rules, at := oversizedResearchFixture(8)
 			g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: mode}
@@ -590,7 +596,7 @@ func TestResumeOversizedDraftCanRestartWithinExistingAttempt(t *testing.T) {
 }
 
 func TestInvalidSummaryGetsOnlyOneFormatRepair(t *testing.T) {
-	for _, mode := range []string{"invalid_once", "invalid", "provider", "large_summaries"} {
+	for _, mode := range []string{"invalid_once", "invalid", "wrapped_error", "unsafe_over", "provider", "large_summaries"} {
 		t.Run(mode, func(t *testing.T) {
 			g := &compactTestGateway{scoreGateway: &scoreGateway{}, failure: mode}
 			s := NewService(nil, g, nil, nil)

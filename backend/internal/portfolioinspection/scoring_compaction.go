@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	compactionVersion         = "portfolio-compaction-v3"
+	compactionVersion         = "portfolio-compaction-v4"
 	compactionChunkBytes      = 32 * 1024
 	compactionSummaryBytes    = 6 * 1024
 	compactionMinSummaryBytes = 512
@@ -164,28 +164,30 @@ func decodeCompactionSummary(content string) (string, bool) {
 	if text == "" {
 		return "", false
 	}
+	var plain string
+	quoted := json.Unmarshal([]byte(text), &plain) == nil
+	if quoted {
+		// Apply the same structure checks to JSON strings so quoting an error
+		// object does not turn it into usable research.
+		text = trimCodeFence(plain)
+		if text == "" {
+			return "", false
+		}
+	}
 	var object struct {
 		Summary string `json:"summary"`
 	}
 	if decodeJSONObject(text, &object) == nil {
-		if summary := strings.TrimSpace(object.Summary); summary != "" {
-			return summary, true
-		}
-	}
-	var plain string
-	if json.Unmarshal([]byte(text), &plain) == nil {
-		if summary := strings.TrimSpace(plain); summary != "" {
-			return summary, true
-		}
+		summary := strings.TrimSpace(object.Summary)
+		return summary, summary != ""
 	}
 	// A JSON-shaped answer without a usable summary is a failed attempt, not
-	// prose. Unlabelled text is the summary itself unless it is too short to
-	// say anything about the chunk.
+	// prose, including malformed objects preceded by an explanatory sentence.
 	trimmed := strings.TrimLeft(text, " \t\r\n")
-	if json.Valid([]byte(text)) || strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+	if json.Valid([]byte(text)) || strings.ContainsAny(text, "{}") || strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "\"") {
 		return "", false
 	}
-	if utf8.RuneCountInString(trimmed) < compactionBareSummaryRunes {
+	if !quoted && utf8.RuneCountInString(trimmed) < compactionBareSummaryRunes {
 		return "", false
 	}
 	return trimmed, true
@@ -204,7 +206,7 @@ func clampCompactionSummary(summary string, limit int) (string, bool) {
 	}
 	marker := compactionTruncatedMarker
 	if !validCompactionSummaryWithin(marker, limit) {
-		marker = ""
+		return "", false
 	}
 	runes := []rune(summary)
 	lo, hi := 0, len(runes)
@@ -219,23 +221,23 @@ func clampCompactionSummary(summary string, limit int) (string, bool) {
 	if lo == 0 {
 		return "", false
 	}
-	n := lo
-	for i := n - 1; i >= n*3/4; i-- {
+	// Require a sentence or line boundary while retaining most of the summary;
+	// otherwise let repair/staging handle it instead of slicing evidence text.
+	n := 0
+	for i := lo - 1; i >= lo*3/4; i-- {
 		if strings.ContainsRune("。！？；\n", runes[i]) {
 			n = i + 1
 			break
 		}
 	}
+	if n == 0 {
+		return "", false
+	}
 	trimmed := strings.TrimSpace(string(runes[:n]))
 	if trimmed == "" {
 		return "", false
 	}
-	if marker != "" {
-		trimmed += marker
-	}
-	if !validCompactionSummaryWithin(trimmed, limit) {
-		trimmed = strings.TrimSpace(string(runes[:lo]))
-	}
+	trimmed += marker
 	if !validCompactionSummaryWithin(trimmed, limit) {
 		return "", false
 	}
