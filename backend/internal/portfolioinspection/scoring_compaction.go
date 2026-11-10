@@ -8,12 +8,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"easy-stock/backend/internal/agent"
 )
 
 const (
-	compactionVersion         = "portfolio-compaction-v3"
+	compactionVersion         = "portfolio-compaction-v5"
 	compactionChunkBytes      = 32 * 1024
 	compactionSummaryBytes    = 6 * 1024
 	compactionMinSummaryBytes = 512
@@ -84,31 +85,178 @@ func (r *compactionRunner) summarizeChunk(chunk compactionChunk) (string, error)
 		r.progress(fmt.Sprintf("正在压缩 %s 的研究资料，已完成 %d 段（复用 %d 段摘要）", chunk.Symbol, r.completed, r.reused))
 		prompt := base
 		if attempt > 0 {
-			prompt += fmt.Sprintf("\n上次摘要为空、格式无效或过长。请重新提炼，严格仅返回summary字符串，控制在%d汉字以内，仍须满足上述JSON字节预算。", characters*2/3)
+			prompt += fmt.Sprintf("\n上次返回为空、不是合法JSON对象或摘要过长。请重新提炼，只输出一个JSON对象{\"summary\":\"摘要\"}，不要输出任何其他文字，摘要控制在%d汉字以内，仍须满足上述JSON字节预算。", characters*2/3)
 		}
 		callCtx, cancelCall := context.WithTimeout(r.ctx, r.budget.StageTimeout)
 		callCtx = agent.WithCallTrace(callCtx, agent.CallTrace{NodeID: "compact", AttemptID: fmt.Sprint(r.calls + 1), ProtocolVersion: compactionVersion})
-		response, err := agent.PromptUsingOptions(callCtx, r.service.gateway, prompt, agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, FirstResponseTimeout: r.budget.ResponseTimeout, IdleTimeout: r.budget.ResponseTimeout, MaxAttempts: 1})
+		response, err := agent.PromptUsingOptions(callCtx, r.service.gateway, prompt, agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, ReasoningEffortCap: "low", FirstResponseTimeout: r.budget.ResponseTimeout, IdleTimeout: r.budget.ResponseTimeout, MaxAttempts: 1})
 		cancelCall()
 		r.calls++
 		if err != nil {
 			return "", fmt.Errorf("组合研究自动压缩失败，原研究已保留：%w", err)
 		}
-		var decoded struct {
-			Summary string `json:"summary"`
-		}
-		if decodeJSONObject(response.Content, &decoded) != nil || !validCompactionSummaryWithin(decoded.Summary, limit) {
+		summary, reason := normalizeCompactionSummary(response.Content, limit)
+		if summary == "" {
+			r.rejected(chunk.Symbol, attempt, reason, len(response.Content))
 			continue
 		}
 		if cacheable && r.hooks.save != nil {
-			if err := r.hooks.save(r.ctx, digest, decoded.Summary); err != nil {
+			if err := r.hooks.save(r.ctx, digest, summary); err != nil {
 				return "", fmt.Errorf("保存组合压缩检查点失败：%w", err)
 			}
 		}
 		r.completed++
-		return decoded.Summary, nil
+		return summary, nil
 	}
-	return "", errors.New("组合研究摘要两次未通过格式或长度校验，原研究已保留，请重试")
+	return "", errSummaryRejected
+}
+
+// unusableSummaryError marks a chunk whose model answer this run could not
+// turn into a budgeted summary. Callers may degrade to the staged path, but
+// the message stays user-facing if nothing else can be produced.
+type unusableSummaryError struct{ message string }
+
+func (e *unusableSummaryError) Error() string { return e.message }
+
+var (
+	errSummaryRejected     = &unusableSummaryError{message: "组合研究摘要两次未通过格式或长度校验，原研究已保留，请重试"}
+	errSummaryNotShrinking = &unusableSummaryError{message: "组合研究摘要未能进一步缩小，原研究已保留"}
+)
+
+const (
+	compactionTruncatedMarker  = "……（摘要已截断）"
+	compactionClampSlack       = 512 // A summary this close to the budget is trimmed, not discarded.
+	compactionBareSummaryRunes = 24  // Shorter unlabelled text is an apology, not a summary.
+)
+
+func (r *compactionRunner) rejected(symbol string, attempt int, reason string, responseBytes int) {
+	if r.service == nil || r.service.logger == nil {
+		return
+	}
+	r.service.logger.Printf("level=warn event=portfolio_scoring_compaction_rejected feature=portfolio-inspection symbol=%s attempt=%d reason=%s response_bytes=%d", symbol, attempt+1, reason, responseBytes)
+}
+
+// normalizeCompactionSummary turns a model answer into a summary that fits the
+// chunk budget. It returns a reason when the answer is unusable so repeated
+// failures can be diagnosed from the log instead of only counted.
+func normalizeCompactionSummary(content string, limit int) (string, string) {
+	summary, ok := decodeCompactionSummary(content)
+	if !ok {
+		return "", "no_summary"
+	}
+	summary = strings.TrimSpace(summary)
+	if validCompactionSummaryWithin(summary, limit) {
+		return summary, ""
+	}
+	clamped, ok := clampCompactionSummary(summary, limit)
+	if !ok {
+		return "", "over_limit"
+	}
+	return clamped, ""
+}
+
+// decodeCompactionSummary extracts the summary from a model response. The
+// prompt asks for {"summary":"..."}; a model that answers with the string
+// alone, wraps it in a code fence, or adds a sentence around the object has
+// still produced usable content, and rejecting it only burns another call.
+func decodeCompactionSummary(content string) (string, bool) {
+	text := trimCodeFence(content)
+	if text == "" {
+		return "", false
+	}
+	var plain string
+	quoted := json.Unmarshal([]byte(text), &plain) == nil
+	if quoted {
+		// Apply the same structure checks to JSON strings so quoting an error
+		// object does not turn it into usable research.
+		text = trimCodeFence(plain)
+		if text == "" {
+			return "", false
+		}
+	}
+	var object struct {
+		Summary string `json:"summary"`
+	}
+	if decodeJSONObject(text, &object) == nil {
+		summary := strings.TrimSpace(object.Summary)
+		return summary, summary != ""
+	}
+	// A JSON-shaped answer without a usable summary is a failed attempt, not
+	// prose, including malformed objects preceded by an explanatory sentence.
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	if json.Valid([]byte(text)) || strings.ContainsAny(text, "{}") || strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "\"") {
+		return "", false
+	}
+	if !quoted && utf8.RuneCountInString(trimmed) < compactionBareSummaryRunes {
+		return "", false
+	}
+	return trimmed, true
+}
+
+// clampCompactionSummary keeps a modestly oversized summary by trimming it at
+// a sentence boundary. A grossly oversized answer means the model ignored the
+// budget, so it is still rejected rather than silently gutted.
+func clampCompactionSummary(summary string, limit int) (string, bool) {
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		return "", false
+	}
+	if len(encoded) > limit+max(compactionClampSlack, limit/4) {
+		return "", false
+	}
+	marker := compactionTruncatedMarker
+	if !validCompactionSummaryWithin(marker, limit) {
+		return "", false
+	}
+	runes := []rune(summary)
+	lo, hi := 0, len(runes)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if validCompactionSummaryWithin(string(runes[:mid])+marker, limit) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	if lo == 0 {
+		return "", false
+	}
+	// Require a sentence or line boundary while retaining most of the summary;
+	// otherwise let repair/staging handle it instead of slicing evidence text.
+	n := 0
+	for i := lo - 1; i >= lo*3/4; i-- {
+		if strings.ContainsRune("。！？；\n", runes[i]) {
+			n = i + 1
+			break
+		}
+	}
+	if n == 0 {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(string(runes[:n]))
+	if trimmed == "" {
+		return "", false
+	}
+	trimmed += marker
+	if !validCompactionSummaryWithin(trimmed, limit) {
+		return "", false
+	}
+	return trimmed, true
+}
+
+func trimCodeFence(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "```") {
+		return text
+	}
+	if newline := strings.IndexByte(text, '\n'); newline >= 0 {
+		text = text[newline+1:]
+	} else {
+		return text
+	}
+	text = strings.TrimSpace(text)
+	text = strings.TrimSuffix(text, "```")
+	return strings.TrimSpace(text)
 }
 
 func (r *compactionRunner) summarize(card PortfolioAssetCard, value any) (string, error) {
@@ -136,7 +284,7 @@ func (r *compactionRunner) summarize(card PortfolioAssetCard, value any) (string
 			return "", err
 		}
 		if merging && len(data) >= previousBytes {
-			return "", errors.New("组合研究摘要未能进一步缩小，原研究已保留")
+			return "", errSummaryNotShrinking
 		}
 		previousBytes = len(data)
 		value, merging = map[string]any{"summaries": summaries}, true
@@ -243,6 +391,13 @@ func (s *Service) compactScoringEvidence(ctx context.Context, input compactScori
 		original := input.Holdings[candidate.index]
 		summary, err := runner.summarize(original, candidate.research)
 		if err != nil {
+			var unusable *unusableSummaryError
+			if errors.As(err, &unusable) && ctx.Err() == nil {
+				// One holding that will not compress must not fail the whole
+				// inspection: the staged path gives every holding its own
+				// budget and keeps the original reports authoritative.
+				return s.stageScoringEvidence(originalInput, runner, instructions)
+			}
 			return input, err
 		}
 		card := compactionCardSkeleton(original)
