@@ -28,7 +28,6 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
 import { ReviewSchedulePanel } from './ReviewSchedulePanel';
-import { ReviewSummaryHistory } from './ReviewSummaryHistory';
 import { useReviewSummaryHistory } from '../lib/use-review-summary-history';
 import { PortfolioTomorrowExpectation } from './PortfolioTomorrowExpectation';
 import { applyTheme } from '../lib/theme';
@@ -60,7 +59,6 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	const [authors, setAuthors] = useState<ReviewAuthor[]>([]);
 	const [posts, setPosts] = useState<ReviewPost[]>([]);
 	const [subscriptions, setSubscriptions] = useState<ReviewSubscription[]>([]);
-	const [subscriptionsExpanded, setSubscriptionsExpanded] = useState(true);
 	const [reviewProfiles, setReviewProfiles] = useState<ReviewAutomationProfile[]>([]);
 	const [total, setTotal] = useState(0);
 	const [activeSource, setActiveSource] = useState('all');
@@ -507,7 +505,19 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 				</div>
 			</header>
 
-			<ReviewSchedulePanel config={config} onOpenSettings={onOpenNotificationSettings} onView={(start) => viewSavedSummary(toDateTimeLocal(new Date(start)).slice(0, 10))} />
+			<ReviewSchedulePanel config={config} onOpenSettings={onOpenNotificationSettings} onView={(start) => viewSavedSummary(toDateTimeLocal(new Date(start)).slice(0, 10))} subscriptionCount={subscriptions.filter((sub) => sub.source !== 'wechat').length}>
+				<section className="review-automation-subscriptions" aria-label="复盘内容订阅">
+					<header><strong><RadioTower size={15} />内容订阅</strong><span>{subscriptions.filter((sub) => sub.source !== 'wechat').length} 个主页 · 每日自动同步</span><button type="button" disabled={!subscriptions.some((sub) => sub.source !== 'wechat') || !!syncing} onClick={() => void syncSubscriptions()}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></header>
+					<form className="review-subscription-form" onSubmit={addSubscription}>
+						<label><span>订阅平台</span><select aria-label="订阅平台" value={subscriptionSource} onChange={(event) => setSubscriptionSource(event.target.value)}><option value="xueqiu">雪球</option><option value="taoguba">淘股吧</option></select></label>
+						<label><span>采集配置</span><select value={subscriptionConfigID} onChange={(event) => setSubscriptionConfigID(event.target.value)} aria-label="采集配置">{reviewProfiles.filter((profile) => profile.source === subscriptionSource).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label>
+						<label><span>作者名称</span><input aria-label="订阅作者名称" value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder="作者名称（可选）" /></label>
+						<label><span>主页地址</span><input aria-label="大V主页地址" value={homepageURL} onChange={(event) => setHomepageURL(event.target.value)} placeholder="粘贴大V主页地址" /></label>
+						<button type="submit" disabled={!homepageURL.trim() || !subscriptionConfigID || savingSubscription}>{savingSubscription ? <RefreshCw className="spin" size={14} /> : <Plus size={14} />}添加订阅</button>
+					</form>
+					<div className="review-subscription-list">{subscriptions.map((sub) => <div key={sub.id}><span className={`author-avatar ${sub.source}`}>{sub.name.slice(0, 1)}</span><span><strong>{sub.name}</strong><small>{sourceLabel(sub.source)} · {sub.source === 'wechat' ? '旧订阅已停用，请通过链接导入文章' : `${reviewProfiles.find((profile) => profile.id === sub.config_id)?.name || '默认配置'} · ${sub.last_sync_at ? `上次 ${formatDateTime(sub.last_sync_at)}` : '等待首次同步'}`}{sub.last_error ? ` · ${sub.last_error}` : ''}</small></span><i className={`source-dot ${sub.source === 'wechat' ? 'limited' : sub.last_status === 'ok' ? 'ready' : sub.last_status === 'error' ? 'limited' : 'experimental'}`} /><button type="button" title="立即同步该主页" disabled={!!syncing || sub.source === 'wechat'} onClick={() => void syncSubscriptions(sub.id)}>{syncing === sub.id ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}</button><button type="button" title="删除订阅" onClick={() => void deleteSubscription(sub.id)}><Trash2 size={14} /></button></div>)}</div>
+				</section>
+			</ReviewSchedulePanel>
 			</>}
 
 			<nav className="review-view-tabs" aria-label="复盘日记视图">
@@ -518,8 +528,6 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 			</nav>
 
 			{!personalActive && <>
-			<ReviewSummaryHistory {...summaryHistory} onSelect={viewSavedSummary} onPage={summaryHistory.setOffset} onRetry={summaryHistory.refresh} />
-
 			{dailySummaryJob && dailySummaryJob.status !== 'idle' && <DailySummaryJobPanel job={dailySummaryJob} onView={() => { viewSavedSummary(dailySummaryJob.trade_date); window.setTimeout(() => document.getElementById('daily-viewpoint-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); }} onRetry={() => { const fallback = fallbackSummaryWindow(); setSummaryWindow({ start: dailySummaryJob.window_start ? toDateTimeLocal(new Date(dailySummaryJob.window_start)) : fallback.start, end: dailySummaryJob.window_end ? toDateTimeLocal(new Date(dailySummaryJob.window_end)) : fallback.end }); }} />}
 			{dailyValidationJob && ['running', 'succeeded', 'failed'].includes(dailyValidationJob.status) && <DailyValidationJobPanel job={dailyValidationJob} onView={() => void openDailyValidation()} onRetry={() => void startDailyValidation(true)} />}
 
@@ -551,20 +559,7 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 				</div>
 
 				{activeSource === 'personal' ? <PersonalReviewJournal config={config} refreshKey={refreshKey} /> : <>
-				<details className="review-automation" open={subscriptionsExpanded} onToggle={(event) => setSubscriptionsExpanded(event.currentTarget.open)}>
-					<summary><span><RadioTower size={16} /><strong>自动订阅与每日同步</strong><small>{subscriptions.filter((sub) => sub.source !== 'wechat').length ? `${subscriptions.filter((sub) => sub.source !== 'wechat').length} 个主页 · 后台定时检查` : '添加大V主页后，系统会每天自动获取新文章'}</small></span><button type="button" disabled={!subscriptions.some((sub) => sub.source !== 'wechat') || !!syncing} onClick={(event) => { event.preventDefault(); void syncSubscriptions(); }}>{syncing === 'all' ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}立即同步</button></summary>
-					<div className="review-automation-body">
-						<div className="review-wechat-import-hint"><FileInput size={16} /><span><strong>微信公众号仅支持链接导入</strong><small>将具体文章链接粘贴到上方“导入文章”；不提供公众号自动订阅。</small></span></div>
-						<form className="review-subscription-form" onSubmit={addSubscription}>
-							<select value={subscriptionSource} onChange={(event) => setSubscriptionSource(event.target.value)}><option value="xueqiu">雪球</option><option value="taoguba">淘股吧</option></select>
-							<select value={subscriptionConfigID} onChange={(event) => setSubscriptionConfigID(event.target.value)} aria-label="采集配置">{reviewProfiles.filter((profile) => profile.source === subscriptionSource).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select>
-							<input value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder="作者名称（可选）" />
-							<input value={homepageURL} onChange={(event) => setHomepageURL(event.target.value)} placeholder="粘贴大V主页地址" />
-							<button type="submit" disabled={!homepageURL.trim() || !subscriptionConfigID || savingSubscription}>{savingSubscription ? <RefreshCw className="spin" size={14} /> : <Plus size={14} />}添加订阅</button>
-						</form>
-						<div className="review-subscription-list">{subscriptions.map((sub) => <div key={sub.id}><span className={`author-avatar ${sub.source}`}>{sub.name.slice(0, 1)}</span><span><strong>{sub.name}</strong><small>{sourceLabel(sub.source)} · {sub.source === 'wechat' ? '旧订阅已停用，请通过链接导入文章' : `${reviewProfiles.find((profile) => profile.id === sub.config_id)?.name || '默认配置'} · ${sub.last_sync_at ? `上次 ${formatDateTime(sub.last_sync_at)}` : '等待首次同步'}`}{sub.last_error ? ` · ${sub.last_error}` : ''}</small></span><i className={`source-dot ${sub.source === 'wechat' ? 'limited' : sub.last_status === 'ok' ? 'ready' : sub.last_status === 'error' ? 'limited' : 'experimental'}`} /><button type="button" title="立即同步该主页" disabled={!!syncing || sub.source === 'wechat'} onClick={() => void syncSubscriptions(sub.id)}>{syncing === sub.id ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}</button><button type="button" title="删除订阅" onClick={() => void deleteSubscription(sub.id)}><Trash2 size={14} /></button></div>)}</div>
-					</div>
-				</details>
+
 
 				<div className="review-layout">
 				<aside className="review-author-rail">
