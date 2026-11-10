@@ -15,6 +15,8 @@
 
 <p align="center">
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><strong>Download</strong></a> ·
+  <a href="https://gitee.com/zhoujundi/easy-stock"><strong>Gitee Source Mirror</strong></a> ·
+  <a href="./docs/downloads.md">Download Guide (Chinese)</a> ·
   <a href="#why-easy-stock">Why</a> ·
   <a href="#core-features">Core Features</a> ·
   <a href="#how-ai-augments-a-share-research">How AI Helps</a> ·
@@ -34,6 +36,7 @@
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
   <a href="https://github.com/jundizhou/easy-stock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jundizhou/easy-stock?style=flat" /></a>
+  <a href="https://gitee.com/zhoujundi/easy-stock"><img alt="Gitee stars" src="https://gitee.com/zhoujundi/easy-stock/badge/star.svg?theme=dark" /></a>
 </p>
 
 ---
@@ -308,6 +311,8 @@ Stock research saves stage checkpoints and can resume when model configuration a
 ### Users
 
 No Node.js, Go, or Python required. Grab the installer or archive for your OS from [GitHub Releases](https://github.com/jundizhou/easy-stock/releases/latest).
+
+Browse or clone the source through the [Gitee mirror](https://gitee.com/zhoujundi/easy-stock). [Gitee releases](https://gitee.com/zhoujundi/easy-stock/releases) provide mirrored release notes and links to the corresponding installers; desktop installers and automatic updates are distributed through GitHub Releases. See the [download guide (Chinese)](./docs/downloads.md) for platform selection, installation, and checksum verification.
 
 For first-time setup (LLM API keys, Xueqiu/TaoGuba login for content sync), see the [User Guide](./docs/user-guide.md) (Chinese). To add or enable local skills, see the [Skill Installation Guide](./docs/skill-installation.md) (Chinese).
 

@@ -15,6 +15,8 @@
 
 <p align="center">
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><strong>下载最新版</strong></a> ·
+  <a href="https://gitee.com/zhoujundi/easy-stock"><strong>Gitee 源码镜像</strong></a> ·
+  <a href="./docs/downloads.md">下载与安装说明</a> ·
   <a href="https://qm.qq.com/q/lizlauc32U"><strong>加入 QQ 群</strong></a> ·
   <a href="#核心产品能力">查看核心能力</a> ·
   <a href="https://github.com/jundizhou/easy-stock/issues/new/choose">反馈问题</a> ·
@@ -30,6 +32,7 @@
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
   <a href="https://github.com/jundizhou/easy-stock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jundizhou/easy-stock?style=flat" /></a>
+  <a href="https://gitee.com/zhoujundi/easy-stock"><img alt="Gitee stars" src="https://gitee.com/zhoujundi/easy-stock/badge/star.svg?theme=dark" /></a>
 </p>
 
 <h3 align="center">easy-stock QQ 交流群</h3>
@@ -321,6 +324,8 @@ Go 后端负责行情采集、量化计算、证据组织与任务编排，统�
 ### 1. 用户
 
 无需安装 Node.js、Go 或 Python。前往 [GitHub Releases](https://github.com/jundizhou/easy-stock/releases/latest) 下载适合当前系统的桌面安装包或压缩包。
+
+源码也可通过 [Gitee 镜像](https://gitee.com/zhoujundi/easy-stock) 浏览和克隆。[Gitee 发行版](https://gitee.com/zhoujundi/easy-stock/releases) 提供镜像版本说明及对应安装包链接；桌面安装包与自动更新统一由 GitHub Releases 分发。系统与芯片选择、安装步骤和文件校验见 [下载与安装说明](./docs/downloads.md)。
 
 **从 v1.5.2 及更早版本升级**：v1.5.3 起桌面更新源切换到 GitHub Releases。旧版仍内置 OSS 地址，请从上述页面下载对应系统的 DMG / EXE，退出应用后覆盖安装一次；新版随后通过 GitHub 检查更新。macOS 更新仍需下载 DMG 手动安装，Windows 可在应用内下载并安装更新。
 
