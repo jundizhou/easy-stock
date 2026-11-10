@@ -440,6 +440,10 @@ func TestCompactETFEvidenceBoundsDirectionAndJudgments(t *testing.T) {
 	if direction["primary"].(etfanalysis.DirectionTag).Key != "tech" || direction["trend"] != "mixed" {
 		t.Fatal("direction judgment lost", direction)
 	}
+	availableSources := map[string]bool{}
+	for _, source := range dossier["sources"].([][3]string) {
+		availableSources[source[0]] = true
+	}
 	for key, raw := range etf["judgments"].(map[string]any) {
 		judgment := raw.(map[string]any)
 		if text := judgment["text"].(string); len([]rune(text)) > 31 {
@@ -449,6 +453,102 @@ func TestCompactETFEvidenceBoundsDirectionAndJudgments(t *testing.T) {
 			t.Fatalf("judgment %s sources not bounded: %v", key, ids)
 		} else if ids[0] != "e-news" {
 			t.Fatalf("judgment %s kept an unresolvable source: %v", key, ids)
+		} else if !availableSources[ids[0]] {
+			t.Fatalf("judgment %s source %s missing from final sources: %v", key, ids[0], availableSources)
+		}
+	}
+}
+
+func TestCompactETFStockFactsPreserveHoldingIdentity(t *testing.T) {
+	longName := strings.Repeat("未标准化的境外证券名称", 8)
+	for _, tc := range []struct {
+		name    string
+		holding foundation.ETFHolding
+		want    map[string]any
+	}{
+		{"normalized", foundation.ETFHolding{Symbol: "600519.SH", Code: "600519", Name: "贵州茅台", WeightPercent: 8.5}, map[string]any{"symbol": "600519.SH", "weight_percent": 8.5}},
+		{"hong_kong", foundation.ETFHolding{Code: "00700", Name: "腾讯控股", WeightPercent: 8.5}, map[string]any{"code": "00700", "name": "腾讯控股", "weight_percent": 8.5}},
+		{"overseas", foundation.ETFHolding{Code: "AAPL", Name: longName, WeightPercent: 0}, map[string]any{"code": "AAPL", "name": shortText(longName, 30), "weight_percent": float64(0)}},
+		{"name_only", foundation.ETFHolding{Name: "未确认代码的证券", WeightPercent: 2}, map[string]any{"name": "未确认代码的证券", "weight_percent": float64(2)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := []foundation.ETFHoldings{{Symbol: "513330.SH", AssetType: "equity", ReportDate: "2026-09-30", Items: []foundation.ETFHolding{tc.holding}}}
+			before, _ := json.Marshal(input)
+			compact, ok := compactETFStockFact("etf.holdings", input)
+			if !ok {
+				t.Fatal("holdings were not compacted")
+			}
+			group := compact.([]any)[0].(map[string]any)
+			item := group["items"].([]any)[0].(map[string]any)
+			if !reflect.DeepEqual(item, tc.want) {
+				t.Fatalf("holding identity or weight changed: got %v, want %v", item, tc.want)
+			}
+			after, _ := json.Marshal(input)
+			if string(before) != string(after) {
+				t.Fatal("compaction mutated frozen holdings")
+			}
+		})
+	}
+}
+
+func TestETFJudgmentSourcesSurviveFinalDossier(t *testing.T) {
+	job := fixtureJob()
+	result := etfCapacityFixture("510300.SH")
+	rr := result.Analysis.ResearchReport
+	for _, id := range []string{"e-technical", "e-product", "e-entry", "e-unused"} {
+		rr.Sources = append(rr.Sources, stockanalysis.ResearchSource{ID: id, Kind: "fund_data", Content: "冻结研究证据"})
+	}
+	rr.ETFJudgments.Technical.SourceIDs = []string{"e-missing", "e-technical", "e-news"}
+	rr.ETFJudgments.Underlying.SourceIDs = []string{"e-technical"}
+	rr.ETFJudgments.Product.SourceIDs = []string{"e-product"}
+	rr.ETFJudgments.Entry.SourceIDs = []string{"e-entry"}
+	rr.Sources[1].Provider = "测试财经媒体"
+	rr.Sources[1].URL = "https://finance.example.test/etf-news"
+	rr.Sources[1].PublishedAt = rr.CutoffAt.Add(-time.Hour)
+	job.Results = []pi.HoldingResult{result}
+	job.Source.Request.Holdings = []pi.Holding{result.Holding}
+	before, _ := json.Marshal(job)
+	for _, detail := range []int{12, 0} {
+		t.Run(fmt.Sprintf("detail=%d", detail), func(t *testing.T) {
+			dossier := commonDossier(job, job.Results, detail)
+			assertETFJudgmentSourcesResolve(t, dossier)
+			encoded, _ := json.Marshal(dossier)
+			if strings.Contains(string(encoded), "e-unused") || strings.Contains(string(encoded), "e-missing") {
+				t.Fatal("unreferenced or unknown source retained")
+			}
+			if !strings.Contains(string(encoded), rr.Sources[1].URL) || !strings.Contains(string(encoded), rr.Sources[1].Provider) {
+				t.Fatal("judgment news source lost its provenance")
+			}
+		})
+	}
+	after, _ := json.Marshal(job)
+	if string(before) != string(after) {
+		t.Fatal("building the dossier mutated frozen research")
+	}
+}
+
+func assertETFJudgmentSourcesResolve(t *testing.T, dossier map[string]any) {
+	t.Helper()
+	indices := map[string]int{}
+	for i, name := range dossier["stock_columns"].([]string) {
+		indices[name] = i
+	}
+	for _, raw := range dossier["stocks"].([]any) {
+		row := raw.([]any)
+		sources := map[string]bool{}
+		for _, rawSource := range row[indices["sources"]].([]any) {
+			source := rawSource.([]any)
+			sources[source[0].(string)] = true
+		}
+		etf := row[indices["etf"]].(map[string]any)
+		for key, rawJudgment := range etf["judgments"].(map[string]any) {
+			judgment := rawJudgment.(map[string]any)
+			ids, _ := judgment["source_ids"].([]string)
+			for _, id := range ids {
+				if !sources[id] {
+					t.Errorf("%s judgment %s refers to %s outside final sources", row[indices["symbol"]], key, id)
+				}
+			}
 		}
 	}
 }
@@ -508,26 +608,49 @@ func TestCompactETFStockFactsTrimStructuredEvidence(t *testing.T) {
 }
 
 func TestETFHeavyCapacityDossierFitsEvidenceBudget(t *testing.T) {
-	job := fixtureJob()
-	job.Results = nil
-	request := job.Source.Request
-	request.Holdings = nil
-	for i := 0; i < 8; i++ {
-		result := etfCapacityFixture(fmt.Sprintf("51030%d.SH", i))
-		job.Results = append(job.Results, result)
-		request.Holdings = append(request.Holdings, result.Holding)
-	}
-	job.Source.Request = request
-	dossier := commonDossier(job, job.Results, 0)
-	encoded, _ := json.Marshal(dossier)
-	if len(encoded) > 32*1024 {
-		t.Fatalf("eight researched ETFs still need %d bytes of evidence", len(encoded))
-	}
-	prompt, err := proposalPrompt(job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prompt) > MaxEvidenceModelPromptBytes {
-		t.Fatalf("ETF-heavy prompt still %d bytes", len(prompt))
+	for _, candidates := range []int{0, 6} {
+		t.Run(fmt.Sprintf("8_holdings_%d_candidates", candidates), func(t *testing.T) {
+			job := fixtureJob()
+			job.Results, job.Candidates, job.Eligibility = nil, nil, nil
+			job.Source.Request.Holdings = nil
+			for i := 0; i < 8+candidates; i++ {
+				result := etfCapacityFixture(fmt.Sprintf("5103%02d.SH", i))
+				rr := result.Analysis.ResearchReport
+				for _, id := range []string{"e-direction-technical", "e-execution"} {
+					rr.Sources = append(rr.Sources, stockanalysis.ResearchSource{ID: id, Kind: "fund_data", TimeStatus: "dated"})
+				}
+				rr.ETFJudgments.Technical.SourceIDs = []string{"e-direction-technical"}
+				rr.ETFJudgments.Underlying.SourceIDs = []string{"e-direction-technical"}
+				rr.ETFJudgments.Product.SourceIDs = []string{"e-profile"}
+				rr.ETFJudgments.Entry.SourceIDs = []string{"e-execution"}
+				rr.Sources[1].Provider = "测试财经媒体"
+				rr.Sources[1].URL = "https://finance.example.test/" + result.Holding.Symbol
+				rr.Sources[1].PublishedAt = rr.CutoffAt.Add(-time.Hour)
+				if i < 8 {
+					job.Source.Request.Holdings = append(job.Source.Request.Holdings, result.Holding)
+				} else {
+					result.Holding.Weight = 0
+					job.Candidates = append(job.Candidates, Candidate{Symbol: result.Holding.Symbol, Selected: true})
+				}
+				job.Results = append(job.Results, result)
+				job.Eligibility = append(job.Eligibility, Eligibility{Symbol: result.Holding.Symbol, Locked: true})
+			}
+			job.Baseline = job.Source.Request.Holdings
+			job.Source = pi.OptimizationReport(job.Source.Request, job.Results, job.SnapshotAt)
+			dossier := commonDossier(job, job.Results, 0)
+			assertETFJudgmentSourcesResolve(t, dossier)
+			encoded, _ := json.Marshal(dossier)
+			if candidates == 0 && len(encoded) > 32*1024 {
+				t.Fatalf("eight researched ETFs still need %d bytes of evidence", len(encoded))
+			}
+			prompt, err := proposalPrompt(job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(prompt) > MaxEvidenceModelPromptBytes {
+				t.Fatalf("ETF-heavy prompt still %d bytes", len(prompt))
+			}
+			t.Logf("dossier=%d bytes, proposal=%d bytes (limit=%d)", len(encoded), len(prompt), MaxEvidenceModelPromptBytes)
+		})
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const ModelPromptVersion = "portfolio-optimization-prompts-v36"
+const ModelPromptVersion = "portfolio-optimization-prompts-v37"
 const MaxModelPromptBytes = 64 * 1024
 
 // Stage sizes below are compression targets, not model context limits. Rich
@@ -419,6 +419,18 @@ func compactStockDossier(r pi.HoldingResult) map[string]any {
 			claim(v.Evidence)
 		}
 	}
+	// ETF judgments can cite evidence unused by the thesis or counterclaims.
+	// Keep those sources too, after the judgments have chosen their bounded IDs.
+	if etf, ok := d["etf"].(map[string]any); ok {
+		judgments, _ := etf["judgments"].(map[string]any)
+		for _, value := range judgments {
+			judgment, _ := value.(map[string]any)
+			ids, _ := judgment["source_ids"].([]string)
+			for _, id := range ids {
+				used[id] = true
+			}
+		}
+	}
 	sources := [][3]string{}
 	for _, src := range d["sources"].([][3]string) {
 		if used[src[0]] {
@@ -616,6 +628,18 @@ func compactETFStockFact(name string, value any) (any, bool) {
 				for _, key := range []string{"symbol", "weight_percent"} {
 					if v, ok := item[key]; ok {
 						row[key] = v
+					}
+				}
+				// Overseas and other unnormalised holdings may have no symbol.
+				// Preserve their disclosed identity without inferring a market.
+				if symbol, _ := item["symbol"].(string); symbol == "" {
+					for _, key := range []string{"code", "name"} {
+						if text, ok := item[key].(string); ok && text != "" {
+							if key == "name" {
+								text = shortText(text, 30)
+							}
+							row[key] = text
+						}
 					}
 				}
 				kept = append(kept, row)
