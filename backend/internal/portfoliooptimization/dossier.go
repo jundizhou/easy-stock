@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const ModelPromptVersion = "portfolio-optimization-prompts-v37"
+const ModelPromptVersion = "portfolio-optimization-prompts-v38"
 const MaxModelPromptBytes = 64 * 1024
 
 // Stage sizes below are compression targets, not model context limits. Rich
@@ -56,6 +56,7 @@ func (d dossierDriver) MarshalJSON() ([]byte, error) {
 var stockDossierColumns = []string{"symbol", "name", "report_id", "cutoff_at", "purpose", "horizon", "decision_reason", "prior_position_opinion", "prior_blockers", "thesis", "support", "counter", "business", "drivers", "catalysts", "limitations", "earnings_disclosure", "anchors", "sources", "instrument_type", "etf"}
 
 var newsDossierColumns = []string{"provider", "url", "published_at", "content_status", "traceable", "excerpt"}
+var etfJudgmentColumns = []string{"status", "text", "source_ids"}
 
 // Share provenance keys across all cited articles. The excerpt follows the
 // same detail budget as the claims; provenance and citation IDs never shrink.
@@ -261,6 +262,7 @@ func stockFactTable(facts map[string]pi.Fact, results []pi.HoldingResult) map[st
 }
 func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]any {
 	stocks := []any{}
+	packedJudgments := false
 	columns := stockDossierColumns
 	if detail <= 0 {
 		columns = []string{}
@@ -284,6 +286,9 @@ func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]a
 		d := stockDossier(r, detail)
 		if detail <= 0 {
 			d = compactStockDossier(r)
+			if packETFJudgments(d) {
+				packedJudgments = true
+			}
 		}
 		// Dictionary encode repeated source metadata, keeping actual source IDs
 		// untouched. This is lossless and never abbreviates citations.
@@ -323,8 +328,93 @@ func commonDossier(job Job, results []pi.HoldingResult, detail int) map[string]a
 		}
 		table["rows"] = rows
 		table["row_columns"] = []string{"symbol", "values"}
+		compactSparseStockFacts(table)
 	}
-	return map[string]any{"prompt_version": ModelPromptVersion, "horizon": job.Source.Request.Horizon, "profile": job.Source.Profile, "snapshot_at": job.SnapshotAt, "stock_columns": columns, "driver_columns": []string{"name", "market_status", "claim"}, "claim_columns": []string{"text", "source_ids"}, "anchor_columns": []string{"id", "price", "source_id", "as_of"}, "source_columns": []string{"id", "kind_index", "time_index", "news_context"}, "news_columns": newsDossierColumns, "source_kinds": kinds, "source_times": times, "stocks": stocks, "stock_facts": table}
+	data := map[string]any{"prompt_version": ModelPromptVersion, "horizon": job.Source.Request.Horizon, "profile": job.Source.Profile, "snapshot_at": job.SnapshotAt, "stock_columns": columns, "driver_columns": []string{"name", "market_status", "claim"}, "claim_columns": []string{"text", "source_ids"}, "anchor_columns": []string{"id", "price", "source_id", "as_of"}, "source_columns": []string{"id", "kind_index", "time_index", "news_context"}, "news_columns": newsDossierColumns, "source_kinds": kinds, "source_times": times, "stocks": stocks, "stock_facts": table}
+	if packedJudgments {
+		data["etf_judgment_columns"] = etfJudgmentColumns
+	}
+	return data
+}
+
+// The wire view shares field names, retaining every judgment and citation.
+// Unknown future fields stay as objects rather than being silently discarded.
+func packETFJudgments(card map[string]any) bool {
+	etf, ok := card["etf"].(map[string]any)
+	if !ok {
+		return false
+	}
+	judgments, _ := etf["judgments"].(map[string]any)
+	changed := false
+	for key, raw := range judgments {
+		judgment, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		known := true
+		for field := range judgment {
+			if field != "status" && field != "text" && field != "source_ids" {
+				known = false
+			}
+		}
+		if !known {
+			continue
+		}
+		if _, status := judgment["status"]; !status {
+			continue
+		}
+		if _, text := judgment["text"]; !text {
+			continue
+		}
+		row := []any{judgment["status"], judgment["text"]}
+		if ids, exists := judgment["source_ids"]; exists {
+			row = append(row, ids)
+		}
+		judgments[key] = row
+		changed = true
+	}
+	return changed
+}
+
+// Mixed stock/ETF tables have many unknown cells. Share the exact non-null
+// column indices instead of repeating null placeholders in every row. Omitted
+// cells remain unknown, never zero; canonical fact names and values are intact.
+func compactSparseStockFacts(table map[string]any) {
+	original, _ := json.Marshal(table)
+	sets := [][]int{}
+	rows := []any{}
+	for _, item := range table["rows"].([]any) {
+		row := item.([]any)
+		indices, values := []int{}, []any{}
+		for i, value := range row[1].([]any) {
+			if value != nil {
+				indices = append(indices, i)
+				values = append(values, value)
+			}
+		}
+		set := -1
+		for i, known := range sets {
+			if reflect.DeepEqual(indices, known) {
+				set = i
+				break
+			}
+		}
+		if set < 0 {
+			set = len(sets)
+			sets = append(sets, indices)
+		}
+		rows = append(rows, []any{row[0], set, values})
+	}
+	trial := make(map[string]any, len(table)+1)
+	for key, value := range table {
+		trial[key] = value
+	}
+	trial["column_sets"], trial["rows"] = sets, rows
+	trial["row_columns"] = []string{"symbol", "column_set", "values"}
+	encoded, err := json.Marshal(trial)
+	if err == nil && len(encoded) < len(original) {
+		table["column_sets"], table["rows"], table["row_columns"] = sets, rows, trial["row_columns"]
+	}
 }
 
 // A shared column retains the exact per-stock fact identity and availability.

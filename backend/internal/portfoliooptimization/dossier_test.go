@@ -542,8 +542,15 @@ func assertETFJudgmentSourcesResolve(t *testing.T, dossier map[string]any) {
 		}
 		etf := row[indices["etf"]].(map[string]any)
 		for key, rawJudgment := range etf["judgments"].(map[string]any) {
-			judgment := rawJudgment.(map[string]any)
-			ids, _ := judgment["source_ids"].([]string)
+			var ids []string
+			switch judgment := rawJudgment.(type) {
+			case map[string]any:
+				ids, _ = judgment["source_ids"].([]string)
+			case []any:
+				if len(judgment) == 3 {
+					ids, _ = judgment[2].([]string)
+				}
+			}
 			for _, id := range ids {
 				if !sources[id] {
 					t.Errorf("%s judgment %s refers to %s outside final sources", row[indices["symbol"]], key, id)

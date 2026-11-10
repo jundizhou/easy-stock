@@ -42,6 +42,8 @@ const valuationDossierNote = `稳健盈利且估值合理可配置，无须高�
 `
 
 const compactCorrelationNote = valuationDossierNote + `stock_facts.rows若为数组按row_columns解释；shared列适用于每股，key仍是symbol+"."+列名，null未知。
+若有column_sets，row的column_set索引该表，values仅按该组0起始列索引对应columns；未列出的列未知，不当0、不引用。
+ETF judgments若为数组按etf_judgment_columns解释，末尾省略表示无引用，来源ID仍用原值。
 news_context按news_columns解读，excerpt为截取片段、省略非缺正文；出处字段与引用ID保持。
 若有stock_facts.correlations，每行[i,j,值]对应correlation_symbols的0起始股票索引，引用key为correlation.股票i.股票j；null为未知，不能引用。
 `
