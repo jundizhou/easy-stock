@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	compactionVersion         = "portfolio-compaction-v4"
+	compactionVersion         = "portfolio-compaction-v5"
 	compactionChunkBytes      = 32 * 1024
 	compactionSummaryBytes    = 6 * 1024
 	compactionMinSummaryBytes = 512
@@ -89,7 +89,7 @@ func (r *compactionRunner) summarizeChunk(chunk compactionChunk) (string, error)
 		}
 		callCtx, cancelCall := context.WithTimeout(r.ctx, r.budget.StageTimeout)
 		callCtx = agent.WithCallTrace(callCtx, agent.CallTrace{NodeID: "compact", AttemptID: fmt.Sprint(r.calls + 1), ProtocolVersion: compactionVersion})
-		response, err := agent.PromptUsingOptions(callCtx, r.service.gateway, prompt, agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, FirstResponseTimeout: r.budget.ResponseTimeout, IdleTimeout: r.budget.ResponseTimeout, MaxAttempts: 1})
+		response, err := agent.PromptUsingOptions(callCtx, r.service.gateway, prompt, agent.PromptOptions{Sandbox: true, AutoApprove: true, DisableTools: true, ReasoningEffortCap: "low", FirstResponseTimeout: r.budget.ResponseTimeout, IdleTimeout: r.budget.ResponseTimeout, MaxAttempts: 1})
 		cancelCall()
 		r.calls++
 		if err != nil {
