@@ -85,6 +85,77 @@ function globalSaveBody() {
 	return JSON.parse(String(calls.at(-1)?.[2]?.body));
 }
 
+describe('model setup guidance', () => {
+	it('opens a spotlight on the provider controls and can be dismissed and restarted', async () => {
+		const onClose = vi.fn();
+		render(<SettingsDrawer config={config} open initialSection="llm" onClose={onClose} />);
+		await screen.findByRole('region', { name: '大模型配置引导' });
+		expect(within(screen.getByRole('dialog', { name: '系统设置' })).getByRole('region', { name: '大模型配置引导' })).toBeTruthy();
+		const section = screen.getByLabelText('大模型和运行时配置');
+		expect(section.closest('details')!.open).toBe(true);
+		expect(document.activeElement).toBe(screen.getByLabelText('服务商'));
+		expect(document.querySelector('.llm-setup-spotlight')?.getAttribute('data-target')).toBe('provider');
+		const providerTarget = document.querySelector('[data-llm-setup-target="provider"]');
+		expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts).not.toContain(providerTarget);
+		fireEvent.click(screen.getByRole('button', { name: '稍后配置' }));
+		expect(screen.queryByRole('region', { name: '大模型配置引导' })).toBeNull();
+		expect(onClose).not.toHaveBeenCalled();
+		fireEvent.click(screen.getByRole('button', { name: '开始配置引导' }));
+		await screen.findByRole('region', { name: '大模型配置引导' });
+		fireEvent.keyDown(window, { key: 'Escape' });
+		expect(screen.queryByRole('region', { name: '大模型配置引导' })).toBeNull();
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it('hides setup instructions for an existing model', async () => {
+		saved.agent.configured = true;
+		render(<SettingsDrawer config={config} open initialSection="llm" onClose={() => {}} />);
+		await screen.findByLabelText('服务商');
+		expect(screen.queryByRole('region', { name: '大模型配置引导' })).toBeNull();
+	});
+
+	it('requires the key and model before saving, and preserves the guide and inputs on save failure', async () => {
+		const onClose = vi.fn();
+		render(<SettingsDrawer config={config} open initialSection="llm" onClose={onClose} />);
+		const guide = within(await screen.findByRole('region', { name: '大模型配置引导' }));
+		fireEvent.click(guide.getByRole('button', { name: '下一步' }));
+		expect(document.querySelector('.llm-setup-spotlight')?.getAttribute('data-target')).toBe('key');
+		expect((guide.getByRole('button', { name: '下一步' }) as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.change(screen.getByLabelText('模型 API Key', { exact: true }), { target: { value: 'fake-tour-key' } });
+		fireEvent.click(guide.getByRole('button', { name: '下一步' }));
+		expect(document.querySelector('.llm-setup-spotlight')?.getAttribute('data-target')).toBe('model');
+		expect((guide.getByRole('button', { name: '下一步' }) as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.change(screen.getByPlaceholderText('例如 gpt-5.5 或 deepseek-v4-pro'), { target: { value: 'tour-model' } });
+		fireEvent.click(guide.getByRole('button', { name: '下一步' }));
+		expect(document.querySelector('.llm-setup-spotlight')?.getAttribute('data-target')).toBe('save');
+		expect(vi.mocked(requestJSON).mock.calls.some(([, , options]) => options?.method === 'PUT')).toBe(false);
+		saveError = true;
+		fireEvent.click(guide.getByRole('button', { name: '保存并开始使用' }));
+		await waitFor(() => expect(guide.getByRole('alert').textContent).toContain('保存失败'));
+		expect(onClose).not.toHaveBeenCalled();
+		expect((screen.getByLabelText('模型 API Key', { exact: true }) as HTMLInputElement).value).toBe('fake-tour-key');
+		saveError = false;
+		fireEvent.click(guide.getByRole('button', { name: '保存并开始使用' }));
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(globalSaveBody().llm_profiles[0]).toMatchObject({ model: 'tour-model', api_key: 'fake-tour-key' });
+	});
+
+	it('allows a keyless custom endpoint and keeps keyboard navigation within the current step', async () => {
+		render(<SettingsDrawer config={config} open initialSection="llm" onClose={() => {}} />);
+		const guide = within(await screen.findByRole('region', { name: '大模型配置引导' }));
+		fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'custom' } });
+		expect((guide.getByRole('button', { name: '下一步' }) as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.change(screen.getByLabelText('API Base URL'), { target: { value: 'http://localhost:11434/v1' } });
+		fireEvent.click(guide.getByRole('button', { name: '下一步' }));
+		expect((guide.getByRole('button', { name: '下一步' }) as HTMLButtonElement).disabled).toBe(false);
+		expect(document.activeElement).toBe(screen.getByLabelText('模型 API Key', { exact: true }));
+		fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+		expect(document.activeElement).toBe(guide.getByRole('button', { name: '下一步' }));
+		fireEvent.keyDown(window, { key: 'Tab' });
+		expect(document.activeElement).toBe(screen.getByLabelText('模型 API Key', { exact: true }));
+	});
+});
+
 describe('notification settings save flow (issue #37)', () => {
 	it('saves tested robot drafts through the global button and refreshes mounted schedule channels', async () => {
 		render(<Harness />);

@@ -21,6 +21,8 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, RuntimeLogStatus, SecretSettingStatus, requestJSON } from '../lib/backend';
 import { llmBaseURLForAPIMode, llmProviderDefinition, llmProviders } from '../lib/llm-providers';
+import { hasConfiguredLLM } from '../lib/llm-setup';
+import { LLMSetupTour } from './LLMSetupTour';
 import { AppUpdatePanel } from './AppUpdatePanel';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { useAgentSettings } from '../lib/agent-settings';
@@ -32,7 +34,7 @@ import type { AgentSettings, NotificationSettings } from '../lib/backend';
 type Props = {
 	config: BackendConfig | null;
 	open: boolean;
-	initialSection?: 'updates' | 'notifications';
+	initialSection?: 'llm' | 'updates' | 'notifications';
 	onClose: () => void;
 	onSaved?: () => void;
 };
@@ -88,23 +90,37 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	const [openingRuntimeLogs, setOpeningRuntimeLogs] = useState(false);
 	const modelFetchSequence = useRef(0);
 	const updateSectionRef = useRef<HTMLDivElement>(null);
- const notificationSectionRef = useRef<HTMLDivElement>(null);
-	const updateSectionFocused = useRef(false);
+	const notificationSectionRef = useRef<HTMLDivElement>(null);
+	const llmSectionRef = useRef<HTMLDivElement>(null);
+	const formRef = useRef<HTMLFormElement>(null);
+	const [llmSetupTourDismissed, setLLMSetupTourDismissed] = useState(false);
+	const [llmSetupTourRequested, setLLMSetupTourRequested] = useState(false);
+	const needsLLMSetup = Boolean(settings && notifications && !hasConfiguredLLM(settings));
+	const llmSetupTourOpen = needsLLMSetup && state !== 'loading' && !llmSetupTourDismissed && (initialSection === 'llm' || llmSetupTourRequested);
+	const initialSectionFocused = useRef<Props['initialSection']>(undefined);
+
+	useEffect(() => {
+		if (open) return;
+		setLLMSetupTourDismissed(false);
+		setLLMSetupTourRequested(false);
+	}, [open]);
 
 	useEffect(() => {
 		if (!open || !initialSection || state === 'loading') {
-			updateSectionFocused.current = false;
+			initialSectionFocused.current = undefined;
 			return;
 		}
-		if (updateSectionFocused.current) return;
-		const target = initialSection === 'notifications' ? notificationSectionRef : updateSectionRef;
-  const section = target.current?.querySelector('details');
+		if (initialSectionFocused.current === initialSection) return;
+		const target = initialSection === 'llm' ? llmSectionRef : initialSection === 'notifications' ? notificationSectionRef : updateSectionRef;
+		const section = target.current?.querySelector('details');
 		if (!section) return;
 		section.open = true;
-		section.scrollIntoView({ block: 'start' });
-		section.querySelector('summary')?.focus({ preventScroll: true });
-		updateSectionFocused.current = true;
-	}, [open, initialSection, state]);
+		if (!llmSetupTourOpen) {
+			section.scrollIntoView({ block: 'start' });
+			section.querySelector('summary')?.focus({ preventScroll: true });
+		}
+		initialSectionFocused.current = initialSection;
+	}, [open, initialSection, state, llmSetupTourOpen]);
 
 	const saving = state === 'saving' || testState === 'testing' || agent.busy || notificationTesting;
 	const closeSettings = () => { if (!saving) onClose(); };
@@ -510,8 +526,8 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	if (!open) return null;
 
 	return (
-		<div className="settings-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}>
-			<aside className="settings-drawer" role="dialog" aria-modal="true" aria-label="系统设置">
+		<div className="settings-overlay" role="dialog" aria-modal="true" aria-label="系统设置" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}>
+			<aside className="settings-drawer">
 				<header className="settings-header">
 					<div><span>AI RUNTIME</span><h2>系统设置</h2><p>管理运行引擎、共享模型、数据源与钉钉和飞书机器人</p></div>
 					<button type="button" onClick={closeSettings} disabled={saving} aria-label="关闭设置"><X size={20} /></button>
@@ -519,11 +535,13 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 
 				{state === 'loading' && <div className="settings-loading"><LoaderCircle className="spin" size={22} /><span>读取本机设置</span></div>}
 				{state !== 'loading' && (
-					<form className="settings-form" onSubmit={save}>
+					<form ref={formRef} className="settings-form" onSubmit={save}>
 						<fieldset className="settings-form-fields" disabled={saving}>
 						<AgentSettingsPanel config={config} open={open} agent={agent} disabled={saving} />
 
+						<div ref={llmSectionRef}>
 						<SettingsSection title="大模型和运行时配置" description="对话、个股研究、复盘与持仓检查使用同一个引擎选择，模型、Skills 和 MCP 共用一套设置。" icon={<Bot size={18} />}>
+							{needsLLMSetup && <div className="llm-setup-entry"><span>配置一个大模型，开启 AI 功能</span><button type="button" onClick={() => { setLLMSetupTourDismissed(false); setLLMSetupTourRequested(true); }}>开始配置引导</button></div>}
 							<div className="runtime-selector">
 								<span className="runtime-selector-label">运行引擎</span>
 								<div className="runtime-selector-buttons" role="group" aria-label="运行引擎">
@@ -540,13 +558,17 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 								<button type="button" className="danger" onClick={removeLLMProfile} disabled={llmProfiles.length <= 1}><Trash2 size={14} />删除</button>
 							</div>
 							<label><span>配置名称</span><input value={profileName} onChange={(event) => { setProfileName(event.target.value); patchSelectedLLMProfile({ name: event.target.value }); }} placeholder="例如 DeepSeek 日常 / GPT-5.6 Sol 深度分析" /></label>
+							<div className="llm-setup-provider-fields" data-llm-setup-target="provider">
 							<div className="settings-grid two-columns">
 								<label><span>服务商</span><select value={provider} onChange={(event) => updateProvider(event.target.value)}>{llmProviders.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
 								<label><span>接口协议</span><select value={apiMode} onChange={(event) => updateAPIMode(event.target.value)}><option value="codex_responses">Responses API</option><option value="chat_completions">Chat Completions</option><option value="anthropic_messages">Anthropic Messages</option><option value="auto">自动检测（优先 Responses）</option></select></label>
 							</div>
 								<label><span>API Base URL</span><input value={baseURL} onChange={(event) => updateBaseURL(event.target.value)} placeholder="https://api.example.com/v1" />{llmProviderDefinition(provider).protocolBaseURLs && <small>切换协议时同步对应的官方地址；自定义地址保持不变。</small>}</label>
+							</div>
+							<div data-llm-setup-target="key">
 								<SecretField key={`llm-api-key-${activeLLMProfileID}-${settings?.updated_at}`} label="模型 API Key" secretKey="llm_api_key" status={selectedLLMProfile?.api_key} value={profileKeyValues[activeLLMProfileID] || ''} clearing={clearProfileKeys.has(activeLLMProfileID)} onChange={updateSecret} onClear={toggleClear} hint="已保存密钥默认隐藏，点击眼睛可查看；输入新值可替换当前配置的密钥" revealable readSavedValue={readSavedModelKey} />
-								<div className="model-field">
+							</div>
+								<div className="model-field" data-llm-setup-target="model">
 									<span className="model-field-heading"><span>模型</span>{modelListState === 'success' && <button type="button" onClick={() => setManualModel((current) => !current)}>{manualModel ? '使用下拉' : '手动输入'}</button>}</span>
 									<span className="model-picker-row">
 										{modelListState === 'success' && !manualModel ? <select value={model} onChange={(event) => { if (event.target.value === manualModelOption) setManualModel(true); else updateModel(event.target.value); }}><option value="">请选择模型</option>{selectableModels.map((option) => <option value={option.id} key={option.id}>{modelOptionLabel(option)}</option>)}<option value={manualModelOption}>手动输入其他模型…</option></select> : <input value={model} onChange={(event) => updateModel(event.target.value)} placeholder="例如 gpt-5.5 或 deepseek-v4-pro" />}
@@ -561,6 +583,8 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 								<button type="button" onClick={testConnection} disabled={!config || !notifications || !agent.ready || agent.loading || saving}>{testState === 'testing' ? <LoaderCircle className="spin" size={15} /> : <PlugZap size={15} />}保存并测试连接</button>
 							</div>
 						</SettingsSection>
+
+						</div>
 
 						<SettingsSection title="大V复盘自动化" description="按平台管理多套采集配置，每个大V订阅可以绑定其中一套。" icon={<Clock3 size={18} />}>
 							<div className="review-profile-tabs">{(['xueqiu', 'taoguba'] as ReviewSource[]).map((source) => <button type="button" className={reviewSource === source ? 'active' : ''} onClick={() => setReviewSource(source)} key={source}>{reviewSourceLabel(source)}<em>{reviewProfiles.filter((profile) => profile.source === source).length}</em></button>)}</div>
@@ -597,12 +621,13 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 						<footer className="settings-footer">
 							<div className={`settings-message ${state}`} role={state === 'error' ? 'alert' : 'status'}>{state === 'saved' && <CheckCircle2 size={15} />}{state === 'error' && <CircleAlert size={15} />}<span>{message || '留空的模型密钥会保留已保存的值。'}</span></div>
 							<button type="button" onClick={closeSettings} disabled={saving}>取消</button>
-							<button type="submit" className="settings-save" disabled={!config || !notifications || !agent.ready || agent.loading || saving}>{state === 'saving' ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存设置</button>
+							<button type="submit" className="settings-save" data-llm-setup-target="save" disabled={!config || !notifications || !agent.ready || agent.loading || saving}>{state === 'saving' ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存设置</button>
 						</footer>
 						</fieldset>
 					</form>
 				)}
 			</aside>
+			{llmSetupTourOpen && <LLMSetupTour formRef={formRef} canContinue={[Boolean(provider && baseURL.trim()), provider === 'custom' || Boolean((profileKeyValues[activeLLMProfileID] || '').trim()) || Boolean(selectedLLMProfile?.api_key.configured && !clearProfileKeys.has(activeLLMProfileID)), Boolean(model.trim()), Boolean(config && notifications && agent.ready && !agent.loading)]} busy={saving} error={state === 'error' ? message : undefined} onDismiss={() => setLLMSetupTourDismissed(true)} onSave={() => formRef.current?.requestSubmit()} />}
 		</div>
 	);
 }

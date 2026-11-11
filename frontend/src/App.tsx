@@ -83,6 +83,7 @@ import { useThemeConstituents, sameTheme } from './lib/use-theme-constituents';
 import { useThemeKLines } from './lib/use-theme-klines';
 import { ThemeIndexPanel } from './components/ThemeIndexPanel';
 import { CockpitWorkspace } from './components/CockpitWorkspace';
+import { useLLMSetupRequired } from './lib/llm-setup';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type WorkspaceMode = 'cockpit' | 'themes' | 'limit-up' | 'reviews' | 'stock-ai' | 'portfolio-inspection' | 'monitor' | 'ai' | 'market' | 'token-usage';
@@ -163,11 +164,18 @@ export function App() {
 	const [aiPrefill, setAIPrefill] = useState('');
 	const [aiAnalysisID, setAIAnalysisID] = useState<string | undefined>();
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [settingsInitialSection, setSettingsInitialSection] = useState<'updates' | 'notifications' | undefined>();
+	const [settingsInitialSection, setSettingsInitialSection] = useState<'llm' | 'updates' | 'notifications' | undefined>();
+	const llmSetupRequired = useLLMSetupRequired(config);
 	const [settingsSavedNotice, setSettingsSavedNotice] = useState(0);
 	const [tokenUsageRefreshKey, setTokenUsageRefreshKey] = useState(0);
 	const [cockpitRefreshKey, setCockpitRefreshKey] = useState(0);
 	const [monitorRefreshKey, setMonitorRefreshKey] = useState(0);
+
+	useEffect(() => {
+		if (!llmSetupRequired) return;
+		setSettingsInitialSection('llm');
+		setSettingsOpen(true);
+	}, [llmSetupRequired]);
 
 	useEffect(() => {
 		if (!settingsSavedNotice) return;
