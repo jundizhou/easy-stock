@@ -332,7 +332,6 @@ export function PortfolioInspectionWorkspace({ config, refreshKey, onOpenSetting
 			{job && <div className="portfolio-record-binding"><span>所属方案：{originalPlan?.name || (job.request.portfolio_plan_id ? `${job.request.portfolio_plan_name || '原方案'}（已删除）` : '未绑定')}</span>{!job.request.portfolio_plan_id && <button type="button" disabled={mutationBusy || Boolean(running)} onClick={() => void bindLegacy()}>绑定到「{activePlan.name}」</button>}</div>}
 
 			{(!job?.report || job.status === 'running') && <>
-				<header className="stock-ai-search-hero portfolio-setup-hero"><div><span>持仓 AI 巡检</span><h2>配置持仓，检查组合风险</h2><p>选择交易风格，填写持仓占比与成本后开始巡检。</p></div><WalletCards size={32} aria-hidden="true" /></header>
 				<PortfolioSetupForm config={config} key={activePlan.id} showResearchOptions draft={draft} directory={directory} disabled={mutationBusy || Boolean(running)} busy={mutationBusy || Boolean(running)} actionLabel="开始 AI 巡检" busyLabel={running ? '巡检进行中' : '正在启动'} onChange={(next) => changePlan(() => writePortfolioDraft(next, activePlan.id))} onSubmit={(holdings) => void startInspection([], undefined, holdings)} />
 			</>}
 

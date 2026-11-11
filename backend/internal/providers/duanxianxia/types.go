@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultBaseURL = "https://duanxianxia.com"
+	DefaultBaseURL = "https://v.duanxianxia.com"
 	SourceID       = "duanxianxia:kaipanla"
 )
 

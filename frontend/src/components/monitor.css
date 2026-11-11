@@ -55,6 +55,15 @@
 	justify-content: safe center;
 }
 
+.monitor-portfolio-inspection {
+	min-width: 0;
+	width: 100%;
+	max-width: 1840px;
+	margin: 0 auto;
+	min-height: 0;
+	overflow: auto;
+}
+
 .monitor-workspace {
 	display: flex;
 	flex-direction: column;
