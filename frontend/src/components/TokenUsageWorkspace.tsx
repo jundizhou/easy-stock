@@ -9,6 +9,8 @@ const moduleLabels: Record<string, string> = {
 	'cockpit-patrol': 'AI总控台巡检',
 	'stock-analysis': '个股分析',
 	'portfolio-inspection': '持仓 AI 巡检',
+	'portfolio-optimization': '持仓优化',
+	'ladder-theme-ai': 'AI上涨题材识别',
 	'review-diary': '大V复盘日记',
 	'review-collection': '复盘文章采集',
 	'review-normalization': '复盘文章整理',
