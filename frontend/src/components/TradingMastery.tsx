@@ -1,5 +1,7 @@
 import {
 	AlertTriangle,
+	BookMarked,
+	BookOpen,
 	Bot,
 	BrainCircuit,
 	CheckCircle2,
@@ -19,15 +21,18 @@ import {
 	MasteryTraderDetail,
 	requestJSON,
 } from '../lib/backend';
+import { ReviewDiary } from './ReviewDiary';
 
 type Props = {
 	config: BackendConfig | null;
+	refreshKey?: number;
 	onAskAI: (traderName: string) => void;
+	onOpenNotificationSettings?: () => void;
 };
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
-export function TradingMastery({ config, onAskAI }: Props) {
+export function TradingMastery({ config, refreshKey = 0, onAskAI, onOpenNotificationSettings = () => undefined }: Props) {
 	const [snapshot, setSnapshot] = useState<MasterySnapshot | null>(null);
 	const [detail, setDetail] = useState<MasteryTraderDetail | null>(null);
 	const [activeTraderID, setActiveTraderID] = useState('');
@@ -37,6 +42,7 @@ export function TradingMastery({ config, onAskAI }: Props) {
 	const [detailState, setDetailState] = useState<LoadState>('idle');
 	const [error, setError] = useState('');
 	const [refreshing, setRefreshing] = useState(false);
+	const [view, setView] = useState<'mastery' | 'reviews'>('mastery');
 
 	const loadIndex = useCallback(async (force = false) => {
 		if (!config) return;
@@ -56,7 +62,7 @@ export function TradingMastery({ config, onAskAI }: Props) {
 
 	useEffect(() => {
 		void loadIndex();
-	}, [loadIndex]);
+	}, [loadIndex, refreshKey]);
 
 	useEffect(() => {
 		if (!config || !activeTraderID) {
@@ -99,6 +105,11 @@ export function TradingMastery({ config, onAskAI }: Props) {
 
 	return (
 		<section className="mastery-workspace">
+			<nav className="mastery-view-tabs" aria-label="游资心法库页面">
+				<button type="button" className={view === 'mastery' ? 'active' : ''} onClick={() => setView('mastery')}><BookMarked size={15} /> 游资心法</button>
+				<button type="button" className={view === 'reviews' ? 'active' : ''} onClick={() => setView('reviews')}><BookOpen size={15} /> 大V复盘日记</button>
+			</nav>
+			{view === 'reviews' ? <ReviewDiary config={config} refreshKey={refreshKey} onOpenNotificationSettings={onOpenNotificationSettings} /> : <>
 			<header className="mastery-hero">
 				<div className="mastery-hero-copy">
 					<span>TRADING MASTERY</span>
@@ -170,6 +181,7 @@ export function TradingMastery({ config, onAskAI }: Props) {
 					)}
 				</article>
 			</div>
+			</>}
 		</section>
 	);
 }

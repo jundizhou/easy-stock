@@ -1,13 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-	Plus, RefreshCw, Radar, Trash2, Save, FlaskConical, LoaderCircle, X, ArrowRightLeft,
+	Plus, RefreshCw, Radar, Trash2, Save, FlaskConical, LoaderCircle, X, ArrowRightLeft, WalletCards,
 	ShieldAlert, Activity, TrendingUp, Gauge, Waves, Wind, SlidersHorizontal, Star, Search,
 	Download, Crosshair, PieChart, Wallet, BellRing, Flame,
 	ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ListPlus, Pencil, Play, Pause, Check,
 } from 'lucide-react';
 import { MonitorSelect } from './MonitorSelect';
 import { MonitorNotificationPanel } from './MonitorNotificationPanel';
-import type { BackendConfig } from '../lib/backend';
+import type { BackendConfig, InstrumentAnalysis } from '../lib/backend';
 import {
 	fetchMonitorOverview, fetchMonitorRules, saveMonitorRule, toggleMonitorRule, deleteMonitorRule, testMonitorRule,
 	fetchMonitorEvents, deleteMonitorEvent, clearMonitorEvents,
@@ -26,10 +26,11 @@ import { confirmDialog } from './ConfirmDialog';
 import { watchCodeOf } from '../lib/watchlist-registry';
 import { monitorLiveBus, useLiveQuoteVersion, useLiveStreamStatus, liveStatusLabel, selectMonitorQuoteValue } from '../lib/monitorLiveBus';
 import { LivePriceCell, LivePriceText } from './LivePriceCell';
+import { PortfolioInspectionWorkspace } from './PortfolioInspectionWorkspace';
 import './monitor-table.css';
 import './monitor.css';
 
-type MonitorTab = 'abnormal' | 'radar' | 'events' | 'watch';
+type MonitorTab = 'abnormal' | 'radar' | 'events' | 'watch' | 'portfolio-inspection';
 
 const availableFields: Record<MonitorRuleType, Array<{ key: string; op?: MonitorCondition['op'] }>> = {
 	price: [{ key: 'last' }, { key: 'change_pct' }, { key: 'cost_distance_pct' }],
@@ -159,7 +160,7 @@ function describeRadarCondition(condition: MonitorCondition) {
 	return `${label} ${op} ${condition.value}`;
 }
 
-export function MonitorWorkspace({ config, refreshKey, onOpenMarketIndexes }: { config: BackendConfig | null; refreshKey: number; onOpenMarketIndexes: () => void }) {
+export function MonitorWorkspace({ config, refreshKey, portfolioRefreshKey, onOpenSettings, onOpenNotificationSettings, onOpenStockAnalysis, onOpenMarketIndexes }: { config: BackendConfig | null; refreshKey: number; portfolioRefreshKey: number; onOpenSettings: () => void; onOpenNotificationSettings: () => void; onOpenStockAnalysis: (analysis: InstrumentAnalysis) => void; onOpenMarketIndexes: () => void }) {
 	// 默认停在「触发与规则」：进监控中心先看今天触发了什么、规则还开着哪些，
 	// 异动预警是发现标的之后才要细看的一页。
 	const [tab, setTab] = useState<MonitorTab>('events');
@@ -177,6 +178,7 @@ export function MonitorWorkspace({ config, refreshKey, onOpenMarketIndexes }: { 
 					<button type="button" className={tab === 'radar' ? 'active' : ''} onClick={() => setTab('radar')}><Radar size={15} /> 智能雷达</button>
 					<button type="button" className={tab === 'events' ? 'active' : ''} onClick={() => setTab('events')}><Gauge size={15} /> 触发与规则</button>
 					<button type="button" className={tab === 'watch' ? 'active' : ''} onClick={() => setTab('watch')}><Star size={15} /> 关注仓</button>
+					<button type="button" className={tab === 'portfolio-inspection' ? 'active' : ''} onClick={() => setTab('portfolio-inspection')}><WalletCards size={15} /> 持仓 AI 巡检</button>
 				</div>
 				{tab === 'watch' && <WatchSearchBox config={config} onAdded={() => setWatchTick((n) => n + 1)} />}
 			</div>
@@ -184,6 +186,7 @@ export function MonitorWorkspace({ config, refreshKey, onOpenMarketIndexes }: { 
 			{tab === 'radar' && <RadarTab config={config} onOpenMarketIndexes={onOpenMarketIndexes} />}
 			{tab === 'events' && <EventsTab config={config} refreshKey={refreshKey} />}
 			{tab === 'watch' && <WatchTab config={config} refreshKey={refreshKey} reloadTick={watchTick} onOpenRadar={() => setTab('radar')} onOpenRules={() => setTab('events')} />}
+			{tab === 'portfolio-inspection' && <div className="monitor-portfolio-inspection"><PortfolioInspectionWorkspace config={config} refreshKey={portfolioRefreshKey} onOpenSettings={onOpenSettings} onOpenNotificationSettings={onOpenNotificationSettings} onOpenStockAnalysis={onOpenStockAnalysis} /></div>}
 		</section>
 	);
 }

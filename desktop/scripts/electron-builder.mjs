@@ -11,11 +11,6 @@ const mode = process.argv[3] || 'release';
 const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
 if (!['mac', 'windows'].includes(platform) || !['release', 'dir'].includes(mode)) throw new Error('Usage: node electron-builder.mjs <mac|windows> <release|dir>');
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported desktop architecture: ${arch}`);
-if (platform === 'windows') {
-  // The bundled NSIS extractor cannot decode modern ARM64 branch filters.
-  // Runtime bundles can contain ARM64 helper executables even in an x64 app.
-  process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ';
-}
 
 const signingCertificate = resolveSigningCertificate(process.env.CSC_LINK);
 if (process.env.CSC_LINK !== undefined && !signingCertificate) {
@@ -116,9 +111,19 @@ const config = {
   },
 };
 
+const { Arch, build, Platform } = await import('electron-builder');
+
 if (platform === 'windows' && mode === 'release') {
-  // The ZIP plugin needs an extended path when Windows long paths are disabled.
-  // Override only decompression, after the stock macros have been defined.
+  // Use the builder's checksum-verified Windows toolset on every build host.
+  // The standalone extractor supports long paths without the old NSIS ZIP plugin.
+  const { downloadBuilderToolset } = await import('app-builder-lib/out/util/electronGet.js');
+  const extractorRoot = await downloadBuilderToolset({
+    releaseName: '7zip@1.0.0',
+    filenameWithExt: '7zip-win-x64.tar.gz',
+    checksums: { '7zip-win-x64.tar.gz': 'be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3' },
+    githubOrgRepo: 'electron-userland/electron-builder-binaries',
+  });
+  const nsisPath = (value) => value.replace(/\$/g, () => '$$').replace(/"/g, () => '$\\"');
   const originalInclude = config.nsis.include;
   const hook = fs.readFileSync(originalInclude, 'utf8');
   const hookStart = '!macro customCheckAppRunning';
@@ -128,6 +133,28 @@ if (platform === 'windows' && mode === 'release') {
   }
   const override = path.join(outputDirectory, 'easy-stock-direct-extract.nsh');
   fs.writeFileSync(override, String.raw`
+; NSIS otherwise measures writing the archive, not extracting its contents.
+; Show activity throughout installation instead of a misleading repeated percentage.
+!macro easyStockStartInstallProgress
+  Var /GLOBAL easyStockProgressStyle
+  IfSilent easyStockProgressStarted
+    Push $0
+    System::Call 'user32::GetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16) i.r0'
+    StrCpy $easyStockProgressStyle $0
+    IntOp $0 $0 | 0x08
+    System::Call 'user32::SetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16, i r0)'
+    SendMessage $mui.InstFilesPage.ProgressBar 0x40A 1 30
+    Pop $0
+  easyStockProgressStarted:
+!macroend
+
+!macro easyStockFinishInstallProgress
+  IfSilent easyStockProgressFinished
+    SendMessage $mui.InstFilesPage.ProgressBar 0x40A 0 0
+    System::Call 'user32::SetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16, i $easyStockProgressStyle)'
+  easyStockProgressFinished:
+!macroend
+
 !macro easyStockPrepareUpgradeTemp
   Var /GLOBAL easyStockUpgradeTempDir
   Var /GLOBAL easyStockPreviousTemp
@@ -171,43 +198,35 @@ if (platform === 'windows' && mode === 'release') {
 
 !macroundef decompress
 !macro decompress
-  Push $R8
-  StrCpy $R8 "$INSTDIR" 4
-  StrCmp $R8 "\\?\" easyStockExtendedPath
-  StrCpy $R8 "$INSTDIR" 2
-  StrCmp $R8 "\\" easyStockUNCPath
-  StrCpy $R8 "\\?\$INSTDIR"
-  Goto easyStockUnzip
-  easyStockUNCPath:
-    StrCpy $R8 "$INSTDIR" "" 2
-    StrCpy $R8 "\\?\UNC\$R8"
-    Goto easyStockUnzip
-  easyStockExtendedPath:
-    StrCpy $R8 "$INSTDIR"
-  easyStockUnzip:
-  nsisunz::Unzip "$PLUGINSDIR\app-$packageArch.zip" "$R8"
+  !insertmacro easyStockStartInstallProgress
+  File /oname=$PLUGINSDIR\easy-stock-7za.exe "${nsisPath(path.join(extractorRoot, 'bin', '7za.exe'))}"
+  DetailPrint "$(installing)"
+  nsExec::ExecToLog '"$PLUGINSDIR\easy-stock-7za.exe" x "$PLUGINSDIR\app-$packageArch.zip" "-o$INSTDIR" -y -bso0 -bsp0'
   Pop $R0
-  Pop $R8
-  StrCmp $R0 "success" easyStockExtractionDone
+  StrCmp $R0 "0" easyStockExtractionDone
     MessageBox MB_OK|MB_ICONEXCLAMATION "$(decompressionFailed)$\n$R0" /SD IDOK
     !insertmacro easyStockRestoreUpgradeTemp
     SetErrorLevel 2
     Quit
   easyStockExtractionDone:
+  SetOutPath "$INSTDIR\resources\installer-tools"
+  File /oname=7zip-LICENSE.txt "${nsisPath(path.join(extractorRoot, 'LICENSE.txt'))}"
+  File /oname=7zip-COPYING.txt "${nsisPath(path.join(extractorRoot, 'COPYING'))}"
+  SetOutPath "$INSTDIR"
 !macroend
 
 !macro customInstall
   !insertmacro easyStockRestoreUpgradeTemp
+  !insertmacro easyStockFinishInstallProgress
 !macroend
 `);
-  const escapedOverride = override.replace(/\$/g, () => '$$').replace(/"/g, () => '$\\"');
+  const escapedOverride = nsisPath(override);
   config.nsis.include = path.join(outputDirectory, 'easy-stock-installer.nsh');
   fs.writeFileSync(config.nsis.include, hook.replace(hookStart,
-    `${hookStart}\n!ifndef BUILD_UNINSTALLER\n!include "${escapedOverride}"\n!endif`)
+    () => `${hookStart}\n!ifndef BUILD_UNINSTALLER\n!include "${escapedOverride}"\n!endif`)
     .replace('!macroend', '!ifndef BUILD_UNINSTALLER\n!insertmacro easyStockPrepareUpgradeTemp\n!endif\n!macroend'));
 }
 
-const { Arch, build, Platform } = await import('electron-builder');
 const targetPlatform = platform === 'mac' ? Platform.MAC : Platform.WINDOWS;
 const targetArch = Arch[arch];
 const artifacts = await build({

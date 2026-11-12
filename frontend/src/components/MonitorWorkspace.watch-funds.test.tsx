@@ -32,7 +32,7 @@ afterEach(() => {
 
 it.each(['688512', '688512.SH', 'sh688512'])('shows fund flows for a watchlist entry stored as %s', async (symbol) => {
 	watchSymbol = symbol;
-	render(<MonitorWorkspace config={config} refreshKey={0} onOpenMarketIndexes={() => {}} />);
+	render(<MonitorWorkspace config={config} refreshKey={0} portfolioRefreshKey={0} onOpenSettings={() => {}} onOpenNotificationSettings={() => {}} onOpenStockAnalysis={() => {}} onOpenMarketIndexes={() => {}} />);
 	fireEvent.click(screen.getByRole('button', { name: '关注仓' }));
 	await screen.findByText('-256.6万');
 	expect(screen.getByText('-1.60%')).toBeTruthy();
@@ -47,7 +47,7 @@ it('matches a code-only response while keeping unavailable fields distinct from 
 	flow.main_net_inflow = 0;
 	flow.retail_net_inflow = 0;
 	flow.meta = { ...meta, available_fields: ['main_net_inflow'] };
-	const { container } = render(<MonitorWorkspace config={config} refreshKey={0} onOpenMarketIndexes={() => {}} />);
+	const { container } = render(<MonitorWorkspace config={config} refreshKey={0} portfolioRefreshKey={0} onOpenSettings={() => {}} onOpenNotificationSettings={() => {}} onOpenStockAnalysis={() => {}} onOpenMarketIndexes={() => {}} />);
 	fireEvent.click(screen.getByRole('button', { name: '关注仓' }));
 	await waitFor(() => expect(container.querySelector('[data-flow-field="main_net_inflow"]')?.textContent).toBe('0.00亿'));
 	expect(container.querySelector('[data-flow-field="retail_net_inflow"]')?.textContent).toBe('--');
