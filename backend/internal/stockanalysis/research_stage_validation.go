@@ -13,17 +13,22 @@ func validateResearchStage(value any, snapshot ResearchSnapshot, label string) e
 	for _, source := range snapshot.Sources {
 		sources[source.ID] = source
 	}
+	aliases := sourceIDRepairAliases(snapshot.Anchors, sources)
 	resolveIDs := func(ids []string) ([]string, error) {
-		// Preserve the existing unique one-character source-ID correction, but
-		// leave the original stage untouched for final validation and its notes.
-		copy := ResearchSynthesis{Thesis: ResearchClaim{SourceIDs: append([]string(nil), ids...)}}
-		repairResearchSourceIDs(&copy, sources)
-		for _, id := range copy.Thesis.SourceIDs {
+		// Validate a repaired copy; the final validator persists the same
+		// correction and its notes on the saved report.
+		resolved := append([]string(nil), ids...)
+		for i, id := range resolved {
+			if repaired, ok := repairSourceID(id, sources, aliases); ok {
+				resolved[i] = repaired
+			}
+		}
+		for _, id := range resolved {
 			if _, ok := sources[id]; !ok {
 				return nil, fmt.Errorf("引用了未知来源%s", id)
 			}
 		}
-		return copy.Thesis.SourceIDs, nil
+		return resolved, nil
 	}
 	validateClaim := func(claim ResearchClaim) error {
 		if strings.TrimSpace(claim.Text) == "" {
