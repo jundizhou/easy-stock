@@ -193,7 +193,7 @@ export function LimitUpWorkspace({ config, data, state, error, emotionData, emot
 			<header className="limit-up-hero">
 				<div>
 					<div className="eyebrow">SHORT-TERM LIMIT-UP STRUCTURE</div>
-					<p>{data?.current.trade_date || '等待涨停池'} · {data?.session_status || '加载中'} · {current.sourceSummary} · 结构统计默认剔除 ST</p>
+					<p>{data?.current.trade_date || '等待涨停池'} · {data?.session_status || '加载中'}</p>
 				</div>
 				<div className="limit-up-actions">
 					<label className="st-toggle" title="联网查阅近期报道识别上涨题材；不足则待确认。成功结果持续复用，失败后七天内不自动重试，手动刷新不受限制。"><input type="checkbox" checked={themeAI.enabled} onChange={event => themeAI.setEnabled(event.target.checked)} /><span>AI增强上涨题材识别</span></label>
