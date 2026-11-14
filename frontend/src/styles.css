@@ -3889,8 +3889,52 @@ a:focus-visible {
 .mastery-workspace {
 	display: grid;
 	gap: 12px;
+	width: 100%;
+	min-width: 0;
 	max-width: 1840px;
 	margin: 0 auto;
+}
+
+.mastery-view-tabs {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	width: fit-content;
+	max-width: 100%;
+	padding: 3px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--theme-surface-soft, var(--surface-2));
+	overflow-x: auto;
+}
+
+.mastery-view-tabs button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 30px;
+	padding: 5px 13px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+	font-size: var(--fs-body);
+	line-height: 1.4;
+	white-space: nowrap;
+	transition: background .15s ease, color .15s ease;
+}
+
+.mastery-view-tabs button:hover {
+	background: var(--theme-blue-soft, var(--surface-2));
+	color: var(--theme-blue, var(--blue));
+}
+
+.mastery-view-tabs button.active {
+	background: var(--theme-surface, var(--surface));
+	color: var(--theme-blue, var(--blue));
+	font-weight: 600;
+	box-shadow: 0 1px 3px var(--theme-shadow);
 }
 
 .mastery-hero,
@@ -4182,6 +4226,63 @@ a:focus-visible {
 	max-width: 1840px;
 	margin: 0 auto;
 }
+
+.review-automation-settings { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--theme-surface, #fff); }
+.review-automation-settings > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 16px; list-style: none; cursor: pointer; border-radius: 12px; transition: background .15s; }
+.review-automation-settings > summary::-webkit-details-marker { display: none; }
+.review-automation-settings > summary > svg:first-child { color: var(--theme-blue); }
+.review-automation-settings > summary strong { font-size: var(--fs-subtitle); }
+.review-automation-settings > summary > span { margin-left: auto; color: var(--muted); font-size: var(--fs-desc); }
+.review-automation-settings > summary:focus-visible { outline: 2px solid var(--theme-blue); outline-offset: -3px; }
+.review-automation-settings > summary:hover { background: var(--theme-surface-soft); }
+.review-automation-chevron { flex-shrink: 0; transition: transform .15s; }
+.review-automation-settings[open] > summary { border-bottom: 1px solid var(--line-soft); border-radius: 12px 12px 0 0; }
+.review-automation-settings[open] .review-automation-chevron { transform: rotate(180deg); }
+.review-automation-settings-body { display: grid; gap: 12px; padding: 14px 16px 12px; min-width: 0; }
+.review-automation-settings p { margin: 0; font-size: var(--fs-desc); line-height: var(--lh-body); }
+.review-automation-settings button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #fff); color: var(--text); font-size: var(--fs-body); font-weight: 500; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+.review-automation-settings button:hover:not(:disabled) { color: var(--theme-blue); border-color: var(--theme-blue-line); background: var(--theme-blue-soft); }
+.review-automation-settings button:disabled { opacity: .45; cursor: default; }
+.review-automation-settings :is(button, input, select):focus-visible { outline: 2px solid var(--theme-blue); outline-offset: 2px; }
+.review-automation-settings .review-automation-save, .review-automation-settings .review-subscription-form > button { border-color: var(--theme-blue-solid); background: var(--theme-blue-solid); color: var(--theme-on-emphasis, #fff); }
+.review-automation-settings .review-automation-save:hover:not(:disabled), .review-automation-settings .review-subscription-form > button:hover:not(:disabled) { border-color: var(--theme-blue-solid); background: var(--theme-blue-solid); color: var(--theme-on-emphasis, #fff); filter: brightness(1.08); }
+.review-automation-schedule-form fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.review-automation-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-width: 0; }
+.review-automation-row > strong { color: var(--muted); font-size: var(--fs-body); font-weight: 600; }
+.review-automation-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+.review-automation-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.review-automation-check, .review-automation-time { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-body); }
+.review-automation-check { cursor: pointer; }
+.review-automation-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--theme-blue); cursor: inherit; }
+.review-automation-check small, .review-automation-hint { color: var(--subtle); font-size: var(--fs-desc); }
+.review-automation-enable input { appearance: none; position: relative; flex-shrink: 0; width: 30px; height: 18px; border: 1px solid var(--line); border-radius: 999px; background: var(--theme-surface-muted, #e7edf4); transition: background .18s, border-color .18s; }
+.review-automation-enable input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .18s, background .18s; }
+.review-automation-enable input:checked { border-color: var(--theme-blue-solid); background: var(--theme-blue-solid); }
+.review-automation-enable input:checked::after { transform: translateX(12px); background: var(--theme-on-emphasis, #fff); }
+.review-automation-enable input:disabled { opacity: .5; cursor: default; }
+.review-automation-channel { min-height: 34px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface, #fff); transition: border-color .15s, background .15s; }
+.review-automation-channel:has(input:checked) { border-color: var(--theme-blue-line); background: var(--theme-blue-soft); color: var(--theme-blue); }
+.review-automation-channel:has(input:disabled) { color: var(--muted); background: var(--theme-surface-soft); cursor: default; }
+.review-automation-time { color: var(--muted); }
+.review-automation-time input { width: 112px; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--theme-surface-soft); color: var(--text); font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
+.review-automation-subscriptions { display: grid; gap: 10px; min-width: 0; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.review-automation-subscriptions > header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.review-automation-subscriptions > header strong { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-body); font-weight: 600; }
+.review-automation-subscriptions > header svg { color: var(--theme-blue); }
+.review-automation-subscriptions > header > span { color: var(--subtle); font-size: var(--fs-desc); }
+.review-automation-subscriptions > header > button { margin-left: auto; }
+.review-automation-settings .review-subscription-form { align-items: end; gap: 10px; }
+.review-automation-settings .review-subscription-form > label { display: grid; gap: 6px; min-width: 0; }
+.review-automation-settings .review-subscription-form > label > span { color: var(--muted); font-size: var(--fs-desc); }
+.review-automation-settings .review-subscription-form :is(input, select) { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border-color: var(--line); background: var(--theme-surface-soft); transition: border-color .15s; }
+.review-automation-settings .review-subscription-form :is(input, select):hover { border-color: var(--theme-blue-line); }
+.review-automation-settings .review-subscription-list { max-height: 136px; overflow: auto; }
+.review-automation-settings .review-subscription-list:empty { display: none; }
+.review-automation-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; border-top: 1px solid var(--line-soft); padding-top: 10px; color: var(--subtle); font-size: var(--fs-desc); }
+.review-automation-settings .review-automation-footer button { min-height: 0; padding: 0; border: 0; color: var(--theme-blue); background: transparent; font-size: inherit; }
+.review-automation-settings .review-automation-warning, .review-automation-settings [role="alert"] { color: var(--theme-amber); }
+@media (max-width: 1200px) { .review-automation-controls > .review-automation-hint { display: none; } }
+@media (max-width: 700px) { .review-automation-settings > summary { flex-wrap: wrap; } .review-automation-settings > summary > span { order: 1; width: 100%; margin-left: 26px; } .review-automation-chevron { margin-left: auto; } .review-automation-row { grid-template-columns: 1fr auto; } .review-automation-row > strong { grid-column: 1 / -1; } .review-automation-controls { gap: 8px; } }
 
 .review-hero,
 .review-source-row,
@@ -4498,6 +4599,8 @@ a:focus-visible {
 
 .review-view-tabs {
 	display: grid;
+	width: 100%;
+	min-width: 0;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
 	gap: 8px;
 	padding: 8px;
@@ -4903,7 +5006,8 @@ a:focus-visible {
 
 .review-layout {
 	display: grid;
-	grid-template-columns: 220px minmax(330px, 0.76fr) minmax(430px, 1.24fr);
+	grid-template-columns: minmax(190px, 220px) minmax(0, 0.76fr) minmax(0, 1.24fr);
+	min-width: 0;
 	gap: 12px;
 	align-items: stretch;
 }
