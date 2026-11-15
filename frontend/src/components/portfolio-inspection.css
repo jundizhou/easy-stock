@@ -33,7 +33,7 @@
 	.portfolio-plan-controls { flex-wrap: wrap; }
 	.portfolio-plan-options { flex-basis: 100%; }
 	.portfolio-plan-actions { margin-left: auto; }
-	.portfolio-inspection-workspace .portfolio-weight-control { min-width: 0; grid-template-columns: minmax(0, 1fr) 64px; }
+	.portfolio-inspection-workspace .portfolio-weight-control { min-width: 0; grid-template-columns: minmax(0, 1fr) 104px; }
 	.portfolio-inspection-workspace .portfolio-weight-control > input { min-width: 0; margin-inline: 0; }
 }
 .portfolio-inspection-workspace .portfolio-history,

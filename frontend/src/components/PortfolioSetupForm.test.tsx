@@ -14,7 +14,7 @@ describe('ETF portfolio editing',()=>{
  });
 });
 describe('PortfolioSetupForm', () => {
-	it('shows the holding share as a read-only market-value calculation', () => {
+	it('shows an editable holding share calculated from market value', () => {
 		const markup = renderToStaticMarkup(<PortfolioSetupForm
 			draft={{
 				profile: 'balanced',
@@ -31,7 +31,8 @@ describe('PortfolioSetupForm', () => {
 		/>);
 
 		expect(markup).toContain('持仓占比');
-		expect(markup).toContain('90.04%');
+		expect(markup).toMatch(/type="number"[^>]*aria-label="睿创微纳持仓占比"/);
+		expect(markup).toContain('value="90.04"');
 		expect(markup).not.toContain('按数量 × 最新价格 ÷ 总资产');
 		expect(markup).not.toContain('type="range"');
 		expect(markup).not.toContain('仓位百分比');
