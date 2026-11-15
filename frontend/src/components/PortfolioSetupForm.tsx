@@ -23,6 +23,7 @@ type Props = {
 
 export function PortfolioSetupForm({ draft, config, directory, disabled = false, busy = false, actionLabel, busyLabel, actionIcon, showResearchOptions = false, onChange, onSubmit }: Props) {
 	const [assetsInput, setAssetsInput] = useState(String(draft.totalAssets ?? defaultPortfolioAssets));
+	const [editingInput, setEditingInput] = useState<{ symbol: string; field: 'weight' | 'quantity'; value: string } | null>(null);
 	const [adding, setAdding] = useState(false);
 	const addRequest = useRef<AbortController | null>(null);
 	const latestDraft = useRef(draft);
@@ -84,7 +85,9 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 		const remaining = 100 - values.reduce((sum, item, index) => sum + (item.weightPercent ?? current.holdings[index].weight), 0);
 		// Allow editing a full portfolio; enforce the asset budget on submission.
 		const weight = remaining > 0 ? Math.min(10, remaining) : 10;
-		onChange({ ...current, holdings: [...current.holdings, { symbol, name: stock.name, instrumentType: stock.instrument_type, weight, quantity: '', costPrice: snapshot.entryPrice ? String(snapshot.entryPrice) : '', ...snapshot }] });
+		const assets = current.totalAssets ?? defaultPortfolioAssets;
+		const quantity = snapshot.entryPrice ? String(Math.floor(assets * weight / 100 / snapshot.entryPrice + 1e-9)) : '';
+		onChange({ ...current, holdings: [...current.holdings, { symbol, name: stock.name, instrumentType: stock.instrument_type, weight, quantity, costPrice: snapshot.entryPrice ? String(snapshot.entryPrice) : '', ...snapshot }] });
 		setQuery('');
 		setSuggestionsOpen(false);
 		setError(priceError);
@@ -119,7 +122,7 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 				<div><span>总盈亏</span><strong className={profitClass(valuation.profit)}>{money(valuation.profit, true)}</strong></div>
 				<div><span>持仓盈亏率</span><strong className={profitClass(valuation.profitPercent)}>{percent(valuation.profitPercent)}</strong></div>
 			</div>
-			<p className="portfolio-valuation-note">持有数量按总资产 × 仓位 ÷ 成本价取整，盈亏按最新价估算，不含交易费用。</p>
+			<p className="portfolio-valuation-note">持仓占比与数量联动，修改占比时按总资产 × 占比 ÷ 最新价取整，无行情时使用成本价。盈亏按最新价估算，不含交易费用。</p>
 			{market.error && <p className="portfolio-quote-warning" role="status">{market.error}</p>}
 			{draft.holdings.some((holding) => portfolioHoldingCost(holding) === null) && <p className="portfolio-quote-warning">部分持仓缺少有效成本，总盈亏待补齐成本与行情后显示。</p>}
 			{quantityExceedsAssets && <p className="portfolio-quote-warning" role="alert">持仓数量对应的市值超过总资产，请减少持仓数量或增加总资产。</p>}
@@ -150,16 +153,29 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 					const quote = market.quotes[holding.symbol];
 					const otherMarketValue = valuation.holdings.reduce((total, item, itemIndex) => itemIndex === index ? total : total + (item.marketValue ?? 0), 0);
 					const maxQuantity = value.price !== null && assetsValid ? Math.max(0, Math.floor((totalAssets - otherMarketValue) / value.price + 1e-9)) : undefined;
+					const sizingPrice = value.price ?? value.costPrice;
+					const weightInput = editingInput?.symbol === holding.symbol && editingInput.field === 'weight' ? editingInput.value : String(Math.round((value.weightPercent ?? holding.weight) * 100) / 100);
+					const quantityInput = editingInput?.symbol === holding.symbol && editingInput.field === 'quantity' ? editingInput.value : holding.quantity?.trim() ? holding.quantity : String(value.quantity ?? '');
  const isFund = holding.instrumentType === 'etf' || directory.some(v => v.symbol === holding.symbol && v.instrument_type === 'etf');
 					return <article key={holding.symbol}>
 						<div className="portfolio-holding-identity"><i>{String(index + 1).padStart(2, '0')}</i><div><strong>{holding.name}</strong><span>{holding.symbol}</span></div></div>
-						<div className="portfolio-weight-control" aria-label={`${holding.name}持仓占比`}><span>持仓占比</span><strong>{allocationPercent(value.weightPercent)}</strong></div>
-						<label className="portfolio-quantity-input"><span>持仓数量</span><input type="number" min="0" max={maxQuantity} step="1" inputMode="numeric" value={holding.quantity || ''} disabled={disabled} aria-label={`${holding.name}持仓数量`} aria-invalid={value.marketValue !== null && value.marketValue > totalAssets + 1e-6} onChange={(event) => {
+						<div className="portfolio-weight-control"><span>持仓占比</span><label><input type="number" min="0" max="100" step="0.01" inputMode="decimal" value={weightInput} disabled={disabled || !assetsValid || sizingPrice === null} aria-label={`${holding.name}持仓占比`} onChange={(event) => {
+							const raw = event.target.value;
+							setEditingInput({ symbol: holding.symbol, field: 'weight', value: raw });
+							const weight = Number(raw);
+							if (!raw.trim() || !Number.isFinite(weight) || weight < 0 || weight > 100 || !assetsValid || sizingPrice === null) return;
+							const quantity = Math.floor(totalAssets * weight / 100 / sizingPrice + 1e-9);
+							updateHolding(holding.symbol, { weight: weight > 0 ? weight : holding.weight, quantity: String(quantity) });
+						}} onBlur={() => setEditingInput(null)} /><span>%</span></label></div>
+						<label className="portfolio-quantity-input"><span>持仓数量</span><input type="number" min="0" max={maxQuantity} step="1" inputMode="numeric" value={quantityInput} disabled={disabled} aria-label={`${holding.name}持仓数量`} aria-invalid={value.marketValue !== null && value.marketValue > totalAssets + 1e-6} onChange={(event) => {
 							const raw = event.target.value;
 							const parsed = raw.trim() ? Number(raw) : null;
-							const quantity = maxQuantity !== undefined && parsed !== null && Number.isFinite(parsed) && parsed > maxQuantity ? String(maxQuantity) : raw;
-							updateHolding(holding.symbol, { quantity });
-						}} placeholder="自动估算" /></label>
+							const quantity = parsed !== null && Number.isFinite(parsed) && parsed >= 0 ? Math.min(Math.floor(parsed), maxQuantity ?? Infinity) : null;
+							setEditingInput({ symbol: holding.symbol, field: 'quantity', value: quantity === null ? raw : String(quantity) });
+							if (quantity === null) return;
+							const weight = assetsValid && sizingPrice !== null ? quantity * sizingPrice / totalAssets * 100 : null;
+							updateHolding(holding.symbol, { quantity: String(quantity), ...(weight !== null && weight > 0 ? { weight } : {}) });
+						}} onBlur={() => setEditingInput(null)} placeholder="待补齐价格" /></label>
 						<label className="portfolio-cost-input"><span>持仓成本</span><input inputMode="decimal" value={holding.costPrice} disabled={disabled} aria-label={`${holding.name}持仓成本`} aria-invalid={Boolean(holding.costPrice.trim()) && value.costPrice === null} onChange={(event) => updateHolding(holding.symbol, { costPrice: event.target.value })} onBlur={() => { if (!holding.costPrice.trim() && holding.entryPrice) updateHolding(holding.symbol, { costPrice: String(holding.entryPrice) }); }} placeholder={holding.entryPrice ? String(holding.entryPrice) : '请输入成本'} title={holding.entryPrice ? `添加时价格 ${holding.entryPrice} 元，可修改` : '未取得添加时价格，请填写实际成本'} /></label>
 						<button type="button" className="portfolio-remove" onClick={() => onChange({ ...draft, holdings: draft.holdings.filter((item) => item.symbol !== holding.symbol) })} disabled={disabled} aria-label={`删除${holding.name}`} title="删除"><Trash2 size={16} /></button>
 						<div className="portfolio-holding-valuation">
