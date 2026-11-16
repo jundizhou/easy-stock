@@ -235,6 +235,9 @@ func defaultValues() Values {
 		ReviewAutomation: ReviewAutomation{Profiles: []ReviewSourceProfile{
 			{ID: "xueqiu-default", Source: "xueqiu", Name: "雪球默认配置", BaseURL: "https://xueqiu.com", SyncHour: 7, AutoAnalyze: true, Enabled: true},
 			{ID: "taoguba-default", Source: "taoguba", Name: "淘股吧默认配置", BaseURL: "https://www.tgb.cn", SyncHour: 7, AutoAnalyze: true, Enabled: true},
+			// 知识星球单日主题可达 20 条以上且多为短评，逐条 AI 提炼成本高，
+			// 默认只入库，交给每日复盘统一归纳。
+			{ID: "zsxq-default", Source: "zsxq", Name: "知识星球默认配置", BaseURL: "https://wx.zsxq.com", SyncHour: 7, AutoAnalyze: false, Enabled: true},
 		}},
 	}
 }
@@ -258,9 +261,25 @@ func (s *Store) normalizeReviewProfiles() {
 			}
 		}
 		for index := range defaults {
+			if defaults[index].Source == "zsxq" {
+				continue
+			}
 			defaults[index].AutoAnalyze = s.values.ReviewAutomation.AutoAnalyze || s.values.UpdatedAt.IsZero()
 		}
 		s.values.ReviewAutomation.Profiles = defaults
+		return
+	}
+	// 知识星球是后加入的平台，旧版设置文件里不会有它的配置。缺失时补一份默认
+	// 配置，否则新增的知识星球订阅找不到可用采集配置；已有配置一律不动。
+	for _, profile := range s.values.ReviewAutomation.Profiles {
+		if profile.Source == "zsxq" {
+			return
+		}
+	}
+	for _, profile := range defaultValues().ReviewAutomation.Profiles {
+		if profile.Source == "zsxq" {
+			s.values.ReviewAutomation.Profiles = append(s.values.ReviewAutomation.Profiles, profile)
+		}
 	}
 }
 

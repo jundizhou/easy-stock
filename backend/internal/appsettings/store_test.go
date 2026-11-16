@@ -56,7 +56,8 @@ func TestStoreDropsLegacyWechatServiceSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	profiles := store.Snapshot().ReviewAutomation.Profiles
-	if len(profiles) != 1 || profiles[0].Source != "xueqiu" {
+	// 旧配置里的微信公众号配置被清掉；知识星球作为后加平台会补一份默认配置。
+	if len(profiles) != 2 || profiles[0].Source != "xueqiu" || profiles[1].Source != "zsxq" {
 		t.Fatalf("profiles = %+v", profiles)
 	}
 	if _, err := store.Update(func(*Values) error { return nil }); err != nil {

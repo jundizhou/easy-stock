@@ -28,12 +28,75 @@ func (s *Server) reviewSources(w http.ResponseWriter, r *http.Request) {
 			ready[profile.Source] = true
 		}
 	}
+	zsxqStatus := review.ZsxqAuthStatus{Message: "知识星球采集未启用"}
+	if s.reviewAutomation != nil {
+		zsxqStatus = s.reviewAutomation.ZsxqAuthStatus(r.Context())
+	}
+	zsxqMessage := zsxqStatus.Message
+	if zsxqStatus.LoggedIn {
+		zsxqMessage = "zsxq-cli 授权有效；只能同步星主已开通 Skill 权限的星球"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": []review.SourceStatus{
 		{ID: "official", Name: "每日复盘", Status: "configured", Message: "收盘后每30分钟刷新远程大V清单；每位作者本地已有当日文章后不再重复下载", ImportReady: false, SyncReady: s.remoteDailySync != nil},
 		{ID: "xueqiu", Name: "雪球", Status: map[bool]string{true: "configured", false: "limited"}[ready["xueqiu"]], Message: map[bool]string{true: "内置浏览器登录态有效，Hermes 可复用会话采集", false: "请在设置中打开雪球登录窗口并完成登录验证"}[ready["xueqiu"]], ImportReady: true, SyncReady: ready["xueqiu"]},
 		{ID: "taoguba", Name: "淘股吧", Status: map[bool]string{true: "configured", false: "limited"}[ready["taoguba"]], Message: map[bool]string{true: "内置浏览器登录态有效，Hermes 可复用会话采集", false: "请在设置中打开淘股吧登录窗口并完成登录验证"}[ready["taoguba"]], ImportReady: true, SyncReady: ready["taoguba"]},
+		{ID: review.ZsxqSource, Name: "知识星球", Status: map[bool]string{true: "configured", false: "limited"}[zsxqStatus.LoggedIn], Message: zsxqMessage, ImportReady: false, SyncReady: zsxqStatus.LoggedIn},
 		{ID: "wechat", Name: "微信公众号", Status: "limited", Message: "仅支持具体文章链接导入；微信已停用历史文章列表接口，不提供自动订阅", ImportReady: true, SyncReady: false},
 	}})
+}
+
+// reviewZsxqGroups 返回已加入的星球及其可读状态。知识星球的内容读取权限由星主
+// 按星球开通，成员身份不自带，因此订阅前必须让用户看到「可读 / 需星主开通」。
+func (s *Server) reviewZsxqGroups(w http.ResponseWriter, r *http.Request) {
+	if s.reviewAutomation == nil {
+		writeError(w, http.StatusServiceUnavailable, "知识星球采集未启用")
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, 90*time.Second)
+	defer cancel()
+	groups, err := s.reviewAutomation.ZsxqGroups(ctx)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, review.ErrZsxqCLIUnavailable) || errors.Is(err, review.ErrZsxqNotLoggedIn) {
+			status = http.StatusServiceUnavailable
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": groups})
+}
+
+// reviewZsxqAuthDevice 生成/查询/取消知识星球设备授权。
+//
+// 这里不让前端直接调 CLI：二维码链接和 device_code 必须由服务端持有，
+// 否则页面得知道 CLI 路径、还得自己解析混合了中文横幅的输出。
+func (s *Server) reviewZsxqAuthDevice(w http.ResponseWriter, r *http.Request) {
+	if s.reviewAutomation == nil {
+		writeError(w, http.StatusServiceUnavailable, "知识星球采集未启用")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"data": s.reviewAutomation.ZsxqAuthSessionSnapshot()})
+	case http.MethodPost:
+		ctx, cancel := contextWithTimeout(r, 30*time.Second)
+		defer cancel()
+		session, err := s.reviewAutomation.StartZsxqAuth(ctx)
+		if err != nil {
+			status := http.StatusBadGateway
+			if errors.Is(err, review.ErrZsxqCLIUnavailable) {
+				status = http.StatusServiceUnavailable
+			}
+			writeError(w, status, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": session})
+	case http.MethodDelete:
+		s.reviewAutomation.CancelZsxqAuth()
+		writeJSON(w, http.StatusOK, map[string]any{"data": s.reviewAutomation.ZsxqAuthSessionSnapshot()})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "不支持的操作")
+	}
 }
 
 func (s *Server) reviewRemoteDailyStatus(w http.ResponseWriter, _ *http.Request) {

@@ -26,7 +26,7 @@ import {
 	Zap,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, requestJSON } from '../lib/backend';
+import { AppSettings, BackendConfig, ReviewAuthor, ReviewAuthorDeleteResult, ReviewAutomationProfile, ReviewDailyAuthorView, ReviewDailyStockView, ReviewDailySummary, ReviewDailySummaryJob, ReviewDailySummaryWindow, ReviewDailyValidation, ReviewDailyValidationJob, ReviewPost, ReviewSource, ReviewSubscription, ReviewSyncResult, ReviewZsxqGroup, requestJSON } from '../lib/backend';
 import { ReviewSchedulePanel } from './ReviewSchedulePanel';
 import { ReviewSummaryHistory } from './ReviewSummaryHistory';
 import { useReviewSummaryHistory } from '../lib/use-review-summary-history';
@@ -52,6 +52,7 @@ const sourceTabs: Array<{ id: string; name: string }> = [
 	{ id: 'official', name: '每日复盘' },
 	{ id: 'xueqiu', name: '雪球' },
 	{ id: 'taoguba', name: '淘股吧' },
+	{ id: 'zsxq', name: '知识星球' },
 	{ id: 'wechat', name: '微信公众号' },
 ];
 
@@ -76,6 +77,9 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 	const [subscriptionName, setSubscriptionName] = useState('');
 	const [homepageURL, setHomepageURL] = useState('');
 	const [savingSubscription, setSavingSubscription] = useState(false);
+	const [zsxqGroups, setZsxqGroups] = useState<ReviewZsxqGroup[]>([]);
+	const [zsxqGroupsLoading, setZsxqGroupsLoading] = useState(false);
+	const [zsxqGroupsError, setZsxqGroupsError] = useState('');
 	const [syncing, setSyncing] = useState('');
 	const [analyzing, setAnalyzing] = useState('');
 	const [deletingPost, setDeletingPost] = useState('');
@@ -267,6 +271,17 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 			await requestJSON(config, '/api/v1/reviews/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: subscriptionSource, homepage_url: homepageURL.trim(), name: subscriptionName.trim(), config_id: subscriptionConfigID }) });
 			setHomepageURL(''); setSubscriptionName(''); setNotice('订阅已添加，点击“立即同步”可马上抓取'); await loadDiary();
 		} catch (cause) { setError(cause instanceof Error ? readableAPIError(cause.message) : '添加订阅失败'); } finally { setSavingSubscription(false); }
+	};
+
+	const loadZsxqGroups = async () => {
+		if (!config) return;
+		setZsxqGroupsLoading(true); setZsxqGroupsError('');
+		try {
+			const payload = await requestJSON<{ data: ReviewZsxqGroup[] }>(config, '/api/v1/reviews/zsxq/groups');
+			setZsxqGroups(payload.data || []);
+		} catch (cause) {
+			setZsxqGroupsError(cause instanceof Error ? readableAPIError(cause.message) : '读取知识星球列表失败');
+		} finally { setZsxqGroupsLoading(false); }
 	};
 
 	const syncSubscriptions = async (id = '') => {
@@ -556,12 +571,17 @@ export function ReviewDiary({ config, refreshKey, onOpenNotificationSettings }: 
 					<div className="review-automation-body">
 						<div className="review-wechat-import-hint"><FileInput size={16} /><span><strong>微信公众号仅支持链接导入</strong><small>将具体文章链接粘贴到上方“导入文章”；不提供公众号自动订阅。</small></span></div>
 						<form className="review-subscription-form" onSubmit={addSubscription}>
-							<select value={subscriptionSource} onChange={(event) => setSubscriptionSource(event.target.value)}><option value="xueqiu">雪球</option><option value="taoguba">淘股吧</option></select>
+							<select value={subscriptionSource} onChange={(event) => { const next = event.target.value; setSubscriptionSource(next); setSubscriptionConfigID(reviewProfiles.find((profile) => profile.source === next)?.id || ''); }}><option value="xueqiu">雪球</option><option value="taoguba">淘股吧</option><option value="zsxq">知识星球</option></select>
 							<select value={subscriptionConfigID} onChange={(event) => setSubscriptionConfigID(event.target.value)} aria-label="采集配置">{reviewProfiles.filter((profile) => profile.source === subscriptionSource).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select>
-							<input value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder="作者名称（可选）" />
-							<input value={homepageURL} onChange={(event) => setHomepageURL(event.target.value)} placeholder="粘贴大V主页地址" />
+							<input value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder={subscriptionSource === 'zsxq' ? '星球名称（可选）' : '作者名称（可选）'} />
+							<input value={homepageURL} onChange={(event) => setHomepageURL(event.target.value)} placeholder={subscriptionSource === 'zsxq' ? '粘贴知识星球链接或 group_id' : '粘贴大V主页地址'} />
 							<button type="submit" disabled={!homepageURL.trim() || !subscriptionConfigID || savingSubscription}>{savingSubscription ? <RefreshCw className="spin" size={14} /> : <Plus size={14} />}添加订阅</button>
 						</form>
+						{subscriptionSource === 'zsxq' && <div className="review-zsxq-groups">
+							<div className="review-zsxq-groups-head"><span><strong>知识星球需要星主开通 Skill 权限</strong><small>已加入不等于可同步。添加前先探测一下，避免同步后才看到失败。</small></span><button type="button" onClick={() => void loadZsxqGroups()} disabled={zsxqGroupsLoading}>{zsxqGroupsLoading ? <RefreshCw className="spin" size={14} /> : <RadioTower size={14} />}{zsxqGroupsLoading ? '探测中' : '检测我的星球'}</button></div>
+							{zsxqGroups.length > 0 && <div className="review-zsxq-group-list">{zsxqGroups.map((group) => <button type="button" key={group.id} className={`review-zsxq-group ${group.readable ? 'ready' : 'limited'}`} title={group.message} onClick={() => { setHomepageURL(`https://wx.zsxq.com/group/${group.id}`); setSubscriptionName(group.name); }}><span>{group.name}</span><i>{group.readable ? '可同步' : '需星主开通'}</i></button>)}</div>}
+							{zsxqGroupsError && <small className="review-zsxq-error" role="alert">{zsxqGroupsError}</small>}
+						</div>}
 						<div className="review-subscription-list">{subscriptions.map((sub) => <div key={sub.id}><span className={`author-avatar ${sub.source}`}>{sub.name.slice(0, 1)}</span><span><strong>{sub.name}</strong><small>{sourceLabel(sub.source)} · {sub.source === 'wechat' ? '旧订阅已停用，请通过链接导入文章' : `${reviewProfiles.find((profile) => profile.id === sub.config_id)?.name || '默认配置'} · ${sub.last_sync_at ? `上次 ${formatDateTime(sub.last_sync_at)}` : '等待首次同步'}`}{sub.last_error ? ` · ${sub.last_error}` : ''}</small></span><i className={`source-dot ${sub.source === 'wechat' ? 'limited' : sub.last_status === 'ok' ? 'ready' : sub.last_status === 'error' ? 'limited' : 'experimental'}`} /><button type="button" title="立即同步该主页" disabled={!!syncing || sub.source === 'wechat'} onClick={() => void syncSubscriptions(sub.id)}>{syncing === sub.id ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}</button><button type="button" title="删除订阅" onClick={() => void deleteSubscription(sub.id)}><Trash2 size={14} /></button></div>)}</div>
 					</div>
 				</details>
@@ -1003,13 +1023,14 @@ function formatPercent(value: number) {
 }
 
 function sourceLabel(source: string) {
-	return source === 'official' ? '每日复盘' : source === 'wechat' ? '微信公众号' : source === 'xueqiu' ? '雪球' : source === 'taoguba' ? '淘股吧' : source;
+	return source === 'official' ? '每日复盘' : source === 'wechat' ? '微信公众号' : source === 'xueqiu' ? '雪球' : source === 'taoguba' ? '淘股吧' : source === 'zsxq' ? '知识星球' : source;
 }
 
 function sourceClass(source: string) {
 	if (source.includes('微信')) return 'wechat';
 	if (source.includes('雪球')) return 'xueqiu';
 	if (source.includes('淘股吧')) return 'taoguba';
+	if (source.includes('知识星球')) return 'zsxq';
 	if (source.includes('每日复盘')) return 'official';
 	return source.toLowerCase();
 }
