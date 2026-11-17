@@ -1,0 +1,30 @@
+name: Knowledge Planet Runtime
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/zsxq-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-cli:
+    name: Native CLI (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test runtime selection and archive verification
+        run: node --test desktop/test/zsxq-runtime.test.cjs desktop/test/packaging-files.test.cjs
+      - name: Prepare and execute native CLI without Node in PATH
+        run: node desktop/scripts/ensure-zsxq-runtime.mjs

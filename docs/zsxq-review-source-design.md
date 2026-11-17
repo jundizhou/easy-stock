@@ -334,6 +334,12 @@ zsxq-cli group +topics --group-id <id> --limit 5 --json
 
 CLI 缺失时该来源会降级为 `limited`，提示"未安装 zsxq-cli"，不影响其他来源。想指定非标准安装位置，设 `A_STOCK_ZSXQ_CLI`（或 `ZSXQ_CLI_PATH`）指向可执行文件即可。
 
+## 桌面分发更新（2026-11-17）
+
+上述 npm 全局安装要求仅适用于独立后端。桌面端现统一内置官方 `@zsxq/cli-<platform>-<arch>` 原生二进制，固定 0.5.1 版本和各平台 SHA-512 校验值，不依赖用户的 Node/npm 或终端 PATH。`dev:desktop` 自动准备运行时，`prepare:package` 把原生 CLI、版本清单和 Apache 2.0 许可复制进 resources/zsxq-runtime；打包后优先执行该目录内的原生文件。
+
+`verify-release-package.mjs` 在仅含系统目录的 PATH 下执行包内 CLI 的版本和设备授权帮助命令。CLI 缺失、版本或架构清单不匹配、设备授权参数不可用都会阻止发布验证通过；macOS DMG/ZIP 和 Windows 安装包解包验证共用此检查。
+
 ## 实现状态（2026-11-16）
 
 P0–P4 已落地，本地端到端跑通。

@@ -126,7 +126,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:mac
 
-      - name: Verify Hermes inside the macOS updater ZIP
+      - name: Verify runtimes inside the macOS updater ZIP
         run: |
           verify_root="$RUNNER_TEMP/easy-stock-zip-check"
           mkdir -p "$verify_root"
@@ -190,7 +190,7 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npm run release:windows
 
-      - name: Verify Hermes inside the Windows installer
+      - name: Verify runtimes inside the Windows installer
         shell: pwsh
         run: |
           $verifyRoot = Join-Path $env:RUNNER_TEMP 'easy-stock-installer-check'

@@ -63,7 +63,7 @@ type ZsxqAuthSession struct {
 
 var (
 	// ErrZsxqCLIUnavailable 表示本机没有可执行的 zsxq-cli。
-	ErrZsxqCLIUnavailable = errors.New("未找到 zsxq-cli：请先安装 Node 18+，再执行 npm install -g zsxq-cli")
+	ErrZsxqCLIUnavailable = errors.New("未找到知识星球采集程序：桌面端请重新安装完整安装包；独立运行后端时请配置 A_STOCK_ZSXQ_CLI")
 	// ErrZsxqNotAuthorized 表示当前账号有成员身份，但星主未开通 Skill 权限。
 	// 这是知识星球的服务端开关，客户端无法绕过，只能由星主在星球设置中申请开通。
 	ErrZsxqNotAuthorized = errors.New("该星球尚未开通知识星球 Skill 权限，需要星主在星球设置中申请开通后才能同步")

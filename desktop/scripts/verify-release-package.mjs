@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { verifyCodexRuntime } from './codex-runtime.mjs';
 import { verifyHermesRuntime } from './verify-hermes-runtime.mjs';
+import { verifyZsxqRuntime, zsxqExecutable } from './zsxq-runtime.mjs';
 
 const packageRoot = path.resolve(process.argv[2] || '');
 const platform = process.argv[3];
@@ -28,6 +29,8 @@ const requiredPaths = [
 	path.join(resourcesRoot, 'frontend', 'dist', 'index.html'),
 	path.join(resourcesRoot, 'hermes-runtime', 'runtime-manifest.json'),
 	path.join(resourcesRoot, 'agent-browser'),
+	zsxqExecutable(path.join(resourcesRoot, 'zsxq-runtime'), platform === 'windows' ? 'win32' : 'darwin'),
+	path.join(resourcesRoot, 'zsxq-runtime', 'runtime-manifest.json'),
 ];
 for (const requiredPath of requiredPaths) {
 	if (!fs.existsSync(requiredPath)) throw new Error(`Release package is incomplete: ${requiredPath}`);
@@ -74,6 +77,7 @@ if (violations.length) {
 }
 await verifyCodexRuntime(path.join(resourcesRoot, 'codex-runtime'));
 verifyHermesRuntime(path.join(resourcesRoot, 'hermes-runtime'));
+verifyZsxqRuntime(path.join(resourcesRoot, 'zsxq-runtime'));
 console.log(`Release package verified: ${packageRoot}`);
 
 function verifyMacBundle(appPath) {

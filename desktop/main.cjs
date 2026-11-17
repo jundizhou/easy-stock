@@ -25,6 +25,7 @@ const { createTaogubaBrowserBridge } = require('./taoguba-browser-bridge.cjs');
 const { createXueqiuBrowserBridge } = require('./xueqiu-browser-bridge.cjs');
 const { resolveUserDataPath } = require('./user-data.cjs');
 const { resolveHermesRuntimeRoot } = require('./hermes-runtime-root.cjs');
+const { resolveZsxqCliPath } = require('./zsxq-runtime.cjs');
 const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs');
 const { UpdateManager } = require('./update-manager.cjs');
 const { resolveUpdateFeed } = require('./update-feed.cjs');
@@ -269,38 +270,6 @@ function initializeUpdateManager() {
   }
 }
 
-function resolveZsxqCliPath() {
-  const configured = process.env.A_STOCK_ZSXQ_CLI || process.env.ZSXQ_CLI_PATH;
-  if (configured && fs.existsSync(configured)) return configured;
-  // 从 Finder 启动的桌面应用拿不到登录 shell 的 PATH，npm 全局 bin 往往不在
-  // 环境里，这里补一轮常见安装位置，避免知识星球采集因为找不到 CLI 直接不可用。
-  const names = process.platform === 'win32' ? ['zsxq-cli.cmd', 'zsxq-cli.exe', 'zsxq-cli'] : ['zsxq-cli'];
-  const directories = ['/usr/local/bin', '/opt/homebrew/bin'];
-  if (process.env.HOME) {
-    directories.push(
-      path.join(process.env.HOME, '.npm-global', 'bin'),
-      path.join(process.env.HOME, '.local', 'bin'),
-      path.join(process.env.HOME, '.volta', 'bin'),
-      path.join(process.env.HOME, 'n', 'bin'),
-    );
-  }
-  if (process.platform === 'win32') {
-    if (process.env.APPDATA) directories.push(path.join(process.env.APPDATA, 'npm'));
-    if (process.env.LOCALAPPDATA) directories.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs'));
-  }
-  for (const directory of directories) {
-    for (const name of names) {
-      const candidate = path.join(directory, name);
-      try {
-        if (fs.existsSync(candidate)) return candidate;
-      } catch {
-        // 忽略无权限目录
-      }
-    }
-  }
-  return '';
-}
-
 function buildRuntimeEnv(resourcesRoot) {
   const userData = app.getPath('userData');
   const hermesHome = process.env.A_STOCK_HERMES_HOME || path.join(userData, 'hermes-home');
@@ -320,7 +289,7 @@ function buildRuntimeEnv(resourcesRoot) {
     bundledRoot: resourcesRoot,
     projectRoot: path.resolve(__dirname, '..'),
   });
-  const zsxqCliPath = resolveZsxqCliPath();
+  const zsxqCliPath = resolveZsxqCliPath({ resourcesRoot, isPackaged: app.isPackaged });
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.mkdirSync(hermesWorkDir, { recursive: true });
   fs.mkdirSync(browserStateDir, { recursive: true, mode: 0o700 });

@@ -1,0 +1,9 @@
+Knowledge Planet (知识星球) official zsxq-cli 0.5.1
+Publisher: 知识星球 (ZSXQ)
+Source: https://github.com/unnoo/zsxq-skill
+Official site: https://garden.zsxq.com/skill/
+License: Apache License, Version 2.0 (see LICENSE).
+
+This application redistributes the unmodified platform-specific native CLI from
+the official @zsxq npm packages. No account credentials or authorization state
+are included. The bundled CLI does not require Node.js or npm on the user's PC.

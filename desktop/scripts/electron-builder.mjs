@@ -63,6 +63,7 @@ const config = {
     'eastmoney-push2-bridge.cjs',
     'eastmoney-session-bridge.cjs',
     'hermes-runtime-root.cjs',
+    'zsxq-runtime.cjs',
     'taoguba-browser-bridge.cjs',
     'update-feed.cjs',
     'update-manager.cjs',
