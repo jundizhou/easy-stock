@@ -4898,6 +4898,9 @@ a:focus-visible {
 .review-zsxq-groups-head span { display: grid; gap: 2px; min-width: 0; }
 .review-zsxq-groups-head strong { color: var(--theme-purple, #6845bd); font-size: var(--fs-body); }
 .review-zsxq-groups-head small { color: var(--muted); font-size: var(--fs-desc); line-height: var(--lh-snug); }
+.review-zsxq-groups-head > button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 10px; border: 1px solid var(--theme-purple-line, #d8ccf4); border-radius: 6px; background: var(--theme-surface, #ffffff); color: var(--theme-purple, #6845bd); font-size: var(--fs-body); white-space: nowrap; cursor: pointer; }
+.review-zsxq-groups-head > button:hover:not(:disabled) { background: var(--theme-purple-soft, #f7f4ff); }
+.review-zsxq-groups-head > button:disabled { opacity: .62; cursor: default; }
 .review-zsxq-group-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .review-zsxq-group { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--theme-line, #d6e0ea); border-radius: 999px; background: var(--theme-surface, #ffffff); color: var(--text); font-size: var(--fs-body); cursor: pointer; }
 .review-zsxq-group i { font-style: normal; font-size: var(--fs-desc); }

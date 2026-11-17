@@ -477,22 +477,27 @@ func (a *Automation) syncZsxqUnlocked(ctx context.Context, sub Subscription, pro
 	} else {
 		since = since.Add(-zsxqSyncOverlap)
 	}
-	posts, err := a.zsxqCollector().Collect(ctx, groupID, since)
-	if err != nil {
-		result.Error = err.Error()
-		_ = a.store.SetSubscriptionSync(ctx, sub.ID, "error", result.Error, a.nextRun(profile))
-		return result
-	}
+	posts, syncErr := a.zsxqCollector().Collect(ctx, groupID, since)
 	result.Found = len(posts)
 	for _, post := range posts {
+		deleted, err := a.store.IsAuthorDeleted(ctx, post.Source, post.AuthorID)
+		if err != nil {
+			syncErr = errors.Join(syncErr, err)
+			break
+		}
+		if deleted {
+			continue
+		}
 		if _, getErr := a.store.GetPostByURL(ctx, post.OriginalURL); getErr == nil {
 			continue
 		} else if !errors.Is(getErr, sql.ErrNoRows) {
-			continue
+			syncErr = errors.Join(syncErr, getErr)
+			break
 		}
 		stored, storeErr := a.store.UpsertPost(ctx, post)
 		if storeErr != nil {
-			continue
+			syncErr = errors.Join(syncErr, storeErr)
+			break
 		}
 		result.Imported++
 		if profile.AutoAnalyze {
@@ -501,7 +506,12 @@ func (a *Automation) syncZsxqUnlocked(ctx context.Context, sub Subscription, pro
 			}
 		}
 	}
-	_ = a.store.SetSubscriptionSync(ctx, sub.ID, "ok", "", a.nextRun(profile))
+	if syncErr != nil {
+		result.Error = syncErr.Error()
+		_ = a.store.SetSubscriptionSync(ctx, sub.ID, "error", result.Error, a.nextRun(profile))
+	} else if err := a.store.SetSubscriptionSync(ctx, sub.ID, "ok", "", a.nextRun(profile)); err != nil {
+		result.Error = err.Error()
+	}
 	return result
 }
 

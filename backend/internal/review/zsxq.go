@@ -13,10 +13,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"easy-stock/backend/internal/agent"
 )
 
 // ZsxqSource is the review source id for 知识星球 (zsxq).
@@ -451,7 +454,7 @@ func (c *ZsxqCollector) Collect(ctx context.Context, groupID string, since time.
 	if strings.TrimSpace(groupID) == "" {
 		return nil, errors.New("缺少星球 group_id")
 	}
-	topics := make([]zsxqTopic, 0, zsxqPageLimit)
+	posts := make([]Post, 0, zsxqPageLimit)
 	seen := map[string]bool{}
 	cursor := ""
 	for page := 0; page < zsxqMaxPages; page++ {
@@ -461,18 +464,11 @@ func (c *ZsxqCollector) Collect(ctx context.Context, groupID string, since time.
 		}
 		data, err := c.executeWithRetry(ctx, path, args...)
 		if err != nil {
-			if page == 0 {
-				return nil, err
-			}
-			// 已经拿到部分主题时不再让整次同步失败。
-			break
+			return posts, fmt.Errorf("知识星球第 %d 页采集失败: %w", page+1, err)
 		}
 		var payload zsxqTopicPage
 		if err := json.Unmarshal(data, &payload); err != nil {
-			if page == 0 {
-				return nil, fmt.Errorf("zsxq-cli 主题列表返回格式无效: %w", err)
-			}
-			break
+			return posts, fmt.Errorf("zsxq-cli 第 %d 页主题列表返回格式无效: %w", page+1, err)
 		}
 		reachedOlder := false
 		for _, topic := range payload.TopicsBrief {
@@ -491,24 +487,20 @@ func (c *ZsxqCollector) Collect(ctx context.Context, groupID string, since time.
 				reachedOlder = true
 				continue
 			}
-			topics = append(topics, topic)
+			if post, ok := zsxqTopicToPost(topic); ok {
+				posts = append(posts, post)
+			}
 		}
 		if reachedOlder || !payload.HasMore {
-			break
+			return posts, nil
 		}
 		next := strings.TrimSpace(payload.NextEndTime)
 		if next == "" || next == cursor {
-			break
+			return posts, errors.New("知识星球分页游标缺失或未前进，本次同步未完成")
 		}
 		cursor = next
 	}
-	posts := make([]Post, 0, len(topics))
-	for _, topic := range topics {
-		if post, ok := zsxqTopicToPost(topic); ok {
-			posts = append(posts, post)
-		}
-	}
-	return posts, nil
+	return posts, fmt.Errorf("知识星球本次已达 %d 页上限，尚未覆盖同步时间窗", zsxqMaxPages)
 }
 
 func zsxqTopicToPost(topic zsxqTopic) (Post, bool) {
@@ -779,7 +771,7 @@ func zsxqTranslateError(err error) error {
 	case strings.Contains(message, "登录") && (strings.Contains(message, "失效") || strings.Contains(message, "过期") || strings.Contains(message, "未登录")):
 		return fmt.Errorf("%w（原始提示：%s）", ErrZsxqNotLoggedIn, message)
 	default:
-		return errors.New(message)
+		return err
 	}
 }
 
@@ -938,12 +930,10 @@ func zsxqPrependPath(env []string, dirs []string) []string {
 
 func runZsxqCLI(ctx context.Context, path string, args ...string) ([]byte, error) {
 	timeout := zsxqRequestTimeout
-	// 设备授权要等用户扫码，外层给的是 10 分钟 deadline；此时不能让默认的
-	// 90 秒提前把轮询进程掐断，否则永远等不到授权成功。
-	if deadline, ok := ctx.Deadline(); ok {
-		if remaining := time.Until(deadline); remaining > timeout {
-			timeout = remaining
-		}
+	// Only device polling waits for a person; collection still has a 90s limit
+	// even when its scheduler context has a longer deadline.
+	if len(args) >= 2 && args[0] == "auth" && args[1] == "login" && slices.Contains(args[2:], "--device-code") {
+		timeout = zsxqAuthTTL
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -952,6 +942,9 @@ func runZsxqCLI(ctx context.Context, path string, args ...string) ([]byte, error
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()
@@ -984,5 +977,9 @@ func zsxqCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 	if env := zsxqProcessEnv(path); env != nil {
 		command.Env = env
 	}
+	// The npm entry point spawns a native CLI. Cancel both processes so its
+	// inherited output pipes cannot keep Run waiting after authorization ends.
+	agent.IsolateProcess(command)
+	command.WaitDelay = time.Second
 	return command
 }

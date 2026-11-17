@@ -10,7 +10,9 @@ import (
 	"syscall"
 )
 
-func isolateProcess(cmd *exec.Cmd) {
+// IsolateProcess makes cancellation terminate the command and its descendants.
+// The command must have been created with exec.CommandContext.
+func IsolateProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killProcessTree(cmd) }
 }

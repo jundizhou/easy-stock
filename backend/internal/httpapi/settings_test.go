@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -170,6 +171,49 @@ func TestSettingsAPISupportsReviewProfilesAndRejectsWechatAutomation(t *testing.
 	if len(profiles) != 2 || profiles[0].Credential != "" || profiles[1].Credential != "secret-5678" {
 		t.Fatalf("profiles=%+v", profiles)
 	}
+}
+
+func TestSettingsAPISavesDefaultReviewProfilesWithZsxq(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	store, err := appsettings.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{SettingsStore: store})
+	profiles := append([]appsettings.ReviewSourceProfile(nil), store.Snapshot().ReviewAutomation.Profiles...)
+	found := false
+	for index := range profiles {
+		if profiles[index].Source == "zsxq" {
+			found = true
+			profiles[index].SyncHour = 9
+			profiles[index].AutoAnalyze = true
+		}
+	}
+	if !found {
+		t.Fatal("default settings must include the knowledge planet profile")
+	}
+	body, err := json.Marshal(map[string]any{"review_automation": map[string]any{"profiles": profiles}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(string(body))))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save default profiles: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	reopened, err := appsettings.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range reopened.Snapshot().ReviewAutomation.Profiles {
+		if profile.Source == "zsxq" {
+			if profile.SyncHour != 9 || !profile.AutoAnalyze {
+				t.Fatalf("knowledge planet settings were not persisted: %+v", profile)
+			}
+			return
+		}
+	}
+	t.Fatal("saved knowledge planet profile is missing")
 }
 
 func TestSettingsAPIAcceptsAdditionalLLMProviders(t *testing.T) {

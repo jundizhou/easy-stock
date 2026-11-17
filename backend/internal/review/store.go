@@ -711,7 +711,9 @@ func (s *Store) DeleteSubscription(ctx context.Context, id string) error {
 }
 
 func (s *Store) SetSubscriptionSync(ctx context.Context, id, status, syncError string, next time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE review_subscriptions SET last_sync_at=?,next_sync_at=?,last_status=?,last_error=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339), next.UTC().Format(time.RFC3339), status, syncError, id)
+	// last_sync_at is the successful collection checkpoint, not the last attempt.
+	// Advancing it on failure would discard the failed interval on the next sync.
+	_, err := s.db.ExecContext(ctx, `UPDATE review_subscriptions SET last_sync_at=CASE WHEN ?='ok' THEN ? ELSE last_sync_at END,next_sync_at=?,last_status=?,last_error=? WHERE id=?`, status, time.Now().UTC().Format(time.RFC3339), next.UTC().Format(time.RFC3339), status, syncError, id)
 	return err
 }
 

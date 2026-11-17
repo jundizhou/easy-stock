@@ -211,6 +211,61 @@ func TestZsxqCollectRetriesRateLimit(t *testing.T) {
 	}
 }
 
+func TestZsxqCollectReportsLaterPageFailures(t *testing.T) {
+	for _, failure := range []string{"cli", "json"} {
+		t.Run(failure, func(t *testing.T) {
+			collector := NewZsxqCollector("fake-zsxq-cli")
+			collector.retryDelays = nil
+			calls := 0
+			collector.run = func(context.Context, string, ...string) ([]byte, error) {
+				calls++
+				if calls == 1 {
+					return zsxqSyncTestPage(t, true, "cursor", zsxqSyncTestTopic("1", "111", time.Now())), nil
+				}
+				if failure == "json" {
+					return []byte(`{invalid`), nil
+				}
+				return nil, errors.New("HTTP 429 Too Many Requests")
+			}
+			posts, err := collector.Collect(context.Background(), "12345678", time.Time{})
+			if err == nil || !strings.Contains(err.Error(), "第 2 页") || len(posts) != 1 || calls != 2 {
+				t.Fatalf("partial page failure: posts=%d calls=%d err=%v", len(posts), calls, err)
+			}
+		})
+	}
+}
+
+func TestZsxqCollectReportsIncompletePagination(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		calls   int
+		message string
+	}{
+		{name: "missing cursor", calls: 1, message: "游标"},
+		{name: "repeated cursor", calls: 2, message: "游标"},
+		{name: "page limit", calls: zsxqMaxPages, message: "页上限"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			collector := NewZsxqCollector("fake-zsxq-cli")
+			calls := 0
+			collector.run = func(context.Context, string, ...string) ([]byte, error) {
+				calls++
+				cursor := ""
+				if scenario.name == "repeated cursor" {
+					cursor = "cursor"
+				} else if scenario.name == "page limit" {
+					cursor = fmt.Sprintf("cursor-%d", calls)
+				}
+				return zsxqSyncTestPage(t, true, cursor, zsxqSyncTestTopic("1", "111", time.Now())), nil
+			}
+			posts, err := collector.Collect(context.Background(), "12345678", time.Time{})
+			if err == nil || !strings.Contains(err.Error(), scenario.message) || len(posts) != 1 || calls != scenario.calls {
+				t.Fatalf("incomplete pagination: posts=%d calls=%d err=%v", len(posts), calls, err)
+			}
+		})
+	}
+}
+
 func TestZsxqAuthStatusReportsMissingAndLoggedIn(t *testing.T) {
 	loggedIn := NewZsxqCollector("fake-zsxq-cli")
 	loggedIn.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {

@@ -325,7 +325,7 @@ func (r *CodexRuntime) start(ctx context.Context, options PromptOptions) (Proces
 	}
 	cmd := exec.CommandContext(ctx, r.config.Executable, "app-server", "--listen", "stdio://")
 	cmd.Dir, cmd.Env = work, values
-	isolateProcess(cmd)
+	IsolateProcess(cmd)
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		cleanup()
