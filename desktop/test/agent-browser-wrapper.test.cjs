@@ -109,5 +109,6 @@ test('desktop resolves packaged Python wrappers without falling back to absent d
   const env = buildRuntimeEnv(resourcesRoot);
   assert.equal(env.A_STOCK_AGENT_BROWSER_WRAPPER_DIR, wrapperDir);
   assert.equal(env.A_STOCK_ZSXQ_CLI, bundledZsxq);
+  assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
   assert.equal(fs.existsSync(path.join(appDirectory, 'scripts')), false);
 });

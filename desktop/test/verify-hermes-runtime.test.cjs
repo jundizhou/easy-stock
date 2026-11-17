@@ -63,6 +63,7 @@ test('verifies actual imports with spaces, Unicode paths and runtime relocation'
 	const data = await fixture(t); if (!data) return;
 	const { verifyHermesRuntime } = await import('../scripts/verify-hermes-runtime.mjs');
 	assert.deepEqual(verifyHermesRuntime(path.relative(process.cwd(), data.runtimeRoot), data.hashes), { version: data.manifest.version });
+	assert.equal(fs.existsSync(path.join(data.source, 'hermes_cli', '__pycache__')), false, 'verification must not write inside a signed bundle');
 	const moved = path.join(data.root, 'moved runtime 迁移');
 	fs.renameSync(data.runtimeRoot, moved);
 	assert.deepEqual(verifyHermesRuntime(moved, data.hashes), { version: data.manifest.version });

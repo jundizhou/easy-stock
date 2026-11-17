@@ -78,6 +78,8 @@ if (violations.length) {
 await verifyCodexRuntime(path.join(resourcesRoot, 'codex-runtime'));
 verifyHermesRuntime(path.join(resourcesRoot, 'hermes-runtime'));
 verifyZsxqRuntime(path.join(resourcesRoot, 'zsxq-runtime'));
+// Verification must not modify the signed runtime it just executed.
+if (platform === 'macos') verifyMacBundle(packageRoot);
 console.log(`Release package verified: ${packageRoot}`);
 
 function verifyMacBundle(appPath) {

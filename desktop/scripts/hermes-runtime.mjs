@@ -158,7 +158,8 @@ print(json.dumps({"version": hermes_cli.__version__}), file=output)
 	delete env.PYTHONPATH;
 	delete env.PYTHONHOME;
 	delete env.VIRTUAL_ENV;
-	const args = [...(process.platform === 'win32' ? ['-I'] : []), '-c', script, path.resolve(runtimeRoot), HERMES_AGENT_VERSION];
+	// -I ignores PYTHON* variables on Windows; -B is required there as well.
+	const args = [...(process.platform === 'win32' ? ['-I'] : []), '-B', '-c', script, path.resolve(runtimeRoot), HERMES_AGENT_VERSION];
 	const result = spawnSync(hermesRuntimePython(runtimeRoot), args, { cwd: runtimeRoot, encoding: 'utf8', env, timeout: 60_000 });
 	if (result.error) throw result.error;
 	if (result.status !== 0) throw new Error(`Bundled Hermes verification failed: ${(result.stderr || result.stdout || '').trim() || `exit status ${result.status}`}`);

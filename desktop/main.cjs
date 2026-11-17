@@ -294,6 +294,8 @@ function buildRuntimeEnv(resourcesRoot) {
   fs.mkdirSync(hermesWorkDir, { recursive: true });
   fs.mkdirSync(browserStateDir, { recursive: true, mode: 0o700 });
   return {
+		// Runtime resources are sealed by macOS signing and may be read-only.
+		PYTHONDONTWRITEBYTECODE: '1',
 		A_STOCK_LOG_DIR: runtimeLogDirectory,
 		A_STOCK_APP_VERSION: app.getVersion(),
     A_STOCK_SETTINGS_PATH: path.join(userData, 'settings.json'),

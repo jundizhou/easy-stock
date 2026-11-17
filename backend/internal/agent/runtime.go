@@ -1337,6 +1337,9 @@ func hermesEnvironment(base []string, home, workDir, binDir string) []string {
 	values = setEnv(values, "HERMES_HOME", home)
 	values = setEnv(values, "HERMES_SESSION_SOURCE", "easy-stock")
 	values = setEnv(values, "PYTHONNOUSERSITE", "1")
+	// Imported runtime files live inside the signed desktop bundle. Rewriting
+	// their bytecode after installation invalidates the macOS resource seal.
+	values = setEnv(values, "PYTHONDONTWRITEBYTECODE", "1")
 	values = setEnv(values, "PYTHONUNBUFFERED", "1")
 	values = setEnv(values, "NO_COLOR", "1")
 	// Python stdio and pipes follow the ANSI code page on Windows (GBK on
