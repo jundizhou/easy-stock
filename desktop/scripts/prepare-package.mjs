@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { prepareCodexRuntime, codexExecutable } from './codex-runtime.mjs';
 import { prepareHermesRuntime, hermesRuntimePython } from './hermes-runtime.mjs';
+import { prepareZsxqRuntime } from './zsxq-runtime.mjs';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(desktopRoot, '..');
@@ -23,6 +24,7 @@ runNpm(['--workspace', 'frontend', 'run', 'build'], repoRoot);
 run('go', ['build', '-trimpath', '-o', path.join(resourcesRoot, 'backend', backendName), './cmd/server'], path.join(repoRoot, 'backend'), { CGO_ENABLED: process.env.CGO_ENABLED || '0' });
 fs.cpSync(path.join(repoRoot, 'frontend', 'dist'), path.join(resourcesRoot, 'frontend', 'dist'), { recursive: true });
 prepareAgentBrowser();
+const zsxqManifest = await prepareZsxqRuntime({ runtimeRoot: path.join(resourcesRoot, 'zsxq-runtime') });
 
 const codexManifest = await prepareCodexRuntime({ runtimeRoot: path.join(resourcesRoot, 'codex-runtime') });
 const manifest = prepareHermesRuntime({ runtimeRoot: path.join(resourcesRoot, 'hermes-runtime') });
@@ -31,7 +33,7 @@ run('go', ['test', './internal/agent', '-run', 'TestCodexNative|TestBuiltinMCP|T
     EASY_STOCK_HERMES_TEST_PYTHON: hermesRuntimePython(path.join(resourcesRoot, 'hermes-runtime')),
 });
 run(hermesRuntimePython(path.join(resourcesRoot, 'hermes-runtime')), ['-m', 'unittest', 'discover', '-s', 'internal/agent', '-p', 'reasoning_launcher_test.py'], path.join(repoRoot, 'backend'));
-console.log(`Desktop resources ready: Codex ${codexManifest.version}, Hermes ${manifest.version} (${manifest.mode})`);
+console.log(`Desktop resources ready: Codex ${codexManifest.version}, Hermes ${manifest.version} (${manifest.mode}), zsxq-cli ${zsxqManifest.version}`);
 
 function prepareAgentBrowser() {
 	const packageRoot = path.join(repoRoot, 'node_modules', 'agent-browser');

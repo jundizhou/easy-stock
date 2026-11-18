@@ -92,15 +92,23 @@ test('desktop resolves packaged Python wrappers without falling back to absent d
   fs.writeFileSync(path.join(wrapperDir, 'agent-browser.py'), '# packaged fixture');
   fs.copyFileSync(fakeBrowser, path.join(wrapperDir, process.platform === 'win32' ? 'agent-browser-real.exe' : 'agent-browser-real'));
   const appDirectory = path.join(fixture.root, 'app.asar');
+  const bundledZsxq = path.join(resourcesRoot, 'zsxq-runtime', 'bin', process.platform === 'win32' ? 'zsxq-cli.exe' : 'zsxq-cli');
   const buildRuntimeEnv = vm.runInNewContext('(' + main.slice(start, end) + ')', {
     fs, path, process: { env: {}, platform: process.platform }, __dirname: appDirectory,
     app: { getPath: () => path.join(fixture.root, 'user'), getVersion: () => 'test', isPackaged: true },
     runtimeLogDirectory: path.join(fixture.root, 'logs'), resolveHermesRuntimeRoot: () => path.join(resourcesRoot, 'hermes-runtime'),
+    resolveZsxqCliPath: (options) => {
+      assert.equal(options.resourcesRoot, resourcesRoot);
+      assert.equal(options.isPackaged, true);
+      return bundledZsxq;
+    },
     xueqiuBrowserBridgeConfig: null, taogubaBrowserBridgeConfig: null,
     eastmoneySessionBridgeConfig: null, eastmoneyPush2BridgeConfig: null,
     agentBrowserBinaryName: () => 'unused',
   });
   const env = buildRuntimeEnv(resourcesRoot);
   assert.equal(env.A_STOCK_AGENT_BROWSER_WRAPPER_DIR, wrapperDir);
+  assert.equal(env.A_STOCK_ZSXQ_CLI, bundledZsxq);
+  assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
   assert.equal(fs.existsSync(path.join(appDirectory, 'scripts')), false);
 });

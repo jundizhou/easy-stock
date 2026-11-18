@@ -1,0 +1,35 @@
+{
+  "version": "0.5.1",
+  "platforms": {
+    "darwin-arm64": {
+      "package": "@zsxq/cli-darwin-arm64",
+      "url": "https://registry.npmjs.org/@zsxq/cli-darwin-arm64/-/cli-darwin-arm64-0.5.1.tgz",
+      "integrity": "sha512-rwdd/nUfxAYRkIYyQ54O4TZhEgGUvahSsuTioS/kFW19GmmJ8XEEO6Z6TmuIMlNf3p3YNhk9x6V7Xsh4B3h3Mg=="
+    },
+    "darwin-x64": {
+      "package": "@zsxq/cli-darwin-x64",
+      "url": "https://registry.npmjs.org/@zsxq/cli-darwin-x64/-/cli-darwin-x64-0.5.1.tgz",
+      "integrity": "sha512-yeRc9ZBjni0/KoqaY1siYDLe8Vz4iIDEsFsKbeO6MG5MpcBNzL61pEnies1JKmSm/sIK5UT5LyUWOb2GzpQiHg=="
+    },
+    "win32-x64": {
+      "package": "@zsxq/cli-win32-x64",
+      "url": "https://registry.npmjs.org/@zsxq/cli-win32-x64/-/cli-win32-x64-0.5.1.tgz",
+      "integrity": "sha512-iwHPGdvv6jDXqmfzFhUu9mHg88Mwxq7Zra10VS+BrJyks9fDPVZsHvCyrbtQsyLh1nIEgkfK7nEEsSuVXN94iw=="
+    },
+    "win32-arm64": {
+      "package": "@zsxq/cli-win32-arm64",
+      "url": "https://registry.npmjs.org/@zsxq/cli-win32-arm64/-/cli-win32-arm64-0.5.1.tgz",
+      "integrity": "sha512-w3lxwPhYZn6+bwHZ4Io+cPCHgeyHT4POQFfyFsCr5+0/4zuoTrtp/b3FOzpeT1H53NPBlns8BajsQZvqu3sQRQ=="
+    },
+    "linux-x64": {
+      "package": "@zsxq/cli-linux-x64",
+      "url": "https://registry.npmjs.org/@zsxq/cli-linux-x64/-/cli-linux-x64-0.5.1.tgz",
+      "integrity": "sha512-jh6dZ6N0eYTvB2mmkj6Ks3T4YW9qUjDYSSfUwqtQra93Ds6mwVwokGlAJNBWioePMtqZocnm+RbaJaMa1Dad5A=="
+    },
+    "linux-arm64": {
+      "package": "@zsxq/cli-linux-arm64",
+      "url": "https://registry.npmjs.org/@zsxq/cli-linux-arm64/-/cli-linux-arm64-0.5.1.tgz",
+      "integrity": "sha512-f3VCrCmnZwQSki81NXrLKHCxn2X1jPBuW1ORy7SKM2eonDA141/8fj0mOlWmiSUgpytepsQw+jFBPsCcVVgyDA=="
+    }
+  }
+}

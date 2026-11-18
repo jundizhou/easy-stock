@@ -176,6 +176,10 @@ func classifyURL(raw string) (*url.URL, string, error) {
 		return parsed, "xueqiu", nil
 	case host == "taoguba.com.cn" || strings.HasSuffix(host, ".taoguba.com.cn") || host == "tgb.cn" || strings.HasSuffix(host, ".tgb.cn"):
 		return parsed, "taoguba", nil
+	case host == "zsxq.com" || strings.HasSuffix(host, ".zsxq.com"):
+		// 星球是登录态 SPA，单篇正文只能经官方 CLI 取；这里给出正确入口，
+		// 不要退回网页抓取，否则抓到的只是前端空壳。
+		return nil, "", errors.New("知识星球不支持单篇链接导入；请在“自动订阅”里添加星球链接，按星球同步")
 	default:
 		return nil, "", errors.New("目前只支持微信公众号、雪球和淘股吧文章链接")
 	}
@@ -334,6 +338,8 @@ func sourceName(source string) string {
 		return "雪球作者"
 	case "taoguba":
 		return "淘股吧作者"
+	case "zsxq":
+		return "知识星球"
 	case "official":
 		return "每日复盘"
 	default:

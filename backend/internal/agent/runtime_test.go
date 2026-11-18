@@ -242,6 +242,17 @@ func TestRuntimeProcessEnvironmentUsesHermesEnvInsteadOfAmbientKey(t *testing.T)
 	}
 }
 
+func TestHermesEnvironmentKeepsBundledResourcesReadOnly(t *testing.T) {
+	base := []string{"PYTHONDONTWRITEBYTECODE=0"}
+	values := hermesEnvironment(base, t.TempDir(), "", "")
+	if got := envValue(values, "PYTHONDONTWRITEBYTECODE"); got != "1" {
+		t.Fatalf("runtime must not rewrite signed Python caches: %q", got)
+	}
+	if base[0] != "PYTHONDONTWRITEBYTECODE=0" {
+		t.Fatal("runtime environment modified its input")
+	}
+}
+
 func TestRuntimeProcessEnvironmentUsesBrowserStateWithoutConflictingProfile(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

@@ -13,13 +13,15 @@ import {
 	LogIn,
 	PlugZap,
 	Plus,
+	QrCode,
 	RefreshCw,
 	Save,
 	Trash2,
 	X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, RuntimeLogStatus, SecretSettingStatus, requestJSON } from '../lib/backend';
+import { QRCodeSVG } from 'qrcode.react';
+import { AppSettings, BackendConfig, BackendRequestError, BrowserAuthStatus, LLMConnectionTestResult, LLMModelOption, LLMModelsResult, LLMProfile, ReviewAutomationProfile, ReviewSource as ReviewSourceInfo, ReviewZsxqAuthSession, RuntimeLogStatus, SecretSettingStatus, requestJSON } from '../lib/backend';
 import { llmBaseURLForAPIMode, llmProviderDefinition, llmProviders } from '../lib/llm-providers';
 import { hasConfiguredLLM } from '../lib/llm-setup';
 import { LLMSetupTour } from './LLMSetupTour';
@@ -40,7 +42,7 @@ type Props = {
 };
 
 type SecretKey = 'llm_api_key' | 'tushare_token' | 'ths_cookie' | 'xueqiu_cookie' | 'eastmoney_cookie';
-type ReviewSource = 'xueqiu' | 'taoguba';
+type ReviewSource = 'xueqiu' | 'taoguba' | 'zsxq';
 type ReviewProfileDraft = Omit<ReviewAutomationProfile, 'credential'> & { credential: SecretSettingStatus; credential_value: string; clear_credential: boolean };
 type ModelListState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -86,6 +88,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	const [manualModel, setManualModel] = useState(true);
 	const [browserAuthStatuses, setBrowserAuthStatuses] = useState<Record<string, BrowserAuthStatus>>({});
 	const [openingBrowserProfile, setOpeningBrowserProfile] = useState('');
+	const [zsxqSource, setZsxqSource] = useState<ReviewSourceInfo | null>(null);
 	const [runtimeLogStatus, setRuntimeLogStatus] = useState<RuntimeLogStatus | null>(null);
 	const [openingRuntimeLogs, setOpeningRuntimeLogs] = useState(false);
 	const modelFetchSequence = useRef(0);
@@ -370,6 +373,23 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 		setBrowserAuthStatuses(Object.fromEntries(statuses));
 	};
 
+	const refreshZsxqSource = async () => {
+		if (!config) return;
+		try {
+			const payload = await requestJSON<{ data: ReviewSourceInfo[] }>(config, '/api/v1/reviews/sources');
+			setZsxqSource(payload.data.find((item) => item.id === 'zsxq') || null);
+		} catch {
+			// 来源状态读取失败不影响设置页其他功能，卡片退回“未授权”引导。
+			setZsxqSource(null);
+		}
+	};
+
+	useEffect(() => {
+		if (!open || reviewSource !== 'zsxq') return;
+		void refreshZsxqSource();
+		// config 是对象，取 backendUrl 作为稳定依赖，避免每次渲染都重复请求。
+	}, [open, reviewSource, config?.backendUrl]);
+
 	const openReviewSourceLogin = async (profile: ReviewProfileDraft) => {
 		const source = profile.source as 'xueqiu' | 'taoguba';
 		const label = reviewSourceLabel(source);
@@ -587,13 +607,13 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 						</div>
 
 						<SettingsSection title="大V复盘自动化" description="按平台管理多套采集配置，每个大V订阅可以绑定其中一套。" icon={<Clock3 size={18} />}>
-							<div className="review-profile-tabs">{(['xueqiu', 'taoguba'] as ReviewSource[]).map((source) => <button type="button" className={reviewSource === source ? 'active' : ''} onClick={() => setReviewSource(source)} key={source}>{reviewSourceLabel(source)}<em>{reviewProfiles.filter((profile) => profile.source === source).length}</em></button>)}</div>
+							<div className="review-profile-tabs">{(['xueqiu', 'taoguba', 'zsxq'] as ReviewSource[]).map((source) => <button type="button" className={reviewSource === source ? 'active' : ''} onClick={() => setReviewSource(source)} key={source}>{reviewSourceLabel(source)}<em>{reviewProfiles.filter((profile) => profile.source === source).length}</em></button>)}</div>
 							<div className="review-profile-list">
-								{reviewProfiles.filter((profile) => profile.source === reviewSource).map((profile) => <ReviewProfileCard profile={profile} browserAuthStatus={browserAuthStatuses[profile.id]} openingBrowser={openingBrowserProfile === profile.id} onOpenBrowserLogin={() => void openReviewSourceLogin(profile)} onChange={(patch) => updateReviewProfile(profile.id, patch)} onRemove={() => removeReviewProfile(profile.id)} canRemove key={profile.id} />)}
+								{reviewProfiles.filter((profile) => profile.source === reviewSource).map((profile) => <ReviewProfileCard config={config} zsxqStatus={profile.source === 'zsxq' ? zsxqSource : undefined} onZsxqAuthorized={() => void refreshZsxqSource()} profile={profile} browserAuthStatus={browserAuthStatuses[profile.id]} openingBrowser={openingBrowserProfile === profile.id} onOpenBrowserLogin={() => void openReviewSourceLogin(profile)} onChange={(patch) => updateReviewProfile(profile.id, patch)} onRemove={() => removeReviewProfile(profile.id)} canRemove key={profile.id} />)}
 								{!reviewProfiles.some((profile) => profile.source === reviewSource) && <div className="review-profile-empty"><strong>还没有{reviewSourceLabel(reviewSource)}配置</strong><span>可以添加多套配置，并让不同大V订阅使用不同登录态或同步时段。</span></div>}
 							</div>
 							<button type="button" className="review-profile-add" onClick={() => addReviewProfile(reviewSource)}><Plus size={14} />添加{reviewSourceLabel(reviewSource)}配置</button>
-							<p className="settings-field-note">雪球和淘股吧通过内置浏览器保存独立登录态。微信公众号文章请在“大V复盘日记”粘贴具体链接导入。所有登录凭据仅保存在本机。</p>
+							<p className="settings-field-note">雪球和淘股吧通过内置浏览器保存独立登录态；知识星球通过官方 zsxq-cli 授权，只读取星主已开通 Skill 权限的星球。微信公众号文章请在“大V复盘日记”粘贴具体链接导入。所有登录凭据仅保存在本机。</p>
 						</SettingsSection>
 
 						<SettingsSection title="行情与内容数据源" description="现有公共接口继续直接使用；以下凭据为增强数据与后续接入准备。" icon={<Database size={18} />}>
@@ -632,7 +652,7 @@ export function SettingsDrawer({ config, open, initialSection, onClose, onSaved 
 	);
 }
 
-function ReviewProfileCard({ profile, browserAuthStatus, openingBrowser, onOpenBrowserLogin, onChange, onRemove, canRemove }: { profile: ReviewProfileDraft; browserAuthStatus?: BrowserAuthStatus; openingBrowser: boolean; onOpenBrowserLogin: () => void; onChange: (patch: Partial<ReviewProfileDraft>) => void; onRemove: () => void; canRemove: boolean }) {
+function ReviewProfileCard({ profile, browserAuthStatus, openingBrowser, onOpenBrowserLogin, onChange, onRemove, canRemove, config, zsxqStatus, onZsxqAuthorized }: { profile: ReviewProfileDraft; browserAuthStatus?: BrowserAuthStatus; openingBrowser: boolean; onOpenBrowserLogin: () => void; onChange: (patch: Partial<ReviewProfileDraft>) => void; onRemove: () => void; canRemove: boolean; config: BackendConfig | null; zsxqStatus?: ReviewSourceInfo | null; onZsxqAuthorized: () => void }) {
 	const sourceLabel = reviewSourceLabel(profile.source as ReviewSource);
 	return <article className={`review-profile-card ${profile.enabled ? '' : 'disabled'}`}>
 		<header><div><span className={`review-profile-source ${profile.source}`}>{sourceLabel}</span><strong>{profile.name || '未命名配置'}</strong></div><div><button type="button" className={profile.enabled ? 'profile-enabled active' : 'profile-enabled'} onClick={() => onChange({ enabled: !profile.enabled })}>{profile.enabled ? '已启用' : '已停用'}</button>{canRemove && <button type="button" className="profile-remove" title="删除配置" onClick={onRemove}><Trash2 size={14} /></button>}</div></header>
@@ -640,14 +660,111 @@ function ReviewProfileCard({ profile, browserAuthStatus, openingBrowser, onOpenB
 			<label><span>配置名称</span><input value={profile.name} onChange={(event) => onChange({ name: event.target.value })} placeholder={`${sourceLabel}配置名称`} /></label>
 			<label><span>每日同步时间</span><select value={profile.sync_hour} onChange={(event) => onChange({ sync_hour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option value={hour} key={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label>
 		</div>
-		<label><span>平台地址</span><input value={profile.base_url} onChange={(event) => onChange({ base_url: event.target.value })} placeholder={profile.source === 'xueqiu' ? 'https://xueqiu.com' : 'https://www.tgb.cn'} /></label>
-		<div className={`profile-browser-auth ${browserAuthStatus?.configured ? 'ready' : ''}`}><Globe2 size={18} /><span><strong>{browserAuthStatus?.configured ? `${sourceLabel}浏览器已登录` : `使用内置浏览器登录${sourceLabel}`}</strong><small>{browserAuthStatus?.message || '打开后由你亲自完成登录或安全验证，然后点击“我已完成登录”保存登录态。'}</small>{browserAuthStatus?.updated_at && <em>最近保存 {new Date(browserAuthStatus.updated_at).toLocaleString('zh-CN', { hour12: false })}</em>}</span><button type="button" onClick={onOpenBrowserLogin} disabled={openingBrowser}>{openingBrowser ? <LoaderCircle className="spin" size={14} /> : <LogIn size={14} />}{openingBrowser ? '等待确认登录' : browserAuthStatus?.configured ? '重新登录' : '打开登录窗口'}</button></div>
+		<label><span>平台地址</span><input value={profile.base_url} onChange={(event) => onChange({ base_url: event.target.value })} placeholder={profile.source === 'xueqiu' ? 'https://xueqiu.com' : profile.source === 'zsxq' ? 'https://wx.zsxq.com' : 'https://www.tgb.cn'} /></label>
+		{profile.source === 'zsxq'
+			? <ZsxqAuthPanel config={config} status={zsxqStatus} onAuthorized={onZsxqAuthorized} />
+			: <div className={`profile-browser-auth ${browserAuthStatus?.configured ? 'ready' : ''}`}><Globe2 size={18} /><span><strong>{browserAuthStatus?.configured ? `${sourceLabel}浏览器已登录` : `使用内置浏览器登录${sourceLabel}`}</strong><small>{browserAuthStatus?.message || '打开后由你亲自完成登录或安全验证，然后点击“我已完成登录”保存登录态。'}</small>{browserAuthStatus?.updated_at && <em>最近保存 {new Date(browserAuthStatus.updated_at).toLocaleString('zh-CN', { hour12: false })}</em>}</span><button type="button" onClick={onOpenBrowserLogin} disabled={openingBrowser}>{openingBrowser ? <LoaderCircle className="spin" size={14} /> : <LogIn size={14} />}{openingBrowser ? '等待确认登录' : browserAuthStatus?.configured ? '重新登录' : '打开登录窗口'}</button></div>}
 		<label className="profile-ai-toggle"><span>抓取后自动 AI 提炼</span><button type="button" className={profile.auto_analyze ? 'active' : ''} onClick={() => onChange({ auto_analyze: !profile.auto_analyze })}>{profile.auto_analyze ? '已开启' : '已关闭'}</button></label>
 	</article>;
 }
 
+// ZsxqAuthPanel 把官方 CLI 的设备授权搬到页面上：后端生成 device code 并代持轮询，
+// 页面只负责展示二维码和确认码。device code 不会出现在前端。
+function ZsxqAuthPanel({ config, status, onAuthorized }: { config: BackendConfig | null; status?: ReviewSourceInfo | null; onAuthorized: () => void }) {
+	const authorized = Boolean(status?.sync_ready);
+	const [session, setSession] = useState<ReviewZsxqAuthSession | null>(null);
+	const [starting, setStarting] = useState(false);
+	const [error, setError] = useState('');
+	const authorizedRef = useRef(onAuthorized);
+
+	useEffect(() => {
+		authorizedRef.current = onAuthorized;
+	}, [onAuthorized]);
+
+	// 重新挂载时恢复未完成的授权：设置抽屉关掉再打开，二维码不应该消失。
+	useEffect(() => {
+		if (!config) return;
+		let cancelled = false;
+		requestJSON<{ data: ReviewZsxqAuthSession | null }>(config, '/api/v1/reviews/zsxq/auth/device')
+			.then((payload) => {
+				if (!cancelled && payload.data?.status === 'pending') setSession(payload.data);
+			})
+			.catch(() => undefined);
+		return () => { cancelled = true; };
+	}, [config]);
+
+	useEffect(() => {
+		if (!config || session?.status !== 'pending') return;
+		let cancelled = false;
+		const timer = window.setInterval(() => {
+			void requestJSON<{ data: ReviewZsxqAuthSession | null }>(config, '/api/v1/reviews/zsxq/auth/device')
+				.then((payload) => {
+					if (cancelled) return;
+					setSession(payload.data);
+					if (payload.data?.status === 'authorized') authorizedRef.current();
+				})
+				.catch(() => undefined);
+		}, 2500);
+		return () => { cancelled = true; window.clearInterval(timer); };
+	}, [config, session?.id, session?.status]);
+
+	const start = async () => {
+		if (!config) return;
+		setStarting(true);
+		setError('');
+		try {
+			const payload = await requestJSON<{ data: ReviewZsxqAuthSession }>(config, '/api/v1/reviews/zsxq/auth/device', { method: 'POST' });
+			setSession(payload.data);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : '生成授权二维码失败');
+		} finally {
+			setStarting(false);
+		}
+	};
+
+	const cancel = async () => {
+		if (config) {
+			try {
+				await requestJSON(config, '/api/v1/reviews/zsxq/auth/device', { method: 'DELETE' });
+			} catch {
+				// 取消失败不影响本地收起，后端会等设备码自然过期。
+			}
+		}
+		setSession(null);
+	};
+
+	const showingQR = session?.status === 'pending';
+	return <div className={`zsxq-auth ${authorized && !showingQR ? 'ready' : ''}`}>
+		<div className="zsxq-auth-head">
+			<QrCode size={18} />
+			<span>
+				<strong>{showingQR ? '等待手机扫码' : authorized ? '知识星球已授权' : '扫码授权知识星球'}</strong>
+				<small>{authorized && !showingQR ? (status?.message || '授权有效，可同步星主已开通 Skill 权限的星球') : '点击生成二维码，用知识星球 App 扫码确认。凭据写入系统钥匙串，本应用不保存 token。'}</small>
+			</span>
+			{!showingQR && <button type="button" onClick={() => void start()} disabled={!config || starting}>{starting ? <LoaderCircle className="spin" size={14} /> : <QrCode size={14} />}{starting ? '生成中' : authorized ? '重新授权' : '扫码授权'}</button>}
+		</div>
+		{error && <small className="zsxq-auth-error" role="alert">{error}</small>}
+		{showingQR && <div className="zsxq-auth-body">
+			<div className="zsxq-auth-qr"><QRCodeSVG value={session.verification_url} size={164} marginSize={1} /></div>
+			<div className="zsxq-auth-meta">
+				<span>确认码</span>
+				<strong>{session.user_code}</strong>
+				<small>二维码与确认码等效，约 10 分钟内有效。扫码完成后这里会自动刷新。</small>
+				<a href={session.verification_url} target="_blank" rel="noreferrer">在浏览器中打开</a>
+				<button type="button" className="zsxq-auth-cancel" onClick={() => void cancel()}>取消本次授权</button>
+			</div>
+		</div>}
+		{session && session.status !== 'pending' && session.status !== 'authorized' && <div className="zsxq-auth-state" role="status">
+			<CircleAlert size={14} />
+			<span>{session.message}</span>
+			<button type="button" onClick={() => void start()} disabled={!config || starting}>重新生成</button>
+			<button type="button" onClick={() => setSession(null)}>关闭</button>
+		</div>}
+	</div>;
+}
+
 function toProfileDrafts(profiles: ReviewAutomationProfile[]): ReviewProfileDraft[] {
-	return profiles.filter((profile) => profile.source === 'xueqiu' || profile.source === 'taoguba').map((profile) => ({ ...profile, credential_value: '', clear_credential: false }));
+	return profiles.filter((profile) => profile.source === 'xueqiu' || profile.source === 'taoguba' || profile.source === 'zsxq').map((profile) => ({ ...profile, credential_value: '', clear_credential: false }));
 }
 
 function normalizeLLMProfiles(settings: AppSettings): LLMProfile[] {
@@ -663,10 +780,12 @@ function normalizeLLMProfiles(settings: AppSettings): LLMProfile[] {
 
 function newProfileDraft(source: ReviewSource): ReviewProfileDraft {
 	const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-	return { id: `${source}-${suffix}`, source, name: `${reviewSourceLabel(source)}配置`, base_url: source === 'xueqiu' ? 'https://xueqiu.com' : 'https://www.tgb.cn', credential: { configured: false }, credential_value: '', clear_credential: false, sync_hour: 7, auto_analyze: true, enabled: true };
+	const baseURL = source === 'xueqiu' ? 'https://xueqiu.com' : source === 'zsxq' ? 'https://wx.zsxq.com' : 'https://www.tgb.cn';
+	// 知识星球单日主题可达 20 条以上，逐条 AI 提炼成本高，默认关闭，交给每日复盘统一归纳。
+	return { id: `${source}-${suffix}`, source, name: `${reviewSourceLabel(source)}配置`, base_url: baseURL, credential: { configured: false }, credential_value: '', clear_credential: false, sync_hour: 7, auto_analyze: source !== 'zsxq', enabled: true };
 }
 
-function reviewSourceLabel(source: ReviewSource) { return source === 'xueqiu' ? '雪球' : '淘股吧'; }
+function reviewSourceLabel(source: ReviewSource) { return source === 'xueqiu' ? '雪球' : source === 'zsxq' ? '知识星球' : '淘股吧'; }
 
 function modelOptionLabel(option: LLMModelOption) {
 	const detail = option.display_name || option.owned_by;

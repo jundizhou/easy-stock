@@ -45,6 +45,38 @@ func TestStorePersistsAndFiltersReviewPosts(t *testing.T) {
 	}
 }
 
+func TestSubscriptionFailurePreservesSuccessfulCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(filepath.Join(t.TempDir(), "reviews.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	sub, err := store.UpsertSubscription(ctx, Subscription{Source: ZsxqSource, Name: "测试星球", HomepageURL: "https://wx.zsxq.com/group/12345678", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	for _, afterSuccess := range []bool{false, true} {
+		if afterSuccess {
+			if err := store.SetSubscriptionSync(ctx, sub.ID, "ok", "", next); err != nil {
+				t.Fatal(err)
+			}
+			sub, err = store.GetSubscription(ctx, sub.ID)
+			if err != nil || sub.LastSyncAt.IsZero() {
+				t.Fatalf("success did not record checkpoint: sub=%+v err=%v", sub, err)
+			}
+		}
+		if err := store.SetSubscriptionSync(ctx, sub.ID, "error", "offline", next); err != nil {
+			t.Fatal(err)
+		}
+		failed, err := store.GetSubscription(ctx, sub.ID)
+		if err != nil || !failed.LastSyncAt.Equal(sub.LastSyncAt) || failed.LastStatus != "error" || failed.LastError != "offline" || !failed.NextSyncAt.Equal(next) {
+			t.Fatalf("failure changed checkpoint or lost failure state: sub=%+v err=%v", failed, err)
+		}
+	}
+}
+
 func TestStoreDeletePostRemovesOnlyArticle(t *testing.T) {
 	store, err := OpenStore(filepath.Join(t.TempDir(), "reviews.db"))
 	if err != nil {

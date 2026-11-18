@@ -25,6 +25,7 @@ const { createTaogubaBrowserBridge } = require('./taoguba-browser-bridge.cjs');
 const { createXueqiuBrowserBridge } = require('./xueqiu-browser-bridge.cjs');
 const { resolveUserDataPath } = require('./user-data.cjs');
 const { resolveHermesRuntimeRoot } = require('./hermes-runtime-root.cjs');
+const { resolveZsxqCliPath } = require('./zsxq-runtime.cjs');
 const { createUpdateBackup, resolveBackupRoot } = require('./data-protection.cjs');
 const { UpdateManager } = require('./update-manager.cjs');
 const { resolveUpdateFeed } = require('./update-feed.cjs');
@@ -288,10 +289,13 @@ function buildRuntimeEnv(resourcesRoot) {
     bundledRoot: resourcesRoot,
     projectRoot: path.resolve(__dirname, '..'),
   });
+  const zsxqCliPath = resolveZsxqCliPath({ resourcesRoot, isPackaged: app.isPackaged });
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.mkdirSync(hermesWorkDir, { recursive: true });
   fs.mkdirSync(browserStateDir, { recursive: true, mode: 0o700 });
   return {
+		// Runtime resources are sealed by macOS signing and may be read-only.
+		PYTHONDONTWRITEBYTECODE: '1',
 		A_STOCK_LOG_DIR: runtimeLogDirectory,
 		A_STOCK_APP_VERSION: app.getVersion(),
     A_STOCK_SETTINGS_PATH: path.join(userData, 'settings.json'),
@@ -306,6 +310,7 @@ function buildRuntimeEnv(resourcesRoot) {
     A_STOCK_HERMES_WORKDIR: hermesWorkDir,
     A_STOCK_HERMES_RUNTIME_ROOT: hermesRuntimeRoot,
     A_STOCK_BROWSER_STATE_DIR: browserStateDir,
+    ...(zsxqCliPath ? { A_STOCK_ZSXQ_CLI: zsxqCliPath } : {}),
     ...(xueqiuBrowserBridgeConfig ? {
       A_STOCK_BROWSER_BRIDGE_URL: xueqiuBrowserBridgeConfig.baseURL,
       A_STOCK_BROWSER_BRIDGE_TOKEN: xueqiuBrowserBridgeConfig.token,

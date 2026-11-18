@@ -42,6 +42,12 @@ type Automation struct {
 	taogubaBridgeURL       string
 	taogubaBridgeToken     string
 	browserBridgeClient    *http.Client
+	zsxq                   *ZsxqCollector
+	zsxqMu                 sync.Mutex
+	zsxqAuthCache          ZsxqAuthStatus
+	zsxqAuthCachedAt       time.Time
+	zsxqAuthSession        *ZsxqAuthSession
+	zsxqAuthCancel         context.CancelFunc
 	mu                     sync.Mutex
 	dailySummaryMu         sync.Mutex
 	dailySummaryJobMu      sync.Mutex
@@ -57,6 +63,160 @@ type Automation struct {
 // callers and tests that do not configure market data remain compatible.
 func (a *Automation) SetDailyMarketProvider(provider DailyMarketProvider) {
 	a.dailyMarketProvider = provider
+}
+
+// SetZsxqCollector overrides the zsxq (知识星球) collector; tests inject a fake CLI.
+func (a *Automation) SetZsxqCollector(collector *ZsxqCollector) {
+	a.zsxqMu.Lock()
+	defer a.zsxqMu.Unlock()
+	if a.zsxqAuthCancel != nil {
+		a.zsxqAuthCancel()
+		a.zsxqAuthCancel = nil
+	}
+	a.zsxq = collector
+	a.zsxqAuthCachedAt = time.Time{}
+}
+
+func (a *Automation) zsxqCollector() *ZsxqCollector {
+	a.zsxqMu.Lock()
+	defer a.zsxqMu.Unlock()
+	return a.zsxqCollectorLocked()
+}
+
+// zsxqCollectorLocked 惰性创建采集器，调用方必须已持有 zsxqMu。
+func (a *Automation) zsxqCollectorLocked() *ZsxqCollector {
+	if a.zsxq == nil {
+		a.zsxq = NewZsxqCollector(strings.TrimSpace(os.Getenv("A_STOCK_ZSXQ_CLI")))
+	}
+	return a.zsxq
+}
+
+// ZsxqAuthStatus reports the local zsxq-cli authorisation state. The CLI probe
+// spawns a node process, so the result is cached briefly to keep the review
+// diary page from shelling out on every load.
+func (a *Automation) ZsxqAuthStatus(ctx context.Context) ZsxqAuthStatus {
+	a.zsxqMu.Lock()
+	// 设备授权进行中时，CLI 的 auth status 会自己去恢复轮询并阻塞，不能在这里
+	// 探测；直接返回等待态，避免整个复盘页面被一次扫码授权拖住。
+	if session := a.zsxqAuthSession; session != nil && session.Status == ZsxqAuthPending && time.Now().Before(session.ExpiresAt) {
+		message := "等待手机扫码授权，请在“设置 → 数据源 → 知识星球”完成"
+		if session.UserCode != "" {
+			message = "等待手机扫码授权（确认码 " + session.UserCode + "）"
+		}
+		a.zsxqMu.Unlock()
+		return ZsxqAuthStatus{CLIInstalled: true, Message: message}
+	}
+	if !a.zsxqAuthCachedAt.IsZero() && time.Since(a.zsxqAuthCachedAt) < time.Minute {
+		cached := a.zsxqAuthCache
+		a.zsxqMu.Unlock()
+		return cached
+	}
+	collector := a.zsxqCollectorLocked()
+	a.zsxqMu.Unlock()
+
+	status := collector.AuthStatus(ctx)
+
+	a.zsxqMu.Lock()
+	a.zsxqAuthCache = status
+	a.zsxqAuthCachedAt = time.Now()
+	a.zsxqMu.Unlock()
+	return status
+}
+
+// StartZsxqAuth 生成一次设备授权。同一次授权在 10 分钟内是幂等的：重复点击
+// 会拿回同一个二维码，而不是不断向平台申请新的设备码。
+func (a *Automation) StartZsxqAuth(ctx context.Context) (ZsxqAuthSession, error) {
+	a.zsxqMu.Lock()
+	if session := a.zsxqAuthSession; session != nil && session.Status == ZsxqAuthPending && time.Now().Before(session.ExpiresAt) {
+		current := *session
+		a.zsxqMu.Unlock()
+		return current, nil
+	}
+	collector := a.zsxqCollectorLocked()
+	a.zsxqMu.Unlock()
+
+	session, deviceCode, err := collector.StartAuth(ctx)
+	if err != nil {
+		return ZsxqAuthSession{}, err
+	}
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), zsxqAuthTTL)
+	a.zsxqMu.Lock()
+	if a.zsxqAuthCancel != nil {
+		a.zsxqAuthCancel()
+	}
+	a.zsxqAuthSession = &session
+	a.zsxqAuthCancel = cancel
+	// 新的授权流程会改变登录态，先作废旧的状态缓存。
+	a.zsxqAuthCachedAt = time.Time{}
+	a.zsxqMu.Unlock()
+
+	go a.waitZsxqAuth(waitCtx, cancel, session.ID, collector, deviceCode)
+	return session, nil
+}
+
+func (a *Automation) waitZsxqAuth(ctx context.Context, cancel context.CancelFunc, id string, collector *ZsxqCollector, deviceCode string) {
+	defer cancel()
+	status, message := collector.WaitAuth(ctx, deviceCode)
+
+	a.zsxqMu.Lock()
+	defer a.zsxqMu.Unlock()
+	if a.zsxqAuthSession == nil || a.zsxqAuthSession.ID != id {
+		// 已被取消或被新的授权流程取代，丢弃这次结果。
+		return
+	}
+	if a.zsxqAuthSession.Status != ZsxqAuthPending {
+		// 用户已经取消或服务端已判过期，不让迟到的子进程结果覆盖用户可见状态。
+		return
+	}
+	a.zsxqAuthSession.Status = status
+	a.zsxqAuthSession.Message = message
+	a.zsxqAuthCancel = nil
+	if status == ZsxqAuthAuthorized {
+		// 授权成功后必须让下一次 sources 探测真实读一次 CLI，否则界面会继续
+		// 显示未登录，直到缓存过期。
+		a.zsxqAuthCachedAt = time.Time{}
+	}
+}
+
+// ZsxqAuthSessionSnapshot 返回当前授权会话。CLI 没有回调，过期只能由服务端兜底。
+func (a *Automation) ZsxqAuthSessionSnapshot() *ZsxqAuthSession {
+	a.zsxqMu.Lock()
+	defer a.zsxqMu.Unlock()
+	if a.zsxqAuthSession == nil {
+		return nil
+	}
+	if a.zsxqAuthSession.Status == ZsxqAuthPending && time.Now().After(a.zsxqAuthSession.ExpiresAt) {
+		if a.zsxqAuthCancel != nil {
+			a.zsxqAuthCancel()
+			a.zsxqAuthCancel = nil
+		}
+		a.zsxqAuthSession.Status = ZsxqAuthExpired
+		a.zsxqAuthSession.Message = "授权码已过期，请重新生成二维码"
+	}
+	snapshot := *a.zsxqAuthSession
+	return &snapshot
+}
+
+// CancelZsxqAuth 停止等待并回收子进程，用户关闭二维码时可以立即释放。
+func (a *Automation) CancelZsxqAuth() {
+	a.zsxqMu.Lock()
+	defer a.zsxqMu.Unlock()
+	if a.zsxqAuthCancel != nil {
+		a.zsxqAuthCancel()
+		a.zsxqAuthCancel = nil
+	}
+	if a.zsxqAuthSession != nil && a.zsxqAuthSession.Status == ZsxqAuthPending {
+		a.zsxqAuthSession.Status = ZsxqAuthFailed
+		a.zsxqAuthSession.Message = "已取消本次授权，可重新生成二维码"
+	}
+}
+
+// ZsxqGroups lists joined groups together with per-group readability. Knowledge
+// planet gates content by a per-group switch owned by the group owner, so
+// "joined" does not imply "syncable".
+func (a *Automation) ZsxqGroups(ctx context.Context) ([]ZsxqGroup, error) {
+	return a.zsxqCollector().Groups(ctx)
 }
 
 func NewAutomation(store *Store, importer URLImporter, settings *appsettings.Store, httpClient *http.Client, prompters ...agent.Prompter) *Automation {
@@ -94,8 +254,11 @@ func (a *Automation) AddSubscription(ctx context.Context, source, homepageURL, n
 	if source == "wechat" {
 		return Subscription{}, errors.New(WechatArticleListUnavailableMessage)
 	}
+	if source == ZsxqSource {
+		return a.addZsxqSubscription(ctx, homepageURL, name, configID)
+	}
 	if source != "xueqiu" && source != "taoguba" {
-		return Subscription{}, errors.New("只支持雪球和淘股吧")
+		return Subscription{}, errors.New("只支持雪球、淘股吧和知识星球")
 	}
 	if homepageURL == "" {
 		return Subscription{}, errors.New("主页地址或公众号名称不能为空")
@@ -120,6 +283,33 @@ func (a *Automation) AddSubscription(ctx context.Context, source, homepageURL, n
 		return Subscription{}, err
 	}
 	return a.store.UpsertSubscription(ctx, Subscription{Source: source, Name: firstNonEmpty(name, sourceName(source)), HomepageURL: homepageURL, ExternalID: externalID, ConfigID: profile.ID, Enabled: true, LastStatus: "pending"})
+}
+
+// addZsxqSubscription 在落库前先探一次星球可读性。知识星球的内容读取权限由
+// 星主按星球开通，成员身份不自带；如果等到同步阶段才暴露，用户只会看到一次
+// 失败的技术报错，所以这里前置拦下并给出可行动的原因。
+func (a *Automation) addZsxqSubscription(ctx context.Context, input, name, configID string) (Subscription, error) {
+	groupID, canonicalURL, err := parseZsxqGroupInput(input)
+	if err != nil {
+		return Subscription{}, err
+	}
+	profile, err := a.profileFor(ZsxqSource, configID)
+	if err != nil {
+		return Subscription{}, err
+	}
+	group, lookupErr := a.zsxqCollector().Lookup(ctx, groupID)
+	if lookupErr != nil {
+		return Subscription{}, lookupErr
+	}
+	return a.store.UpsertSubscription(ctx, Subscription{
+		Source:      ZsxqSource,
+		Name:        firstNonEmpty(name, group.Name, "知识星球 "+groupID),
+		HomepageURL: canonicalURL,
+		ExternalID:  groupID,
+		ConfigID:    profile.ID,
+		Enabled:     true,
+		LastStatus:  "pending",
+	})
 }
 
 func (a *Automation) SyncAll(ctx context.Context) []SyncResult {
@@ -170,6 +360,9 @@ func (a *Automation) syncOneUnlocked(ctx context.Context, sub Subscription) Sync
 	}
 	if sub.Source == "xueqiu" || sub.Source == "taoguba" {
 		return a.syncBrowserSourceWithHermesUnlocked(ctx, sub, profile)
+	}
+	if sub.Source == ZsxqSource {
+		return a.syncZsxqUnlocked(ctx, sub, profile)
 	}
 	links, resolvedName, resolvedID, err := a.discover(ctx, sub, profile)
 	if err != nil {
@@ -259,6 +452,66 @@ func (a *Automation) syncBrowserSourceWithHermesUnlocked(ctx context.Context, su
 		_, _ = a.store.UpsertSubscription(ctx, sub)
 	}
 	_ = a.store.SetSubscriptionSync(ctx, sub.ID, "ok", "", a.nextRun(profile))
+	return result
+}
+
+// syncZsxqUnlocked 采集一个星球。与雪球/淘股吧不同，这里的作者取自每条主题的
+// owner：一个星球只有一位星主，但发帖人常常不止一个，复用订阅名会把他们合并成
+// 同一位作者，导致作者观点卡和共识/分歧归纳失真。
+func (a *Automation) syncZsxqUnlocked(ctx context.Context, sub Subscription, profile appsettings.ReviewSourceProfile) SyncResult {
+	result := SyncResult{SubscriptionID: sub.ID}
+	groupID := firstNonEmpty(strings.TrimSpace(sub.ExternalID), zsxqGroupIDFromURL(sub.HomepageURL))
+	if groupID == "" {
+		result.Error = "订阅缺少星球 group_id，请删除该订阅后重新添加"
+		_ = a.store.SetSubscriptionSync(ctx, sub.ID, "error", result.Error, a.nextRun(profile))
+		return result
+	}
+	if status := a.ZsxqAuthStatus(ctx); !status.LoggedIn {
+		result.Error = status.Message
+		_ = a.store.SetSubscriptionSync(ctx, sub.ID, "error", result.Error, a.nextRun(profile))
+		return result
+	}
+	since := sub.LastSyncAt
+	if since.IsZero() {
+		since = time.Now().Add(-zsxqInitialLookback)
+	} else {
+		since = since.Add(-zsxqSyncOverlap)
+	}
+	posts, syncErr := a.zsxqCollector().Collect(ctx, groupID, since)
+	result.Found = len(posts)
+	for _, post := range posts {
+		deleted, err := a.store.IsAuthorDeleted(ctx, post.Source, post.AuthorID)
+		if err != nil {
+			syncErr = errors.Join(syncErr, err)
+			break
+		}
+		if deleted {
+			continue
+		}
+		if _, getErr := a.store.GetPostByURL(ctx, post.OriginalURL); getErr == nil {
+			continue
+		} else if !errors.Is(getErr, sql.ErrNoRows) {
+			syncErr = errors.Join(syncErr, getErr)
+			break
+		}
+		stored, storeErr := a.store.UpsertPost(ctx, post)
+		if storeErr != nil {
+			syncErr = errors.Join(syncErr, storeErr)
+			break
+		}
+		result.Imported++
+		if profile.AutoAnalyze {
+			if analyzed, analyzeErr := a.AnalyzePost(ctx, stored.ID); analyzeErr == nil && !analyzed.AIAnalyzedAt.IsZero() {
+				result.Analyzed++
+			}
+		}
+	}
+	if syncErr != nil {
+		result.Error = syncErr.Error()
+		_ = a.store.SetSubscriptionSync(ctx, sub.ID, "error", result.Error, a.nextRun(profile))
+	} else if err := a.store.SetSubscriptionSync(ctx, sub.ID, "ok", "", a.nextRun(profile)); err != nil {
+		result.Error = err.Error()
+	}
 	return result
 }
 

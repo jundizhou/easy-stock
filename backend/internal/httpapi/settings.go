@@ -447,7 +447,7 @@ func validateSingleLLM(request settingsUpdateRequest) error {
 			return fmt.Errorf("too many review automation profiles")
 		}
 		for _, profile := range *request.ReviewAutomation.Profiles {
-			if profile.Source != "xueqiu" && profile.Source != "taoguba" {
+			if profile.Source != "xueqiu" && profile.Source != "taoguba" && profile.Source != "zsxq" {
 				return fmt.Errorf("unsupported review source: %s", profile.Source)
 			}
 			if strings.TrimSpace(profile.Name) == "" || len([]rune(profile.Name)) > 80 {

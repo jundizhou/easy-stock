@@ -1796,12 +1796,34 @@ export type StreamMessage = {
 };
 
 export type ReviewSource = {
-	id: 'wechat' | 'xueqiu' | 'taoguba' | string;
+	id: 'wechat' | 'xueqiu' | 'taoguba' | 'zsxq' | string;
 	name: string;
 	status: string;
 	message: string;
 	import_ready: boolean;
 	sync_ready: boolean;
+};
+
+export type ReviewZsxqGroup = {
+	id: string;
+	name: string;
+	type?: string;
+	members?: number;
+	owner?: string;
+	readable: boolean;
+	status: string;
+	message: string;
+};
+
+// 知识星球设备授权会话。device_code 只在后端保存，页面拿不到。
+export type ReviewZsxqAuthSession = {
+	id: string;
+	status: 'pending' | 'authorized' | 'denied' | 'expired' | 'failed';
+	message: string;
+	user_code: string;
+	verification_url: string;
+	created_at: string;
+	expires_at: string;
 };
 
 export type ReviewAuthor = {
