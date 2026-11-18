@@ -78,9 +78,19 @@ function detach(mountPath) {
 	const firstAttempt = spawnSync('hdiutil', ['detach', mountPath], { stdio: 'inherit' });
 	if (firstAttempt.error) throw firstAttempt.error;
 	if (firstAttempt.status === 0) return;
-	// Spotlight/Finder can briefly keep a newly-created volume busy. Retry with
-	// force after a short delay; this only detaches our temporary build volume.
+	// DiskArbitration can finish unmounting after hdiutil reports a timeout.
+	if (!isMounted(mountPath)) return;
+	// Spotlight/Finder can keep a new volume busy. Only force our build volume.
 	const forcedAttempt = spawnSync('hdiutil', ['detach', mountPath, '-force'], { stdio: 'inherit' });
 	if (forcedAttempt.error) throw forcedAttempt.error;
-	if (forcedAttempt.status !== 0) throw new Error(`hdiutil detach exited with status ${forcedAttempt.status ?? 1}`);
+	if (forcedAttempt.status !== 0 && isMounted(mountPath)) throw new Error(`hdiutil detach exited with status ${forcedAttempt.status ?? 1}`);
+}
+
+function isMounted(mountPath) {
+	try {
+		return fs.statSync(mountPath).dev !== fs.statSync(path.dirname(mountPath)).dev;
+	} catch (error) {
+		if (error.code === 'ENOENT') return false;
+		throw error;
+	}
 }
