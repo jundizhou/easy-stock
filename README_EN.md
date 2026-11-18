@@ -4,7 +4,7 @@
 
 <h1 align="center">easy-stock: An AI Research Workbench for the China A-Share Market</h1>
 
-<p align="center"><strong>A local-first desktop workbench for market discovery, stock research, portfolio inspection, and AI portfolio optimization</strong></p>
+<p align="center"><strong>From market discovery to stock research and portfolio checks, with evidence you can inspect</strong></p>
 
 <p align="center"><sub>English | <a href="./README.md">简体中文</a></sub></p>
 
@@ -32,7 +32,6 @@
   <img alt="React" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-3178C6?logo=react&logoColor=white" />
   <img alt="Electron" src="https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white" />
   <img alt="Hermes / Codex" src="https://img.shields.io/badge/AI-Hermes%20%2B%20Codex-2476D2" />
-  <img alt="Local First" src="https://img.shields.io/badge/Data-Local%20First-159A80" />
   <img alt="License" src="https://img.shields.io/badge/License-Non--Commercial-EA580C" />
   <a href="https://github.com/jundizhou/easy-stock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jundizhou/easy-stock?label=Release" /></a>
   <a href="https://github.com/jundizhou/easy-stock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/jundizhou/easy-stock?style=flat" /></a>
@@ -47,7 +46,7 @@ An AI-era stock terminal shouldn't just bolt a chat box onto a legacy quote app.
 
 Traditional market software is good at showing prices, changes, and turnover. What is actually hard about A-share trading is understanding the structure behind the numbers: What is today's main theme? Is the theme broadening? Did the limit-up ladder extend higher? Did yesterday's strongest stocks get follow-through? Is the trend still intact? Is market sentiment repairing or fading?
 
-easy-stock is an AI-native workbench that speaks this language. It unifies quotes, themes, limit-up pools, news, and post-market reviews into a single local-first research pipeline:
+easy-stock is an AI-native workbench that speaks this language. It unifies quotes, themes, limit-up pools, news, and post-market reviews into a single research workflow:
 
 | AI-native capability | How easy-stock does it |
 | --- | --- |
@@ -348,4 +347,4 @@ The original backend, frontend, desktop app, and documentation of easy-stock are
 
 > This project is for learning, research, and information organization only. It is not investment advice, a promise of returns, or a trading basis. Markets carry risk, and AI output and third-party data may be delayed, incomplete, or wrong — always verify against original sources, judge independently, and own your decisions.
 
-<p align="center"><sub>Local first · Evidence based · Human in control</sub></p>
+<p align="center"><sub>Evidence you can inspect · Research you can revisit</sub></p>

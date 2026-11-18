@@ -17,7 +17,7 @@
 <text x="176" y="122" font-size="38" fill="#172033" font-weight="750">easy-stock · AI 原生架构</text>
 <text x="176" y="153" font-size="18" fill="#56657a" font-weight="400">以市场证据为起点，把量化计算、AI 研判与本地研究积累连成闭环</text>
 <rect x="1178" y="63" width="138" height="28" rx="5" fill="#edf9f4" stroke="#edf9f4" />
-<text x="1247.0" y="82" font-size="13" fill="#14865f" font-weight="600" text-anchor="middle">LOCAL FIRST</text>
+<text x="1247.0" y="82" font-size="13" fill="#14865f" font-weight="600" text-anchor="middle">EVIDENCE BASED</text>
 <rect x="1332" y="63" width="260" height="28" rx="5" fill="#edf5ff" stroke="#edf5ff" />
 <text x="1462.0" y="82" font-size="13" fill="#2476d2" font-weight="600" text-anchor="middle">HERMES / CODEX</text>
 <text x="1592" y="125" font-size="19" fill="#172033" font-weight="600" text-anchor="end">发现 → 研判 → 巡检 → 优化 → 核验</text>
@@ -70,7 +70,7 @@
 <text x="96" y="1112" font-size="14" fill="#56657a" font-weight="400">浏览器持久登录态</text>
 <text x="96" y="1137" font-size="14" fill="#56657a" font-weight="400">前端对话 / 原生 Agent 会话</text>
 <rect x="80" y="1190" width="200" height="96" rx="10" fill="#edf5ff" stroke="#bdd2ed" />
-<text x="96" y="1220" font-size="17" fill="#2476d2" font-weight="650">本地优先 · 证据可追溯</text>
+<text x="96" y="1220" font-size="17" fill="#2476d2" font-weight="650">研究闭环 · 证据可追溯</text>
 <text x="96" y="1246" font-size="14" fill="#56657a" font-weight="400">来源、时间与降级状态</text>
 <text x="96" y="1268" font-size="14" fill="#56657a" font-weight="400">随数据与研究结果保留</text>
 <!-- React workspaces. -->
