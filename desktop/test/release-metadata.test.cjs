@@ -34,8 +34,8 @@ test('DMG staging uses ditto so framework symlinks remain relative', () => {
 	assert.match(script, /run\('hdiutil', \['convert', writableImagePath/);
 	assert.doesNotMatch(script, /['"]-srcfolder['"]/);
 	assert.doesNotMatch(script, /fs\.cpSync\(appPath/);
-	assert.match(script, /detach\(writableMountPath\)/);
-	assert.match(script, /\['detach', mountPath, '-force'\]/);
+	assert.match(script, /await detachDmg\(writableMountPath, writableImagePath\)/);
+	assert.match(script, /await detachDmg\(verificationMountPath, dmgPath\)/);
 });
 
 test('macOS builds use a complete ad-hoc signature without release credentials', () => {

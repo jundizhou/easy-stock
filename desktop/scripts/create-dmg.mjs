@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dmgSizeMiB } from './dmg-size.mjs';
+import { detachDmg } from './dmg-detach.mjs';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arch = process.env.A_STOCK_DESKTOP_ARCH || process.arch;
@@ -46,14 +47,14 @@ try {
 	run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), stagedAppPath, 'macos']);
 	fs.symlinkSync('/Applications', path.join(writableMountPath, 'Applications'));
 	run('sync', []);
-	detach(writableMountPath);
+	await detachDmg(writableMountPath, writableImagePath);
 	writableMounted = false;
 	run('hdiutil', ['convert', writableImagePath, '-format', 'UDZO', '-o', dmgPath]);
 	run('hdiutil', ['verify', dmgPath]);
 	run('hdiutil', ['attach', dmgPath, '-nobrowse', '-readonly', '-mountpoint', verificationMountPath]);
 	verificationMounted = true;
 	run(process.execPath, [path.join(desktopRoot, 'scripts', 'verify-release-package.mjs'), path.join(verificationMountPath, 'easy-stock.app'), 'macos']);
-	detach(verificationMountPath);
+	await detachDmg(verificationMountPath, dmgPath);
 	verificationMounted = false;
 } finally {
 	if (verificationMounted) tryRun('hdiutil', ['detach', verificationMountPath, '-force']);
@@ -72,25 +73,4 @@ function run(command, args) {
 
 function tryRun(command, args) {
 	spawnSync(command, args, { stdio: 'ignore' });
-}
-
-function detach(mountPath) {
-	const firstAttempt = spawnSync('hdiutil', ['detach', mountPath], { stdio: 'inherit' });
-	if (firstAttempt.error) throw firstAttempt.error;
-	if (firstAttempt.status === 0) return;
-	// DiskArbitration can finish unmounting after hdiutil reports a timeout.
-	if (!isMounted(mountPath)) return;
-	// Spotlight/Finder can keep a new volume busy. Only force our build volume.
-	const forcedAttempt = spawnSync('hdiutil', ['detach', mountPath, '-force'], { stdio: 'inherit' });
-	if (forcedAttempt.error) throw forcedAttempt.error;
-	if (forcedAttempt.status !== 0 && isMounted(mountPath)) throw new Error(`hdiutil detach exited with status ${forcedAttempt.status ?? 1}`);
-}
-
-function isMounted(mountPath) {
-	try {
-		return fs.statSync(mountPath).dev !== fs.statSync(path.dirname(mountPath)).dev;
-	} catch (error) {
-		if (error.code === 'ENOENT') return false;
-		throw error;
-	}
 }
