@@ -31,7 +31,7 @@ technical卡必须写对应研究对象、截止日期、方向与量价依据�
 分开解释市价、净值和基准。更高市价涨幅可能来自溢价扩大，不证明管理能力更强。旧净值偏离不是实时折溢价；没有可比IOPV不输出实时溢价或套利。成交额不是净申购，规模变化不等于资金流入。净值已反映的费用不重复扣减。无分红调整的净值序列和基准不能计算跟踪误差，未提供估值历史不能输出分位。
 程序给出的缺失、日期、execution_blockers必须保留。不了解久期、信用结构、底层持仓或申赎状态时明确缺口，不能猜值；报价正常不证明可成交或T+0。无成本不推定浮盈浮亏，有成本也不以回本为持有依据。仅研究单一标的，不给账户仓位比例。
 所有claim引用source_ids，kind为fact/opinion/inference；推断不写成已证实事实。每张判断卡均须引用来源并交代限制。证据充分度按每个实际提出的结论评价：能确认投资范围和披露集中度时应明确给出该结论，不因缺少完整实时持仓就否定已有事实；缺少行业景气只限制景气判断。e-underlying是报告期重仓股财务/估值样本，可描述样本盈利变化，不能冒充整个指数财务或全行业景气。没有指数估值历史时仍可解释已知价格趋势和样本估值，不输出历史分位。拆分事件按e-actions与程序调整后的m-price解释；不把拆分当暴跌。e-benchmark有值时明确比较真实基准。
-研究充分度与交易许可分开：盘后、有执行阻断、未拿到IOPV，只影响实时交易/溢价判断，不能单独导致底层和产品研究降级。盘后以完整交易日量价形成方向、条件和反证，下个交易时段再核实执行。observation_premium_percent仅为注明时点的盘后参考偏离，不是实时溢价。未知不等于负面，更不能把未核实交易状态表述为基金已暂停交易。整体evidence_level只评价thesis实际提出的研究结论，禁止为了达标虚报sufficient；仍须保留具体未解决的关键缺口。evidence_reasons最多3条，只列影响研究结论的具体问题；时间口径说明、前十大披露惯例和交易许可列入limitations/decision.blockers，不自动当作整体研究不足的原因。可比较产品只限已给出的peer样本，禁止声称全市场最优。source_id不存在时不得引用。缺少反证不代表没有风险。价格参考只允许引用anchors，禁止凭空目标价。输出JSON，不要Markdown。
+研究充分度与交易许可分开：盘后、有执行阻断、未拿到IOPV，只影响实时交易/溢价判断，不能单独导致底层和产品研究降级。盘后以完整交易日量价形成方向、条件和反证，下个交易时段再核实执行。observation_premium_percent仅为注明时点的盘后参考偏离，不是实时溢价。未知不等于负面，更不能把未核实交易状态表述为基金已暂停交易。整体evidence_level只评价thesis实际提出的研究结论，禁止为了达标虚报sufficient；仍须保留具体未解决的关键缺口。evidence_reasons最多3条，只列影响研究结论的具体问题；时间口径说明、前十大披露惯例和交易许可列入limitations/decision.blockers，不自动当作整体研究不足的原因。可比较产品只限已给出的peer样本，禁止声称全市场最优。source_ids只能逐字复制输入sources[].id，不得自造或改写；anchors是价格锚点数组，不是来源ID（锚点id如etf-close也不是来源，锚点自己的source_id才是来源；行情来源为m-price/m-quote）；公告ID必须连-fulltext/-excerpt/-title_only后缀一起复制。缺少反证不代表没有风险。价格参考只能使用anchors数组的anchor_id，禁止凭空目标价。输出JSON，不要Markdown。
 `
 
 const etfCoreSchema = `{"etf_judgments":{"technical":{"status":"rising|falling|mixed|insufficient|not_applicable","text":"分类后对应指数/板块的近期技术判断，含日期、对象和量价依据","evidence_level":"sufficient|limited|insufficient","source_ids":["编号"]},"news":{"status":"supported|mixed|weakened|insufficient","text":"该投资方向的消息催化、传导机制与反向证据，含事件日期","evidence_level":"sufficient|limited|insufficient","source_ids":["编号"]},"underlying":{"status":"supported|mixed|weakened|insufficient","text":"底层判断及限制","evidence_level":"sufficient|limited|insufficient","source_ids":["编号"]},"product":{"status":"suitable|limited|unverified","text":"基金产品判断及限制","evidence_level":"sufficient|limited|insufficient","source_ids":["编号"]},"entry":{"status":"conditional|wait|avoid|unknown","text":"当前介入条件及限制","evidence_level":"sufficient|limited|insufficient","source_ids":["编号"]}},"headline":"研究结论","thesis":{"text":"三层综合解释","kind":"inference","source_ids":["编号"]},"support":[{"text":"支持证据","kind":"fact|opinion|inference","source_ids":["编号"]}],"counter":[{"text":"有证据的反向依据","kind":"fact|opinion|inference","source_ids":["编号"]}],"alternatives":[],"main_conflict":"核心分歧","evidence_level":"sufficient|limited|insufficient","evidence_reasons":["影响当前研究结论的具体未解决问题"],"limitations":["缺口"],"baseline_relation":"insufficient","baseline_reason":"仅对照ETF量化事实，无股票总分"}`
@@ -48,6 +48,7 @@ func validateETFJudgments(j *etfanalysis.Judgments, snapshot ResearchSnapshot) e
 	if j == nil {
 		return fmt.Errorf("ETF研究必须分别给出底层、产品和介入条件判断")
 	}
+	repairETFJudgmentSourceIDs(j, snapshot)
 	known := map[string]bool{}
 	for _, s := range snapshot.Sources {
 		known[s.ID] = true
@@ -110,6 +111,39 @@ func validateETFJudgments(j *etfanalysis.Judgments, snapshot ResearchSnapshot) e
 		}
 	}
 	return nil
+}
+
+// repairETFJudgmentSourceIDs maps a citation the model wrote with an anchor id
+// or a near-miss evidence id back to the frozen source it identifies. Anchor
+// ids such as etf-close are price anchors, not sources; their source_id is the
+// dated evidence the card must cite. A wrong announcement content suffix or a
+// one-character copy error is accepted only when exactly one frozen source
+// matches, so ambiguous or invented ids still fail validation.
+func repairETFJudgmentSourceIDs(j *etfanalysis.Judgments, snapshot ResearchSnapshot) {
+	if j == nil {
+		return
+	}
+	sources := make(map[string]ResearchSource, len(snapshot.Sources))
+	for _, source := range snapshot.Sources {
+		sources[source.ID] = source
+	}
+	aliases := sourceIDRepairAliases(snapshot.Anchors, sources)
+	repair := func(ids []string) {
+		for i, id := range ids {
+			if repaired, ok := repairSourceID(id, sources, aliases); ok {
+				ids[i] = repaired
+			}
+		}
+	}
+	if j.Technical != nil {
+		repair(j.Technical.SourceIDs)
+	}
+	if j.News != nil {
+		repair(j.News.SourceIDs)
+	}
+	repair(j.Underlying.SourceIDs)
+	repair(j.Product.SourceIDs)
+	repair(j.Entry.SourceIDs)
 }
 
 func containsExact(values []string, v string) bool {

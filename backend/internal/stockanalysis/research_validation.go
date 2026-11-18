@@ -19,7 +19,7 @@ func validateResearch(result *ResearchSynthesis, snapshot ResearchSnapshot) ([]s
 		anchors[anchor.ID] = anchor
 	}
 	notes := []string{"已校验来源编号、引文和数字结构；语义解释仍属于AI判断，并非完整事实认证"}
-	if repaired := repairResearchSourceIDs(result, sources); len(repaired) > 0 {
+	if repaired := repairResearchSourceIDs(result, sources, snapshot.Anchors); len(repaired) > 0 {
 		notes = append(notes, repaired...)
 	}
 	if softenUnsupportedAttribution(result, sources) {
@@ -327,26 +327,63 @@ func researchClaimHasUsableEvidence(claim ResearchClaim, sources map[string]Rese
 	return false
 }
 
+// sourceIDRepairAliases maps price-anchor ids (etf-close) and the anchors
+// array name to the frozen source they identify. It only aliases a source that
+// exists in this snapshot; "anchors" is aliased only when every anchor shares
+// the same source.
+func sourceIDRepairAliases(anchors []PriceAnchor, sources map[string]ResearchSource) map[string]string {
+	aliases := map[string]string{}
+	unique := ""
+	for _, anchor := range anchors {
+		if anchor.ID == "" || anchor.SourceID == "" {
+			continue
+		}
+		if _, ok := sources[anchor.SourceID]; !ok {
+			continue
+		}
+		aliases[anchor.ID] = anchor.SourceID
+		if unique == "" {
+			unique = anchor.SourceID
+		} else if unique != anchor.SourceID {
+			unique = "-"
+		}
+	}
+	if unique != "" && unique != "-" {
+		aliases["anchors"] = unique
+	}
+	return aliases
+}
+
+func repairSourceID(id string, sources map[string]ResearchSource, aliases map[string]string) (string, bool) {
+	if _, ok := sources[id]; ok {
+		return "", false
+	}
+	if alias, ok := aliases[id]; ok {
+		return alias, true
+	}
+	if repaired, ok := repairNoticeSourceID(id, sources); ok {
+		return repaired, true
+	}
+	if repaired, ok := repairOneEditSourceID(id, sources, "e-notice-"); ok {
+		return repaired, true
+	}
+	if repaired, ok := repairOneEditSourceID(id, sources, "s-"); ok {
+		return repaired, true
+	}
+	return "", false
+}
+
 // Models occasionally drop or alter one character while copying a long source
 // id into JSON. Repair only a unique one-edit match for generated sources;
 // ambiguous or unrelated ids remain validation errors.
-func repairResearchSourceIDs(result *ResearchSynthesis, sources map[string]ResearchSource) []string {
+func repairResearchSourceIDs(result *ResearchSynthesis, sources map[string]ResearchSource, anchors []PriceAnchor) []string {
 	repairs := map[string]string{}
+	aliases := sourceIDRepairAliases(anchors, sources)
 	repairIDs := func(ids *[]string) {
 		for index, id := range *ids {
-			if _, ok := sources[id]; ok || !strings.HasPrefix(id, "s-") {
-				continue
-			}
-			matches := []string{}
-			for candidate := range sources {
-				if !strings.HasPrefix(candidate, "s-") || !sourceIDWithinOneEdit(id, candidate) {
-					continue
-				}
-				matches = append(matches, candidate)
-			}
-			if len(matches) == 1 {
-				(*ids)[index] = matches[0]
-				repairs[id] = matches[0]
+			if repaired, ok := repairSourceID(id, sources, aliases); ok {
+				(*ids)[index] = repaired
+				repairs[id] = repaired
 			}
 		}
 	}
@@ -398,14 +435,66 @@ func repairResearchSourceIDs(result *ResearchSynthesis, sources map[string]Resea
 	return notes
 }
 
+func repairOneEditSourceID(id string, sources map[string]ResearchSource, prefix string) (string, bool) {
+	if _, ok := sources[id]; ok || !strings.HasPrefix(id, prefix) {
+		return "", false
+	}
+	matches := []string{}
+	for candidate := range sources {
+		if sourceIDWithinOneEditAfterPrefix(id, candidate, prefix) {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], true
+	}
+	return "", false
+}
+
+// repairNoticeSourceID accepts a wrong content-status suffix for the same
+// frozen announcement id when exactly one suffix variant exists.
+func repairNoticeSourceID(id string, sources map[string]ResearchSource) (string, bool) {
+	if !strings.HasPrefix(id, "e-notice-") {
+		return "", false
+	}
+	base := noticeSourceBase(id)
+	match := ""
+	for candidate := range sources {
+		if !strings.HasPrefix(candidate, "e-notice-") || noticeSourceBase(candidate) != base {
+			continue
+		}
+		if match != "" && match != candidate {
+			return "", false
+		}
+		match = candidate
+	}
+	if match == "" {
+		return "", false
+	}
+	return match, true
+}
+
+func noticeSourceBase(id string) string {
+	for _, suffix := range []string{"-fulltext", "-excerpt", "-title_only"} {
+		if strings.HasSuffix(id, suffix) {
+			return strings.TrimSuffix(id, suffix)
+		}
+	}
+	return id
+}
+
 func sourceIDWithinOneEdit(a, b string) bool {
+	return sourceIDWithinOneEditAfterPrefix(a, b, "s-")
+}
+
+func sourceIDWithinOneEditAfterPrefix(a, b, prefix string) bool {
 	if a == b {
 		return true
 	}
-	if !strings.HasPrefix(a, "s-") || !strings.HasPrefix(b, "s-") {
+	if prefix == "" || !strings.HasPrefix(a, prefix) || !strings.HasPrefix(b, prefix) {
 		return false
 	}
-	a, b = a[2:], b[2:]
+	a, b = a[len(prefix):], b[len(prefix):]
 	if len(a) > len(b)+1 || len(b) > len(a)+1 {
 		return false
 	}
