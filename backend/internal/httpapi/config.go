@@ -199,6 +199,7 @@ type Config struct {
 	HotStocks                HotStockProvider
 	FuturesPosition          FuturesPositionProvider
 	MarketOverview           MarketOverviewProvider
+	ETFSubscriptions         ETFSubscriptionProvider
 	Inflection               InflectionEvaluator
 	ReviewDBPath             string
 	PortfolioDBPath          string

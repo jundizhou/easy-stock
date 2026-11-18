@@ -79,6 +79,7 @@ type Server struct {
 	hotStockProvider         HotStockProvider
 	futuresPosition          FuturesPositionProvider
 	marketOverview           MarketOverviewProvider
+	etfSubscriptions         ETFSubscriptionProvider
 	// sectorFlowSamples 是板块资金流本地采样库：上游分时接口不可用时，曲线由它拼接。
 	sectorFlowSamples        *sectorflowsample.Store
 	sectorFlowSampleInterval time.Duration
@@ -224,6 +225,9 @@ func NewServer(config any) *Server {
 	}
 	if cfg.IndustryStocks == nil {
 		cfg.IndustryStocks = tencentClient
+	}
+	if cfg.ETFSubscriptions == nil {
+		cfg.ETFSubscriptions = eastMoneyClient
 	}
 	if cfg.MarketOverview == nil {
 		cfg.MarketOverview = marketoverviewprovider.New(eastMoneyClient, tencentClient, tencentClient, sinaClient,
@@ -409,6 +413,7 @@ func NewServer(config any) *Server {
 		hotStockProvider:         cfg.HotStocks,
 		futuresPosition:          cfg.FuturesPosition,
 		marketOverview:           cfg.MarketOverview,
+		etfSubscriptions:         cfg.ETFSubscriptions,
 		sectorFlowSamples:        cfg.SectorFlowSampleStore,
 		sectorFlowSampleInterval: cfg.SectorFlowSampleInterval,
 		inflection:               cfg.Inflection,
@@ -758,6 +763,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/quotes/kline/batch", s.klineBatch)
 	s.mux.HandleFunc("GET /api/v1/market/news", s.news)
 	s.mux.HandleFunc("GET /api/v1/market/indexes", s.marketIndexesHandler)
+	s.mux.HandleFunc("GET /api/v1/market/national-team-etfs/subscriptions", s.etfSubscriptionsHandler)
 	s.mux.HandleFunc("GET /api/v1/market/index-series", s.marketIndexSeriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/industries", s.marketIndustriesHandler)
 	s.mux.HandleFunc("GET /api/v1/market/flows", s.marketFlowsHandler)

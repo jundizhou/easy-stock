@@ -18,6 +18,10 @@ import (
 )
 
 type Client struct {
+	subscriptionBaseURL string
+	subscriptionSSEURL  string
+	subscriptionSZSEURL string
+	subscriptionData    subscriptionDataCache
 	baseURL             string
 	quoteBaseURL        string
 	quoteFallbackURLs   []string

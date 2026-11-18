@@ -20,6 +20,7 @@ export type MarketOverviewView =
 	| 'pulse'
 	| 'core-indexes'
 	| 'sector-flow'
+	| 'national-team'
 	| 'industry-momentum'
 	| 'industry-flow'
 	| 'theme-flow'
@@ -59,6 +60,7 @@ export const marketOverviewGroups: MarketOverviewGroup[] = [
 		name: '资金结构',
 		modules: [
 			{ id: 'sector-flow', name: '资金流向', description: '板块资金流向趋势研判', status: 'ready' },
+			{ id: 'national-team', name: '国家队 ETF 观察', description: '宽基ETF净申购与份额核验', status: 'ready' },
 			{ id: 'industry-momentum', name: '行业趋势强度', description: '多周期趋势强弱与领涨结构', status: 'ready' },
 			{ id: 'industry-flow', name: '行业资金', description: '行业资金净流入与持续性', status: 'ready' },
 			{ id: 'theme-flow', name: '题材概念', description: '题材概念资金强度与领涨结构', status: 'ready' },
