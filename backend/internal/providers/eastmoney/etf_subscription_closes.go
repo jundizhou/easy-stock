@@ -23,7 +23,7 @@ func (c *Client) subscriptionDailyCloses(ctx context.Context, code, exchange, st
 	params := url.Values{
 		"secid": {prefix + code}, "klt": {"101"}, "fqt": {"0"},
 		"beg": {strings.ReplaceAll(start, "-", "")}, "end": {strings.ReplaceAll(end, "-", "")},
-		"lmt": {"80"}, "fields1": {"f1,f2,f3,f4,f5,f6"}, "fields2": {"f51,f53"},
+		"lmt": {"400"}, "fields1": {"f1,f2,f3,f4,f5,f6"}, "fields2": {"f51,f53"},
 	}
 	var payload struct {
 		RC   int `json:"rc"`

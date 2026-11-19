@@ -2,7 +2,7 @@ import { requestJSON, type BackendConfig, type SourceMeta } from './backend';
 import type { ETFSubscriptionDashboard } from './etf-subscription';
 
 export type ETFSubscriptionPayload = { data: ETFSubscriptionDashboard; meta: SourceMeta };
-const prefix = 'easy-stock:etf-subscriptions:v1:';
+const prefix = 'easy-stock:etf-subscriptions:v2:';
 const maxAge = 7 * 24 * 60 * 60 * 1000;
 const requests = new Map<string, Promise<ETFSubscriptionPayload>>();
 

@@ -3,7 +3,25 @@ package nationalteam
 import (
 	"easy-stock/backend/internal/foundation"
 	"testing"
+	"time"
 )
+
+func TestSubscriptionYearStartClampsLeapDayAndUsesChinaDate(t *testing.T) {
+	for _, tc := range []struct{ now, want string }{
+		{"2026-11-19T10:00:00+08:00", "2025-11-19"},
+		{"2024-02-29T10:00:00+08:00", "2023-02-28"},
+		{"2026-01-01T00:00:00+08:00", "2025-01-01"},
+		{"2026-11-18T20:00:00Z", "2025-11-19"},
+	} {
+		now, err := time.Parse(time.RFC3339, tc.now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := SubscriptionYearStart(now); got != tc.want {
+			t.Errorf("SubscriptionYearStart(%s) = %s, want %s", tc.now, got, tc.want)
+		}
+	}
+}
 
 func TestSubscriptionAmountsUseSharesAndSameDayCloseNotTradingFlows(t *testing.T) {
 	raw := map[string]SubscriptionRaw{}

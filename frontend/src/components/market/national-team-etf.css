@@ -30,6 +30,14 @@
 .national-team-history-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px 8px; flex-wrap: wrap; }
 .national-team-history-toolbar label { display: flex; align-items: center; gap: 8px; color: var(--theme-muted); font-size: var(--fs-desc); }
 .national-team-history-toolbar select { max-width: 310px; min-height: 30px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface); color: var(--theme-text); font: inherit; }
+.etf-subscription-range-controls, .etf-subscription-custom-range { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
+.etf-subscription-custom-range { flex-basis: 100%; }
+.etf-subscription-custom-range input, .etf-subscription-custom-range button { min-height: 30px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--theme-surface); color: var(--theme-text); font: inherit; font-size: var(--fs-desc); }
+.etf-subscription-custom-range button { color: var(--theme-blue); cursor: pointer; }
+.etf-subscription-custom-range button:disabled { color: var(--theme-muted); cursor: default; opacity: .6; }
+.etf-subscription-custom-range > span, .etf-subscription-selected-range { color: var(--theme-muted); font-size: var(--fs-desc); }
+.etf-subscription-custom-range [role="alert"] { color: var(--theme-red); }
+.etf-subscription-selected-range { flex-basis: 100%; font-family: var(--font-num); }
 .national-team-history .national-team-chart-reading { flex-wrap: wrap; }
 .national-team-history .market-module-loading { margin: 10px 14px; }
 .national-team-history svg rect:focus-visible { outline: 1px solid var(--theme-blue); }

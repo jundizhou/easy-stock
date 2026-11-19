@@ -43,9 +43,9 @@ type SubscriptionRaw struct {
 	Prices map[string]float64
 }
 
-func SubscriptionMonthStart(now time.Time) string {
+func SubscriptionYearStart(now time.Time) string {
 	now = now.In(China)
-	last := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, China).AddDate(0, 0, -1)
+	last := time.Date(now.Year()-1, now.Month()+1, 1, 0, 0, 0, 0, China).AddDate(0, 0, -1)
 	return time.Date(last.Year(), last.Month(), min(now.Day(), last.Day()), 0, 0, 0, 0, China).Format(time.DateOnly)
 }
 

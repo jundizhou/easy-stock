@@ -264,9 +264,9 @@ func (c *Client) etfSubscriptionsAt(ctx context.Context, now time.Time) (foundat
 	if _, err := time.Parse(time.DateOnly, source.Date); err != nil || source.Date > today {
 		return foundation.ETFSubscriptionDashboard{}, foundation.SourceMeta{}, fmt.Errorf("invalid public ETF snapshot date")
 	}
-	start := nationalteam.SubscriptionMonthStart(now)
+	start := nationalteam.SubscriptionYearStart(now)
 	if source.Date < start {
-		return foundation.ETFSubscriptionDashboard{}, foundation.SourceMeta{}, fmt.Errorf("public ETF snapshot is older than the requested month")
+		return foundation.ETFSubscriptionDashboard{}, foundation.SourceMeta{}, fmt.Errorf("public ETF snapshot is older than the requested year")
 	}
 	from, _ := time.Parse(time.DateOnly, start)
 	to, _ := time.Parse(time.DateOnly, source.Date)

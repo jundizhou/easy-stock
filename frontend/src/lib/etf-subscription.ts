@@ -17,6 +17,47 @@ export type ETFSubscriptionDashboard = {
  checks: Array<{ code: string; date: string; snapshot_shares: number | null; official_shares: number | null; status: string }>;
  warnings: string[];
 };
+export type ETFSubscriptionRange = { start: string; end: string };
+export type ETFSubscriptionPeriod = '1m' | '3m' | '6m' | '1y' | 'custom';
+
+export function subscriptionMonthsBefore(date: string, months: number): string {
+ const [year, month, day] = date.split('-').map(Number);
+ const last = new Date(Date.UTC(year, month - months, 0));
+ last.setUTCDate(Math.min(day, last.getUTCDate()));
+ return last.toISOString().slice(0, 10);
+}
+
+export function subscriptionRangeBounds(data: ETFSubscriptionDashboard): ETFSubscriptionRange {
+ const end = data.latest_date || data.source_date;
+ return { start: [data.start_date, subscriptionMonthsBefore(end, 12)].sort().at(-1)!, end };
+}
+
+export function subscriptionPresetRange(bounds: ETFSubscriptionRange, period: Exclude<ETFSubscriptionPeriod, 'custom'>): ETFSubscriptionRange {
+ const months = { '1m': 1, '3m': 3, '6m': 6, '1y': 12 }[period];
+ return { start: [bounds.start, subscriptionMonthsBefore(bounds.end, months)].sort().at(-1)!, end: bounds.end };
+}
+
+export function subscriptionRangeError(range: ETFSubscriptionRange, bounds: ETFSubscriptionRange): string {
+ const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+ if (!validDate(range.start) || !validDate(range.end)) return '请选择完整的起止日期';
+ if (range.start > range.end) return '开始日期不能晚于结束日期';
+ if (range.start < subscriptionMonthsBefore(range.end, 12)) return '时间范围最长为 1 年';
+ if (range.start < bounds.start || range.end > bounds.end) return `可选日期为 ${bounds.start} 至 ${bounds.end}`;
+ return '';
+}
+
+// Filter before accumulating so amounts and gaps outside the selected interval
+// cannot affect its total. Daily deltas retain their prior-disclosure baseline.
+export function subscriptionWindow(data: ETFSubscriptionDashboard, range: ETFSubscriptionRange): ETFSubscriptionDashboard {
+ const includes = (date: string) => date >= range.start && date <= range.end;
+ const days = data.days.filter((day) => includes(day.date));
+ return {
+  ...data, start_date: range.start, latest_date: days.at(-1)?.date || '',
+  latest_complete_date: days.filter((day) => day.estimated_net != null).at(-1)?.date || '', days,
+  series: data.series.map((item) => ({ ...item, points: item.points.filter((point) => includes(point.date)) })),
+  checks: data.checks.filter((check) => includes(check.date)),
+ };
+}
 export function subscriptionChartPoints(data: ETFSubscriptionDashboard, code: string, cumulative: boolean): ETFChartPoint[] {
  const individual = new Map(data.series.find((item) => item.code === code)?.points.map((item) => [item.date, item.estimated_net]) || []);
  let total: number | null = 0;
@@ -29,7 +70,7 @@ export function subscriptionChartPoints(data: ETFSubscriptionDashboard, code: st
 }
 export function subscriptionWindowNet(data: ETFSubscriptionDashboard): number | null {
  const days = data.days.filter((day) => data.latest_complete_date && day.date <= data.latest_complete_date);
- if (!days.length || days.some((day) => day.estimated_net == null)) return null;
+ if (!days.length || days.some((day) => day.estimated_net == null || !Number.isFinite(day.estimated_net))) return null;
  return days.reduce((sum, day) => sum + day.estimated_net!, 0);
 }
 export function subscriptionPrompt(data: ETFSubscriptionDashboard, day: ETFSubscriptionDay | undefined, meta: SourceMeta): string {

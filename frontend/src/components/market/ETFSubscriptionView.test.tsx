@@ -32,7 +32,7 @@ describe('share-based ETF subscription view', () => {
   const { onAskAI } = await mount();
   expect(screen.getByText('+3.00 亿')).toBeTruthy(); expect(screen.getByText('4.054')).toBeTruthy();
   expect(screen.getByText(/9.999/)).toBeTruthy(); expect(screen.getByText(/份额最新齐备日 2026-11-16/)).toBeTruthy();
-  expect(screen.getByRole('img', { name: 'ETF近一个月净申购估算折线图' })).toBeTruthy();
+  expect(screen.getByRole('img', { name: 'ETF净申购估算折线图 2026-11-13 至 2026-11-16' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '交给 AI 解读' })); expect(onAskAI.mock.calls[0][0]).toContain('不得用盘中大单净额');
  });
  it('switches disclosed dates and chart measures without losing timestamp context', async () => {
@@ -68,6 +68,46 @@ describe('share-based ETF subscription view', () => {
   await act(async () => { render(<StrictMode><ETFSubscriptionView config={config} refreshKey={0} onAskAI={vi.fn()} /></StrictMode>); });
   expect(requestJSON).toHaveBeenCalledTimes(1);
   expect(screen.getByText('华泰柏瑞沪深300ETF').getAttribute('title')).toBe('华泰柏瑞沪深300ETF');
+ });
+ it('recalculates the chart, summary, details and AI evidence for a custom inclusive range', async () => {
+  const { onAskAI } = await mount();
+  fireEvent.change(screen.getByLabelText('净申购时间范围'), { target: { value: 'custom' } });
+  fireEvent.change(screen.getByLabelText('净申购开始日期'), { target: { value: '2026-11-16' } });
+  fireEvent.click(screen.getByRole('button', { name: '应用' }));
+  expect(screen.getByText('所选区间累计（估算）').closest('article')?.textContent).toContain('+3.00 亿');
+  expect(screen.getByText('1 个披露交易日 · 单位：亿元')).toBeTruthy();
+  expect(screen.getByLabelText('查看份额披露日期').querySelectorAll('option')).toHaveLength(1);
+  expect(screen.getByRole('img', { name: 'ETF净申购估算折线图 2026-11-16 至 2026-11-16' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '交给 AI 解读' }));
+  expect(onAskAI.mock.calls[0][0]).toContain('所示窗口 2026-11-16 至 2026-11-16，区间估算净申购 +3.00 亿');
+  expect(onAskAI.mock.calls[0][0]).toContain('比较基准 2026-11-13');
+  expect(requestJSON).toHaveBeenCalledTimes(1);
+ });
+ it('includes older disclosures in year totals and restores a month when switching back', async () => {
+  const older = { ...data.days[0], date: '2026-01-05', previous_date: '2025-12-31', estimated_net: 5e8 };
+  vi.mocked(requestJSON).mockResolvedValueOnce({ data: { ...data, start_date: '2025-11-17', days: [older, ...data.days] }, meta });
+  await mount();
+  const total = () => screen.getByText('所选区间累计（估算）').closest('article')?.textContent;
+  expect(total()).toContain('+2.00 亿');
+  fireEvent.change(screen.getByLabelText('净申购时间范围'), { target: { value: '1y' } });
+  expect(total()).toContain('+7.00 亿');
+  expect(screen.getByText('3 个披露交易日 · 单位：亿元')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('净申购时间范围'), { target: { value: '1m' } });
+  expect(total()).toContain('+2.00 亿');
+  expect(requestJSON).toHaveBeenCalledTimes(1);
+ });
+ it('blocks invalid ranges and shows no estimate for weekends without disclosure', async () => {
+  await mount();
+  fireEvent.change(screen.getByLabelText('净申购时间范围'), { target: { value: 'custom' } });
+  fireEvent.change(screen.getByLabelText('净申购开始日期'), { target: { value: '2026-11-16' } });
+  fireEvent.change(screen.getByLabelText('净申购结束日期'), { target: { value: '2026-11-13' } });
+  expect(screen.getByRole('alert').textContent).toContain('开始日期不能晚于结束日期');
+  expect(screen.getByRole('button', { name: '应用' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.change(screen.getByLabelText('净申购开始日期'), { target: { value: '2026-11-14' } });
+  fireEvent.change(screen.getByLabelText('净申购结束日期'), { target: { value: '2026-11-15' } });
+  fireEvent.click(screen.getByRole('button', { name: '应用' }));
+  expect(screen.getByText('暂无可绘制的净申购历史')).toBeTruthy();
+  expect(screen.getByText('所选区间累计（估算）').closest('article')?.textContent).toContain('--');
  });
 });
 

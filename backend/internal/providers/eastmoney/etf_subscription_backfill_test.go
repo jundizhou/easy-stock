@@ -60,6 +60,9 @@ func TestSubscriptionBackfillsYesterdayWhenSnapshotLagsTwoDays(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"rc": 0, "data": map[string]any{"diff": rows}})
 		case r.URL.Path == "/api/qt/stock/kline/get":
 			closeRequests.Add(1)
+			if q.Get("lmt") != "400" {
+				t.Errorf("daily close limit must cover a full year: %s", r.URL)
+			}
 			if q.Get("fqt") != "0" || q.Get("klt") != "101" || q.Get("beg") != "20261117" || q.Get("end") != "20261117" || q.Get("fields2") != "f51,f53" {
 				t.Errorf("incorrect historical close request: %s", r.URL)
 			}

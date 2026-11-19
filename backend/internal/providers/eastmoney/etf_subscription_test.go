@@ -31,9 +31,17 @@ func TestSubscriptionProviderVerifiesBothExchangesAndNeverUsesLivePriceForHistor
 		case r.URL.Path == "/meta.json":
 			fmt.Fprint(w, `{"trade_date":"2026-11-16","generated_at_iso":"2026-11-17T16:00:00+08:00","report_date":"2025-12-31"}`)
 		case strings.HasPrefix(r.URL.Path, "/industry/"):
+			if strings.HasSuffix(r.URL.Path, "/2025.json") {
+				fmt.Fprint(w, `{"dates":["2025-11-14","2025-11-17"]}`)
+				return
+			}
 			fmt.Fprint(w, `{"dates":["2026-10-16","2026-10-19","2026-11-13","2026-11-16"]}`)
 		case strings.HasPrefix(r.URL.Path, "/series/"):
 			files.Add(1)
+			if strings.HasSuffix(r.URL.Path, "/2025.json") {
+				fmt.Fprint(w, `{"shares":[["2025-11-14",800],["2025-11-17",900]],"prices":[["2025-11-17",2]]}`)
+				return
+			}
 			fmt.Fprint(w, `{"shares":[["2026-10-16",1000],["2026-10-19",1100],["2026-11-13",1200],["2026-11-16",1300]],"prices":[["2026-10-19",5],["2026-11-13",3],["2026-11-16",2]]}`)
 		case r.URL.Path == "/api/qt/ulist.np/get":
 			if len(strings.Split(r.URL.Query().Get("secids"), ",")) != 22 {
@@ -93,8 +101,12 @@ func TestSubscriptionProviderVerifiesBothExchangesAndNeverUsesLivePriceForHistor
 	if err != nil || result.Expected != 22 || result.LatestCompleteDate != "2026-11-16" || result.ReportDate != "2025-12-31" || meta.Stale {
 		t.Fatalf("bad source result %+v %+v %v", result, meta, err)
 	}
-	if files.Load() != 22 {
+	if files.Load() != 44 {
 		t.Fatalf("source files=%d", files.Load())
+	}
+	first := result.Days[0]
+	if result.StartDate != "2025-11-17" || first.Date != "2025-11-17" || first.PreviousDate != "2025-11-14" || first.EstimatedNet == nil || *first.EstimatedNet != 4400 {
+		t.Fatalf("year history omitted or lost the first day's baseline: start=%s first=%+v", result.StartDate, first)
 	}
 	if result.TodayTrial == nil || result.TodayTrial.ShareCoverage != 0 || result.TodayTrial.EstimatedNet != nil || result.TodayTrial.PriceCoverage != 22 {
 		t.Fatalf("today's quote must not make yesterday's share total into a same-day estimate: %+v", result.TodayTrial)
@@ -109,7 +121,7 @@ func TestSubscriptionProviderVerifiesBothExchangesAndNeverUsesLivePriceForHistor
 		t.Fatalf("live price replaced historical close or correction ignored %+v", point)
 	}
 	client.etfSubscriptionsAt(context.Background(), now)
-	if files.Load() != 22 {
+	if files.Load() != 44 {
 		t.Fatalf("unchanged snapshot refetched historical files: %d", files.Load())
 	}
 	newDay.Store(true)

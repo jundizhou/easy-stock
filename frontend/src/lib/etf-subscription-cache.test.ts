@@ -33,13 +33,17 @@ describe('ETF subscription fast-open snapshot', () => {
 		expect(requestJSON).toHaveBeenCalledTimes(2);
 	});
 	it('ignores corrupt snapshots and storage failures', async () => {
-		window.localStorage.setItem('easy-stock:etf-subscriptions:v1:http://backend.test', '{broken');
+		window.localStorage.setItem('easy-stock:etf-subscriptions:v2:http://backend.test', '{broken');
 		expect(readETFSubscriptionSnapshot(config)).toBeNull();
-		window.localStorage.setItem('easy-stock:etf-subscriptions:v1:http://backend.test', JSON.stringify({ ...snapshot, data: { ...snapshot.data, days: [null] } }));
+		window.localStorage.setItem('easy-stock:etf-subscriptions:v2:http://backend.test', JSON.stringify({ ...snapshot, data: { ...snapshot.data, days: [null] } }));
 		expect(readETFSubscriptionSnapshot(config)).toBeNull();
 		vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => { throw new Error('quota'); });
 		vi.mocked(requestJSON).mockResolvedValueOnce(snapshot);
 		expect(await loadETFSubscriptionSnapshot(config)).toBe(snapshot);
 		vi.restoreAllMocks();
+	});
+	it('ignores old one-month snapshots after the year-history upgrade', () => {
+		window.localStorage.setItem('easy-stock:etf-subscriptions:v1:http://backend.test', JSON.stringify(snapshot));
+		expect(readETFSubscriptionSnapshot(config)).toBeNull();
 	});
 });

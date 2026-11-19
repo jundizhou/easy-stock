@@ -2,7 +2,7 @@ import { Activity, ArrowUpRight, Bot, CheckCheck, Database, Download, Pause, Pla
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type BackendConfig, type SourceMeta } from '../../lib/backend';
 import { etfMoney, etfTime } from '../../lib/national-team';
-import { subscriptionChartPoints, subscriptionPrompt, subscriptionWindowNet, subscriptionTrialStatus, type ETFSubscriptionTrial } from '../../lib/etf-subscription';
+import { subscriptionChartPoints, subscriptionPrompt, subscriptionWindowNet, subscriptionTrialStatus, subscriptionRangeBounds, subscriptionPresetRange, subscriptionRangeError, subscriptionWindow, type ETFSubscriptionPeriod, type ETFSubscriptionRange, type ETFSubscriptionTrial } from '../../lib/etf-subscription';
 import { ModuleState } from './MarketDataViews';
 import { ETFSubscriptionChart } from './ETFSubscriptionChart';
 import { loadETFSubscriptionSnapshot, readETFSubscriptionSnapshot, type ETFSubscriptionPayload } from '../../lib/etf-subscription-cache';
@@ -18,6 +18,9 @@ export function ETFSubscriptionView({ config, refreshKey, onAskAI }: Props) {
  const [interval, setIntervalSeconds] = useState(60);
  const [code, setCode] = useState('pool');
  const [cumulative, setCumulative] = useState(true);
+ const [period, setPeriod] = useState<ETFSubscriptionPeriod>('1m');
+ const [customRange, setCustomRange] = useState<ETFSubscriptionRange | null>(null);
+ const [rangeDraft, setRangeDraft] = useState<ETFSubscriptionRange | null>(null);
  const [selectedDate, setSelectedDate] = useState('');
  const [query, setQuery] = useState('');
  useEffect(() => {
@@ -43,7 +46,15 @@ export function ETFSubscriptionView({ config, refreshKey, onAskAI }: Props) {
   document.addEventListener('visibilitychange', onVisible);
   return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
  }, [config, refreshKey, interval]);
- const data = payload?.data;
+ const sourceData = payload?.data;
+ const bounds = useMemo(() => sourceData ? subscriptionRangeBounds(sourceData) : null, [sourceData]);
+ const range = useMemo(() => bounds ? period === 'custom' && customRange ? customRange : subscriptionPresetRange(bounds, period === 'custom' ? '1m' : period) : null, [bounds, period, customRange]);
+ const rangeError = bounds && rangeDraft ? subscriptionRangeError(rangeDraft, bounds) : '';
+ const data = useMemo(() => sourceData && range ? subscriptionWindow(sourceData, range) : undefined, [sourceData, range]);
+ const changePeriod = (value: ETFSubscriptionPeriod) => {
+  if (value === 'custom') { setCustomRange(range); setRangeDraft(range); }
+  setPeriod(value);
+ };
  const date = data?.days.some((day) => day.date === selectedDate) ? selectedDate : data?.latest_complete_date || data?.latest_date || '';
  const day = data?.days.find((item) => item.date === date);
  const windowNet = data ? subscriptionWindowNet(data) : null;
@@ -64,17 +75,22 @@ export function ETFSubscriptionView({ config, refreshKey, onAskAI }: Props) {
   <ModuleState state={!payload && busy ? 'loading' : !payload && error ? 'error' : 'ready'} error={error}>
    {data && <>
     {data.today_trial && payload && <TodayTrial trial={data.today_trial} meta={payload.meta} />}
-    <div className="etf-subscription-dates"><span><strong>份额最新齐备日 {data.latest_complete_date || '尚未齐备'}</strong> · 公开快照生成 {etfTime(data.source_generated_at, true)}{data.latest_date !== data.latest_complete_date ? ` · ${data.latest_date} 尚有份额或同日价格待补齐` : ''}</span><label>查看披露日期<select aria-label="查看份额披露日期" value={date} onChange={(event) => setSelectedDate(event.target.value)}>{[...data.days].reverse().map((item) => <option key={item.date} value={item.date}>{item.date}（{item.coverage}/{data.expected}）</option>)}</select></label></div>
+    <div className="etf-subscription-dates"><span><strong>份额最新齐备日 {sourceData?.latest_complete_date || '尚未齐备'}</strong> · 公开快照生成 {etfTime(data.source_generated_at, true)}{sourceData?.latest_date !== sourceData?.latest_complete_date ? ` · ${sourceData?.latest_date} 尚有份额或同日价格待补齐` : ''}</span><label>查看披露日期<select aria-label="查看份额披露日期" value={date} onChange={(event) => setSelectedDate(event.target.value)}>{[...data.days].reverse().map((item) => <option key={item.date} value={item.date}>{item.date}（{item.coverage}/{data.expected}）</option>)}</select></label></div>
     <section className="market-flow-summary market-margin-summary">
      <SubscriptionMetric icon={<Activity size={17} />} label="全池净申购（估算）" value={etfMoney(day?.estimated_net)} amount={day?.estimated_net} detail={`${date || '--'} · 对比 ${day?.previous_date || '--'}`} />
-     <SubscriptionMetric icon={<ArrowUpRight size={17} />} label="近 1 个月累计（估算）" value={etfMoney(windowNet)} amount={windowNet} detail={`${data.start_date} 至 ${data.latest_complete_date || '--'}`} />
+     <SubscriptionMetric icon={<ArrowUpRight size={17} />} label="所选区间累计（估算）" value={etfMoney(windowNet)} amount={windowNet} detail={`${range?.start} 至 ${data.latest_complete_date || '--'}`} />
      <SubscriptionMetric icon={<Database size={17} />} label="同步净申购只数" value={`${day?.subscribed ?? '--'} / ${data.expected}`} detail={`净赎回 ${day?.redeemed ?? '--'} 只 · 金额有效 ${day?.coverage ?? 0}/${data.expected}`} />
      <SubscriptionMetric icon={<CheckCheck size={17} />} label="当日交易所直接核验" value={`${checks.length} / ${data.expected}`} detail="份额已与交易所原始数据对照" />
     </section>
     <section className="national-team-chart national-team-history">
-     <header><div><h3>近 1 个月净申购趋势</h3><span>份额所属日期与收盘价格日期对齐 · {cumulative ? '区间累计' : '每日净申购'} · 估算</span></div><div className="national-team-tabs" role="group" aria-label="净申购统计方式"><button type="button" aria-pressed={!cumulative} className={!cumulative ? 'active' : ''} onClick={() => setCumulative(false)}>每日净申购</button><button type="button" aria-pressed={cumulative} className={cumulative ? 'active' : ''} onClick={() => setCumulative(true)}>区间累计</button></div></header>
-     <div className="national-team-history-toolbar"><label>观察范围<select aria-label="净申购 ETF 范围" value={code} onChange={(event) => setCode(event.target.value)}><option value="pool">监测池合计（22 只）</option>{data.series.map((item) => <option key={item.code} value={item.code}>{item.name}（{item.code}）</option>)}</select></label><span className="national-team-times">{points.length} 个披露交易日 · 单位：亿元</span></div>
-     <ETFSubscriptionChart key={`${code}-${cumulative}`} points={points} />
+     <header><div><h3>净申购趋势</h3><span>份额所属日期与收盘价格日期对齐 · {cumulative ? '区间累计' : '每日净申购'} · 估算</span></div><div className="national-team-tabs" role="group" aria-label="净申购统计方式"><button type="button" aria-pressed={!cumulative} className={!cumulative ? 'active' : ''} onClick={() => setCumulative(false)}>每日净申购</button><button type="button" aria-pressed={cumulative} className={cumulative ? 'active' : ''} onClick={() => setCumulative(true)}>区间累计</button></div></header>
+     <div className="national-team-history-toolbar">
+      <div className="etf-subscription-range-controls"><label>时间范围<select aria-label="净申购时间范围" value={period} onChange={(event) => changePeriod(event.target.value as ETFSubscriptionPeriod)}><option value="1m">近 1 个月</option><option value="3m">近 3 个月</option><option value="6m">近 6 个月</option><option value="1y">近 1 年</option><option value="custom">自定义</option></select></label><label>观察范围<select aria-label="净申购 ETF 范围" value={code} onChange={(event) => setCode(event.target.value)}><option value="pool">监测池合计（22 只）</option>{data.series.map((item) => <option key={item.code} value={item.code}>{item.name}（{item.code}）</option>)}</select></label></div>
+      <span className="national-team-times">{points.length} 个披露交易日 · 单位：亿元</span>
+      {period === 'custom' && rangeDraft && bounds && <form className="etf-subscription-custom-range" onSubmit={(event) => { event.preventDefault(); if (!rangeError) setCustomRange({ ...rangeDraft }); }}><label>开始日期<input type="date" aria-label="净申购开始日期" min={bounds.start} max={bounds.end} value={rangeDraft.start} onChange={(event) => setRangeDraft({ ...rangeDraft, start: event.target.value })} required /></label><span>至</span><label>结束日期<input type="date" aria-label="净申购结束日期" min={bounds.start} max={bounds.end} value={rangeDraft.end} onChange={(event) => setRangeDraft({ ...rangeDraft, end: event.target.value })} required /></label><button type="submit" disabled={!!rangeError}>应用</button><span className="national-team-times">最长 1 年</span>{rangeError && <span role="alert">{rangeError}</span>}</form>}
+      <span className="etf-subscription-selected-range">统计区间：{range?.start} 至 {range?.end}</span>
+     </div>
+     <ETFSubscriptionChart key={`${code}-${cumulative}-${range?.start}-${range?.end}`} points={points} />
      <footer>{cumulative ? '累计从本窗口首个披露交易日起算，不是持仓金额。' : '每个点为该交易日估算净申购。'} 同一日期必须有全部 22 只 ETF 的份额基准及对应日收盘价才计算池合计；缺失保留断点，累计在缺失后停止。池曲线截至最新齐备日，未齐备的新披露日期在明细中单独查看；最新价不用于重算历史申赎。</footer>
     </section>
     <div className="national-team-table-toolbar"><label><Search size={14} /><input aria-label="搜索净申购 ETF" placeholder="搜索 ETF / 代码 / 指数" value={query} onChange={(event) => setQuery(event.target.value)} /></label><span>{date} · 正数为净申购，负数为净赎回</span><button type="button" onClick={exportCSV}><Download size={14} />导出明细</button><button type="button" onClick={() => data && payload && onAskAI(subscriptionPrompt(data, day, payload.meta))}><Bot size={14} />交给 AI 解读</button></div>
