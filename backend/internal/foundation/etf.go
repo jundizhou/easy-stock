@@ -8,6 +8,11 @@ func IsListedFundCandidate(symbol string) bool {
 	if err != nil {
 		return false
 	}
+	// 港股是 5 位代码，个别代码段会撞上 A 股 ETF 的前缀规则；
+	// 港股没有场外/场内基金代码体系，直接判定不是基金。
+	if normalized.Market == "HK" {
+		return false
+	}
 	code := normalized.RawCode
 	return strings.HasPrefix(code, "5") || strings.HasPrefix(code, "15") || strings.HasPrefix(code, "16")
 }

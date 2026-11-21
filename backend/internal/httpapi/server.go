@@ -63,6 +63,8 @@ type Server struct {
 	realtimeProvider         RealtimeProvider
 	kLinePrimary             KLineProvider
 	kLineFallback            KLineProvider
+	hongKongKLine            HongKongKLineProvider
+	hongKongFinancials       HongKongFinancialProvider
 	newsProvider             NewsProvider
 	stockNewsSearch          StockNewsSearchProvider
 	sectorMap                SectorMapProvider
@@ -181,6 +183,12 @@ func NewServer(config any) *Server {
 	}
 	if cfg.KLineFallback == nil {
 		cfg.KLineFallback = sinaClient
+	}
+	if cfg.HongKongKLine == nil {
+		cfg.HongKongKLine = tencentClient
+	}
+	if cfg.HongKongFinancials == nil {
+		cfg.HongKongFinancials = eastMoneyClient
 	}
 	if cfg.News == nil {
 		if cfg.StockNews == nil {
@@ -398,6 +406,8 @@ func NewServer(config any) *Server {
 		realtimeProvider:         cfg.Realtime,
 		kLinePrimary:             cfg.KLinePrimary,
 		kLineFallback:            cfg.KLineFallback,
+		hongKongKLine:            cfg.HongKongKLine,
+		hongKongFinancials:       cfg.HongKongFinancials,
 		newsProvider:             cfg.News,
 		stockNewsSearch:          cfg.StockNews,
 		sectorMap:                cfg.SectorMap,
@@ -526,10 +536,12 @@ func NewServer(config any) *Server {
 		sectorRank = flow
 	}
 	s.monitor = monitor.NewEngine(monitor.EngineConfig{
-		Store:              monitorStore,
-		Realtime:           cfg.Realtime,
-		Snapshot:           cfg.MonitorSnapshot,
-		KLine:              newKLineChain(cfg.KLinePrimary, cfg.KLineFallback),
+		Store:    monitorStore,
+		Realtime: cfg.Realtime,
+		Snapshot: cfg.MonitorSnapshot,
+		// 监控中心的日线请求必须和个股分析走同一套市场分流：A 股主备链
+		// 不覆盖港股，纯 A 股链会让自选/持仓里的港股拿不到任何日线。
+		KLine:              newMarketKLineChain(cfg.HongKongKLine, newKLineChain(cfg.KLinePrimary, cfg.KLineFallback)),
 		Index:              cfg.MarketOverview,
 		Inspection:         monitorInspectionSource{server: s},
 		InspectionHoldings: monitorInspectionSource{server: s},
@@ -1052,6 +1064,17 @@ func (s *Server) klineBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) loadKLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
+	// 港股先走专用源：A 股的主备（东财 push2his / 新浪 CN_MarketDataService）
+	// 都不覆盖港股复权序列，直接落到它们必然拿不到有效 K 线。
+	if foundation.IsHongKongSymbol(symbol) && s.hongKongKLine != nil {
+		lines, err := s.hongKongKLine.HongKongKLine(ctx, symbol, period, limit)
+		if err == nil && len(lines) > 0 {
+			return normalizeKLinePeriod(lines, period), nil
+		}
+		if err != nil {
+			log.Printf("event=hong_kong_kline_failed symbol=%s period=%s err=%v", symbol, period, err)
+		}
+	}
 	lines, err := s.kLinePrimary.KLine(ctx, symbol, period, limit)
 	if err == nil {
 		return normalizeKLinePeriod(lines, period), nil

@@ -70,6 +70,7 @@ import {
 	searchStockDirectory,
 	signedPercent,
 } from '../lib/stock-analysis';
+import { fetchMonitorStockSuggest } from '../lib/monitor';
 import { formatArticleParagraphs, isIndentedParagraph } from '../lib/article';
 import { logRuntimeEvent, runtimeErrorDetails } from '../lib/runtime-log';
 import { useStockResearch } from '../lib/use-stock-research';
@@ -136,6 +137,13 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 	const [exporting, setExporting] = useState(false);
 	const [exportNotice, setExportNotice] = useState('');
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedStockDirectory);
+	const [suggestHits, setSuggestHits] = useState<StockDirectoryEntry[]>([]);
+	// 远端 suggest 命中的港股并入解析目录，使「腾讯控股」这类中文名也能提交。
+	const effectiveDirectory = useMemo(() => {
+		if (suggestHits.length === 0) return directory;
+		const seen = new Set(directory.map((item) => item.symbol));
+		return [...directory, ...suggestHits.filter((item) => !seen.has(item.symbol))];
+	}, [directory, suggestHits]);
 	const [directoryWarnings, setDirectoryWarnings] = useState<string[]>([]);
 	const [directoryState, setDirectoryState] = useState<DirectoryState>(() => directory.length > 0 ? 'cached' : 'idle');
 	const [hotRanks, setHotRanks] = useState<HotStockRankData | null>(null);
@@ -227,9 +235,9 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 		analysisAbortController.current = null;
 		const sequence = analysisRequestSequence.current + 1;
 		analysisRequestSequence.current = sequence;
-		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
+		const symbol = resolveStockDirectorySymbol(rawSymbol, effectiveDirectory);
 		if (!symbol) {
-			setError(directory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入6位股票或 ETF 代码，例如 600519 / 510300');
+			setError(effectiveDirectory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入股票 / ETF / 港股代码或名称，例如 600519 / 510300 / 00700');
 			setState('error');
 			return;
 		}
@@ -252,12 +260,12 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 			setError(loadError instanceof Error ? loadError.message : '标的 AI 分析失败');
 			setState('error');
 		}
-	}, [config, directory, research.start, purpose, horizon, cost, researchLevel]);
+	}, [config, effectiveDirectory, research.start, purpose, horizon, cost, researchLevel]);
 
 	const requestAnalysis = useCallback((rawSymbol: string) => {
-		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
+		const symbol = resolveStockDirectorySymbol(rawSymbol, effectiveDirectory);
 		if (!symbol) {
-			setError(directory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入6位股票或 ETF 代码，例如 600519 / 510300');
+			setError(effectiveDirectory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入股票 / ETF / 港股代码或名称，例如 600519 / 510300 / 00700');
 			setState('error');
 			return;
 		}
@@ -416,7 +424,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearchHero mode={mode} right={<AnalysisSearchForm query={query} directory={directory} directoryState={directoryState} directoryWarnings={directoryWarnings} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />} />
+			<AnalysisSearchHero mode={mode} right={<AnalysisSearchForm config={config} query={query} directory={directory} directoryState={directoryState} directoryWarnings={directoryWarnings} onRemoteHits={setSuggestHits} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />} />
 			<div className="stock-ai-mode-row">
 				<nav className="mode-nav stock-ai-mode-nav" aria-label="工作台模式">
 					<button type="button" className={mode === 'analysis' ? 'active' : ''} aria-pressed={mode === 'analysis'} onClick={() => onModeChange('analysis')}><BrainCircuit size={16} aria-hidden="true" />股票 / ETF 分析</button>
@@ -604,19 +612,62 @@ function AnalysisSearchHero({ mode, right }: {
 	);
 }
 
-function AnalysisSearchForm({ query, directory, directoryState, directoryWarnings, onQuery, onSubmit, loading }: {
+function AnalysisSearchForm({ config, query, directory, directoryState, directoryWarnings, onRemoteHits, onQuery, onSubmit, loading }: {
+	config: BackendConfig | null;
 	query: string;
 	directory: StockDirectoryEntry[];
 	directoryState: DirectoryState;
 	directoryWarnings: string[];
+	onRemoteHits: (hits: StockDirectoryEntry[]) => void;
 	onQuery: (value: string) => void;
 	onSubmit: (event: FormEvent) => void;
 	loading: boolean;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const suggestions = useMemo(() => searchStockDirectory(directory, query), [directory, query]);
-	const resolvedSymbol = useMemo(() => resolveStockDirectorySymbol(query, directory), [directory, query]);
+	const [remoteHits, setRemoteHits] = useState<StockDirectoryEntry[]>([]);
+	// 港股代码固定 5 位、A 股固定 6 位：输入裸 5 位时代码本身已无歧义，
+	// 本地目录里的 A 股模糊命中（00700 → 000700/300700）纯属巧合，直接屏蔽。
+	const isHongKongCode = /^(?:\d{5}|HK\d{5}|\d{5}\.HK)$/.test(query.trim().toUpperCase());
+	const localSuggestions = useMemo(() => (isHongKongCode ? [] : searchStockDirectory(directory, query)), [directory, query, isHongKongCode]);
+	// 本地目录只有 A 股 + ETF（港股目录接口在多数网络不可达）。当输入没有被本地
+	// 目录命中、也不是可直接解析的代码时，走后端 suggest 接口补港股候选（输入即查）。
+	useEffect(() => {
+		const needle = query.trim().toUpperCase();
+		// 带后缀的港股代码与 6 位 A 股代码可以直接解析，不必再问远端；
+		// 裸 5 位仍要查一次，否则下拉里看不到「00700 腾讯控股」。
+		const directlyResolvable = /^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(needle)
+			|| /^(?:HK\d{5}|\d{5}\.HK)$/.test(needle);
+		if (!needle || !config || directlyResolvable || localSuggestions.length > 0) {
+			setRemoteHits([]);
+			onRemoteHits([]);
+			return;
+		}
+		let cancelled = false;
+		const timer = window.setTimeout(() => {
+			fetchMonitorStockSuggest(config, needle).then((response) => {
+				if (cancelled) return;
+				const hits = Array.isArray(response?.data) ? response.data : [];
+				const hkHits = hits.filter((hit) => hit.symbol?.endsWith('.HK')).map((hit) => ({
+					symbol: hit.symbol, code: hit.code, name: hit.name, instrument_type: 'stock' as const,
+				}));
+				setRemoteHits(hkHits);
+				onRemoteHits(hkHits);
+			}).catch(() => { if (!cancelled) { setRemoteHits([]); onRemoteHits([]); } });
+		}, 220);
+		return () => { cancelled = true; window.clearTimeout(timer); };
+	}, [config, query, localSuggestions.length, onRemoteHits]);
+	const searchableDirectory = useMemo(() => {
+		if (remoteHits.length === 0) return directory;
+		const seen = new Set(directory.map((item) => item.symbol));
+		return [...directory, ...remoteHits.filter((item) => !seen.has(item.symbol))];
+	}, [directory, remoteHits]);
+	const suggestions = useMemo(() => {
+		const seen = new Set(localSuggestions.map((item) => item.symbol));
+		return [...localSuggestions, ...remoteHits.filter((item) => !seen.has(item.symbol))].slice(0, 8);
+	}, [localSuggestions, remoteHits]);
+	// 用合并后的候选解析：输入「腾讯控股」这类完整名称时回车可直接提交，无需先选下拉项。
+	const resolvedSymbol = useMemo(() => resolveStockDirectorySymbol(query, searchableDirectory), [searchableDirectory, query]);
 	const chooseSuggestion = (stock: StockDirectoryEntry) => {
 		onQuery(stock.symbol);
 		setExpanded(false);
@@ -637,11 +688,11 @@ function AnalysisSearchForm({ query, directory, directoryState, directoryWarning
 			setExpanded(false);
 		}
 	};
-	const directoryNotice = directoryState === 'error' ? ['目录暂不可用，可直接输入6位代码', ...directoryWarnings].join(' · ') : directoryWarnings.join(' · ');
+	const directoryNotice = directoryState === 'error' ? ['目录暂不可用，可直接输入代码', ...directoryWarnings].join(' · ') : directoryWarnings.join(' · ');
 	return (
 		<form className="stock-ai-search-form" onSubmit={onSubmit}>
 			<div className="stock-ai-search-control" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(false); }}>
-				<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="股票或 ETF 代码 / 名称" aria-label="股票或 ETF 名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
+				<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="股票 / ETF / 港股 代码或名称" aria-label="股票 / ETF / 港股 名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
 				{directoryNotice && <small className={directoryState === 'error' ? 'error' : ''} role={directoryState === 'error' ? 'alert' : undefined}>{directoryNotice}</small>}
 				{expanded && query.trim() && suggestions.length > 0 && (
 					<div className="stock-ai-search-suggestions" id="stock-ai-search-suggestions" role="listbox">
@@ -663,6 +714,7 @@ function stockMarketLabel(symbol: string) {
 	if (symbol.endsWith('.SH')) return '沪市';
 	if (symbol.endsWith('.SZ')) return '深市';
 	if (symbol.endsWith('.BJ')) return '北交所';
+	if (symbol.endsWith('.HK')) return '港股';
 	return 'A股';
 }
 
@@ -884,13 +936,15 @@ function normalizeStockAITheme(theme?: StockAIAnalysis['theme']): NonNullable<St
 
 function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {
 	const item = analysis.fundamental;
+	// 港股财报按港元或人民币列示，金额必须带单位，否则容易当成人民币读。
+	const reportCurrency = item?.currency && item.currency !== 'CNY' ? (item.currency === 'HKD' ? '港元' : item.currency) : '';
 	return <section className="stock-ai-panel stock-ai-fundamental-panel">
 		<header><div><span>公司质量</span><h3>基本面 · 最新财报</h3></div><Building2 size={19} /></header>
 		{item?.available ? <>
-			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date} · 收益持续性{item.sustainability || '待确认'}</span><p>{item.summary}</p>{(item.sustainability_flags || []).map((flag) => <small key={flag} className="stock-ai-fundamental-warning">{flag}</small>)}</div>
+			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date} · 收益持续性{item.sustainability || '待确认'}{reportCurrency ? ` · 以${reportCurrency}列示` : ''}</span><p>{item.summary}</p>{(item.sustainability_flags || []).map((flag) => <small key={flag} className="stock-ai-fundamental-warning">{flag}</small>)}</div>
 			<div className="stock-ai-fundamental-metrics">
-				<FundamentalMetric label="营业总收入" value={formatCompactAmount(item.revenue)} detail={`同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="营业总收入" value={formatCompactAmount(item.revenue)} detail={`${reportCurrency ? `${reportCurrency} · ` : ''}同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
+				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`${reportCurrency ? `${reportCurrency} · ` : ''}同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
 				<FundamentalMetric label="扣非净利润" value={item.recurring_net_profit_available && typeof item.recurring_net_profit === 'number' ? formatCompactAmount(item.recurring_net_profit) : '--'} detail={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' ? `同比 ${signedPercent(item.recurring_net_profit_yoy)}` : '数据待补充'} tone={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' && item.recurring_net_profit_yoy >= 0 ? 'positive' : 'negative'} />
 				<FundamentalMetric label="一次性损益占比" value={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' ? `${item.non_recurring_profit_ratio.toFixed(1)}%` : '--'} detail="占归母净利润绝对值" tone={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' && item.non_recurring_profit_ratio >= 30 ? 'negative' : ''} />
 				<FundamentalMetric label="ROE" value={`${item.roe.toFixed(1)}%`} detail={`EPS ${item.eps.toFixed(2)}`} />

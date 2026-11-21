@@ -18,6 +18,10 @@ export function searchStockDirectory(stocks: StockDirectoryEntry[], query: strin
 export function resolveStockDirectorySymbol(value: string, stocks: StockDirectoryEntry[]) {
 	const normalized = normalizeAnalysisSymbol(value);
 	if (/^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(normalized)) return normalized;
+	// 港股：00700.HK / HK00700 / 裸 5 位代码（A 股一律 6 位）。
+	if (/^\d{5}\.HK$/.test(normalized)) return normalized;
+	if (/^HK(\d{5})$/.test(normalized)) return `${normalized.slice(2)}.HK`;
+	if (/^\d{5}$/.test(normalized)) return `${normalized}.HK`;
 
 	const needle = normalizeStockSearchText(value);
 	const exactMatches = stocks.filter((stock) => {
@@ -29,6 +33,9 @@ export function resolveStockDirectorySymbol(value: string, stocks: StockDirector
 
 	const embeddedCode = value.toUpperCase().match(/(?:^|\D)(\d{6})(?:\s*\.\s*(SH|SZ|BJ))?(?:$|\D)/);
 	if (embeddedCode) return `${embeddedCode[1]}${embeddedCode[2] ? `.${embeddedCode[2]}` : ''}`;
+
+	const embeddedHK = value.toUpperCase().match(/(?:^|\D)(\d{5})(?:\s*\.\s*HK)?(?:$|\D)/);
+	if (embeddedHK) return `${embeddedHK[1]}.HK`;
 
 	const matches = searchStockDirectory(stocks, value, 2);
 	return matches.length === 1 ? matches[0].symbol : '';

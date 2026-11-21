@@ -379,6 +379,8 @@ type FundamentalAnalysis struct {
 	OperatingCashFlowPerShare      float64  `json:"operating_cash_flow_per_share"`
 	Summary                        string   `json:"summary"`
 	Source                         string   `json:"source"`
+	// Currency 是财报计价货币。A 股恒为人民币（留空），港股可能是 HKD。
+	Currency string `json:"currency,omitempty"`
 }
 
 type ResearchAnalysis struct {

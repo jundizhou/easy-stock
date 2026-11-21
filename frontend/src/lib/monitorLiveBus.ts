@@ -15,7 +15,9 @@ export function selectMonitorQuoteValue(quote: LiveQuote | undefined, status: Li
 }
 
 function symbolKey(symbol: string) {
-	return symbol.trim().toUpperCase().replace(/^(SH|SZ|BJ)/, '').replace(/\.(SH|SZ|BJ)$/, '');
+	// 港股同样有 5 位代码与 HK 前后缀：归一化后 A 股 6 位、港股 5 位，
+	// 订阅方传 00700 / 00700.HK / HK00700 都能命中同一条推送。
+	return symbol.trim().toUpperCase().replace(/^(SH|SZ|BJ|HK)/, '').replace(/\.(SH|SZ|BJ|HK)$/, '');
 }
 
 // 一条连接供监控工作区共享；只通知数字改变的标的，整表不订阅价格状态。
@@ -53,7 +55,7 @@ export function createMonitorLiveBus() {
 		if (!Array.isArray(frame.ticks)) return;
 		const changed = new Set<string>();
 		for (const tick of frame.ticks) {
-			if (!tick || typeof tick.symbol !== 'string' || !/^\d{6}$/.test(symbolKey(tick.symbol))
+			if (!tick || typeof tick.symbol !== 'string' || !/^\d{5,6}$/.test(symbolKey(tick.symbol))
 				|| typeof tick.price !== 'number' || !Number.isFinite(tick.price) || tick.price <= 0
 				|| typeof tick.change_percent !== 'number' || !Number.isFinite(tick.change_percent)
 				|| typeof tick.ts !== 'number' || !Number.isFinite(tick.ts) || tick.ts <= 0) continue;

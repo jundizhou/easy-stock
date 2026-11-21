@@ -242,7 +242,11 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 		}
 	};
 
-	const directCode = query.trim().match(/^\d{6}$/);
+	// 港股 5 位、A 股 6 位都可以直接回车添加，不必等建议下拉。
+	// 港股裸 5 位补 .HK 后缀再提交，保证关注仓里存的是可判别市场的规范代码。
+	const directQuery = query.trim().toUpperCase();
+	const directCode = directQuery.match(/^(\d{6}|\d{5})$/);
+	const directSymbol = directCode ? (directCode[1].length === 5 ? `${directCode[1]}.HK` : directCode[1]) : '';
 	return (
 		<div className="monitor-watch-search" ref={boxRef}>
 			<Search size={14} aria-hidden="true" />
@@ -250,12 +254,12 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 				value={query}
 				onChange={(event) => { setQuery(event.target.value); setPending(null); }}
 				onKeyDown={(event) => {
-					// 直接输 6 位代码回车也能加，不必等搜索结果。
-					if (event.key === 'Enter' && directCode && !busy) {
-						void add(pending || { symbol: directCode[0], code: directCode[0], name: '' });
+					// 直接输 6 位 A 股 / 5 位港股代码回车也能加，不必等搜索结果。
+					if (event.key === 'Enter' && directSymbol && !busy) {
+						void add(pending || { symbol: directSymbol, code: directCode![1], name: '' });
 					}
 				}}
-				placeholder="搜索添加：名称 / 代码 / 拼音，如 gzmt"
+				placeholder="搜索添加：名称 / 代码 / 拼音，如 gzmt、00700"
 				aria-label="搜索股票"
 			/>
 			{suggesting && <LoaderCircle size={13} className="spin" />}
@@ -271,7 +275,7 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 				</div>
 			)}
 			{suggestOpen && !suggesting && hits.length === 0 && (
-				<div className="monitor-suggest empty"><span>没有匹配的 A 股，换个关键词试试</span></div>
+				<div className="monitor-suggest empty"><span>没有匹配的标的，换个关键词试试（支持 A 股与港股）</span></div>
 			)}
 			{error && <div className="monitor-suggest empty"><span>搜索失败：{error}</span></div>}
 		</div>
@@ -792,6 +796,7 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 											<LivePriceCell as="b" symbol={selectedCalc.symbol} kind="change" fallback={selectedCalc.change_percent} />
 											<small>现价 <LivePriceText symbol={selectedCalc.symbol} kind="price" fallback={selectedCalc.price} /> · 基准 {selectedCalc.benchmark_label || '—'}</small>
 										</div>
+										{selectedCalc.threshold_note && <p className="monitor-abn-state">{selectedCalc.threshold_note}</p>}
 										<div className="monitor-abn-tiles">
 											{abnormalWindowKeys.map((key) => (
 												<AbnormalWindowTile key={key} windowKey={key} window={selectedCalc.windows?.find((window) => window.key === key)} />

@@ -90,6 +90,61 @@ func TestClientRealtimeHonorsGB18030EvenWhenBytesAreValidUTF8(t *testing.T) {
 	}
 }
 
+func TestClientRealtimeParsesHongKongQuote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 港股请求走 hk 前缀，且响应字段布局与 A 股不同（19 列、斜杠日期）。
+		if got := r.URL.Query().Get("list"); got != "hk00700" {
+			t.Fatalf("list = %q, want hk00700", got)
+		}
+		w.Write([]byte(`var hq_str_hk00700="TENCENT,腾讯控股,341.000,348.400,349.600,339.600,344.000,-4.400,-1.263,344.00000,344.00000,13102850465,38224869,0.000,0.000,631.641,339.600,2026/11/20,16:07";`))
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL))
+	got, err := client.Realtime(context.Background(), []string{"00700.HK"})
+	if err != nil {
+		t.Fatalf("Realtime returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(Realtime) = %d, want 1", len(got))
+	}
+	quote := got[0]
+	if quote.Symbol != "00700.HK" || quote.Name != "腾讯控股" || quote.Price != 344 {
+		t.Fatalf("unexpected hk quote: %+v", quote)
+	}
+	if quote.PreviousClose != 348.4 || quote.Open != 341 || quote.High != 349.6 || quote.Low != 339.6 {
+		t.Fatalf("hk ohlc not parsed: %+v", quote)
+	}
+	// 涨跌额/涨跌幅直接取上游列（港股口径与收盘价重算一致，但以上游为准）。
+	if quote.Change != -4.4 || quote.ChangePercent != -1.263 {
+		t.Fatalf("hk change not parsed: %+v", quote)
+	}
+	if quote.Volume != 38224869 || quote.Amount != 13102850465 {
+		t.Fatalf("hk session totals discarded: %+v", quote)
+	}
+	if stamp := quote.TradeTime.Format("2006-01-02 15:04"); stamp != "2026-11-20 16:07" {
+		t.Fatalf("hk trade time = %q, want 2026-11-20 16:07", stamp)
+	}
+	// 港股不返回买卖盘数量，不能用 0 伪造盘口。
+	if quote.Book != nil {
+		t.Fatalf("hk quote must not fabricate order book: %+v", quote.Book)
+	}
+}
+
+func TestParseHongKongRealtimeRejectsUnusableRows(t *testing.T) {
+	symbol, _ := foundation.NormalizeSymbol("00700.HK")
+	meta := foundation.SourceMeta{Source: "sina"}
+	for name, payload := range map[string]string{
+		"too few fields": "TENCENT,腾讯控股,341.000,348.400",
+		"zero price":     "TENCENT,腾讯控股,341.000,348.400,349.600,339.600,0,-4.400,-1.263,0,0,0,0,0,0,0,0,2026/11/20,16:07",
+		"bad price":      "TENCENT,腾讯控股,341.000,348.400,349.600,339.600,--,-4.400,-1.263,0,0,0,0,0,0,0,0,2026/11/20,16:07",
+	} {
+		if _, ok := parseHongKongRealtime(strings.Split(payload, ","), symbol, meta); ok {
+			t.Fatalf("%s must not produce a quote", name)
+		}
+	}
+}
+
 func TestParseKLineSupportsIntradayTime(t *testing.T) {
 	body := `callback([{"day":"2026-08-12 14:35","open":"11.000","high":"11.250","low":"10.880","close":"11.240","volume":"203235546"}]);`
 	got, err := parseKLineJSONP(body, "000001.SZ", foundation.SourceMeta{})

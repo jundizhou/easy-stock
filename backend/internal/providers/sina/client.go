@@ -320,6 +320,14 @@ func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.Sou
 			continue
 		}
 		fields := strings.Split(payload, ",")
+		// 港股与 A 股的行情串不是同一套字段：港股只有 19 列、买卖盘五档缺失、
+		// 日期时间用斜杠格式。按市场分流，避免港股落进 A 股解析拿不到行情。
+		if symbol.Market == "HK" {
+			if quote, ok := parseHongKongRealtime(fields, symbol, meta); ok {
+				quotes = append(quotes, quote)
+			}
+			continue
+		}
 		if len(fields) < 32 || fields[0] == "" {
 			continue
 		}
@@ -357,6 +365,64 @@ func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.Sou
 		return nil, fmt.Errorf("sina returned no quotes")
 	}
 	return quotes, nil
+}
+
+// sinaHongKongLocation 港股交易时钟：香港与上海同为 UTC+8，但用独立时区名
+// 表达，避免读代码时把港股时间当成 A 股时段。
+var sinaHongKongLocation = time.FixedZone("Asia/Hong_Kong", 8*3600)
+
+// parseHongKongRealtime 解析新浪港股行情串。
+//
+// 字段布局（19 列）：0 英文名、1 中文名、2 今开、3 昨收、4 最高、5 最低、
+// 6 现价、7 涨跌额、8 涨跌幅、9 买一价、10 卖一价、11 成交额、12 成交量、
+// 15/16 52 周高低、17 日期（2026/11/20）、18 时间（16:07）。
+// 港股不返回买卖盘数量，所以 Book 留空；价格缺失或非正则视为无行情，
+// 不伪造 0 填充。
+func parseHongKongRealtime(fields []string, symbol foundation.Symbol, meta foundation.SourceMeta) (foundation.Quote, bool) {
+	if len(fields) < 19 {
+		return foundation.Quote{}, false
+	}
+	price, priceErr := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
+	if priceErr != nil || math.IsNaN(price) || math.IsInf(price, 0) || price <= 0 {
+		return foundation.Quote{}, false
+	}
+	name := strings.TrimSpace(fields[1])
+	if name == "" {
+		name = strings.TrimSpace(fields[0])
+	}
+	open, _ := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
+	prevClose, _ := strconv.ParseFloat(strings.TrimSpace(fields[3]), 64)
+	high, _ := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
+	low, _ := strconv.ParseFloat(strings.TrimSpace(fields[5]), 64)
+	amount, _ := strconv.ParseFloat(strings.TrimSpace(fields[11]), 64)
+	volume, _ := strconv.ParseFloat(strings.TrimSpace(fields[12]), 64)
+	change, changeErr := strconv.ParseFloat(strings.TrimSpace(fields[7]), 64)
+	changePercent, percentErr := strconv.ParseFloat(strings.TrimSpace(fields[8]), 64)
+	if changeErr != nil {
+		change = price - prevClose
+	}
+	if percentErr != nil {
+		changePercent = 0
+		if prevClose != 0 {
+			changePercent = change / prevClose * 100
+		}
+	}
+	tradeTime, _ := time.ParseInLocation("2006/01/02 15:04", strings.TrimSpace(fields[17])+" "+strings.TrimSpace(fields[18]), sinaHongKongLocation)
+	return foundation.Quote{
+		Symbol:        symbol.Canonical,
+		Volume:        volume,
+		Amount:        amount,
+		Name:          name,
+		Price:         price,
+		Open:          open,
+		PreviousClose: prevClose,
+		High:          high,
+		Low:           low,
+		Change:        change,
+		ChangePercent: changePercent,
+		TradeTime:     tradeTime,
+		Meta:          meta,
+	}, true
 }
 
 // Sina level-one quantity fields are shares (not lots). Missing/malformed book

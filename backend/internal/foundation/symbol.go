@@ -30,28 +30,40 @@ func NormalizeSymbol(input string) (Symbol, error) {
 			return Symbol{}, fmt.Errorf("invalid symbol %q", input)
 		}
 		code, market = parts[0], parts[1]
-	} else if len(raw) >= 8 && (strings.HasPrefix(raw, "SH") || strings.HasPrefix(raw, "SZ") || strings.HasPrefix(raw, "BJ")) {
-		market, code = raw[:2], raw[2:]
 	} else {
-		code = strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(input), "sh"), "sz")
-		code = strings.TrimPrefix(code, "bj")
-		code = strings.ToUpper(strings.TrimSpace(code))
+		// A 股用 SH/SZ/BJ 前缀，港股用 HK 前缀（如 hk00700）。
+		// 代码本身都是数字，不会与这些字母前缀冲突。
+		for _, prefix := range []string{"SH", "SZ", "BJ", "HK"} {
+			if strings.HasPrefix(raw, prefix) {
+				market, code = prefix, raw[len(prefix):]
+				break
+			}
+		}
 	}
 
 	if !digitsOnly.MatchString(code) {
 		return Symbol{}, fmt.Errorf("unsupported symbol %q", input)
 	}
 	if market == "" {
-		market = inferAStockMarket(code)
+		// 5 位裸代码是港股（A 股一律 6 位），据此推断市场。
+		if len(code) == 5 {
+			market = "HK"
+		} else {
+			market = inferAStockMarket(code)
+		}
 	}
-	if market != "SH" && market != "SZ" && market != "BJ" {
+	if market != "SH" && market != "SZ" && market != "BJ" && market != "HK" {
 		return Symbol{}, fmt.Errorf("unsupported market %q", market)
 	}
 
 	sinaPrefix := strings.ToLower(market)
 	emMarket := "0"
-	if market == "SH" {
+	switch market {
+	case "SH":
 		emMarket = "1"
+	case "HK":
+		// 港股 secid 固定 116. 前缀 + 5 位零填充代码（00700.HK → 116.00700）。
+		emMarket = "116"
 	}
 
 	return Symbol{
@@ -61,6 +73,16 @@ func NormalizeSymbol(input string) (Symbol, error) {
 		RawCode:        code,
 		Market:         market,
 	}, nil
+}
+
+// IsHongKongSymbol 判断规范化代码（00700.HK）是否为港股。
+// 港股 K 线、行情与 A 股走不同数据源，调用方据此分流。
+func IsHongKongSymbol(symbol string) bool {
+	normalized, err := NormalizeSymbol(symbol)
+	if err != nil {
+		return false
+	}
+	return normalized.Market == "HK"
 }
 
 func inferAStockMarket(code string) string {

@@ -179,24 +179,27 @@ type StockBusinessProfile struct {
 // the non-short-term stock route. Values follow EastMoney's published F10
 // units: amounts are CNY and percentage fields are percentage points.
 type StockFundamentals struct {
-	Symbol                        string     `json:"symbol"`
-	PublishedAt                   time.Time  `json:"published_at,omitempty"`
-	ReportDate                    string     `json:"report_date"`
-	ReportName                    string     `json:"report_name"`
-	Revenue                       float64    `json:"revenue"`
-	RevenueYearOverYear           float64    `json:"revenue_yoy"`
-	NetProfit                     float64    `json:"net_profit"`
-	NetProfitYearOverYear         float64    `json:"net_profit_yoy"`
-	DeductedNetProfit             float64    `json:"deducted_net_profit"`
-	DeductedNetProfitYearOverYear float64    `json:"deducted_net_profit_yoy"`
-	DeductedNetProfitAvailable    bool       `json:"deducted_net_profit_available"`
-	DeductedNetProfitReportDate   string     `json:"deducted_net_profit_report_date,omitempty"`
-	EPS                           float64    `json:"eps"`
-	ROE                           float64    `json:"roe"`
-	GrossMargin                   float64    `json:"gross_margin"`
-	DebtRatio                     float64    `json:"debt_ratio"`
-	OperatingCashFlowPerShare     float64    `json:"operating_cash_flow_per_share"`
-	Meta                          SourceMeta `json:"meta"`
+	Symbol                        string    `json:"symbol"`
+	PublishedAt                   time.Time `json:"published_at,omitempty"`
+	ReportDate                    string    `json:"report_date"`
+	ReportName                    string    `json:"report_name"`
+	Revenue                       float64   `json:"revenue"`
+	RevenueYearOverYear           float64   `json:"revenue_yoy"`
+	NetProfit                     float64   `json:"net_profit"`
+	NetProfitYearOverYear         float64   `json:"net_profit_yoy"`
+	DeductedNetProfit             float64   `json:"deducted_net_profit"`
+	DeductedNetProfitYearOverYear float64   `json:"deducted_net_profit_yoy"`
+	DeductedNetProfitAvailable    bool      `json:"deducted_net_profit_available"`
+	DeductedNetProfitReportDate   string    `json:"deducted_net_profit_report_date,omitempty"`
+	EPS                           float64   `json:"eps"`
+	ROE                           float64   `json:"roe"`
+	GrossMargin                   float64   `json:"gross_margin"`
+	DebtRatio                     float64   `json:"debt_ratio"`
+	OperatingCashFlowPerShare     float64   `json:"operating_cash_flow_per_share"`
+	// Currency 是财报计价货币（CNY/HKD）。港股报表可能以港元或人民币列示，
+	// 与 A 股的人民币口径不同，下游展示时必须带上单位。
+	Currency string     `json:"currency,omitempty"`
+	Meta     SourceMeta `json:"meta"`
 }
 
 // StockFinancialEvidence keeps only fields actually returned by a second

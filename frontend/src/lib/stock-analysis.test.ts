@@ -7,6 +7,11 @@ const stockDirectory = [
 	{ symbol: '600664.SH', code: '600664', name: '哈药股份' },
 ];
 
+const hkDirectory = [
+	{ symbol: '00700.HK', code: '00700', name: '腾讯控股' },
+	{ symbol: '09988.HK', code: '09988', name: '阿里巴巴' },
+];
+
 describe('stock analysis helpers', () => {
 	it('normalizes analysis symbols', () => {
 		expect(normalizeAnalysisSymbol(' 600519.sh ')).toBe('600519.SH');
@@ -18,10 +23,24 @@ describe('stock analysis helpers', () => {
 		expect(searchStockDirectory(stockDirectory, '平银').map((item) => item.symbol)).toEqual(['000001.SZ']);
 	});
 
+	it('searches Hong Kong stocks by code or Chinese name', () => {
+		expect(searchStockDirectory(hkDirectory, '00700').map((item) => item.name)).toEqual(['腾讯控股']);
+		expect(searchStockDirectory(hkDirectory, '腾讯').map((item) => item.symbol)).toEqual(['00700.HK']);
+		expect(searchStockDirectory(hkDirectory, '阿里').map((item) => item.code)).toEqual(['09988']);
+	});
+
 	it('resolves exact names and selected display values to symbols', () => {
 		expect(resolveStockDirectorySymbol('贵州茅台', stockDirectory)).toBe('600519.SH');
 		expect(resolveStockDirectorySymbol('贵州茅台 · 600519', stockDirectory)).toBe('600519');
 		expect(resolveStockDirectorySymbol('600664.sh', [])).toBe('600664.SH');
+	});
+
+	it('resolves Hong Kong codes and names to .HK symbols', () => {
+		expect(resolveStockDirectorySymbol('00700.HK', [])).toBe('00700.HK');
+		expect(resolveStockDirectorySymbol('hk00700', [])).toBe('00700.HK');
+		expect(resolveStockDirectorySymbol('00700', [])).toBe('00700.HK');
+		expect(resolveStockDirectorySymbol('腾讯控股', hkDirectory)).toBe('00700.HK');
+		expect(resolveStockDirectorySymbol('阿里巴巴 · 09988', hkDirectory)).toBe('09988.HK');
 	});
 
 	it('derives analysis tone from the routed profile', () => {

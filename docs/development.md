@@ -12,6 +12,7 @@
 - [测试](#测试)
 - [构建与桌面打包](#构建与桌面打包)
 - [本地数据与日志](#本地数据与日志)
+- [港股支持范围](#港股支持范围)
 - [相关技术文档](#相关技术文档)
 - [常见问题](#常见问题)
 
@@ -286,6 +287,34 @@ Go 后端在未显式配置路径时，会使用操作系统用户配置目录�
 普通用户可从「系统设置 → 运行日志」直接打开目录。直接运行后端时，可通过 `A_STOCK_LOG_DIR` 指定相同的日志目录。
 
 可使用 `A_STOCK_USER_DATA_DIR` 覆盖 Electron 用户数据目录。清理这些目录会删除本机配置、登录态和历史数据，操作前应先备份。
+
+## 港股支持范围
+
+**搜索 / 行情 / K 线 / 财报**：
+
+| 环节 | 数据源 | 说明 |
+| --- | --- | --- |
+| 搜索 | `searchapi.eastmoney.com/api/suggest/get`（`/api/v1/monitor/stock-suggest`） | 原生返回港股 `116.xxxxx`；个股分析搜索框「输入即查」，本地目录无命中时才请求 |
+| 实时行情 | `hq.sinajs.cn`（`hk00700`）、`qt.gtimg.cn`（`hk00700`） | 港股行情串与 A 股不是同一套字段：新浪 19 列且无买卖盘五档，腾讯时间列为 `2026/11/20 16:08:37`。两个源都按市场分流解析，港股 `Book` 留空不伪造 |
+| K 线 | `web.ifzq.gtimg.cn/appstock/app/hkfqkline/get` | 港股复权序列只在 `qfqday/qfqweek/qfqmonth`；东财 `push2his` 与新浪 `CN_MarketDataService` 不覆盖港股 |
+| 基准指数 | 恒生指数 `hsi`（`MarketIndexSeries`） | 个股分析的相对强度、监控中心的偏离值/异动都以恒生指数为基准；拿 A 股宽基对照会把两个市场的系统性差异算成个股超额收益 |
+| 财报 | `datacenter.eastmoney.com` `RPT_HKF10_FN_MAININDICATOR` | 营收/归母净利/毛利率/负债率/ROE/每股经营现金流；港股无「扣非净利润」，货币按 `CURRENCY` 标注（腾讯为 HKD） |
+| 名称 | 同上 suggest | 港股不在 A 股目录里，名称靠 suggest 回填 |
+
+搜索走 suggest 而非目录接口的原因：`push2.eastmoney.com` 在部分网络（含 DNS 劫持的代理）会被整体拦截，连真实 Chrome 网络栈也返回 502，因此不做港股全量目录。A 股和 ETF 仍走 `data.eastmoney.com` 的全量目录。
+
+**监控中心与持仓巡检的港股口径**：
+
+| 能力 | 实现 |
+| --- | --- |
+| 监控日线 | `newMarketKLineChain` 按市场分流：港股走 `hkfqkline`，其余走 A 股主备链；两条链熔断状态独立 |
+| 监控实时价 | 港股不在全市场快照里，关注仓价格走 `realtimeQuoteIndex`（`/api/v1/quotes/realtime`）兜底；SSE 推送仍只覆盖快照内的 A 股 |
+| 监控异动 | 偏离值基准切到恒生指数；港股无交易所异常波动认定，阈值沿用 A 股口径并返回 `threshold_note` 明示「仅供观察」 |
+| 巡检持仓录入 | 本地目录只有 A 股 + ETF，港股候选由远端 suggest 补齐；裸 5 位代码补 `.HK` 后提交 |
+| 巡检取数 | 涨停事件、开盘啦题材、个股概念目录、F10 主营业务不覆盖港股，直接跳过并在 `CollectionGaps` 里写明「口径不适用」，不作为取数失败 |
+| 巡检基准 | `BenchmarkForSymbol` 对港股返回 `HSI`，由 `loadBenchmarkKLine` 转给指数序列接口 |
+
+仍未按港股口径改造的部分：prompt 与涨跌幅限制仍按 A 股表述，行业/概念来自 A 股目录（港股拿不到），港股交易时段未单独建模（监控常驻循环仍按 A 股时段驱动）。港股的结论是「搜得到、能选中、量价与财报可用」，不等于完整的港股研究口径。
 
 ## 相关技术文档
 

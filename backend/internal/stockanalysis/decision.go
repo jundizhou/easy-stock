@@ -8,9 +8,19 @@ import (
 	"easy-stock/backend/internal/foundation"
 )
 
+// HongKongBenchmarkSymbol 是港股相对强度的基准标识（恒生指数）。
+// 它是指数而不是可买卖个股，不能交给 NormalizeSymbol 解析，
+// 取数时由调用方转给指数序列接口。
+const HongKongBenchmarkSymbol = "HSI"
+
 // BenchmarkForSymbol returns a broad-market benchmark suited to the stock's board.
 // It is deliberately board-based instead of attempting to infer an index constituent.
 func BenchmarkForSymbol(symbol string) (string, string) {
+	// 港股不能用 A 股宽基做相对强度：交易日、成分与计价货币都不同，
+	// 拿上证指数对照会把港股的系统性波动算成个股超额收益。
+	if foundation.IsHongKongSymbol(symbol) {
+		return HongKongBenchmarkSymbol, "恒生指数"
+	}
 	code := strings.Split(strings.ToUpper(strings.TrimSpace(symbol)), ".")[0]
 	switch {
 	case strings.HasSuffix(symbol, ".BJ") || strings.HasPrefix(code, "4") || strings.HasPrefix(code, "8"):

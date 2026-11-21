@@ -867,12 +867,21 @@ func TestBenchmarkForSymbolRoutesByBoard(t *testing.T) {
 		"300750.SZ": "399006.SZ",
 		"688981.SH": "000688.SH",
 		"832000.BJ": "899050.BJ",
+		// 港股不能拿 A 股宽基对照：交易日与成分都不同，相对强度会失真。
+		"00700.HK": HongKongBenchmarkSymbol,
+		"09988":    HongKongBenchmarkSymbol,
 	}
 	for symbol, want := range tests {
 		got, _ := BenchmarkForSymbol(symbol)
 		if got != want {
 			t.Fatalf("BenchmarkForSymbol(%q) = %q, want %q", symbol, got, want)
 		}
+	}
+}
+
+func TestBenchmarkForSymbolNamesHongKongBenchmark(t *testing.T) {
+	if _, name := BenchmarkForSymbol("00700.HK"); name != "恒生指数" {
+		t.Fatalf("hk benchmark name = %q, want 恒生指数", name)
 	}
 }
 

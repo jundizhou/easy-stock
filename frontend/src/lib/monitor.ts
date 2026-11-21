@@ -412,6 +412,8 @@ export type MonitorAbnormalCalc = {
 	change_percent: number;
 	benchmark_id?: string;
 	benchmark_label?: string;
+	// 阈值口径适用范围：港股按 A 股口径估算时非空，必须展示以免被读成港交所认定。
+	threshold_note?: string;
 	windows?: MonitorAbnormalWindow[];
 	window_availability?: MonitorAbnormalWindowAvailability;
 	level?: string;

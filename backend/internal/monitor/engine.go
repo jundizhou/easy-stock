@@ -1106,6 +1106,11 @@ func lotSymbol(ctx context.Context, store *Store, lotID string) string {
 // 深主板=深证A股指数、创业板=创业板综指、科创板=科创50、北交所=北证50。
 // 注意不能用上证指数/深证成指：成分不同，深市标的的偏离值会和公告对不上。
 func deviationIndexID(board, symbol string) string {
+	// 港股先判市场：按代码段推板块会把 00700.HK 归到主板，
+	// 再拿深证成指当基准，偏离值里混进两个市场的系统性差异。
+	if foundation.IsHongKongSymbol(symbol) {
+		return "hsi"
+	}
 	switch board {
 	case foundation.BoardChiNext:
 		return "chinext_comp"

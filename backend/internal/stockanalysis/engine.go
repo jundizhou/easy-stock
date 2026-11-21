@@ -199,7 +199,7 @@ func analyzeFundamentals(item *foundation.StockFundamentals) FundamentalAnalysis
 		NetProfitYearOverYear: item.NetProfitYearOverYear, RecurringNetProfitAvailable: hasDeductedProfit, RecurringNetProfit: recurringProfit, RecurringNetProfitYearOverYear: recurringGrowth,
 		NonRecurringProfit: nonRecurringProfit, NonRecurringProfitRatio: round2(nonRecurringRatio), Sustainability: sustainability, SustainabilityFlags: uniqueStrings(sustainabilityFlags, 4), EPS: item.EPS, ROE: item.ROE, GrossMargin: item.GrossMargin,
 		DebtRatio: item.DebtRatio, OperatingCashFlowPerShare: item.OperatingCashFlowPerShare,
-		Summary: summary, Source: item.Meta.Source,
+		Summary: summary, Source: item.Meta.Source, Currency: item.Currency,
 	}
 }
 

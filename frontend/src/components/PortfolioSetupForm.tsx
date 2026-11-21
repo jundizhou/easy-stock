@@ -6,6 +6,7 @@ import { loadPortfolioQuotes, usePortfolioQuotes } from '../lib/use-portfolio-qu
 import { valuePortfolio } from '../lib/portfolio-valuation';
 import './portfolio-valuation.css';
 import { resolveStockDirectorySymbol, searchStockDirectory } from '../lib/stock-analysis';
+import { fetchMonitorStockSuggest } from '../lib/monitor';
 
 type Props = {
 	draft: PortfolioDraft;
@@ -46,14 +47,51 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 	const remainingWeight = totalWeight === null ? null : 100 - totalWeight;
 	const emptyQuantity = valuation.holdings.some((item) => item.quantity === 0);
 	const quantityExceedsAssets = assetsValid && valuation.holdings.some((item) => item.marketValue !== null && item.marketValue > totalAssets + 1e-6);
-	const suggestions = useMemo(() => searchStockDirectory(directory, query).filter((item) => !draft.holdings.some((holding) => holding.symbol === item.symbol)), [directory, draft.holdings, query]);
+	// 本地目录只有 A 股 + ETF，港股不在其中。输入未被本地目录命中、
+	// 也不是可直接解析的代码时，走后端建议接口补港股候选；与个股分析
+	// 共用同一个 suggest 接口，港股命中只取 .HK。
+	const [remoteHits, setRemoteHits] = useState<StockDirectoryEntry[]>([]);
+	const isHongKongQuery = /^(?:\d{5}|HK\d{5}|\d{5}\.HK)$/.test(query.trim().toUpperCase());
+	const localSuggestions = useMemo(() => (isHongKongQuery ? [] : searchStockDirectory(directory, query)), [directory, query, isHongKongQuery]);
+	useEffect(() => {
+		const needle = query.trim().toUpperCase();
+		// 6 位 A 股与带后缀的港股代码可以直接解析；裸 5 位仍要查一次，
+		// 否则下拉里看不到「00700 腾讯控股」。
+		const directlyResolvable = /^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(needle) || /^(?:HK\d{5}|\d{5}\.HK)$/.test(needle);
+		if (!needle || !config || directlyResolvable || localSuggestions.length > 0) {
+			setRemoteHits([]);
+			return;
+		}
+		let cancelled = false;
+		const timer = window.setTimeout(() => {
+			fetchMonitorStockSuggest(config, needle).then((response) => {
+				if (cancelled) return;
+				const hits = Array.isArray(response?.data) ? response.data : [];
+				setRemoteHits(hits.filter((hit) => hit.symbol?.endsWith('.HK')).map((hit) => ({
+					symbol: hit.symbol, code: hit.code, name: hit.name, instrument_type: 'stock' as const,
+				})));
+			}).catch(() => { if (!cancelled) setRemoteHits([]); });
+		}, 220);
+		return () => { cancelled = true; window.clearTimeout(timer); };
+	}, [config, query, localSuggestions.length]);
+	const searchableDirectory = useMemo(() => {
+		if (remoteHits.length === 0) return directory;
+		const seen = new Set(directory.map((item) => item.symbol));
+		return [...directory, ...remoteHits.filter((item) => !seen.has(item.symbol))];
+	}, [directory, remoteHits]);
+	// 裸 5 位时本地 A 股的模糊命中（00700 → 000700/300700）纯属巧合，直接屏蔽，
+	// 只留远端港股候选。
+	const suggestions = useMemo(() => {
+		const pool = isHongKongQuery ? remoteHits : searchStockDirectory(searchableDirectory, query);
+		return pool.filter((item) => !draft.holdings.some((holding) => holding.symbol === item.symbol));
+	}, [isHongKongQuery, remoteHits, searchableDirectory, draft.holdings, query]);
 
 	const addHolding = async (entry?: StockDirectoryEntry) => {
 		if (disabled || addRequest.current) return;
-		const resolved = entry?.symbol || resolveStockDirectorySymbol(query, directory);
-		const stock = entry || directory.find((item) => item.symbol === resolved || item.code === resolved);
+		const resolved = entry?.symbol || resolveStockDirectorySymbol(query, searchableDirectory);
+		const stock = entry || searchableDirectory.find((item) => item.symbol === resolved || item.code === resolved);
 		const symbol = stock?.symbol;
-		if (!symbol || !stock) { setError('未找到唯一匹配的股票或 ETF，请从搜索结果中选择'); return; }
+		if (!symbol || !stock) { setError('未找到唯一匹配的股票 / ETF / 港股，请从搜索结果中选择'); return; }
 		if (draft.holdings.some((item) => item.symbol === symbol)) { setError('此标的已经在持仓中'); return; }
 		if (draft.holdings.length >= maxPortfolioHoldings) { setError(`最多添加 ${maxPortfolioHoldings} 只持仓标的`); return; }
 		const controller = new AbortController();
@@ -139,7 +177,7 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 		<section className="portfolio-holdings-section">
 			<header><span>02</span><div><strong>当前持仓</strong><small>{draft.holdings.length}/{maxPortfolioHoldings} 只标的</small></div><div className="portfolio-allocation"><span>持仓 <b>{allocationPercent(totalWeight)}</b></span><span>现金 <b>{allocationPercent(remainingWeight)}</b></span></div></header>
 			<div className="portfolio-stock-search">
-				<label><Search size={16} /><input value={query} disabled={disabled || adding || directory.length === 0 || draft.holdings.length >= maxPortfolioHoldings} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); setActiveSuggestion(0); }} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKey} placeholder="输入股票 / ETF 名称或代码" aria-label="搜索持仓股票或 ETF" aria-autocomplete="list" /></label>
+				<label><Search size={16} /><input value={query} disabled={disabled || adding || draft.holdings.length >= maxPortfolioHoldings} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); setActiveSuggestion(0); }} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKey} placeholder="输入股票 / ETF / 港股名称或代码" aria-label="搜索持仓股票或 ETF" aria-autocomplete="list" /></label>
 				<button type="button" onClick={() => void addHolding()} disabled={disabled || adding || !query.trim() || draft.holdings.length >= maxPortfolioHoldings} aria-label="添加持仓" title="添加持仓">{adding ? <LoaderCircle size={18} className="spin" /> : <Plus size={18} />}</button>
 				{suggestionsOpen && query.trim() && suggestions.length > 0 && <div className="portfolio-stock-suggestions" role="listbox">{suggestions.map((stock, index) => <button type="button" className={index === activeSuggestion ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => void addHolding(stock)} disabled={adding || disabled} role="option" aria-selected={index === activeSuggestion} key={stock.symbol}><strong>{stock.name}</strong><span>{stock.code}</span><small>{stock.instrument_type === 'etf' ? 'ETF · ' : ''}{marketLabel(stock.symbol)}</small></button>)}</div>}
 			</div>
@@ -198,6 +236,7 @@ function marketLabel(symbol: string) {
 	if (symbol.endsWith('.SH')) return '沪市';
 	if (symbol.endsWith('.SZ')) return '深市';
 	if (symbol.endsWith('.BJ')) return '北交所';
+	if (symbol.endsWith('.HK')) return '港股';
 	return 'A股';
 }
 

@@ -149,6 +149,27 @@ func (s *Server) logThemeEvidenceAttempts(symbol string, attempts []stockanalysi
 	}
 }
 
+// loadBenchmarkKLine 取相对强度基准日线。
+//
+// 港股基准是恒生指数，它不属于任何个股行情口径（没有 5 位股票代码），
+// 只能走指数序列接口；A 股仍走个股日线主备链。
+func (s *Server) loadBenchmarkKLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
+	if symbol != stockanalysis.HongKongBenchmarkSymbol {
+		return s.loadKLine(ctx, symbol, period, limit)
+	}
+	if s.marketOverview == nil {
+		return nil, fmt.Errorf("恒生指数数据源不可用")
+	}
+	series, err := s.marketOverview.MarketIndexSeries(ctx, "hsi", period, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(series.Lines) == 0 {
+		return nil, fmt.Errorf("恒生指数未返回可用日线")
+	}
+	return series.Lines, nil
+}
+
 func (s *Server) analyzeStock(ctx context.Context, canonicalSymbol string) (stockanalysis.Analysis, error) {
 	return s.awaitStockResearch(ctx, stockanalysis.ResearchRequest{Symbol: canonicalSymbol, Purpose: "holding"})
 }
@@ -227,10 +248,14 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 	}()
 	go func() {
 		defer collectionWG.Done()
-		benchmarkLines, benchmarkErr = s.loadKLine(dataCtx, benchmarkSymbol, "day", 300)
+		benchmarkLines, benchmarkErr = s.loadBenchmarkKLine(dataCtx, benchmarkSymbol, "day", 300)
 	}()
 
-	if s.limitUpProvider != nil {
+	// 港股走另一套披露与板块口径：A 股的涨停池、开盘啦题材、个股概念目录
+	// 与 F10 主营业务都不覆盖港股。请求它们只会得到确定失败，把真实的数据
+	// 缺口淹在噪音里，因此港股直接跳过，并在 gaps 里说明适用范围。
+	isHongKong := normalized.Market == "HK"
+	if s.limitUpProvider != nil && !isHongKong {
 		collectionWG.Add(1)
 		go func() {
 			defer collectionWG.Done()
@@ -244,7 +269,7 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 			}()
 		}
 	}
-	if s.stockConcepts != nil {
+	if s.stockConcepts != nil && !isHongKong {
 		collectionWG.Add(1)
 		go func() {
 			defer collectionWG.Done()
@@ -252,13 +277,30 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		}()
 	}
 	if s.stockBusiness != nil {
-		collectionWG.Add(2)
+		if !isHongKong {
+			collectionWG.Add(1)
+			go func() {
+				defer collectionWG.Done()
+				business, businessErr = s.stockBusiness.StockBusinessProfile(dataCtx, normalized.Canonical)
+			}()
+		}
+		collectionWG.Add(1)
 		go func() {
 			defer collectionWG.Done()
-			business, businessErr = s.stockBusiness.StockBusinessProfile(dataCtx, normalized.Canonical)
-		}()
-		go func() {
-			defer collectionWG.Done()
+			// 港股财报不在 A 股的 HSF10 主财务表里，走港股 F10 主指标表；
+			// 拿到就直接用，不再回落到 A 股接口（回落只会拿到空结果）。
+			if isHongKong && s.hongKongFinancials != nil {
+				financialHistory, financialHistoryErr = s.hongKongFinancials.HongKongFinancialHistory(dataCtx, normalized.Canonical, 8)
+				if financialHistoryErr == nil && len(financialHistory) > 0 {
+					fundamentals = financialHistory[0]
+					return
+				}
+				financialHistory = nil
+				if financialHistoryErr == nil {
+					financialHistoryErr = fmt.Errorf("港股多期财务查询未返回可用报告")
+				}
+				return
+			}
 			if provider, ok := s.stockBusiness.(StockFinancialHistoryProvider); ok {
 				financialHistory, financialHistoryErr = provider.StockFinancialHistory(dataCtx, normalized.Canonical, 8)
 				if financialHistoryErr == nil && len(financialHistory) > 0 {
@@ -273,7 +315,8 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 			fundamentals, fundamentalErr = s.stockBusiness.StockFundamentals(dataCtx, normalized.Canonical)
 		}()
 	}
-	if s.stockFinancialSupplement != nil {
+	// 新浪多期财务补充只覆盖 A 股，港股查询必然失败，跳过以免制造噪音缺口。
+	if s.stockFinancialSupplement != nil && !isHongKong {
 		collectionWG.Add(1)
 		go func() {
 			defer collectionWG.Done()
@@ -333,6 +376,18 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		}
 		break
 	}
+	// 港股不在 A 股目录里，名称靠东财建议接口回填（00700 → 腾讯控股），
+	// 否则结果标题只有裸代码。
+	if strings.TrimSpace(quote.Name) == "" && normalized.Market == "HK" && s.stockSuggest != nil {
+		if hits, suggestErr := s.stockSuggest.StockSuggest(dataCtx, normalized.RawCode, 10); suggestErr == nil {
+			for _, hit := range hits {
+				if hit.Symbol == normalized.Canonical && strings.TrimSpace(hit.Name) != "" {
+					quote.Name = hit.Name
+					break
+				}
+			}
+		}
+	}
 	var emotion *marketemotion.Snapshot
 	if s.marketEmotion != nil && s.marketEmotion.store != nil {
 		points, loadErr := s.marketEmotion.store.List(dataCtx, 1)
@@ -342,7 +397,15 @@ func (s *Server) collectStockResearch(ctx context.Context, canonicalSymbol strin
 		}
 	}
 
-	gaps := make([]string, 0, 6)
+	gaps := make([]string, 0, 8)
+	if isHongKong {
+		// 这些是"口径不适用"而不是"取数失败"，必须与真正的数据缺口区分开，
+		// 否则报告会把它们当成异常降级。
+		gaps = append(gaps, "港股口径：A 股涨停事件、开盘啦题材与个股概念目录不适用于港股，未纳入本次分析")
+		if strings.TrimSpace(business.MainBusiness) == "" {
+			gaps = append(gaps, "港股主营业务资料暂未接入，公司业务定性以财报与公告为准")
+		}
+	}
 	if quoteErr != nil {
 		gaps = append(gaps, "实时行情降级为最新日K: "+quoteErr.Error())
 	}

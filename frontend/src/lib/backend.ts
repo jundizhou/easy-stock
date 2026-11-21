@@ -945,6 +945,7 @@ export type StockAIFundamental = {
 	quality: string;
 	sustainability?: string;
 	sustainability_flags?: string[];
+	currency?: string;
 	report_date: string;
 	report_name: string;
 	revenue: number;
