@@ -831,6 +831,7 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 												const meta = abnormalLevelMeta[item.level];
 												const open = expanded === item.symbol;
 												const detailData = open && detail && detail.symbol === item.symbol ? detail : null;
+												const thresholdNote = detailData?.threshold_note || item.threshold_note;
 												return (
 													<Fragment key={item.symbol}>
 <tr
@@ -919,6 +920,7 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 																				偏离值 = 个股区间涨跌幅 − 基准指数同期涨跌幅；下表是最近 12 个交易日的逐日明细
 																			</small>
 																		</div>
+																		{thresholdNote && <p className="monitor-abn-state">{thresholdNote}</p>}
 																		{detailLoading && !detailData && (
 																			<p className="monitor-abn-state"><LoaderCircle className="spin" size={14} /> 正在计算该股异动明细…</p>
 																		)}

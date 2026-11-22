@@ -1,3 +1,4 @@
+import { StockFundamentalPanel } from './StockFundamentalPanel';
 import { ReasoningControl } from './ReasoningControl';
 import {
 	Activity,
@@ -6,7 +7,6 @@ import {
 	BarChart3,
 	Bot,
 	BrainCircuit,
-	Building2,
 	Calculator,
 	CheckCircle2,
 	ChevronDown,
@@ -777,6 +777,7 @@ function NewListingNotice({ analysis }: { analysis: StockAIAnalysis }) {
 function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 	const isNewListing = analysis.profile.primary_type === 'new_listing';
 	const theme = normalizeStockAITheme(analysis.theme);
+	const hk = analysis.symbol.endsWith('.HK');
 	const themeSource = stockThemeSourceLabel(theme.source);
 	const themeRole = theme.role && theme.role !== '待确认' ? theme.role : '';
 	const themeDetail = theme.is_hot
@@ -791,7 +792,7 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<KPICard icon={<Scale size={17} />} label="相对强度" value={analysis.relative_strength.available ? `${analysis.relative_strength.score}` : '--'} detail={analysis.relative_strength.available ? `${analysis.relative_strength.state} · ${analysis.relative_strength.benchmark_name}` : analysis.relative_strength.detail} tone="purple" />
 				<KPICard icon={<ShieldCheck size={17} />} label="风险压力" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
 				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={analysis.symbol.endsWith('.HK') ? analysis.short_term.tradability : isNewListing ? `上市 ${analysis.trend.history_days || analysis.chart.length} 日 · ${analysis.short_term.tradability}` : `近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
-				{analysis.research_report ? <KPICard icon={<Target size={17} />} label="主营背景" value={theme.business || '主业待补充'} detail={themeSource} tone="purple" /> : <KPICard icon={<Target size={17} />} label={theme.is_hot ? '规则热点定位' : '主营背景'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />}
+				{hk ? <KPICard icon={<Target size={17} />} label="主营背景" value="港股主营资料暂未接入" detail="业务信息以公司财报及公告为准" tone="purple" /> : analysis.research_report ? <KPICard icon={<Target size={17} />} label="主营背景" value={theme.business || '主业待补充'} detail={themeSource} tone="purple" /> : <KPICard icon={<Target size={17} />} label={theme.is_hot ? '规则热点定位' : '主营背景'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />}
 			</section>
 
 			<div className="stock-ai-analysis-grid">
@@ -799,16 +800,16 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<SignalMatrix analysis={analysis} />
 			</div>
 
-			{!analysis.research_report && <ThemeAttributionPanel analysis={analysis} />}
+			{!hk && !analysis.research_report && <ThemeAttributionPanel analysis={analysis} />}
 
 			{!isShortTermDecision(analysis) && <div className="stock-ai-fundamental-grid">
-				<FundamentalPanel analysis={analysis} />
+				<StockFundamentalPanel analysis={analysis} />
 				<ResearchPanel analysis={analysis} />
 			</div>}
 
 			<div className="stock-ai-news-grid">
 				<NewsAnalysisPanel eyebrow="个股资讯" title="近期个股新闻分析" item={analysis.stock_news} icon={<Newspaper size={19} />} />
-				<NewsAnalysisPanel eyebrow="题材催化" title="近期题材新闻分析" item={analysis.theme_news} icon={<Zap size={19} />} />
+				{!hk && <NewsAnalysisPanel eyebrow="题材催化" title="近期题材新闻分析" item={analysis.theme_news} icon={<Zap size={19} />} />}
 			</div>
 
 			<div className="stock-ai-main-grid">
@@ -887,30 +888,6 @@ function normalizeStockAITheme(theme?: StockAIAnalysis['theme']): NonNullable<St
 		primary: '', business: '', is_hot: false, concepts: [], source: '', route: 'trend', trend_score: 0, trend_stage: '', active_days: 0, max_streak: 0, role: '待确认', description: '当前结果由旧版本缓存生成，请重新分析以获得题材共振明细', hot_score: 0, confidence: '低', resonance: { available: false, score: 0, state: '暂无题材', detail: '当前结果由旧版本缓存生成，请重新分析以获得题材共振明细', stock_momentum: 0, relative_strength: 0, breadth: 0, limit_up_energy: 0, persistence: 0, leader_position: 0, evidence_quality: 0, capital_diffusion: 0 },
 	};
 	return { ...fallback, ...(theme || {}), resonance: { ...fallback.resonance, ...(theme?.resonance || {}) } };
-}
-
-function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {
-	const item = analysis.fundamental;
-	// 港股财报按港元或人民币列示，金额必须带单位，否则容易当成人民币读。
-	const reportCurrency = item?.currency === 'CNY' ? '人民币' : item?.currency === 'HKD' ? '港元' : item?.currency || '';
-	return <section className="stock-ai-panel stock-ai-fundamental-panel">
-		<header><div><span>公司质量</span><h3>基本面 · 最新财报</h3></div><Building2 size={19} /></header>
-		{item?.available ? <>
-			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date} · 收益持续性{item.sustainability || '待确认'}{reportCurrency ? ` · 以${reportCurrency}列示` : ''}</span><p>{item.summary}</p>{(item.sustainability_flags || []).map((flag) => <small key={flag} className="stock-ai-fundamental-warning">{flag}</small>)}</div>
-			<div className="stock-ai-fundamental-metrics">
-				<FundamentalMetric label="营业总收入" value={formatCompactAmount(item.revenue)} detail={`${reportCurrency ? `${reportCurrency} · ` : ''}同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`${reportCurrency ? `${reportCurrency} · ` : ''}同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="扣非净利润" value={item.recurring_net_profit_available && typeof item.recurring_net_profit === 'number' ? formatCompactAmount(item.recurring_net_profit) : '--'} detail={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' ? `同比 ${signedPercent(item.recurring_net_profit_yoy)}` : '数据待补充'} tone={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' && item.recurring_net_profit_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="一次性损益占比" value={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' ? `${item.non_recurring_profit_ratio.toFixed(1)}%` : '--'} detail="占归母净利润绝对值" tone={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' && item.non_recurring_profit_ratio >= 30 ? 'negative' : ''} />
-				<FundamentalMetric label="ROE" value={`${item.roe.toFixed(1)}%`} detail={`EPS ${item.eps.toFixed(2)}`} />
-				<FundamentalMetric label="毛利率" value={`${item.gross_margin.toFixed(1)}%`} detail={`负债率 ${item.debt_ratio.toFixed(1)}%`} />
-			</div>
-		</> : <div className="stock-ai-panel-empty">最新F10财务数据暂不可用</div>}
-	</section>;
-}
-
-function FundamentalMetric({ label, value, detail, tone = '' }: { label: string; value: string; detail: string; tone?: string }) {
-	return <article><span>{label}</span><strong className={tone}>{value}</strong><small>{detail}</small></article>;
 }
 
 function ResearchPanel({ analysis }: { analysis: StockAIAnalysis }) {

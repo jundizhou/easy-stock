@@ -247,7 +247,7 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 func TestBuildActionPriceZonesFallsBackWithoutTechnicalLevels(t *testing.T) {
 	trend := TrendAnalysis{LatestClose: 10, ATR14Percent: 0}
 	risk := RiskControl{EntryReference: 10, StopPrice: 9}
-	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{}, trend.LatestClose)
+	plan := buildActionPlan("600000.SH", Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{}, trend.LatestClose)
 	for _, zone := range []ActionPriceZone{plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss} {
 		if zone.PriceText == "" || zone.Reason == "" || zone.Action == "" || zone.PriceHigh <= 0 {
 			t.Fatalf("fallback price zone is incomplete: %+v", zone)
@@ -356,16 +356,16 @@ func TestScorecardV4CompressesCorrelatedTechnicalDownside(t *testing.T) {
 }
 
 func TestFundamentalScoreUsesRecurringProfitWhenAvailable(t *testing.T) {
-	item := analyzeFundamentals(&foundation.StockFundamentals{
+	item := analyzeFundamentals("600000.SH", &foundation.StockFundamentals{
 		ReportDate: "2026-03-31", ReportName: "2026一季报",
 		RevenueYearOverYear: 20, NetProfit: 100, NetProfitYearOverYear: 120,
 		DeductedNetProfit: 10, DeductedNetProfitYearOverYear: -20, DeductedNetProfitAvailable: true,
 		ROE: 10, GrossMargin: 30, DebtRatio: 50,
 	})
-	if item.RecurringNetProfit != 10 || item.RecurringNetProfitYearOverYear != -20 {
+	if *item.RecurringNetProfit != 10 || *item.RecurringNetProfitYearOverYear != -20 {
 		t.Fatalf("recurring profit was not selected: %+v", item)
 	}
-	if item.NonRecurringProfitRatio != 90 || item.Sustainability != "较差" || item.Score >= 45 {
+	if *item.NonRecurringProfitRatio != 90 || item.Sustainability != "较差" || item.Score >= 45 {
 		t.Fatalf("one-off profit was not penalized: %+v", item)
 	}
 	if len(item.SustainabilityFlags) == 0 || !strings.Contains(strings.Join(item.SustainabilityFlags, "；"), "非经常性") {
@@ -374,23 +374,23 @@ func TestFundamentalScoreUsesRecurringProfitWhenAvailable(t *testing.T) {
 }
 
 func TestFundamentalScoreAcceptsExplicitZeroRecurringProfit(t *testing.T) {
-	item := analyzeFundamentals(&foundation.StockFundamentals{
+	item := analyzeFundamentals("600000.SH", &foundation.StockFundamentals{
 		ReportDate: "2026-03-31", NetProfit: 20, NetProfitYearOverYear: 10,
 		DeductedNetProfitAvailable: true, DeductedNetProfit: 0, DeductedNetProfitYearOverYear: 0,
 	})
-	if !item.RecurringNetProfitAvailable || item.RecurringNetProfit != 0 || item.Sustainability != "较差" {
+	if !item.RecurringNetProfitAvailable || *item.RecurringNetProfit != 0 || item.Sustainability != "较差" {
 		t.Fatalf("explicit zero recurring profit was treated as missing: %+v", item)
 	}
 }
 
 func TestFundamentalScoreUsesCumulativeDeductedProfitForInterimReport(t *testing.T) {
-	item := analyzeFundamentals(&foundation.StockFundamentals{
+	item := analyzeFundamentals("600000.SH", &foundation.StockFundamentals{
 		ReportDate: "2026-06-30", ReportName: "2026中报",
 		RevenueYearOverYear: 54.800369148545, NetProfit: 43284002000, NetProfitYearOverYear: 41.983941749454,
 		DeductedNetProfit: 39013300000, DeductedNetProfitYearOverYear: 43.444603004956, DeductedNetProfitAvailable: true,
 		ROE: 12.08, GrossMargin: 23.9283938867, DebtRatio: 63.6524529171, OperatingCashFlowPerShare: 13.015213596184,
 	})
-	if item.Score != 75 || item.Sustainability != "较好" || item.NonRecurringProfitRatio >= 10 {
+	if item.Score != 75 || item.Sustainability != "较好" || *item.NonRecurringProfitRatio >= 10 {
 		t.Fatalf("strong interim fundamentals were misclassified: %+v", item)
 	}
 }

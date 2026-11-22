@@ -347,6 +347,7 @@ export type MonitorAbnormalWindow = {
 };
 
 export type MonitorAbnormalItem = {
+	threshold_note?: string;
 	symbol: string;
 	name: string;
 	board: string;

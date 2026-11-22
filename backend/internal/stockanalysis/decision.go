@@ -285,7 +285,7 @@ func finalizeRiskControl(risk RiskControl, profile Profile, trend TrendAnalysis,
 	return risk
 }
 
-func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl) NextDayPlan {
+func buildNextDayPlan(symbol string, lines []foundation.KLine, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl) NextDayPlan {
 	latest := lines[len(lines)-1]
 	marketScore := 50.0
 	if market != nil {
@@ -295,17 +295,18 @@ func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnal
 	if relative.Available {
 		relativeScore = float64(relative.Score)
 	}
-	themeScore := 50.0
-	if theme.Resonance.Available {
-		themeScore = float64(theme.Resonance.Score)
-	}
-	score := float64(trend.Score)*0.45 + relativeScore*0.2 + marketScore*0.2
-	if theme.Resonance.Available {
-		score += themeScore * .15
-	} else {
-		// Redistribute the missing theme weight instead of injecting a fake
-		// neutral resonance score.
-		score = float64(trend.Score)*.52 + relativeScore*.24 + marketScore*.24
+	hk := foundation.IsHongKongSymbol(symbol)
+	score := float64(trend.Score)
+	switch {
+	case hk:
+		// Only trend and the HK benchmark have corresponding inputs.
+		if relative.Available {
+			score = (score*.52 + relativeScore*.24) / (.52 + .24)
+		}
+	case theme.Resonance.Available:
+		score = score*.45 + relativeScore*.2 + marketScore*.2 + float64(theme.Resonance.Score)*.15
+	default:
+		score = score*.52 + relativeScore*.24 + marketScore*.24
 	}
 	switch short.State {
 	case "修复", "启动", "发酵":
@@ -349,11 +350,21 @@ func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnal
 	if profile.PrimaryType == "emotion_leader" {
 		expectation = fmt.Sprintf("基础预期为%s，核心不是开盘涨幅，而是分歧后的回封与板块梯队反馈；正常波动区间参考%.2f—%.2f。", bias, expectedLow, expectedHigh)
 	}
+	strongConfirmation := "首轮分歧缩量、回踩有承接，题材核心没有同步转弱"
+	breakdownConfirmation := "反抽不能收回关键位，弱于题材与基准指数"
+	preOpenChecks := []string{"核对市场情绪阶段是否恶化", "确认题材核心与同梯队个股是否出现集体负反馈", "检查公告、停复牌和突发消息，避免仅依赖历史K线"}
+	openingStrength := "个股相对题材和基准指数是主动还是被动跟随"
+	if hk {
+		preOpenChecks = []string{"检查港股公告、停复牌及公司消息", "核对恒生指数近期表现及个股相对强弱"}
+		openingStrength = "个股相对恒生指数的走势是否延续"
+		strongConfirmation = "首轮回调缩量、回踩有承接，相对恒生指数表现稳定"
+		breakdownConfirmation = "反抽未能收回关键位，个股持续弱于恒生指数"
+	}
 	scenarios := []NextDayScenario{
-		{Key: "strong_open", Name: "高开强承接", Priority: "次优", Trigger: fmt.Sprintf("高开后不快速跌回%.2f下方", confirmation), Confirmation: "首轮分歧缩量、回踩有承接，题材核心没有同步转弱", Action: "不追第一波，等待回踩确认后按计划仓验证", Invalidation: "高开低走并放量跌破开盘低点"},
+		{Key: "strong_open", Name: "高开强承接", Priority: "次优", Trigger: fmt.Sprintf("高开后不快速跌回%.2f下方", confirmation), Confirmation: strongConfirmation, Action: "不追第一波，等待回踩确认后按计划仓验证", Invalidation: "高开低走并放量跌破开盘低点"},
 		{Key: "flat_confirm", Name: "平开结构确认", Priority: "优先", Trigger: fmt.Sprintf("围绕%.2f震荡后主动站上%.2f", trend.LatestClose, confirmation), Confirmation: "成交额温和放大，分时高点和低点同步抬升", Action: "满足结构与量能双确认后分批介入", Invalidation: fmt.Sprintf("跌破%.2f且反抽无力", defense)},
 		{Key: "weak_repair", Name: "低开修复", Priority: "观察", Trigger: fmt.Sprintf("低开测试%.2f附近但未形成放量破位", defense), Confirmation: "快速收回昨收或开盘价，板块与指数不继续下杀", Action: "只做右侧收回确认，不在下跌途中猜底", Invalidation: fmt.Sprintf("有效跌破%.2f", risk.StopPrice)},
-		{Key: "breakdown", Name: "破位失效", Priority: "回避", Trigger: fmt.Sprintf("放量跌破%.2f或中期趋势同步转弱", risk.StopPrice), Confirmation: "反抽不能收回关键位，弱于题材与基准指数", Action: "取消买入计划；已有仓位执行减仓或止损", Invalidation: "重新站回失效位并形成新的量价结构后再评估"},
+		{Key: "breakdown", Name: "破位失效", Priority: "回避", Trigger: fmt.Sprintf("放量跌破%.2f或中期趋势同步转弱", risk.StopPrice), Confirmation: breakdownConfirmation, Action: "取消买入计划；已有仓位执行减仓或止损", Invalidation: "重新站回失效位并形成新的量价结构后再评估"},
 	}
 	if profile.PrimaryType == "weak_risk" {
 		scenarios[0].Priority = "观察"
@@ -372,8 +383,8 @@ func buildNextDayPlan(lines []foundation.KLine, profile Profile, trend TrendAnal
 			{Label: "计划失效", Price: risk.StopPrice, Detail: "失守后执行风控，不延后解释"},
 		},
 		Scenarios:      scenarios,
-		PreOpenChecks:  []string{"核对市场情绪阶段是否恶化", "确认题材核心与同梯队个股是否出现集体负反馈", "检查公告、停复牌和突发消息，避免仅依赖历史K线"},
-		OpeningChecks:  []string{"开盘位置相对昨收、支撑与确认位处于哪个区间", "前15分钟成交额是否异常放大或明显缩量", "个股相对题材和基准指数是主动还是被动跟随"},
+		PreOpenChecks:  preOpenChecks,
+		OpeningChecks:  []string{"开盘位置相对昨收、支撑与确认位处于哪个区间", "前15分钟成交额是否异常放大或明显缩量", openingStrength},
 		IntradayChecks: []string{"上涨是否放量、回调是否缩量", "分时低点是否抬高，关键位跌破后能否快速收回", "冲击压力位时板块是否同步扩散"},
 		CloseChecks:    []string{"收盘是否站稳短中期趋势线", "尾盘资金选择进攻还是兑现", "将新高、新低、成交额和相对强度写回次日计划"},
 	}
