@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -78,17 +77,26 @@ func (c *klineChain) KLine(ctx context.Context, symbol string, period string, li
 	if clock == nil {
 		clock = time.Now
 	}
+	available := c.availableSources(clock())
 	var firstErr error
-	attempted := 0
-	// 所有源都在冷却里时照样按顺序试一遍：宁可多等一次超时，
-	// 也不要因为熔断状态本身让整轮决策拿不到数据。
-	forceAll := !c.anyAvailable(clock())
-	for index, source := range c.sources {
-		if !forceAll && c.isOpen(index, clock()) {
-			continue
+	for position, index := range available {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		attempted++
-		bars, err := source.KLine(ctx, symbol, period, limit)
+		sourceCtx := ctx
+		var cancel context.CancelFunc
+		// 在调用方的总时限内给后续可用源保留时间，最后一个源可用完剩余时间。
+		remaining := len(available) - position
+		if deadline, ok := ctx.Deadline(); ok && remaining > 1 {
+			sourceCtx, cancel = context.WithTimeout(ctx, time.Until(deadline)/time.Duration(remaining))
+		}
+		bars, err := c.sources[index].KLine(sourceCtx, symbol, period, limit)
+		if cancel != nil {
+			cancel()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err == nil && len(bars) > 0 {
 			c.record(index, nil)
 			return bars, nil
@@ -100,36 +108,26 @@ func (c *klineChain) KLine(ctx context.Context, symbol string, period string, li
 		if firstErr == nil {
 			firstErr = err
 		}
-		// 上下文取消就没必要继续试后面的源，重试只会拖长超时。
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
-		}
-	}
-	if attempted == 0 {
-		return nil, fmt.Errorf("没有可尝试的日线数据源")
 	}
 	return nil, firstErr
 }
 
-// isOpen 表示该源在冷却期内应被跳过。
-func (c *klineChain) isOpen(index int, now time.Time) bool {
+func (c *klineChain) availableSources(now time.Time) []int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if index < 0 || index >= len(c.openUntil) {
-		return false
-	}
-	return now.Before(c.openUntil[index])
-}
-
-func (c *klineChain) anyAvailable(now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for index := range c.openUntil {
-		if !now.Before(c.openUntil[index]) {
-			return true
+	indices := make([]int, 0, len(c.sources))
+	for i, until := range c.openUntil {
+		if !now.Before(until) {
+			indices = append(indices, i)
 		}
 	}
-	return false
+	// 所有源都在冷却时，仍按原顺序尝试。
+	if len(indices) == 0 {
+		for i := range c.sources {
+			indices = append(indices, i)
+		}
+	}
+	return indices
 }
 
 // record 记录一次调用的结果：成功清零，失败累计到阈值后进入冷却。

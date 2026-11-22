@@ -79,14 +79,15 @@ type NewsItem struct {
 }
 
 type SourceHealth struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Category  string    `json:"category"`
-	OK        bool      `json:"ok"`
-	Enabled   bool      `json:"enabled"`
-	Status    string    `json:"status"`
-	Message   string    `json:"message,omitempty"`
-	CheckedAt time.Time `json:"checked_at,omitzero"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Category     string    `json:"category"`
+	OK           bool      `json:"ok"`
+	Enabled      bool      `json:"enabled"`
+	Status       string    `json:"status"`
+	ProbeSummary string    `json:"probe_summary,omitempty"`
+	Message      string    `json:"message,omitempty"`
+	CheckedAt    time.Time `json:"checked_at,omitzero"`
 }
 
 type Board struct {

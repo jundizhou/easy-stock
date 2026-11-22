@@ -31,7 +31,7 @@ import {
 	WalletCards,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sourceHealthSummary, sourceStatusLabel } from './lib/source-health';
+import { sourceSummaryLabel, sourceHealthSummary, sourceStatusLabel } from './lib/source-health';
 import {
 	BackendConfig,
 	KLine,
@@ -553,7 +553,7 @@ export function App() {
 				<div
 					className="source-health-summary"
 					tabIndex={0}
-					aria-label={`数据源状态，${sourceSummary.healthy} 个探测通过，${sourceSummary.failed.length} 个异常，${sourceSummary.unknown} 个未检测`}
+					aria-label={`数据源状态，${sourceSummaryLabel(sourceSummary)}`}
 				>
 					<Database size={16} aria-hidden="true" />
 					<span>数据源</span>
@@ -561,13 +561,13 @@ export function App() {
 					<div className="source-health-popover" role="tooltip">
 						<header>
 							<div><strong>数据源状态</strong><span>轻量接口探测 · 缓存 1 分钟 · 预留源不计入</span></div>
-							<em>{sourceSummary.healthy} 通过 · {sourceSummary.failed.length} 异常 · {sourceSummary.unknown} 未检测</em>
+							<em>{sourceSummaryLabel(sourceSummary)}</em>
 						</header>
 						<div className="source-health-list">
 							{sources.map((source) => (
-								<div className={source.ok ? 'healthy' : 'unhealthy'} key={source.id}>
+								<div className={source.status === 'partial' ? 'partial' : source.ok ? 'healthy' : 'unhealthy'} key={source.id}>
 									<i aria-hidden="true" />
-									<span><strong>{source.name}</strong><small>{sourceCategoryLabel(source.category)}</small></span>
+									<span><strong>{source.name}</strong><small>{source.status === 'partial' && source.probe_summary ? source.probe_summary : sourceCategoryLabel(source.category)}</small></span>
 									<em title={source.message || sourceStatusLabel(source)}>{sourceStatusLabel(source)}</em>
 								</div>
 							))}

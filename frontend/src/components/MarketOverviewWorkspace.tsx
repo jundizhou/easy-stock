@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sourceHealthSummary } from '../lib/source-health';
+import { sourceSummaryLabel, sourceHealthSummary } from '../lib/source-health';
 import type {
 	BackendConfig,
 	LimitUpLadderData,
@@ -471,7 +471,7 @@ function PulseView({ news, themes, themeMeta, sources, state, error, lastUpdated
 		<section className="market-pulse-metrics">
 			<Metric icon={<Newspaper size={17} />} label="快讯样本" value={state === 'loading' ? '--' : String(news.length)} detail="财联社最新快讯" />
 			<Metric icon={<TrendingUp size={17} />} label="题材快照" value={state === 'loading' ? '--' : String(themes.length)} detail={themeMeta?.trade_date || '等待交易日'} />
-			<Metric icon={<Database size={17} />} label="数据源" value={sourceSummary.total ? `${sourceSummary.healthy}/${sourceSummary.total}` : '--'} detail={sourceSummary.unknown ? `${sourceSummary.unknown} 个尚未检测` : '已启用源 · 轻量接口探测'} />
+			<Metric icon={<Database size={17} />} label="数据源" value={sourceSummary.total ? `${sourceSummary.healthy}/${sourceSummary.total}` : '--'} detail={sourceSummaryLabel(sourceSummary)} />
 			<Metric icon={<Clock3 size={17} />} label="最近刷新" value={lastUpdated ? formatTime(lastUpdated) : '--'} detail={themeMeta?.stale ? '题材数据已标记陈旧' : '本机聚合时间'} />
 		</section>
 		{error && <div className="market-partial-warning"><AlertTriangle size={15} /><span>{error}。已展示其余可用数据。</span></div>}

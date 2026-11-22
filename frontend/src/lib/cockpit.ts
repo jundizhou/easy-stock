@@ -1,5 +1,5 @@
 import type { MarketEmotionHistory, MarketEmotionPoint, MarketIndexSnapshot, PortfolioInspectionJob, SourceHealth } from './backend';
-import { isSourceFailure, sourceHealthSummary } from './source-health';
+import { sourceHealthSummary } from './source-health';
 
 export type CockpitTarget = 'market' | 'limit-up' | 'themes' | 'portfolio-inspection' | 'stock-ai' | 'reviews' | 'mastery' | 'ai' | 'token-usage';
 
@@ -128,13 +128,23 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 		}
 	}
 
-	const failedSources = (input.sources || []).filter(isSourceFailure);
+	const { failed: failedSources, partial } = sourceHealthSummary(input.sources || []);
 	if (failedSources.length) {
 		items.push({
 			id: 'sources-failed',
 			level: 'warn',
 			title: `${failedSources.length} 个数据源异常`,
 			detail: failedSources.slice(0, 3).map((source) => source.name).join('、'),
+			target: 'themes',
+		});
+	}
+
+	for (const source of partial) {
+		items.push({
+			id: `source-partial-${source.id}`,
+			level: 'warn',
+			title: `${source.name}部分可用`,
+			detail: source.probe_summary || '部分接口探测失败',
 			target: 'themes',
 		});
 	}
@@ -163,6 +173,9 @@ export function buildCockpitBriefPrompt(input: CockpitInput, attention: Attentio
 	const sourceSummary = sourceHealthSummary(input.sources || []);
 	const failed = sourceSummary.failed.map((source) => source.name);
 	lines.push(`数据源：${sourceSummary.healthy}/${sourceSummary.total || '--'} 探测通过${sourceSummary.unknown ? `，${sourceSummary.unknown} 个未检测` : ''}${failed.length ? `，异常：${failed.join('、')}` : ''}`);
+	for (const source of sourceSummary.partial) {
+		lines.push(`${source.name}部分可用，${source.probe_summary || '部分接口探测失败'}`);
+	}
 	const alerts = attention.filter((item) => item.level !== 'info').map((item) => `[${item.level === 'danger' ? '高' : '中'}] ${item.title}`);
 	lines.push(`需要处理：${alerts.length ? alerts.join('；') : '无'}`);
 

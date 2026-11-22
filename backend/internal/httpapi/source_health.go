@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,36 +15,50 @@ import (
 	"easy-stock/backend/internal/providers/tencent"
 )
 
+type sourceProbe struct {
+	name string
+	run  func(context.Context) error
+}
+
 type sourceHealthCache struct {
 	mu      sync.Mutex
-	checks  map[string]func(context.Context) error
+	checks  map[string][]sourceProbe
 	results []foundation.SourceHealth
 	expires time.Time
 }
 
 func newSourceHealthCache(baseURL string, eastMoney *eastmoney.Client, sinaClient *sina.Client, tencentClient *tencent.Client, clsClient *cls.Client) *sourceHealthCache {
 	kaipanla := duanxianxia.NewClient(duanxianxia.ClientConfig{BaseURL: baseURL})
-	return &sourceHealthCache{checks: map[string]func(context.Context) error{
-		"duanxianxia": func(ctx context.Context) error {
+	return &sourceHealthCache{checks: map[string][]sourceProbe{
+		"duanxianxia": {{"涨停池", func(ctx context.Context) error {
 			_, err := kaipanla.FetchLimitUpPool(ctx)
 			return err
+		}}},
+		"eastmoney": {
+			{"日 K 线", func(ctx context.Context) error {
+				rows, err := eastMoney.KLine(ctx, "600519.SH", "daily", 2)
+				return sourceProbeResult(len(rows), err)
+			}},
+			{"公司资料", func(ctx context.Context) error {
+				profile, err := eastMoney.StockBusinessProfile(ctx, "600519.SH")
+				if err == nil && profile.Name == "" {
+					return errors.New("接口未返回公司名称")
+				}
+				return err
+			}},
 		},
-		"eastmoney": func(ctx context.Context) error {
-			rows, err := eastMoney.KLine(ctx, "600519.SH", "daily", 2)
-			return sourceProbeResult(len(rows), err)
-		},
-		"sina": func(ctx context.Context) error {
+		"sina": {{"实时行情", func(ctx context.Context) error {
 			rows, err := sinaClient.Realtime(ctx, []string{"600519.SH"})
 			return sourceProbeResult(len(rows), err)
-		},
-		"tencent": func(ctx context.Context) error {
+		}}},
+		"tencent": {{"指数", func(ctx context.Context) error {
 			rows, _, err := tencentClient.MarketIndexes(ctx, "core")
 			return sourceProbeResult(len(rows), err)
-		},
-		"cls": func(ctx context.Context) error {
+		}}},
+		"cls": {{"快讯", func(ctx context.Context) error {
 			rows, err := clsClient.LatestNews(ctx, 1)
 			return sourceProbeResult(len(rows), err)
-		},
+		}}},
 	}}
 }
 
@@ -75,30 +90,51 @@ func (cache *sourceHealthCache) load(ctx context.Context) []foundation.SourceHea
 	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	var pending sync.WaitGroup
-	for index := range results {
-		item := &results[index]
+	probeErrors := make([][]error, len(results))
+	for i, item := range results {
 		if !item.Enabled {
 			continue
 		}
-		check := cache.checks[item.ID]
-		if check == nil {
+		checks := cache.checks[item.ID]
+		probeErrors[i] = make([]error, len(checks))
+		for j, check := range checks {
+			pending.Go(func() {
+				probeErrors[i][j] = check.run(probeCtx)
+			})
+		}
+	}
+	pending.Wait()
+	for i := range results {
+		item := &results[i]
+		if !item.Enabled {
+			continue
+		}
+		checks := cache.checks[item.ID]
+		if len(checks) == 0 {
 			item.Status, item.Message = "unknown", "尚未检测"
 			continue
 		}
-		pending.Add(1)
-		go func() {
-			defer pending.Done()
-			err := check(probeCtx)
-			item.CheckedAt = time.Now().UTC()
-			item.OK = err == nil
-			if err != nil {
-				item.Status, item.Message = "unhealthy", "探测失败："+err.Error()
+		var labels, failures []string
+		for j, check := range checks {
+			if err := probeErrors[i][j]; err != nil {
+				labels = append(labels, check.name+"失败")
+				failures = append(failures, check.name+"："+err.Error())
 			} else {
-				item.Status, item.Message = "healthy", "轻量接口探测通过；不代表所有接口均可用"
+				labels = append(labels, check.name+"通过")
 			}
-		}()
+		}
+		item.CheckedAt = time.Now().UTC()
+		item.ProbeSummary = strings.Join(labels, " · ")
+		item.OK = len(failures) == 0
+		switch len(failures) {
+		case 0:
+			item.Status, item.Message = "healthy", item.ProbeSummary
+		case len(checks):
+			item.Status, item.Message = "unhealthy", strings.Join(failures, "；")
+		default:
+			item.Status, item.Message = "partial", item.ProbeSummary+"。"+strings.Join(failures, "；")
+		}
 	}
-	pending.Wait()
 	if ctx.Err() == nil {
 		cache.results = results
 		cache.expires = time.Now().Add(time.Minute)

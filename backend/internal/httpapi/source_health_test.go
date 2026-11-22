@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,9 +11,9 @@ import (
 
 func TestSourceHealthUsesProbeResultsAndKeepsCacheTimestamp(t *testing.T) {
 	var calls atomic.Int32
-	cache := &sourceHealthCache{checks: map[string]func(context.Context) error{
-		"sina":      func(context.Context) error { calls.Add(1); return nil },
-		"eastmoney": func(context.Context) error { return errors.New("network unavailable") },
+	cache := &sourceHealthCache{checks: map[string][]sourceProbe{
+		"sina":      {{"实时行情", func(context.Context) error { calls.Add(1); return nil }}},
+		"eastmoney": {{"日 K 线", func(context.Context) error { return errors.New("network unavailable") }}},
 	}}
 	first := cache.load(context.Background())
 	second := cache.load(context.Background())
@@ -40,11 +41,40 @@ func TestSourceHealthUsesProbeResultsAndKeepsCacheTimestamp(t *testing.T) {
 }
 
 func TestCancelledSourceCheckDoesNotPoisonCache(t *testing.T) {
-	cache := &sourceHealthCache{checks: map[string]func(context.Context) error{"sina": func(ctx context.Context) error { return ctx.Err() }}}
+	cache := &sourceHealthCache{checks: map[string][]sourceProbe{"sina": {{"实时行情", func(ctx context.Context) error { return ctx.Err() }}}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cache.load(ctx)
 	if !cache.expires.IsZero() {
 		t.Fatal("cancelled request cached a false outage")
+	}
+}
+
+func TestEastMoneyReportsEachProbeIndependently(t *testing.T) {
+	failure := errors.New("empty response")
+	for _, tc := range []struct {
+		kline, profile  error
+		status, summary string
+	}{
+		{nil, nil, "healthy", "日 K 线通过 · 公司资料通过"},
+		{failure, nil, "partial", "日 K 线失败 · 公司资料通过"},
+		{nil, failure, "partial", "日 K 线通过 · 公司资料失败"},
+		{failure, failure, "unhealthy", "日 K 线失败 · 公司资料失败"},
+	} {
+		cache := sourceHealthCache{checks: map[string][]sourceProbe{"eastmoney": {
+			{"日 K 线", func(context.Context) error { return tc.kline }},
+			{"公司资料", func(context.Context) error { return tc.profile }},
+		}}}
+		for _, source := range cache.load(context.Background()) {
+			if source.ID != "eastmoney" {
+				continue
+			}
+			if source.Status != tc.status || source.OK != (tc.status == "healthy") || source.ProbeSummary != tc.summary {
+				t.Errorf("unexpected health: %+v", source)
+			}
+			if !source.OK && !strings.Contains(source.Message, failure.Error()) {
+				t.Errorf("missing diagnostic: %s", source.Message)
+			}
+		}
 	}
 }

@@ -84,15 +84,39 @@ func TestKLineChainReportsPrimaryError(t *testing.T) {
 	}
 }
 
-// 上下文被取消时不应再试后面的源，否则一次已超时的决策会被拖到更久。
-func TestKLineChainStopsOnContextError(t *testing.T) {
-	primary := &stubKLine{err: context.DeadlineExceeded}
+type slowKLineSource struct {
+	deadline time.Time
+}
+
+func (s *slowKLineSource) KLine(ctx context.Context, _ string, _ string, _ int) ([]foundation.KLine, error) {
+	s.deadline, _ = ctx.Deadline()
+	return nil, context.DeadlineExceeded
+}
+
+func TestKLineChainReservesTimeForFallback(t *testing.T) {
+	primary := &slowKLineSource{}
 	fallback := &stubKLine{bars: okBars(2)}
-	if _, err := newKLineChain(primary, fallback).KLine(context.Background(), "600519", "day", 60); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("应直接返回超时，得到：%v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	bars, err := newKLineChain(primary, fallback).KLine(ctx, "600519", "day", 2)
+	if err != nil || len(bars) != 2 || fallback.hits != 1 {
+		t.Fatalf("source timeout prevented fallback: bars=%d err=%v", len(bars), err)
 	}
-	if fallback.hits != 0 {
-		t.Errorf("超时后不应再试备源，备源命中 %d 次", fallback.hits)
+	if primary.deadline.IsZero() || !primary.deadline.Before(deadline) {
+		t.Fatalf("primary can exhaust the caller's deadline: %s", primary.deadline)
+	}
+}
+
+func TestKLineChainStopsOnCallerCancellation(t *testing.T) {
+	primary, fallback := &stubKLine{}, &stubKLine{bars: okBars(2)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := newKLineChain(primary, fallback).KLine(ctx, "600519", "day", 60); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want caller cancellation", err)
+	}
+	if primary.hits != 0 || fallback.hits != 0 {
+		t.Fatal("cancelled request reached providers")
 	}
 }
 

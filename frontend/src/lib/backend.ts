@@ -252,7 +252,8 @@ export type SourceHealth = {
   category: string;
   ok: boolean;
 	enabled?: boolean;
-	status?: 'healthy' | 'unhealthy' | 'unknown' | 'disabled';
+	status?: 'healthy' | 'partial' | 'unhealthy' | 'unknown' | 'disabled';
+  probe_summary?: string;
   message?: string;
   checked_at?: string;
 };
