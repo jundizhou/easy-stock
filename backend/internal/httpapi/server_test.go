@@ -479,19 +479,23 @@ func TestServerUsesKaipanlaSnapshotForOverviewAndThemeScreen(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 		switch r.URL.Path {
-		case "/api/getPlateRotatData":
-			html := "<tr><td>排名</td><td>" + tradeDate + "</td></tr>" +
-				"<tr><td>1</td><td code='801660' name='通信'><span>通信</span><span>9836</span></td></tr>" +
-				"<tr><td>2</td><td code='801001' name='芯片'><span>芯片</span><span>9558</span></td></tr>" +
-				"<tr><td>3</td><td code='803023' name='AI应用'><span>AI应用</span><span>5292</span></td></tr>" +
-				"<tr id='long'></tr>"
-			_ = json.NewEncoder(w).Encode(map[string]string{"first": "801660", "html": html})
-		case "/api/getLongByPlate":
-			code := r.Form.Get("platecode")
+		case "/req/getPlateRotatData", "/req/getLongByPlate":
+			if r.Method != http.MethodPost || r.PostForm.Get("from") != "kaipan" || r.PostForm.Get("days") != "20" {
+				http.Error(w, "invalid ranking form", http.StatusBadRequest)
+				return
+			}
+			if r.URL.Path == "/req/getPlateRotatData" {
+				fmt.Fprintf(w, `{"first":"801660","dates":[%q],"rows":[
+					{"rank":1,"cells":[{"code":"801660","name":"通信","strong":"9836"}]},
+					{"rank":2,"cells":[{"code":"801001","name":"芯片","strong":"9558"}]},
+					{"rank":3,"cells":[{"code":"803023","name":"AI应用","strong":"5292"}]}
+				]}`, tradeDate)
+				return
+			}
+			code := r.PostForm.Get("platecode")
 			stockCode := map[string]string{"801660": "002792", "801001": "603629", "803023": "300308"}[code]
 			name := map[string]string{"801660": "通宇通讯", "801001": "利通电子", "803023": "中际旭创"}[code]
-			html := "<td>领涨</td><td><div class='kline' code='" + stockCode + "'><span>龙一</span>" + name + "</div></td>"
-			_ = json.NewEncoder(w).Encode(map[string]string{"html": html})
+			fmt.Fprintf(w, `{"result":"success","data":[{"date":%q,"stocks":[{"code":%q,"name":%q,"long":"龙一"}]}]}`, tradeDate, stockCode, name)
 		case "/vendor/stockdata/datasource.json":
 			_ = json.NewEncoder(w).Encode(map[string]string{"data_url": remote.URL})
 		case "/vendor/stockdata/ztpool.json":

@@ -1,200 +1,110 @@
 package duanxianxia
 
 import (
+	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"easy-stock/backend/internal/foundation"
-	"golang.org/x/net/html"
 )
 
-var numericText = regexp.MustCompile("[-+]?\\d+(?:\\.\\d+)?")
+type rotationResponse struct {
+	First string   `json:"first"`
+	Dates []string `json:"dates"`
+	Rows  []struct {
+		Rank  int `json:"rank"`
+		Cells []struct {
+			Code     string      `json:"code"`
+			Name     string      `json:"name"`
+			Strength json.Number `json:"strong"`
+		} `json:"cells"`
+	} `json:"rows"`
+}
 
-func ParseRotationHTML(fragment string) (string, []Theme, error) {
-	document, err := html.Parse(strings.NewReader("<html><body><table><tbody>" + fragment + "</tbody></table></body></html>"))
-	if err != nil {
-		return "", nil, fmt.Errorf("parse rotation html: %w", err)
+func (rotation rotationResponse) themes() (string, []Theme, error) {
+	if len(rotation.Dates) == 0 {
+		return "", nil, fmt.Errorf("rotation has no trade dates")
 	}
-	rows := findElements(document, "tr")
-	if len(rows) < 2 {
-		return "", nil, fmt.Errorf("rotation html has no ranked rows")
-	}
-	headerCells := directElementChildren(rows[0], "td")
-	if len(headerCells) < 2 {
-		return "", nil, fmt.Errorf("rotation html has no trade dates")
-	}
-	dates := make([]string, 0, len(headerCells)-1)
-	for _, cell := range headerCells[1:] {
-		value := strings.TrimSpace(textContent(cell))
-		if _, err := time.Parse("2006-01-02", value); err != nil {
-			return "", nil, fmt.Errorf("invalid rotation trade date %q", value)
+	var current []Theme
+	history := make(map[string][]RankPoint)
+	for column, date := range rotation.Dates {
+		if _, err := time.Parse(time.DateOnly, date); err != nil {
+			return "", nil, fmt.Errorf("invalid rotation trade date %q", date)
 		}
-		dates = append(dates, value)
-	}
-
-	type pointMap map[string]RankPoint
-	history := map[string]pointMap{}
-	current := make([]Theme, 0, 10)
-	for _, row := range rows[1:] {
-		cells := directElementChildren(row, "td")
-		if len(cells) < 2 {
-			continue
-		}
-		rank, err := strconv.Atoi(strings.TrimSpace(textContent(cells[0])))
-		if err != nil || rank <= 0 {
-			continue
-		}
-		for column := 1; column < len(cells) && column <= len(dates); column++ {
-			cell := cells[column]
-			code := strings.TrimSpace(attr(cell, "code"))
-			name := strings.TrimSpace(attr(cell, "name"))
+		for _, row := range rotation.Rows {
+			if row.Rank <= 0 || column >= len(row.Cells) {
+				continue
+			}
+			cell := row.Cells[column]
+			code, name := strings.TrimSpace(cell.Code), strings.TrimSpace(cell.Name)
 			if code == "" || name == "" {
 				continue
 			}
-			strength := lastNumber(textContent(cell))
-			if history[code] == nil {
-				history[code] = pointMap{}
+			strength, err := cell.Strength.Float64()
+			if err != nil {
+				return "", nil, fmt.Errorf("invalid rotation strength for %s on %s: %w", code, date, err)
 			}
-			history[code][dates[column-1]] = RankPoint{TradeDate: dates[column-1], Rank: rank, Strength: strength}
-			if column == 1 {
-				current = append(current, Theme{Code: code, Name: name, Rank: rank, Strength: strength})
+			history[code] = append(history[code], RankPoint{TradeDate: date, Rank: row.Rank, Strength: strength})
+			if column == 0 {
+				current = append(current, Theme{Code: code, Name: name, Rank: row.Rank, Strength: strength})
 			}
 		}
 	}
 	if len(current) == 0 {
-		return "", nil, fmt.Errorf("rotation html has no current themes")
+		return "", nil, fmt.Errorf("rotation has no current themes")
 	}
 	sort.SliceStable(current, func(i, j int) bool { return current[i].Rank < current[j].Rank })
-	for index := range current {
-		points := make([]RankPoint, 0, len(dates))
-		for _, date := range dates {
-			if point, ok := history[current[index].Code][date]; ok {
-				points = append(points, point)
-			}
-		}
-		current[index].History = points
+	if rotation.First != "" && current[0].Code != rotation.First {
+		return "", nil, fmt.Errorf("rotation first code %s does not match rank one %s", rotation.First, current[0].Code)
 	}
-	return dates[0], current, nil
+	for i := range current {
+		current[i].History = history[current[i].Code]
+	}
+	return rotation.Dates[0], current, nil
 }
 
-func ParseLeadersHTML(fragment string) ([]Leader, bool, error) {
-	document, err := html.Parse(strings.NewReader("<html><body><table><tbody><tr>" + fragment + "</tr></tbody></table></body></html>"))
-	if err != nil {
-		return nil, false, fmt.Errorf("parse leader html: %w", err)
+type leadersResponse struct {
+	Result string `json:"result"`
+	Data   []struct {
+		Date   string `json:"date"`
+		Stocks []struct {
+			Code string `json:"code"`
+			Name string `json:"name"`
+			Role string `json:"long"`
+		} `json:"stocks"`
+	} `json:"data"`
+}
+
+func (response leadersResponse) leadersOn(date string) ([]Leader, error) {
+	if response.Result != "success" {
+		return nil, fmt.Errorf("unexpected leader result %q", response.Result)
 	}
-	rows := findElements(document, "tr")
-	if len(rows) == 0 {
-		return nil, false, fmt.Errorf("leader html has no row")
-	}
-	cells := directElementChildren(rows[0], "td")
-	if len(cells) == 0 {
-		return nil, false, fmt.Errorf("leader html has no cells")
-	}
-	currentCell := cells[0]
-	if len(cells) > 1 {
-		currentCell = cells[1]
-	}
-	items := findElementsWithClass(currentCell, "div", "kline")
-	leaders := make([]Leader, 0, len(items))
-	for index, item := range items {
-		rawCode := strings.TrimSpace(attr(item, "code"))
-		normalized, err := foundation.NormalizeSymbol(rawCode)
-		if err != nil {
-			return nil, false, fmt.Errorf("normalize leader symbol %q: %w", rawCode, err)
-		}
-		role := fmt.Sprintf("龙%d", index+1)
-		for _, span := range findElements(item, "span") {
-			if value := strings.TrimSpace(textContent(span)); value != "" {
-				role = value
-				break
-			}
-		}
-		name := strings.TrimSpace(textContent(item))
-		name = strings.TrimSpace(strings.TrimPrefix(name, role))
-		if name == "" {
+	for _, day := range response.Data {
+		if day.Date != date {
 			continue
 		}
-		leaders = append(leaders, Leader{Rank: index + 1, Role: role, Symbol: normalized.Canonical, Name: name})
-	}
-	if len(leaders) > 0 {
-		return leaders, false, nil
-	}
-	noLeaders := strings.Contains(strings.TrimSpace(textContent(currentCell)), "当日无领涨")
-	return []Leader{}, noLeaders, nil
-}
-
-func lastNumber(value string) float64 {
-	matches := numericText.FindAllString(value, -1)
-	if len(matches) == 0 {
-		return 0
-	}
-	number, _ := strconv.ParseFloat(matches[len(matches)-1], 64)
-	return number
-}
-
-func findElements(node *html.Node, tag string) []*html.Node {
-	items := []*html.Node{}
-	var visit func(*html.Node)
-	visit = func(current *html.Node) {
-		if current.Type == html.ElementNode && current.Data == tag {
-			items = append(items, current)
+		if day.Stocks == nil {
+			return nil, fmt.Errorf("missing leader stocks for %s", date)
 		}
-		for child := current.FirstChild; child != nil; child = child.NextSibling {
-			visit(child)
-		}
-	}
-	visit(node)
-	return items
-}
-
-func findElementsWithClass(node *html.Node, tag string, className string) []*html.Node {
-	items := []*html.Node{}
-	for _, item := range findElements(node, tag) {
-		for _, candidate := range strings.Fields(attr(item, "class")) {
-			if candidate == className {
-				items = append(items, item)
-				break
+		leaders := make([]Leader, 0, len(day.Stocks))
+		for i, stock := range day.Stocks {
+			symbol, err := foundation.NormalizeSymbol(stock.Code)
+			if err != nil {
+				return nil, fmt.Errorf("normalize leader symbol %q: %w", stock.Code, err)
 			}
+			name := strings.TrimSpace(stock.Name)
+			if name == "" {
+				return nil, fmt.Errorf("missing leader name for %s", stock.Code)
+			}
+			role := strings.TrimSpace(stock.Role)
+			if role == "" {
+				role = fmt.Sprintf("龙%d", i+1)
+			}
+			leaders = append(leaders, Leader{Rank: i + 1, Role: role, Symbol: symbol.Canonical, Name: name})
 		}
+		return leaders, nil
 	}
-	return items
-}
-
-func directElementChildren(node *html.Node, tag string) []*html.Node {
-	items := []*html.Node{}
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if child.Type == html.ElementNode && child.Data == tag {
-			items = append(items, child)
-		}
-	}
-	return items
-}
-
-func attr(node *html.Node, name string) string {
-	for _, attribute := range node.Attr {
-		if attribute.Key == name {
-			return attribute.Val
-		}
-	}
-	return ""
-}
-
-func textContent(node *html.Node) string {
-	var builder strings.Builder
-	var visit func(*html.Node)
-	visit = func(current *html.Node) {
-		if current.Type == html.TextNode {
-			builder.WriteString(current.Data)
-			builder.WriteByte(' ')
-		}
-		for child := current.FirstChild; child != nil; child = child.NextSibling {
-			visit(child)
-		}
-	}
-	visit(node)
-	return strings.Join(strings.Fields(builder.String()), " ")
+	return nil, fmt.Errorf("leader response has no entry for %s", date)
 }

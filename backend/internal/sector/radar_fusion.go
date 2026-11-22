@@ -640,7 +640,7 @@ func fusedRadarMeta(
 	}
 	return foundation.SourceMeta{
 		Source:         source,
-		SourceURL:      duanxianxia.DefaultBaseURL + "/web/platerotat",
+		SourceURL:      duanxianxia.RotationPageURL,
 		FetchedAt:      fetchedAt,
 		Stale:          len(reasons) > 0,
 		TradeDate:      tradeDate,

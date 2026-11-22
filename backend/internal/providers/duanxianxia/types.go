@@ -7,8 +7,10 @@ import (
 )
 
 const (
-	DefaultBaseURL = "https://duanxianxia.com"
-	SourceID       = "duanxianxia:kaipanla"
+	DefaultBaseURL  = "https://api.duanxianxia.com"
+	websiteURL      = "https://duanxianxia.com/"
+	RotationPageURL = websiteURL + "#/home/web/platerotat"
+	SourceID        = "duanxianxia:kaipanla"
 )
 
 type RankPoint struct {

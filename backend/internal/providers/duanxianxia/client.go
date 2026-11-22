@@ -59,43 +59,36 @@ func (c *Client) Fetch(ctx context.Context, leaderThemeLimit int) (Snapshot, err
 	if leaderThemeLimit <= 0 {
 		leaderThemeLimit = 3
 	}
-	var rotation struct {
-		First string `json:"first"`
-		HTML  string `json:"html"`
-	}
-	if err := c.postForm(ctx, "/api/getPlateRotatData", url.Values{
+	var rotation rotationResponse
+	if err := c.postForm(ctx, "/req/getPlateRotatData", url.Values{
 		"from":  {"kaipan"},
 		"days":  {"20"},
 		"dates": {""},
 	}, &rotation); err != nil {
 		return Snapshot{}, err
 	}
-	tradeDate, themes, err := ParseRotationHTML(rotation.HTML)
+	tradeDate, themes, err := rotation.themes()
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if rotation.First != "" && len(themes) > 0 && themes[0].Code != rotation.First {
-		return Snapshot{}, fmt.Errorf("rotation first code %s does not match rank one %s", rotation.First, themes[0].Code)
-	}
 
 	for index := 0; index < len(themes) && index < leaderThemeLimit; index++ {
-		var response struct {
-			HTML string `json:"html"`
-		}
-		if err := c.postForm(ctx, "/api/getLongByPlate", url.Values{
+		var response leadersResponse
+		if err := c.postForm(ctx, "/req/getLongByPlate", url.Values{
 			"platecode": {themes[index].Code},
+			"from":      {"kaipan"},
 			"days":      {"20"},
 			"dates":     {""},
 		}, &response); err != nil {
 			return Snapshot{}, fmt.Errorf("fetch leaders for %s: %w", themes[index].Name, err)
 		}
-		leaders, noLeaders, err := ParseLeadersHTML(response.HTML)
+		leaders, err := response.leadersOn(tradeDate)
 		if err != nil {
 			return Snapshot{}, fmt.Errorf("parse leaders for %s: %w", themes[index].Name, err)
 		}
 		themes[index].Leaders = leaders
 		themes[index].LeadersLoaded = true
-		themes[index].NoLeaders = noLeaders
+		themes[index].NoLeaders = len(leaders) == 0
 	}
 
 	fetchedAt := c.now()
@@ -127,16 +120,26 @@ func (c *Client) FetchLimitUpPool(ctx context.Context) (LimitUpPoolSnapshot, err
 	if err != nil {
 		return LimitUpPoolSnapshot{}, fmt.Errorf("decrypt limit-up pool: %w", err)
 	}
-	tradeTime := c.now()
+	var document struct {
+		Date string              `json:"date"`
+		List [][]json.RawMessage `json:"list"`
+	}
+	if err := json.Unmarshal(plain, &document); err != nil {
+		return LimitUpPoolSnapshot{}, fmt.Errorf("decode limit-up pool JSON: %w", err)
+	}
+	fetchedAt := c.now()
+	tradeTime := fetchedAt
 	if raw := strings.TrimSpace(headers.Get("Last-Modified")); raw != "" {
 		if parsed, parseErr := http.ParseTime(raw); parseErr == nil {
 			tradeTime = parsed
 		}
 	}
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
-	tradeDate := tradeTime.In(location).Format("2006-01-02")
-	fetchedAt := c.now()
-	events, err := parseLimitUpPool(plain, tradeDate, fetchedAt, sourceURL)
+	tradeDate := document.Date
+	if tradeDate == "" {
+		location := time.FixedZone("Asia/Shanghai", 8*60*60)
+		tradeDate = tradeTime.In(location).Format(time.DateOnly)
+	}
+	events, err := parseLimitUpPool(document.List, tradeDate, fetchedAt, sourceURL)
 	if err != nil {
 		return LimitUpPoolSnapshot{}, err
 	}
@@ -157,7 +160,7 @@ func (c *Client) getBytes(ctx context.Context, requestURL string, target any) ([
 		return nil, nil, err
 	}
 	request.Header.Set("Accept", "application/json,text/plain,*/*")
-	request.Header.Set("Referer", c.baseURL+"/web/pool")
+	request.Header.Set("Referer", websiteURL)
 	request.Header.Set("User-Agent", "easy-stock/1.0 short-term-radar")
 	response, err := c.http.Do(request)
 	if err != nil {
@@ -213,13 +216,7 @@ func decryptPoolPayload(payload []byte) ([]byte, error) {
 	return plain[:len(plain)-padding], nil
 }
 
-func parseLimitUpPool(payload []byte, tradeDate string, fetchedAt time.Time, sourceURL string) ([]foundation.LimitUpEvent, error) {
-	var document struct {
-		List [][]json.RawMessage `json:"list"`
-	}
-	if err := json.Unmarshal(payload, &document); err != nil {
-		return nil, fmt.Errorf("decode limit-up pool JSON: %w", err)
-	}
+func parseLimitUpPool(rows [][]json.RawMessage, tradeDate string, fetchedAt time.Time, sourceURL string) ([]foundation.LimitUpEvent, error) {
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	date, err := time.ParseInLocation("2006-01-02", tradeDate, location)
 	if err != nil {
@@ -231,8 +228,8 @@ func parseLimitUpPool(payload []byte, tradeDate string, fetchedAt time.Time, sou
 		FetchedAt: fetchedAt,
 		TradeDate: tradeDate,
 	}
-	events := make([]foundation.LimitUpEvent, 0, len(document.List))
-	for _, item := range document.List {
+	events := make([]foundation.LimitUpEvent, 0, len(rows))
+	for _, item := range rows {
 		if len(item) < 12 {
 			continue
 		}
@@ -338,7 +335,7 @@ func (c *Client) postForm(ctx context.Context, path string, form url.Values, tar
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json,text/plain,*/*")
-	request.Header.Set("Referer", c.baseURL+"/web/platerotat")
+	request.Header.Set("Referer", websiteURL)
 	request.Header.Set("User-Agent", "easy-stock/1.0 theme-radar")
 	response, err := c.http.Do(request)
 	if err != nil {

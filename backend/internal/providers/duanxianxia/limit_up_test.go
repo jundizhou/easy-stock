@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,21 +16,24 @@ import (
 
 func TestFetchLimitUpPoolDecryptsKaipanlaPayload(t *testing.T) {
 	location := time.FixedZone("CST", 8*60*60)
-	now := time.Date(2026, 8, 7, 11, 40, 0, 0, location)
-	plain := []byte(`{"list":[["603629","利通电子",10.01,120000000,2,"09:31:02","算力租赁+云计算","6天5板",880000000,9200000000,"回封","4","10:22:08"]]}`)
+	now := time.Date(2026, 8, 9, 11, 40, 0, 0, location)
+	plain := []byte(`{"date":"2026-08-07","list":[["603629","利通电子",10.01,120000000,2,"09:31:02","算力租赁+云计算","6天5板",880000000,9200000000,"回封","4","10:22:08"]]}`)
 	encrypted := encryptPoolFixture(t, plain)
-	requests := 0
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		switch r.URL.Path {
-		case "/vendor/stockdata/datasource.json":
-			_, _ = w.Write([]byte(`{"data_url":"` + "http://" + r.Host + `"}`))
-		case "/vendor/stockdata/ztpool.json":
-			w.Header().Set("Last-Modified", "Fri, 07 Aug 2026 03:30:20 GMT")
-			_, _ = w.Write([]byte(encrypted))
-		default:
+	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/vendor/stockdata/ztpool.json" {
 			http.NotFound(w, r)
+			return
 		}
+		w.Header().Set("Last-Modified", "Sun, 09 Aug 2026 03:30:20 GMT")
+		_, _ = w.Write([]byte(encrypted))
+	}))
+	defer data.Close()
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/vendor/stockdata/datasource.json" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"data_url": data.URL})
 	}))
 	defer remote.Close()
 
@@ -38,10 +42,13 @@ func TestFetchLimitUpPoolDecryptsKaipanlaPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchLimitUpPool: %v", err)
 	}
-	if requests != 2 || snapshot.TradeDate != "2026-08-07" || len(snapshot.Events) != 1 {
-		t.Fatalf("unexpected snapshot: requests=%d snapshot=%+v", requests, snapshot)
+	if snapshot.SourceURL != data.URL+"/vendor/stockdata/ztpool.json" || snapshot.TradeDate != "2026-08-07" || len(snapshot.Events) != 1 {
+		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 	event := snapshot.Events[0]
+	if event.Meta.TradeDate != snapshot.TradeDate || event.Date.Format(time.DateOnly) != snapshot.TradeDate {
+		t.Fatalf("unexpected event date: %+v", event)
+	}
 	if event.Symbol != "603629.SH" || event.Streak != 4 || event.Days != 6 || event.Count != 5 || event.BoardType != "回封" {
 		t.Fatalf("unexpected event: %+v", event)
 	}

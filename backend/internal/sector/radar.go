@@ -390,7 +390,7 @@ func (p *RadarProvider) buildKaipanla(ctx context.Context, themeID string, snaps
 			RankRole:  leader.Role,
 			Meta: foundation.SourceMeta{
 				Source:       duanxianxia.SourceID,
-				SourceURL:    duanxianxia.DefaultBaseURL + "/web/platerotat",
+				SourceURL:    duanxianxia.RotationPageURL,
 				FetchedAt:    snapshot.FetchedAt,
 				TradeDate:    snapshot.TradeDate,
 				SnapshotID:   snapshot.ID,
@@ -417,7 +417,7 @@ func (p *RadarProvider) buildKaipanla(ctx context.Context, themeID string, snaps
 	}
 	meta := foundation.SourceMeta{
 		Source:       duanxianxia.SourceID,
-		SourceURL:    duanxianxia.DefaultBaseURL + "/web/platerotat",
+		SourceURL:    duanxianxia.RotationPageURL,
 		FetchedAt:    snapshot.FetchedAt,
 		Stale:        carryForward,
 		TradeDate:    snapshot.TradeDate,

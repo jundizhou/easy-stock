@@ -11,7 +11,7 @@ This document tracks the stock-related data sources that form the `easy-stock` d
 | EastMoney | `push2.eastmoney.com` | `/api/v1/sector-map` | Board list, board quote, board fund flow, board constituents. |
 | EastMoney Datacenter | `datacenter-web.eastmoney.com` | `/api/v1/market/margin-balance` | Shanghai, Shenzhen, and Beijing financing balance, securities-lending balance, total margin balance, and financing net purchases. |
 | CLS | `www.cls.cn` | `/api/v1/market/news` | Market telegraph news. |
-| 短线侠 / 开盘啦 | `duanxianxia.com`, `ds.duanxianxia.com` | `/api/v1/themes/overview`, `/api/v1/themes/screen`, `/api/v1/short-term/limit-up-ladder` | 开盘啦题材排名、龙一至龙五、涨停/连板池与逐股炒作题材。 |
+| 短线侠 / 开盘啦 | `api.duanxianxia.com`, `ds.duanxianxia.com` | `/api/v1/themes/overview`, `/api/v1/themes/screen`, `/api/v1/short-term/limit-up-ladder` | 开盘啦题材排名、龙一至龙五、涨停/连板池与逐股炒作题材。 |
 
 ## Trend Theme Radar Priority
 
