@@ -272,6 +272,10 @@ export type SourceMeta = {
 };
 
 export type Quote = {
+ board_lot?: number;
+ cny_conversion?: { rate: number; date: string };
+ currency?: string;
+ instrument_type?: 'stock' | 'etf';
  volume?: number;
  amount?: number;
   symbol: string;
@@ -945,22 +949,23 @@ export type StockAIFundamental = {
 	quality: string;
 	sustainability?: string;
 	sustainability_flags?: string[];
+	currency?: string;
 	report_date: string;
 	report_name: string;
-	revenue: number;
-	revenue_yoy: number;
-	net_profit: number;
-	net_profit_yoy: number;
+	revenue: number | null;
+	revenue_yoy: number | null;
+	net_profit: number | null;
+	net_profit_yoy: number | null;
 	recurring_net_profit_available?: boolean;
-	recurring_net_profit?: number;
-	recurring_net_profit_yoy?: number;
-	non_recurring_profit?: number;
-	non_recurring_profit_ratio?: number;
-	eps: number;
-	roe: number;
-	gross_margin: number;
-	debt_ratio: number;
-	operating_cash_flow_per_share: number;
+	recurring_net_profit?: number | null;
+	recurring_net_profit_yoy?: number | null;
+	non_recurring_profit?: number | null;
+	non_recurring_profit_ratio?: number | null;
+	eps: number | null;
+	roe: number | null;
+	gross_margin: number | null;
+	debt_ratio: number | null;
+	operating_cash_flow_per_share: number | null;
 	summary: string;
 	source: string;
 };

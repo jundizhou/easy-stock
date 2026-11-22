@@ -47,3 +47,10 @@ describe('portfolio valuation', () => {
   expect(valuePortfolio({ profile: 'balanced', holdings: [] }, {})).toMatchObject({ cash: 500000, marketValue: 0, profit: 0, profitPercent: 0 });
  });
 });
+
+it('handles RMB counters and rejects expired foreign currency rates', () => {
+	const hk = { ...holding, symbol: '80700.HK', costPrice: '300', quantity: '100' };
+	expect(valuePortfolioHolding(hk, 100000, { ...quote(310), currency: 'CNY' })).toMatchObject({ marketValue: 31000, profit: 1000 });
+	const expired = { ...quote(310), currency: 'HKD', cny_conversion: { rate: 0.85, date: '2000-01-01' } };
+	expect(valuePortfolioHolding(hk, 100000, expired)).toMatchObject({ price: 310, marketValue: null, weightPercent: null });
+});

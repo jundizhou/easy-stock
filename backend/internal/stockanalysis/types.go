@@ -363,22 +363,24 @@ type FundamentalAnalysis struct {
 	SustainabilityFlags            []string `json:"sustainability_flags,omitempty"`
 	ReportDate                     string   `json:"report_date"`
 	ReportName                     string   `json:"report_name"`
-	Revenue                        float64  `json:"revenue"`
-	RevenueYearOverYear            float64  `json:"revenue_yoy"`
-	NetProfit                      float64  `json:"net_profit"`
-	NetProfitYearOverYear          float64  `json:"net_profit_yoy"`
+	Revenue                        *float64 `json:"revenue"`
+	RevenueYearOverYear            *float64 `json:"revenue_yoy"`
+	NetProfit                      *float64 `json:"net_profit"`
+	NetProfitYearOverYear          *float64 `json:"net_profit_yoy"`
 	RecurringNetProfitAvailable    bool     `json:"recurring_net_profit_available"`
-	RecurringNetProfit             float64  `json:"recurring_net_profit"`
-	RecurringNetProfitYearOverYear float64  `json:"recurring_net_profit_yoy"`
-	NonRecurringProfit             float64  `json:"non_recurring_profit"`
-	NonRecurringProfitRatio        float64  `json:"non_recurring_profit_ratio"`
-	EPS                            float64  `json:"eps"`
-	ROE                            float64  `json:"roe"`
-	GrossMargin                    float64  `json:"gross_margin"`
-	DebtRatio                      float64  `json:"debt_ratio"`
-	OperatingCashFlowPerShare      float64  `json:"operating_cash_flow_per_share"`
+	RecurringNetProfit             *float64 `json:"recurring_net_profit"`
+	RecurringNetProfitYearOverYear *float64 `json:"recurring_net_profit_yoy"`
+	NonRecurringProfit             *float64 `json:"non_recurring_profit"`
+	NonRecurringProfitRatio        *float64 `json:"non_recurring_profit_ratio"`
+	EPS                            *float64 `json:"eps"`
+	ROE                            *float64 `json:"roe"`
+	GrossMargin                    *float64 `json:"gross_margin"`
+	DebtRatio                      *float64 `json:"debt_ratio"`
+	OperatingCashFlowPerShare      *float64 `json:"operating_cash_flow_per_share"`
 	Summary                        string   `json:"summary"`
 	Source                         string   `json:"source"`
+	// Currency 是财报计价货币。A 股恒为人民币（留空），港股可能是 HKD。
+	Currency string `json:"currency,omitempty"`
 }
 
 type ResearchAnalysis struct {

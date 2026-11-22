@@ -43,6 +43,7 @@ import (
 )
 
 type Server struct {
+	portfolioFX              portfolioFXRates
 	monitor                  *monitor.Engine
 	monitorStore             *monitor.Store
 	monitorPreferences       *monitor.PreferencesStore
@@ -63,6 +64,8 @@ type Server struct {
 	realtimeProvider         RealtimeProvider
 	kLinePrimary             KLineProvider
 	kLineFallback            KLineProvider
+	marketKLine              KLineProvider
+	hongKongFinancials       HongKongFinancialProvider
 	newsProvider             NewsProvider
 	stockNewsSearch          StockNewsSearchProvider
 	sectorMap                SectorMapProvider
@@ -181,6 +184,12 @@ func NewServer(config any) *Server {
 	}
 	if cfg.KLineFallback == nil {
 		cfg.KLineFallback = sinaClient
+	}
+	if cfg.HongKongKLine == nil {
+		cfg.HongKongKLine = tencentClient
+	}
+	if cfg.HongKongFinancials == nil {
+		cfg.HongKongFinancials = eastMoneyClient
 	}
 	if cfg.News == nil {
 		if cfg.StockNews == nil {
@@ -398,6 +407,8 @@ func NewServer(config any) *Server {
 		realtimeProvider:         cfg.Realtime,
 		kLinePrimary:             cfg.KLinePrimary,
 		kLineFallback:            cfg.KLineFallback,
+		marketKLine:              newMarketKLineChain(cfg.HongKongKLine, newKLineChain(cfg.KLinePrimary, cfg.KLineFallback)),
+		hongKongFinancials:       cfg.HongKongFinancials,
 		newsProvider:             cfg.News,
 		stockNewsSearch:          cfg.StockNews,
 		sectorMap:                cfg.SectorMap,
@@ -526,10 +537,12 @@ func NewServer(config any) *Server {
 		sectorRank = flow
 	}
 	s.monitor = monitor.NewEngine(monitor.EngineConfig{
-		Store:              monitorStore,
-		Realtime:           cfg.Realtime,
-		Snapshot:           cfg.MonitorSnapshot,
-		KLine:              newKLineChain(cfg.KLinePrimary, cfg.KLineFallback),
+		Store:    monitorStore,
+		Realtime: cfg.Realtime,
+		Snapshot: cfg.MonitorSnapshot,
+		// 监控中心的日线请求必须和个股分析走同一套市场分流：A 股主备链
+		// 不覆盖港股，纯 A 股链会让自选/持仓里的港股拿不到任何日线。
+		KLine:              s.marketKLine,
 		Index:              cfg.MarketOverview,
 		Inspection:         monitorInspectionSource{server: s},
 		InspectionHoldings: monitorInspectionSource{server: s},
@@ -957,6 +970,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	if r.URL.Query().Get("account_currency") == "CNY" {
+		quotes = append([]foundation.Quote(nil), quotes...)
+		s.portfolioFX.apply(r.Context(), quotes)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": quotes})
 }
 
@@ -1052,11 +1069,11 @@ func (s *Server) klineBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) loadKLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
-	lines, err := s.kLinePrimary.KLine(ctx, symbol, period, limit)
-	if err == nil {
-		return normalizeKLinePeriod(lines, period), nil
+	provider := s.marketKLine
+	if provider == nil {
+		provider = newMarketKLineChain(nil, newKLineChain(s.kLinePrimary, s.kLineFallback))
 	}
-	lines, err = s.kLineFallback.KLine(ctx, symbol, period, limit)
+	lines, err := provider.KLine(ctx, symbol, period, limit)
 	if err != nil {
 		return nil, err
 	}

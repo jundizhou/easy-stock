@@ -222,18 +222,33 @@ func (e *Engine) deviationEventCounts(ctx context.Context, days int) map[string]
 	if days < 1 {
 		return nil
 	}
-	end := foundation.LatestAStockSession(e.now())
-	day, err := time.ParseInLocation("2006-01-02", end, foundation.AStockLocation)
-	if err != nil {
-		return nil
-	}
-	for remaining := days - 1; remaining > 0; {
-		day = day.AddDate(0, 0, -1)
-		if foundation.IsAStockTradingDay(day) {
-			remaining--
+	now := e.now()
+	counts := map[string]int{}
+	for _, market := range []struct {
+		hk         bool
+		end        string
+		tradingDay func(time.Time) bool
+	}{
+		{false, foundation.LatestAStockSession(now), foundation.IsAStockTradingDay},
+		{true, foundation.LatestHongKongSession(now), foundation.IsHongKongTradingDay},
+	} {
+		day, err := time.ParseInLocation("2006-01-02", market.end, foundation.AStockLocation)
+		if err != nil {
+			continue
+		}
+		for remaining := days - 1; remaining > 0; {
+			day = day.AddDate(0, 0, -1)
+			if market.tradingDay(day) {
+				remaining--
+			}
+		}
+		events, _ := e.store.DeviationCounts(ctx, day.Format("2006-01-02"), market.end)
+		for symbol, count := range events {
+			if foundation.IsHongKongSymbol(symbol) == market.hk {
+				counts[symbol] = count
+			}
 		}
 	}
-	counts, _ := e.store.DeviationCounts(ctx, day.Format("2006-01-02"), end)
 	return counts
 }
 
@@ -251,14 +266,17 @@ type AbnormalCalcRow struct {
 
 // AbnormalCalcView 是单票异动计算结果。
 type AbnormalCalcView struct {
-	Symbol             string            `json:"symbol"`
-	Name               string            `json:"name"`
-	Board              string            `json:"board"`
-	IsST               bool              `json:"is_st"`
-	Price              float64           `json:"price"`
-	ChangePercent      float64           `json:"change_percent"`
-	BenchmarkID        string            `json:"benchmark_id,omitempty"`
-	BenchmarkLabel     string            `json:"benchmark_label,omitempty"`
+	Symbol         string  `json:"symbol"`
+	Name           string  `json:"name"`
+	Board          string  `json:"board"`
+	IsST           bool    `json:"is_st"`
+	Price          float64 `json:"price"`
+	ChangePercent  float64 `json:"change_percent"`
+	BenchmarkID    string  `json:"benchmark_id,omitempty"`
+	BenchmarkLabel string  `json:"benchmark_label,omitempty"`
+	// ThresholdNote 说明阈值口径的适用范围。A 股为空；港股非空，
+	// 因为港股没有交易所异常波动认定制度，沿用 A 股阈值只能作观察参考。
+	ThresholdNote      string            `json:"threshold_note,omitempty"`
 	Windows            []AbnormalWindow  `json:"windows,omitempty"`
 	WindowAvailability map[string]bool   `json:"window_availability"`
 	Level              string            `json:"level,omitempty"`
@@ -277,6 +295,19 @@ var abnormalBenchmarkLabels = map[string]string{
 	"chinext_comp": "创业板综指",
 	"star50":       "科创50",
 	"bse50":        "北证50",
+	"hsi":          "恒生指数",
+}
+
+// abnormalThresholdNote 说明阈值口径的适用范围。
+//
+// 港股没有交易所异常波动认定制度，也不存在 A 股那样的 3/10/30 日阈值；
+// 页面仍按 A 股口径估算偏离值，只能当观察参考，必须明说，否则
+// 「已越线」会被读成港交所的正式认定。
+func abnormalThresholdNote(symbol string) string {
+	if foundation.IsHongKongSymbol(symbol) {
+		return "港股无交易所异常波动认定，偏离阈值按 A 股口径估算，仅供观察"
+	}
+	return ""
 }
 
 // AbnormalCalc 计算一只标的的异动窗口与近 30 个交易日明细。
@@ -320,6 +351,7 @@ func (e *Engine) AbnormalCalc(ctx context.Context, symbol string) (AbnormalCalcV
 	}
 	view.BenchmarkID = indexID
 	view.BenchmarkLabel = abnormalBenchmarkLabels[indexID]
+	view.ThresholdNote = abnormalThresholdNote(symbol)
 	indexBars, haveIndex := e.indexBars(ctx, indexID, view.GeneratedAt)
 	if !haveIndex {
 		view.Error = "基准指数数据不足，暂无法计算偏离值"
@@ -335,7 +367,7 @@ func (e *Engine) AbnormalCalc(ctx context.Context, symbol string) (AbnormalCalcV
 	// 和页面现价同步跳动，否则看起来像没接实时行情。bars 是共享缓存切片，
 	// 不能直接改末根，复制末根后再覆盖。
 	calcBars := bars
-	currentSession := barDate(bars[len(bars)-1]) == foundation.LatestAStockSession(view.GeneratedAt)
+	currentSession := barDate(bars[len(bars)-1]) == foundation.LatestSymbolSession(symbol, view.GeneratedAt)
 	projectionPrice := view.Price
 	if inSnapshot && row.Price > 0 && currentSession {
 		last := bars[len(bars)-1]
@@ -503,7 +535,7 @@ func (e *Engine) abnormalItemForSymbol(ctx context.Context, symbol string, event
 		Symbol: symbol, Name: calc.Name, Board: calc.Board,
 		Price: calc.Price, ChangePercent: calc.ChangePercent,
 		Level: calc.Level, Windows: calc.Windows, WindowAvailability: calc.WindowAvailability,
-		IsST: calc.IsST, Monitored: true,
+		IsST: calc.IsST, Monitored: true, ThresholdNote: calc.ThresholdNote,
 		Severe:  abnormalSevere(calc.Windows),
 		Signals: []string{"deviation"},
 	}
@@ -524,7 +556,7 @@ func (e *Engine) abnormalItemForSymbol(ctx context.Context, symbol string, event
 	item.LastTriggerDate = lastAbnormalTriggerDate(calc.Rows, calc.Board, calc.IsST)
 	if len(calc.Rows) > 0 {
 		item.DailyAsOf = calc.Rows[len(calc.Rows)-1].Date
-		item.Historical = item.DailyAsOf != foundation.LatestAStockSession(calc.GeneratedAt)
+		item.Historical = item.DailyAsOf != foundation.LatestSymbolSession(symbol, calc.GeneratedAt)
 		item.CalculatedAt = &calc.GeneratedAt
 	}
 	if eventCounts != nil {
@@ -569,7 +601,7 @@ func (e *Engine) fillAbnormalWithoutSnapshot(ctx context.Context, view *Abnormal
 			Dev3: dev.Dev3, Dev10: dev.Dev10, Dev30: dev.Dev30,
 			Windows: windows, WindowAvailability: abnormalWindowAvailability(dev.Available), WorstKey: worst.Key, Threshold: worst.Threshold,
 			Direction: worst.Direction, Remaining: worst.Remaining, TriggerPrice: worst.TriggerPrice,
-			Events10d: counts[symbol], Monitored: monitored[symbol],
+			Events10d: counts[symbol], Monitored: monitored[symbol], ThresholdNote: abnormalThresholdNote(symbol),
 			DailyAsOf: dev.DailyAsOf, Historical: dev.Stale,
 		}
 		if !dev.FetchedAt.IsZero() {

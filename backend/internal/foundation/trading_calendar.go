@@ -6,11 +6,19 @@ var AStockLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
 // LatestCompletedAStockSession excludes today's incomplete daily bar.
 func LatestCompletedAStockSession(value time.Time) time.Time {
+	return LatestCompletedSymbolSession("", value)
+}
+
+func LatestCompletedSymbolSession(symbol string, value time.Time) time.Time {
 	day := value.In(AStockLocation)
-	if day.Hour() < 15 {
+	closeHour, tradingDay := 15, IsAStockTradingDay
+	if IsHongKongSymbol(symbol) {
+		closeHour, tradingDay = hongKongCloseHour(day), IsHongKongTradingDay
+	}
+	if day.Hour() < closeHour {
 		day = day.AddDate(0, 0, -1)
 	}
-	for !IsAStockTradingDay(day) {
+	for !tradingDay(day) {
 		day = day.AddDate(0, 0, -1)
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, AStockLocation)
@@ -21,14 +29,22 @@ func LatestCompletedAStockSession(value time.Time) time.Time {
 // be provisional; freshness alone never confirms that its close has completed.
 // Counts are capped at six: callers only distinguish lags above five sessions.
 func AStockSessionLag(date string, asOf time.Time) (int, bool) {
+	return SymbolSessionLag("", date, asOf)
+}
+
+func SymbolSessionLag(symbol, date string, asOf time.Time) (int, bool) {
 	day, err := time.ParseInLocation("2006-01-02", date, AStockLocation)
 	if err != nil || asOf.IsZero() || day.After(asOf) {
 		return 0, false
 	}
-	latest := LatestCompletedAStockSession(asOf)
+	latest := LatestCompletedSymbolSession(symbol, asOf)
+	tradingDay := IsAStockTradingDay
+	if IsHongKongSymbol(symbol) {
+		tradingDay = IsHongKongTradingDay
+	}
 	lag := 0
 	for next := day.AddDate(0, 0, 1); !next.After(latest); next = next.AddDate(0, 0, 1) {
-		if IsAStockTradingDay(next) {
+		if tradingDay(next) {
 			lag++
 		}
 		if lag > 5 {

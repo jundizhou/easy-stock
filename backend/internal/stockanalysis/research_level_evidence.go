@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"easy-stock/backend/internal/foundation"
 )
 
 // Snapshots remain complete; only the model's view is reduced for its level.
@@ -36,7 +38,9 @@ func researchSourceForLevel(source ResearchSource, snapshot ResearchSnapshot, po
 				if policy.DailyBars == 60 {
 					delete(value, "history")
 					value["history_note"] = "仅最新累计披露，不判断连续改善"
-					value["definitions"] = map[string]string{"period": "年初至报告期末累计值，不能按单季或环比解读", "operating_cash_flow_per_share": "每股经营现金流，不是现金流总额"}
+					if !foundation.IsHongKongSymbol(snapshot.Symbol) {
+						value["definitions"] = map[string]string{"period": "年初至报告期末累计值，不能按单季或环比解读", "operating_cash_flow_per_share": "每股经营现金流，不是现金流总额"}
+					}
 				} else {
 					// The latest period already appears in data. Keep comparable
 					// prior periods rather than spending the budget on it twice.

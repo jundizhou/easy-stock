@@ -20,12 +20,14 @@ func PositiveMultiple(v *float64) bool {
 	return v != nil && *v > 0 && !math.IsNaN(*v) && !math.IsInf(*v, 0)
 }
 
-func LatestAStockSession(now time.Time) string {
+func LatestAStockSession(now time.Time) string { return latestSession(now, IsAStockTradingDay) }
+
+func latestSession(now time.Time, tradingDay func(time.Time) bool) string {
 	day := now.In(AStockLocation)
 	if day.Hour() < 9 || (day.Hour() == 9 && day.Minute() < 30) {
 		day = day.AddDate(0, 0, -1)
 	}
-	for !IsAStockTradingDay(day) {
+	for !tradingDay(day) {
 		day = day.AddDate(0, 0, -1)
 	}
 	return day.Format("2006-01-02")

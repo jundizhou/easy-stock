@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"easy-stock/backend/internal/foundation"
+	"easy-stock/backend/internal/stockanalysis"
 )
 
 type stubRealtime struct {
@@ -38,5 +39,30 @@ func TestRealtimeFallbackUsesSecondaryOnlyAfterPrimaryFailure(t *testing.T) {
 	_, err = provider.Realtime(context.Background(), []string{"600519.SH"})
 	if err == nil || strings.Contains(err.Error(), "https://") {
 		t.Fatalf("raw upstream error leaked: %v", err)
+	}
+}
+
+func TestMixedRealtimeUsesHKMetadataAndMainlandPrimary(t *testing.T) {
+	mainland := &stubRealtime{quotes: []foundation.Quote{{Symbol: "600519.SH", Price: 20}}}
+	hk := &stubRealtime{quotes: []foundation.Quote{{Symbol: "02800.HK", InstrumentType: "etf", Currency: "HKD"}}}
+	provider := realtimeFallback{primary: mainland, fallback: hk}
+	quotes, err := provider.Realtime(context.Background(), []string{"02800.HK", "600519.SH", "hk02800"})
+	if err != nil || len(quotes) != 2 || quotes[0].InstrumentType != "etf" || quotes[1].Symbol != "600519.SH" || mainland.calls != 1 || hk.calls != 1 {
+		t.Fatalf("quotes=%+v calls=%d/%d err=%v", quotes, mainland.calls, hk.calls, err)
+	}
+}
+
+func TestHongKongResearchRequiresConfirmedEquity(t *testing.T) {
+	for _, tc := range []struct {
+		symbol, kind string
+		allowed      bool
+	}{
+		{"00700.HK", "stock", true}, {"02800.HK", "etf", false}, {"00700.HK", "", false},
+	} {
+		server := Server{realtimeProvider: &stubRealtime{quotes: []foundation.Quote{{Symbol: tc.symbol, InstrumentType: tc.kind}}}}
+		_, err := server.resolveResearchInstrument(context.Background(), stockanalysis.ResearchRequest{Symbol: tc.symbol}, true)
+		if (err == nil) != tc.allowed {
+			t.Errorf("%s/%s err=%v", tc.symbol, tc.kind, err)
+		}
 	}
 }

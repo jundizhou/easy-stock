@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/agent"
+	"easy-stock/backend/internal/foundation"
 )
 
 func TestAnalyzeNewListingWithOneTradingDay(t *testing.T) {
@@ -247,7 +247,7 @@ func TestAnalyzeRoutesDowntrendToRisk(t *testing.T) {
 func TestBuildActionPriceZonesFallsBackWithoutTechnicalLevels(t *testing.T) {
 	trend := TrendAnalysis{LatestClose: 10, ATR14Percent: 0}
 	risk := RiskControl{EntryReference: 10, StopPrice: 9}
-	plan := buildActionPlan(Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{}, trend.LatestClose)
+	plan := buildActionPlan("600000.SH", Profile{PrimaryType: "range_watch"}, trend, ShortTermAnalysis{}, ThemeAnalysis{}, nil, RelativeStrength{}, risk, ShortTermQuantitativePlan{}, trend.LatestClose)
 	for _, zone := range []ActionPriceZone{plan.Entry, plan.Hold, plan.TakeProfit, plan.StopLoss} {
 		if zone.PriceText == "" || zone.Reason == "" || zone.Action == "" || zone.PriceHigh <= 0 {
 			t.Fatalf("fallback price zone is incomplete: %+v", zone)
@@ -356,16 +356,16 @@ func TestScorecardV4CompressesCorrelatedTechnicalDownside(t *testing.T) {
 }
 
 func TestFundamentalScoreUsesRecurringProfitWhenAvailable(t *testing.T) {
-	item := analyzeFundamentals(&foundation.StockFundamentals{
+	item := analyzeFundamentals("600000.SH", &foundation.StockFundamentals{
 		ReportDate: "2026-03-31", ReportName: "2026一季报",
 		RevenueYearOverYear: 20, NetProfit: 100, NetProfitYearOverYear: 120,
 		DeductedNetProfit: 10, DeductedNetProfitYearOverYear: -20, DeductedNetProfitAvailable: true,
 		ROE: 10, GrossMargin: 30, DebtRatio: 50,
 	})
-	if item.RecurringNetProfit != 10 || item.RecurringNetProfitYearOverYear != -20 {
+	if *item.RecurringNetProfit != 10 || *item.RecurringNetProfitYearOverYear != -20 {
 		t.Fatalf("recurring profit was not selected: %+v", item)
 	}
-	if item.NonRecurringProfitRatio != 90 || item.Sustainability != "较差" || item.Score >= 45 {
+	if *item.NonRecurringProfitRatio != 90 || item.Sustainability != "较差" || item.Score >= 45 {
 		t.Fatalf("one-off profit was not penalized: %+v", item)
 	}
 	if len(item.SustainabilityFlags) == 0 || !strings.Contains(strings.Join(item.SustainabilityFlags, "；"), "非经常性") {
@@ -374,23 +374,23 @@ func TestFundamentalScoreUsesRecurringProfitWhenAvailable(t *testing.T) {
 }
 
 func TestFundamentalScoreAcceptsExplicitZeroRecurringProfit(t *testing.T) {
-	item := analyzeFundamentals(&foundation.StockFundamentals{
+	item := analyzeFundamentals("600000.SH", &foundation.StockFundamentals{
 		ReportDate: "2026-03-31", NetProfit: 20, NetProfitYearOverYear: 10,
 		DeductedNetProfitAvailable: true, DeductedNetProfit: 0, DeductedNetProfitYearOverYear: 0,
 	})
-	if !item.RecurringNetProfitAvailable || item.RecurringNetProfit != 0 || item.Sustainability != "较差" {
+	if !item.RecurringNetProfitAvailable || *item.RecurringNetProfit != 0 || item.Sustainability != "较差" {
 		t.Fatalf("explicit zero recurring profit was treated as missing: %+v", item)
 	}
 }
 
 func TestFundamentalScoreUsesCumulativeDeductedProfitForInterimReport(t *testing.T) {
-	item := analyzeFundamentals(&foundation.StockFundamentals{
+	item := analyzeFundamentals("600000.SH", &foundation.StockFundamentals{
 		ReportDate: "2026-06-30", ReportName: "2026中报",
 		RevenueYearOverYear: 54.800369148545, NetProfit: 43284002000, NetProfitYearOverYear: 41.983941749454,
 		DeductedNetProfit: 39013300000, DeductedNetProfitYearOverYear: 43.444603004956, DeductedNetProfitAvailable: true,
 		ROE: 12.08, GrossMargin: 23.9283938867, DebtRatio: 63.6524529171, OperatingCashFlowPerShare: 13.015213596184,
 	})
-	if item.Score != 75 || item.Sustainability != "较好" || item.NonRecurringProfitRatio >= 10 {
+	if item.Score != 75 || item.Sustainability != "较好" || *item.NonRecurringProfitRatio >= 10 {
 		t.Fatalf("strong interim fundamentals were misclassified: %+v", item)
 	}
 }
@@ -867,12 +867,21 @@ func TestBenchmarkForSymbolRoutesByBoard(t *testing.T) {
 		"300750.SZ": "399006.SZ",
 		"688981.SH": "000688.SH",
 		"832000.BJ": "899050.BJ",
+		// 港股不能拿 A 股宽基对照：交易日与成分都不同，相对强度会失真。
+		"00700.HK": HongKongBenchmarkSymbol,
+		"09988":    HongKongBenchmarkSymbol,
 	}
 	for symbol, want := range tests {
 		got, _ := BenchmarkForSymbol(symbol)
 		if got != want {
 			t.Fatalf("BenchmarkForSymbol(%q) = %q, want %q", symbol, got, want)
 		}
+	}
+}
+
+func TestBenchmarkForSymbolNamesHongKongBenchmark(t *testing.T) {
+	if _, name := BenchmarkForSymbol("00700.HK"); name != "恒生指数" {
+		t.Fatalf("hk benchmark name = %q, want 恒生指数", name)
 	}
 }
 
@@ -1227,4 +1236,27 @@ func (p fakeStockPrompter) Prompt(_ context.Context, prompt string) (agent.Promp
 		*p.prompt = prompt
 	}
 	return agent.PromptResult{Content: p.content}, nil
+}
+
+func TestHongKongRallyDoesNotCreateLimitUpStrategy(t *testing.T) {
+	lines := []foundation.KLine{{Close: 100}, {Close: 112}, {Close: 125.44}}
+	short := analyzeShortTerm("00700.HK", lines, nil)
+	profile := classifyProfile(TrendAnalysis{}, short, ThemeAnalysis{}, nil)
+	if short.LimitUpCount20 != 0 || short.MaxLimitStreak20 != 0 || profile.PrimaryType == "emotion_leader" {
+		t.Fatalf("HK rally generated an A-share limit strategy: %+v %+v", short, profile)
+	}
+	input := Input{Symbol: "00700.HK"}
+	for _, rows := range [][]DataQuality{
+		buildDataQuality(input, profile, lines, short, ThemeAnalysis{}, nil, RelativeStrength{}, nil, nil, nil, nil),
+		buildNewListingDataQuality(input, profile, lines, short, ThemeAnalysis{}, nil, RelativeStrength{}, nil, nil, nil, nil),
+	} {
+		for _, row := range rows {
+			switch row.Key {
+			case "market_emotion", "theme", "limit_up":
+				if row.Status != "not_applicable" {
+					t.Errorf("%+v", row)
+				}
+			}
+		}
+	}
 }

@@ -1,6 +1,8 @@
 import { PortfolioHolding, PortfolioTraderProfile, Quote } from './backend';
 
 export type PortfolioDraftHolding = {
+	currency?: string;
+	cnyConversion?: Quote['cny_conversion'];
  instrumentType?: 'stock' | 'etf';
 	symbol: string;
 	name: string;
@@ -127,6 +129,17 @@ export function portfolioHoldingCost(holding: PortfolioDraftHolding): number | n
 	return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
+export function portfolioRate(holding: Pick<PortfolioDraftHolding, 'symbol' | 'currency' | 'cnyConversion'>, quote?: Quote): number | null {
+	if (!holding.symbol.endsWith('.HK')) return 1;
+	const currency = quote?.currency || holding.currency;
+	if (currency === 'CNY') return 1;
+	if (!currency) return null;
+	const conversion = quote?.cny_conversion || (currency === holding.currency ? holding.cnyConversion : undefined);
+	if (!conversion || !Number.isFinite(conversion.rate) || conversion.rate <= 0) return null;
+	const age = Date.now() - Date.parse(conversion.date + 'T00:00:00Z');
+	return age >= 0 && age < 7 * 86400000 ? conversion.rate : null;
+}
+
 export function portfolioDraftToHoldings(holdings: PortfolioDraftHolding[]): PortfolioHolding[] {
 	return holdings.map((item) => ({
 		symbol: item.symbol,
@@ -139,14 +152,16 @@ export function portfolioDraftToHoldings(holdings: PortfolioDraftHolding[]): Por
 export function portfolioDraftToHoldingsWithAssets(holdings: PortfolioDraftHolding[], totalAssets?: number, quotes?: Record<string, Quote>): PortfolioHolding[] {
 	const assets = typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null;
 	const exact = holdings.map((item) => {
-		const quantity = portfolioValuationQuantity(item, assets);
+		const rate = portfolioRate(item, quotes?.[item.symbol]);
+		if (rate === null) return 0;
+		const quantity = portfolioValuationQuantity(item, assets, rate);
 		const explicitQuantity = portfolioHoldingQuantity(item);
 		const cost = portfolioHoldingCost(item);
 		const price = quotes?.[item.symbol]?.price;
 		const validPrice = typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
 		return quantity !== null && assets !== null && validPrice !== null
-			? quantity * validPrice / assets * 100
-			: explicitQuantity !== null && cost !== null && assets !== null ? explicitQuantity * cost / assets * 100 : item.weight;
+			? quantity * validPrice * rate / assets * 100
+			: explicitQuantity !== null && cost !== null && assets !== null ? explicitQuantity * cost * rate / assets * 100 : item.weight;
 	});
 	const weights = apportionPortfolioWeights(exact);
 	return holdings.map((item, index) => ({ ...portfolioDraftToHoldings([item])[0], weight_percent: weights[index] }));
@@ -196,9 +211,9 @@ export function portfolioHoldingQuantity(holding: PortfolioDraftHolding): number
 
 // Legacy drafts only store an allocation. Use the same whole-share estimate
 // for market value, displayed allocation and the inspection request.
-export function portfolioValuationQuantity(holding: PortfolioDraftHolding, totalAssets?: number | null): number | null {
+export function portfolioValuationQuantity(holding: PortfolioDraftHolding, totalAssets?: number | null, rate = portfolioRate(holding)): number | null {
 	if (holding.quantity?.trim()) return portfolioHoldingQuantity(holding);
 	const cost = portfolioHoldingCost(holding);
-	return typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 && cost !== null
-		? Math.floor(totalAssets * holding.weight / 100 / cost + 1e-9) : null;
+	return typeof totalAssets === 'number' && Number.isFinite(totalAssets) && totalAssets > 0 && cost !== null && rate !== null
+		? Math.floor(totalAssets * holding.weight / 100 / (cost * rate) + 1e-9) : null;
 }

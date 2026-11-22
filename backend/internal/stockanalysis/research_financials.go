@@ -2,7 +2,9 @@ package stockanalysis
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +38,22 @@ func financialModelRows(items []foundation.StockFundamentals, supplement []found
 	result := []any{}
 	for _, item := range items {
 		if item.Meta.Source != "sina:financial-indicators" {
-			result = append(result, item)
+			fields := reportedFinancialFields(&item, foundation.IsHongKongSymbol(item.Symbol))
+			_, deducted := fields["deducted_net_profit"]
+			row := map[string]any{
+				"symbol": item.Symbol, "report_date": item.ReportDate, "report_name": item.ReportName,
+				"published_at": item.PublishedAt, "meta": item.Meta, "deducted_net_profit_available": deducted,
+			}
+			if item.Currency != "" {
+				row["currency"] = item.Currency
+			}
+			if item.DeductedNetProfitReportDate != "" {
+				row["deducted_net_profit_report_date"] = item.DeductedNetProfitReportDate
+			}
+			for key, value := range fields {
+				row[key] = value
+			}
+			result = append(result, row)
 			continue
 		}
 		found := false
@@ -122,7 +139,9 @@ func FinancialFallback(items []foundation.StockFinancialEvidence, symbol string,
 			continue
 		}
 		_, deducted := item.Fields["deducted_net_profit"]
-		result = append(result, foundation.StockFundamentals{Symbol: symbol, ReportDate: item.ReportDate, PublishedAt: item.PublishedAt, Revenue: item.Fields["revenue"], RevenueYearOverYear: item.Fields["revenue_yoy"], NetProfit: item.Fields["net_profit"], NetProfitYearOverYear: item.Fields["net_profit_yoy"], DeductedNetProfit: item.Fields["deducted_net_profit"], DeductedNetProfitYearOverYear: item.Fields["deducted_net_profit_yoy"], DeductedNetProfitAvailable: deducted, EPS: item.Fields["eps"], ROE: item.Fields["roe"], GrossMargin: item.Fields["gross_margin"], DebtRatio: item.Fields["debt_ratio"], Meta: item.Meta})
+		meta := item.Meta
+		meta.AvailableFields = slices.Sorted(maps.Keys(item.Fields))
+		result = append(result, foundation.StockFundamentals{Symbol: symbol, ReportDate: item.ReportDate, PublishedAt: item.PublishedAt, Revenue: item.Fields["revenue"], RevenueYearOverYear: item.Fields["revenue_yoy"], NetProfit: item.Fields["net_profit"], NetProfitYearOverYear: item.Fields["net_profit_yoy"], DeductedNetProfit: item.Fields["deducted_net_profit"], DeductedNetProfitYearOverYear: item.Fields["deducted_net_profit_yoy"], DeductedNetProfitAvailable: deducted, EPS: item.Fields["eps"], ROE: item.Fields["roe"], GrossMargin: item.Fields["gross_margin"], DebtRatio: item.Fields["debt_ratio"], OperatingCashFlowPerShare: item.Fields["operating_cash_flow_per_share"], Meta: meta})
 	}
 	return result
 }
@@ -135,10 +154,7 @@ func financialCrossChecks(primary []foundation.StockFundamentals, secondary []fo
 			if date != b.ReportDate || a.Meta.Source == b.Meta.Source {
 				continue
 			}
-			fields := map[string]float64{"revenue": a.Revenue, "net_profit": a.NetProfit}
-			if a.DeductedNetProfitAvailable {
-				fields["deducted_net_profit"] = a.DeductedNetProfit
-			}
+			fields := reportedFinancialFields(&a, foundation.IsHongKongSymbol(a.Symbol))
 			same, conflicts := []string{}, []string{}
 			for _, key := range []string{"revenue", "net_profit", "deducted_net_profit"} {
 				av, available := fields[key]

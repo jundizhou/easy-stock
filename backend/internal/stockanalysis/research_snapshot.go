@@ -85,7 +85,8 @@ func BuildResearchSnapshot(input Input, analysis Analysis, cutoff time.Time) Res
 	lineMeta := foundation.SourceMeta{}
 	if len(input.KLines) > 0 {
 		lineMeta = input.KLines[len(input.KLines)-1].Meta
-		if parsed, err := url.Parse(lineMeta.SourceURL); err == nil && parsed.Query().Get("fqt") == "1" {
+		parsed, err := url.Parse(lineMeta.SourceURL)
+		if lineMeta.Source == "tencent:hk-qfq-kline" || (err == nil && parsed.Query().Get("fqt") == "1") {
 			priceBasis = "前复权日线；跨除权时点不可直接比较原阈值"
 		}
 	}
@@ -96,8 +97,14 @@ func BuildResearchSnapshot(input Input, analysis Analysis, cutoff time.Time) Res
 			break
 		}
 	}
+	hk := foundation.IsHongKongSymbol(input.Symbol)
+	priceTitle := "日线量价统计（收益为百分比，价格为元，成交额为元）"
+	if hk {
+		priceTitle = "港股日线量价统计（收益为百分比，价格按交易币种 " + analysis.Quote.Currency + "，成交额沿用数据源单位）"
+		snapshot.Limitations = append(snapshot.Limitations, hongKongResearchScope)
+	}
 	snapshot.Limitations = append(snapshot.Limitations, missing...)
-	addMetric("m-price", "日线量价统计（收益为百分比，价格为元，成交额为元）", map[string]any{
+	addMetric("m-price", priceTitle, map[string]any{
 		"summary": summarizeDailyKLines(analysis.dailyBars), "recent_bars": compactDailyBars(normalizeKLines(input.KLines), 20),
 		"source": lineMeta, "price_basis": priceBasis, "missing_fields": missing,
 		"return_definition": "N日收益=末日收盘/此前第N个交易日收盘-1，需要N+1个收盘；不足完整窗口时不输出该收益。",
@@ -113,13 +120,19 @@ func BuildResearchSnapshot(input Input, analysis Analysis, cutoff time.Time) Res
 		latest := financials[0]
 		checks := financialCrossChecks(financials, financialSupplement)
 		modelRows := financialModelRows(financials, financialSupplement)
-		encoded, _ := json.Marshal(map[string]any{"data": modelRows[0], "history": modelRows, "supplemental_history": financialSupplement, "cross_checks": checks, "definitions": map[string]string{"revenue": "营业总收入（并非营业收入）", "net_profit": "归属于母公司股东的净利润", "deducted_net_profit": "扣除非经常性损益后的归母净利润", "period": "各报告期均为年初至报告期末累计值；同年相邻累计营收/利润之差才可计算单季值，单季同比须有上年同季对应的两个累计报告期，比率与每股现金流不能相减", "operating_cash_flow_per_share": "每股经营现金流，不能直接当作现金流总额", "supplement": "东财与新浪分别标记来源；只交叉核对相同报告期、同单位字段，两网站可能转录同一披露，不算独立经营证据；冲突不得择优或平均，保留待核实"}})
+		definitions := map[string]string{"revenue": "营业总收入（并非营业收入）", "net_profit": "归属于母公司股东的净利润", "deducted_net_profit": "扣除非经常性损益后的归母净利润", "period": "各报告期均为年初至报告期末累计值；同年相邻累计营收/利润之差才可计算单季值，单季同比须有上年同季对应的两个累计报告期，比率与每股现金流不能相减", "operating_cash_flow_per_share": "每股经营现金流，不能直接当作现金流总额", "supplement": "东财与新浪分别标记来源；只交叉核对相同报告期、同单位字段，两网站可能转录同一披露，不算独立经营证据；冲突不得择优或平均，保留待核实"}
+		title := "财务披露快照（累计口径，金额为元）"
+		if hk {
+			title = "港股财务披露快照（每期金额按该报告的 currency 列示）"
+			definitions = map[string]string{"revenue": "利润表营运收入或经营收入总额", "net_profit": "股东应占溢利", "period": "按各期报告的财政年度和原币比较", "operating_cash_flow_per_share": "仅在主指标币种与利润表原币相同时取值", "available_fields": "缺少的指标不参与判断，港股未提供扣非净利润"}
+		}
+		encoded, _ := json.Marshal(map[string]any{"data": modelRows[0], "history": modelRows, "supplemental_history": financialSupplement, "cross_checks": checks, "definitions": definitions})
 		for _, check := range checks {
 			if fields := check["conflicting_fields"].([]string); len(fields) > 0 {
 				snapshot.Limitations = append(snapshot.Limitations, fmt.Sprintf("财务来源在%s的%s存在数值冲突，保留两源数值，需核对公司原始披露", check["report_date"], strings.Join(fields, "、")))
 			}
 		}
-		snapshot.Sources = append(snapshot.Sources, ResearchSource{ID: "f-financial", Kind: "disclosure", Title: "财务披露快照（累计口径，金额为元）",
+		snapshot.Sources = append(snapshot.Sources, ResearchSource{ID: "f-financial", Kind: "disclosure", Title: title,
 			Content: string(encoded), Provider: latest.Meta.Source, CapturedAt: snapshot.CapturedAt, PublishedAt: latest.PublishedAt, ReportDate: latest.ReportDate, TimeStatus: financialTimeStatus(latest)})
 		if len(financials) == 1 {
 			snapshot.Limitations = append(snapshot.Limitations, "财务仅含单期披露快照，不能断言连续改善")
@@ -152,7 +165,9 @@ func BuildResearchSnapshot(input Input, analysis Analysis, cutoff time.Time) Res
 		addMetric("m-limit", "涨停事件记录", stockEvents[:min(12, len(stockEvents))], lastDate)
 	}
 	// Membership is kept separate from evidence that a theme caused a price move.
-	addMetric("m-concepts", "概念目录与行业归属（不能证明业务或上涨原因）", map[string]any{"industry": input.Industry, "concepts": input.Concepts}, "")
+	if !hk {
+		addMetric("m-concepts", "概念目录与行业归属（不能证明业务或上涨原因）", map[string]any{"industry": input.Industry, "concepts": input.Concepts}, "")
+	}
 	if input.Industry != "" || len(input.Concepts) > 0 || len(input.ResearchPeers.Members) > 0 || len(researchRelatedThemes(input)) > 0 {
 		addMetric("m-sector", "相关板块与同业量价对照（目录取样，非上涨因果）", researchMarketContext(input, cutoff), lastDate)
 	}

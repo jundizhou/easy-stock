@@ -1,3 +1,4 @@
+import { StockFundamentalPanel } from './StockFundamentalPanel';
 import { ReasoningControl } from './ReasoningControl';
 import {
 	Activity,
@@ -6,7 +7,6 @@ import {
 	BarChart3,
 	Bot,
 	BrainCircuit,
-	Building2,
 	Calculator,
 	CheckCircle2,
 	ChevronDown,
@@ -70,6 +70,7 @@ import {
 	searchStockDirectory,
 	signedPercent,
 } from '../lib/stock-analysis';
+import { useStockSuggestions } from '../lib/use-stock-suggestions';
 import { formatArticleParagraphs, isIndentedParagraph } from '../lib/article';
 import { logRuntimeEvent, runtimeErrorDetails } from '../lib/runtime-log';
 import { useStockResearch } from '../lib/use-stock-research';
@@ -136,6 +137,11 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 	const [exporting, setExporting] = useState(false);
 	const [exportNotice, setExportNotice] = useState('');
 	const [directory, setDirectory] = useState<StockDirectoryEntry[]>(loadCachedStockDirectory);
+	const { suggestions } = useStockSuggestions(config, query, directory);
+	const effectiveDirectory = useMemo(() => {
+		const additions = suggestions.filter(hit => !directory.some(item => item.symbol === hit.symbol));
+		return additions.length ? [...directory, ...additions] : directory;
+	}, [directory, suggestions]);
 	const [directoryWarnings, setDirectoryWarnings] = useState<string[]>([]);
 	const [directoryState, setDirectoryState] = useState<DirectoryState>(() => directory.length > 0 ? 'cached' : 'idle');
 	const [hotRanks, setHotRanks] = useState<HotStockRankData | null>(null);
@@ -227,9 +233,9 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 		analysisAbortController.current = null;
 		const sequence = analysisRequestSequence.current + 1;
 		analysisRequestSequence.current = sequence;
-		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
+		const symbol = resolveStockDirectorySymbol(rawSymbol, effectiveDirectory);
 		if (!symbol) {
-			setError(directory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入6位股票或 ETF 代码，例如 600519 / 510300');
+			setError(effectiveDirectory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入股票 / ETF / 港股代码或名称，例如 600519 / 510300 / 00700');
 			setState('error');
 			return;
 		}
@@ -252,12 +258,12 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 			setError(loadError instanceof Error ? loadError.message : '标的 AI 分析失败');
 			setState('error');
 		}
-	}, [config, directory, research.start, purpose, horizon, cost, researchLevel]);
+	}, [config, effectiveDirectory, research.start, purpose, horizon, cost, researchLevel]);
 
 	const requestAnalysis = useCallback((rawSymbol: string) => {
-		const symbol = resolveStockDirectorySymbol(rawSymbol, directory);
+		const symbol = resolveStockDirectorySymbol(rawSymbol, effectiveDirectory);
 		if (!symbol) {
-			setError(directory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入6位股票或 ETF 代码，例如 600519 / 510300');
+			setError(effectiveDirectory.length > 0 ? '未找到唯一匹配的股票或 ETF，请从搜索结果中选择' : '请输入股票 / ETF / 港股代码或名称，例如 600519 / 510300 / 00700');
 			setState('error');
 			return;
 		}
@@ -416,7 +422,7 @@ export function StockAIAnalysisWorkspace({ config, refreshKey, mode, onModeChang
 
 	return (
 		<section className="stock-ai-workspace">
-			<AnalysisSearchHero mode={mode} right={<AnalysisSearchForm query={query} directory={directory} directoryState={directoryState} directoryWarnings={directoryWarnings} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />} />
+			<AnalysisSearchHero mode={mode} right={<AnalysisSearchForm query={query} directory={effectiveDirectory} suggestions={suggestions} directoryState={directoryState} directoryWarnings={directoryWarnings} onQuery={setQuery} onSubmit={submit} loading={state === 'loading' || state === 'refining'} />} />
 			<div className="stock-ai-mode-row">
 				<nav className="mode-nav stock-ai-mode-nav" aria-label="工作台模式">
 					<button type="button" className={mode === 'analysis' ? 'active' : ''} aria-pressed={mode === 'analysis'} onClick={() => onModeChange('analysis')}><BrainCircuit size={16} aria-hidden="true" />股票 / ETF 分析</button>
@@ -604,7 +610,8 @@ function AnalysisSearchHero({ mode, right }: {
 	);
 }
 
-function AnalysisSearchForm({ query, directory, directoryState, directoryWarnings, onQuery, onSubmit, loading }: {
+function AnalysisSearchForm({ suggestions, query, directory, directoryState, directoryWarnings, onQuery, onSubmit, loading }: {
+	suggestions: StockDirectoryEntry[];
 	query: string;
 	directory: StockDirectoryEntry[];
 	directoryState: DirectoryState;
@@ -615,8 +622,7 @@ function AnalysisSearchForm({ query, directory, directoryState, directoryWarning
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const suggestions = useMemo(() => searchStockDirectory(directory, query), [directory, query]);
-	const resolvedSymbol = useMemo(() => resolveStockDirectorySymbol(query, directory), [directory, query]);
+	const resolvedSymbol = resolveStockDirectorySymbol(query, directory);
 	const chooseSuggestion = (stock: StockDirectoryEntry) => {
 		onQuery(stock.symbol);
 		setExpanded(false);
@@ -637,17 +643,17 @@ function AnalysisSearchForm({ query, directory, directoryState, directoryWarning
 			setExpanded(false);
 		}
 	};
-	const directoryNotice = directoryState === 'error' ? ['目录暂不可用，可直接输入6位代码', ...directoryWarnings].join(' · ') : directoryWarnings.join(' · ');
+	const directoryNotice = directoryState === 'error' ? ['目录暂不可用，可直接输入代码', ...directoryWarnings].join(' · ') : directoryWarnings.join(' · ');
 	return (
 		<form className="stock-ai-search-form" onSubmit={onSubmit}>
 			<div className="stock-ai-search-control" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(false); }}>
-				<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="股票或 ETF 代码 / 名称" aria-label="股票或 ETF 名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
+				<label><Search size={17} /><input value={query} onChange={(event) => { onQuery(event.target.value); setExpanded(true); setActiveIndex(0); }} onFocus={() => setExpanded(true)} onKeyDown={handleKeyDown} placeholder="股票 / ETF / 港股 代码或名称" aria-label="股票 / ETF / 港股 名称或代码" aria-autocomplete="list" aria-controls="stock-ai-search-suggestions" aria-expanded={expanded && suggestions.length > 0} /></label>
 				{directoryNotice && <small className={directoryState === 'error' ? 'error' : ''} role={directoryState === 'error' ? 'alert' : undefined}>{directoryNotice}</small>}
 				{expanded && query.trim() && suggestions.length > 0 && (
 					<div className="stock-ai-search-suggestions" id="stock-ai-search-suggestions" role="listbox">
 						{suggestions.map((stock, index) => (
 							<button type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseSuggestion(stock)} onMouseEnter={() => setActiveIndex(index)} key={stock.symbol}>
-								<span><strong>{stock.name}</strong><small>{stockMarketLabel(stock.symbol)} · {stock.instrument_type === 'etf' ? 'ETF' : '股票'}</small></span>
+								<span><strong>{stock.name}</strong><small>{stockMarketLabel(stock.symbol)} · {stock.instrument_type === 'etf' ? 'ETF' : stock.symbol.endsWith('.HK') && !stock.instrument_type ? '类型待确认' : '股票'}</small></span>
 								<em>{stock.code}</em>
 							</button>
 						))}
@@ -663,6 +669,7 @@ function stockMarketLabel(symbol: string) {
 	if (symbol.endsWith('.SH')) return '沪市';
 	if (symbol.endsWith('.SZ')) return '深市';
 	if (symbol.endsWith('.BJ')) return '北交所';
+	if (symbol.endsWith('.HK')) return '港股';
 	return 'A股';
 }
 
@@ -770,6 +777,7 @@ function NewListingNotice({ analysis }: { analysis: StockAIAnalysis }) {
 function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 	const isNewListing = analysis.profile.primary_type === 'new_listing';
 	const theme = normalizeStockAITheme(analysis.theme);
+	const hk = analysis.symbol.endsWith('.HK');
 	const themeSource = stockThemeSourceLabel(theme.source);
 	const themeRole = theme.role && theme.role !== '待确认' ? theme.role : '';
 	const themeDetail = theme.is_hot
@@ -783,8 +791,8 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<KPICard icon={<TrendingUp size={17} />} label={isNewListing ? '价格发现' : '趋势强度'} value={`${analysis.trend.score}`} detail={`${analysis.trend.strength} · ${analysis.trend.setup}`} tone="green" />
 				<KPICard icon={<Scale size={17} />} label="相对强度" value={analysis.relative_strength.available ? `${analysis.relative_strength.score}` : '--'} detail={analysis.relative_strength.available ? `${analysis.relative_strength.state} · ${analysis.relative_strength.benchmark_name}` : analysis.relative_strength.detail} tone="purple" />
 				<KPICard icon={<ShieldCheck size={17} />} label="风险压力" value={`${analysis.risk_control.score} · ${analysis.risk_control.level}`} detail={`仓位${analysis.risk_control.suggested_position_min_percent}%—${analysis.risk_control.suggested_position_max_percent}%`} tone="amber" />
-				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={isNewListing ? `上市 ${analysis.trend.history_days || analysis.chart.length} 日 · ${analysis.short_term.tradability}` : `近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
-				{analysis.research_report ? <KPICard icon={<Target size={17} />} label="主营背景" value={theme.business || '主业待补充'} detail={themeSource} tone="purple" /> : <KPICard icon={<Target size={17} />} label={theme.is_hot ? '规则热点定位' : '主营背景'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />}
+				<KPICard icon={<Zap size={17} />} label="短线状态" value={analysis.short_term.state} detail={analysis.symbol.endsWith('.HK') ? analysis.short_term.tradability : isNewListing ? `上市 ${analysis.trend.history_days || analysis.chart.length} 日 · ${analysis.short_term.tradability}` : `近20日 ${analysis.short_term.limit_up_count_20d} 次涨停 · ${analysis.short_term.tradability}`} tone="amber" />
+				{hk ? <KPICard icon={<Target size={17} />} label="主营背景" value="港股主营资料暂未接入" detail="业务信息以公司财报及公告为准" tone="purple" /> : analysis.research_report ? <KPICard icon={<Target size={17} />} label="主营背景" value={theme.business || '主业待补充'} detail={themeSource} tone="purple" /> : <KPICard icon={<Target size={17} />} label={theme.is_hot ? '规则热点定位' : '主营背景'} value={theme.primary || '独立结构'} detail={themeDetail} tone="purple" />}
 			</section>
 
 			<div className="stock-ai-analysis-grid">
@@ -792,16 +800,16 @@ function FullAnalysisView({ analysis }: { analysis: StockAIAnalysis }) {
 				<SignalMatrix analysis={analysis} />
 			</div>
 
-			{!analysis.research_report && <ThemeAttributionPanel analysis={analysis} />}
+			{!hk && !analysis.research_report && <ThemeAttributionPanel analysis={analysis} />}
 
 			{!isShortTermDecision(analysis) && <div className="stock-ai-fundamental-grid">
-				<FundamentalPanel analysis={analysis} />
+				<StockFundamentalPanel analysis={analysis} />
 				<ResearchPanel analysis={analysis} />
 			</div>}
 
 			<div className="stock-ai-news-grid">
 				<NewsAnalysisPanel eyebrow="个股资讯" title="近期个股新闻分析" item={analysis.stock_news} icon={<Newspaper size={19} />} />
-				<NewsAnalysisPanel eyebrow="题材催化" title="近期题材新闻分析" item={analysis.theme_news} icon={<Zap size={19} />} />
+				{!hk && <NewsAnalysisPanel eyebrow="题材催化" title="近期题材新闻分析" item={analysis.theme_news} icon={<Zap size={19} />} />}
 			</div>
 
 			<div className="stock-ai-main-grid">
@@ -880,28 +888,6 @@ function normalizeStockAITheme(theme?: StockAIAnalysis['theme']): NonNullable<St
 		primary: '', business: '', is_hot: false, concepts: [], source: '', route: 'trend', trend_score: 0, trend_stage: '', active_days: 0, max_streak: 0, role: '待确认', description: '当前结果由旧版本缓存生成，请重新分析以获得题材共振明细', hot_score: 0, confidence: '低', resonance: { available: false, score: 0, state: '暂无题材', detail: '当前结果由旧版本缓存生成，请重新分析以获得题材共振明细', stock_momentum: 0, relative_strength: 0, breadth: 0, limit_up_energy: 0, persistence: 0, leader_position: 0, evidence_quality: 0, capital_diffusion: 0 },
 	};
 	return { ...fallback, ...(theme || {}), resonance: { ...fallback.resonance, ...(theme?.resonance || {}) } };
-}
-
-function FundamentalPanel({ analysis }: { analysis: StockAIAnalysis }) {
-	const item = analysis.fundamental;
-	return <section className="stock-ai-panel stock-ai-fundamental-panel">
-		<header><div><span>公司质量</span><h3>基本面 · 最新财报</h3></div><Building2 size={19} /></header>
-		{item?.available ? <>
-			<div className="stock-ai-fundamental-summary"><strong>{item.score} · {item.quality}</strong><span>{item.report_name || item.report_date} · 收益持续性{item.sustainability || '待确认'}</span><p>{item.summary}</p>{(item.sustainability_flags || []).map((flag) => <small key={flag} className="stock-ai-fundamental-warning">{flag}</small>)}</div>
-			<div className="stock-ai-fundamental-metrics">
-				<FundamentalMetric label="营业总收入" value={formatCompactAmount(item.revenue)} detail={`同比 ${signedPercent(item.revenue_yoy)}`} tone={item.revenue_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="归母净利润" value={formatCompactAmount(item.net_profit)} detail={`同比 ${signedPercent(item.net_profit_yoy)}`} tone={item.net_profit_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="扣非净利润" value={item.recurring_net_profit_available && typeof item.recurring_net_profit === 'number' ? formatCompactAmount(item.recurring_net_profit) : '--'} detail={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' ? `同比 ${signedPercent(item.recurring_net_profit_yoy)}` : '数据待补充'} tone={item.recurring_net_profit_available && typeof item.recurring_net_profit_yoy === 'number' && item.recurring_net_profit_yoy >= 0 ? 'positive' : 'negative'} />
-				<FundamentalMetric label="一次性损益占比" value={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' ? `${item.non_recurring_profit_ratio.toFixed(1)}%` : '--'} detail="占归母净利润绝对值" tone={item.recurring_net_profit_available && typeof item.non_recurring_profit_ratio === 'number' && item.non_recurring_profit_ratio >= 30 ? 'negative' : ''} />
-				<FundamentalMetric label="ROE" value={`${item.roe.toFixed(1)}%`} detail={`EPS ${item.eps.toFixed(2)}`} />
-				<FundamentalMetric label="毛利率" value={`${item.gross_margin.toFixed(1)}%`} detail={`负债率 ${item.debt_ratio.toFixed(1)}%`} />
-			</div>
-		</> : <div className="stock-ai-panel-empty">最新F10财务数据暂不可用</div>}
-	</section>;
-}
-
-function FundamentalMetric({ label, value, detail, tone = '' }: { label: string; value: string; detail: string; tone?: string }) {
-	return <article><span>{label}</span><strong className={tone}>{value}</strong><small>{detail}</small></article>;
 }
 
 function ResearchPanel({ analysis }: { analysis: StockAIAnalysis }) {
@@ -1112,8 +1098,17 @@ function ShortTermRiskExecutionView({ analysis }: { analysis: StockAIAnalysis })
 }
 
 function PositionCalculator({ analysis }: { analysis: StockAIAnalysis }) {
+	const hk = analysis.symbol.endsWith('.HK');
+	const lot = hk ? analysis.quote?.board_lot : 100;
+	const currency = hk ? analysis.quote?.currency : '元';
+	if (!lot || !currency) return <p>港股仓位测算需要该证券的报价币种和每手股数，当前行情资料不完整。</p>;
+	return <PositionSizingForm key={currency} analysis={analysis} lot={lot} currency={currency} />;
+}
+
+function PositionSizingForm({ analysis, lot, currency }: { analysis: StockAIAnalysis; lot: number; currency: string }) {
+	const storageKey = currency === '元' ? capitalStorageKey : capitalStorageKey + '.' + currency;
 	const risk = analysis.risk_control;
-	const [capital, setCapital] = useState(() => Number(readStoredValue(capitalStorageKey)) || 200_000);
+	const [capital, setCapital] = useState(() => Number(readStoredValue(storageKey)) || (currency === '元' ? 200_000 : 0));
 	const [riskPercent, setRiskPercent] = useState(risk.single_trade_risk_percent);
 	const [entryPrice, setEntryPrice] = useState(risk.entry_reference);
 	const [stopPrice, setStopPrice] = useState(risk.stop_price);
@@ -1126,36 +1121,36 @@ function PositionCalculator({ analysis }: { analysis: StockAIAnalysis }) {
 		setMaxPosition(risk.suggested_position_max_percent);
 	}, [analysis.symbol, risk.entry_reference, risk.single_trade_risk_percent, risk.stop_price, risk.suggested_position_max_percent]);
 
-	const result = useMemo(() => calculatePositionSizing({ accountCapital: capital, riskPercent, entryPrice, stopPrice, maxPositionPercent: maxPosition }), [capital, entryPrice, maxPosition, riskPercent, stopPrice]);
-	const emptySizingReason = maxPosition <= 0
+	const result = useMemo(() => calculatePositionSizing({ boardLot: lot, accountCapital: capital, riskPercent, entryPrice, stopPrice, maxPositionPercent: maxPosition }), [lot, capital, entryPrice, maxPosition, riskPercent, stopPrice]);
+	const emptySizingReason = capital <= 0 ? "请输入账户资金" : maxPosition <= 0
 		? '当前建议不建仓'
-		: capital * maxPosition / 100 < entryPrice * 100
+		: capital * maxPosition / 100 < entryPrice * lot
 			? '仓位上限不足1手'
-			: capital * riskPercent / 100 < Math.max(entryPrice - stopPrice, 0) * 100
+			: capital * riskPercent / 100 < Math.max(entryPrice - stopPrice, 0) * lot
 				? '风险预算不足1手'
 				: '参数无效';
 	const updateCapital = (value: number) => {
 		setCapital(value);
-		if (Number.isFinite(value) && value > 0) writeStoredValue(capitalStorageKey, String(value));
+		if (Number.isFinite(value) && value > 0) writeStoredValue(storageKey, String(value));
 	};
 	return (
 		<section className="stock-ai-panel stock-ai-calculator-panel">
 			<header><div><span>账户风险预算</span><h3>动态仓位计算器</h3></div><Calculator size={19} /></header>
 			<div className="stock-ai-calculator-inputs">
-				<NumberField label="账户资金" value={capital} onChange={updateCapital} suffix="元" step={10000} />
+				<NumberField label="账户资金" value={capital} onChange={updateCapital} suffix={currency} step={10000} />
 				<NumberField label="单笔风险" value={riskPercent} onChange={setRiskPercent} suffix="%" step={0.1} />
-				<NumberField label="计划买入价" value={entryPrice} onChange={setEntryPrice} suffix="元" step={0.01} />
-				<NumberField label="计划止损价" value={stopPrice} onChange={setStopPrice} suffix="元" step={0.01} />
+				<NumberField label="计划买入价" value={entryPrice} onChange={setEntryPrice} suffix={currency} step={0.01} />
+				<NumberField label="计划止损价" value={stopPrice} onChange={setStopPrice} suffix={currency} step={0.01} />
 				<NumberField label="仓位上限" value={maxPosition} onChange={setMaxPosition} suffix="%" step={1} />
 			</div>
 			<div className="stock-ai-sizing-result">
 				<div className="primary"><WalletCards size={20} /><span><small>建议股数</small><strong>{result.shares > 0 ? `${result.shares.toLocaleString('zh-CN')} 股` : emptySizingReason}</strong></span></div>
-				<div><small>计划市值</small><strong>{formatMoney(result.positionValue)}</strong></div>
+				<div><small>计划市值</small><strong>{formatMoney(result.positionValue, currency)}</strong></div>
 				<div><small>实际仓位</small><strong>{result.positionPercent.toFixed(1)}%</strong></div>
-				<div><small>止损亏损</small><strong>{formatMoney(result.maxLoss)}</strong></div>
-				<div><small>允许亏损</small><strong>{formatMoney(result.allowedLoss)}</strong></div>
+				<div><small>止损亏损</small><strong>{formatMoney(result.maxLoss, currency)}</strong></div>
+				<div><small>允许亏损</small><strong>{formatMoney(result.allowedLoss, currency)}</strong></div>
 			</div>
-			<p>计算结果同时受“账户允许亏损”和“仓位上限”约束，并按A股100股整数手向下取整。</p>
+			<p>计算结果同时受“账户允许亏损”和“仓位上限”约束，并按每手 {lot} 股向下取整。</p>
 		</section>
 	);
 }
@@ -1382,7 +1377,7 @@ function PlanGroup({ tone, title, items }: { tone: string; title: string; items:
 }
 
 function QualityRow({ item }: { item: StockAIDataQuality }) {
-	return <div className={item.status}><span>{item.status === 'ready' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}</span><div><strong>{qualityLabel(item.key)}</strong><small>{item.message}</small></div><em>{item.status === 'ready' ? '完整' : item.status === 'missing' ? '缺失' : '受限'}</em></div>;
+	return <div className={item.status}><span>{item.status === 'ready' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}</span><div><strong>{qualityLabel(item.key)}</strong><small>{item.message}</small></div><em>{item.status === 'ready' ? '完整' : item.status === 'not_applicable' ? '不适用' : item.status === 'missing' ? '缺失' : '受限'}</em></div>;
 }
 
 function TrendChart({ points, newListing = false }: { points: StockAITrendPoint[]; newListing?: boolean }) {
@@ -1575,8 +1570,8 @@ function formatPrice(value: number) {
 	return Number.isFinite(value) && value > 0 ? value.toFixed(2) : '--';
 }
 
-function formatMoney(value: number) {
-	return Number.isFinite(value) && value > 0 ? `${value.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} 元` : '--';
+function formatMoney(value: number, currency: string) {
+	return Number.isFinite(value) && value > 0 ? `${value.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} ${currency}` : '--';
 }
 
 function formatShortDate(value: string) {

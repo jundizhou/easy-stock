@@ -151,3 +151,17 @@ describe('monitor live bus', () => {
 		newOff();
 	});
 });
+
+describe('monitor live bus 港股', () => {
+	it('接受 5 位港股代码的实时 tick，并能用带后缀的代码订阅同一条推送', () => {
+		const bus = createMonitorLiveBus();
+		const off = bus.connect(config);
+		const cell = vi.fn();
+		bus.subscribe('00700.HK', cell);
+		FakeEventSource.instances[0].emit({ ticks: [{ symbol: '00700.HK', price: 344, change_percent: -1.26, ts: 200 }] });
+		expect(cell).toHaveBeenCalled();
+		expect(bus.get('00700')?.price).toBe(344);
+		expect(bus.get('hk00700')?.price).toBe(344);
+		off();
+	});
+});

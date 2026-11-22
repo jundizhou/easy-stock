@@ -211,3 +211,58 @@ func TestKLineChainBreakerStillTriesWhenAllOpen(t *testing.T) {
 		t.Fatalf("全冷却时仍应尝试全部源，实际新增 %d 次", primary.hits+fallback.hits-before)
 	}
 }
+
+type stubHongKongKLine struct {
+	bars []foundation.KLine
+	err  error
+	hits int
+}
+
+func (s *stubHongKongKLine) HongKongKLine(_ context.Context, _ string, _ string, _ int) ([]foundation.KLine, error) {
+	s.hits++
+	return s.bars, s.err
+}
+
+// 港股必须走港股专用源：A 股主备链对 hk00700 只会返回空/错误。
+func TestMarketKLineChainRoutesHongKongToDedicatedSource(t *testing.T) {
+	aStock := &stubKLine{bars: okBars(1)}
+	hongKong := &stubHongKongKLine{bars: okBars(5)}
+	bars, err := newMarketKLineChain(hongKong, aStock).KLine(context.Background(), "00700.HK", "day", 60)
+	if err != nil || len(bars) != 5 {
+		t.Fatalf("港股应走专用源：bars=%d err=%v", len(bars), err)
+	}
+	if hongKong.hits != 1 || aStock.hits != 0 {
+		t.Fatalf("港股分流错误：hk=%d a=%d", hongKong.hits, aStock.hits)
+	}
+}
+
+// A 股不应触碰港股源，否则每次 A 股取日线都白打一次公网请求。
+func TestMarketKLineChainKeepsAStockOnAStockChain(t *testing.T) {
+	aStock := &stubKLine{bars: okBars(3)}
+	hongKong := &stubHongKongKLine{bars: okBars(5)}
+	bars, err := newMarketKLineChain(hongKong, aStock).KLine(context.Background(), "600519.SH", "day", 60)
+	if err != nil || len(bars) != 3 {
+		t.Fatalf("A 股应走 A 股链：bars=%d err=%v", len(bars), err)
+	}
+	if hongKong.hits != 0 {
+		t.Fatalf("A 股不该调用港股源，实际 %d 次", hongKong.hits)
+	}
+}
+
+func TestHongKongFailuresLeaveASharePrimaryAvailable(t *testing.T) {
+	aStock := &stubKLine{bars: okBars(2)}
+	hk := &stubHongKongKLine{err: errors.New("hk unavailable")}
+	for _, provider := range []KLineProvider{newMarketKLineChain(hk, aStock), newMarketKLineChain(nil, aStock)} {
+		for range breakerThreshold {
+			if _, err := provider.KLine(context.Background(), "00700.HK", "day", 60); err == nil {
+				t.Fatal("HK request silently crossed markets")
+			}
+		}
+	}
+	if aStock.hits != 0 {
+		t.Fatal("HK failures reached A-share provider")
+	}
+	if _, err := newMarketKLineChain(hk, aStock).KLine(context.Background(), "600519.SH", "day", 60); err != nil || aStock.hits != 1 {
+		t.Fatal("A-share source unavailable", err)
+	}
+}

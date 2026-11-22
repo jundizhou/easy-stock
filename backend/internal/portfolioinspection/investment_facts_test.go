@@ -38,7 +38,7 @@ func TestInvestmentFinancialFactsUseOnlyAvailableFrozenSourceFields(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			_, rs, _, _ := scoreFixture()
 			r := rs[0]
-			r.Analysis.Fundamental = &stockanalysis.FundamentalAnalysis{Summary: "营收虚构99999", Revenue: 99999}
+			r.Analysis.Fundamental = &stockanalysis.FundamentalAnalysis{Summary: "营收虚构99999", Revenue: new(99999.0)}
 			cutoff := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 			r.Analysis.ResearchReport.CutoffAt = cutoff
 			d := map[string]any{"report_date": "2026-06-30 00:00:00", "revenue": 1000, "net_profit": 100, "deducted_net_profit": 80, "deducted_net_profit_available": true, "roe": 0, "meta": map[string]any{"source": "test"}}

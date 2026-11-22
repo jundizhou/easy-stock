@@ -347,6 +347,7 @@ export type MonitorAbnormalWindow = {
 };
 
 export type MonitorAbnormalItem = {
+	threshold_note?: string;
 	symbol: string;
 	name: string;
 	board: string;
@@ -412,6 +413,8 @@ export type MonitorAbnormalCalc = {
 	change_percent: number;
 	benchmark_id?: string;
 	benchmark_label?: string;
+	// 阈值口径适用范围：港股按 A 股口径估算时非空，必须展示以免被读成港交所认定。
+	threshold_note?: string;
 	windows?: MonitorAbnormalWindow[];
 	window_availability?: MonitorAbnormalWindowAvailability;
 	level?: string;
@@ -517,7 +520,7 @@ export const saveMonitorSettings = (config: BackendConfig, settings: Partial<Mon
 
 // MonitorSymbolHit 是搜索添加的一次命中：后端走东财建议接口，
 // 名称 / 6 位代码 / 拼音全拼 / 拼音首字母都能搜到。
-export type MonitorSymbolHit = { symbol: string; code: string; name: string };
+export type MonitorSymbolHit = { instrument_type?: 'stock' | 'etf'; symbol: string; code: string; name: string };
 
 // MonitorWatchItem 是关注仓列表的一行；行情字段在快照不可用时缺省。
 export type MonitorWatchItem = {

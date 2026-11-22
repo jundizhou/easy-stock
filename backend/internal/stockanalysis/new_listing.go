@@ -41,8 +41,7 @@ func analyzeNewListing(input Input, lines []foundation.KLine) Analysis {
 	short.Reasons = uniqueStrings(append([]string{
 		fmt.Sprintf("上市以来仅%d个交易日，短线涨跌只作价格发现参考", len(lines)),
 	}, short.Reasons...), 5)
-	theme := analyzeTheme(input.Symbol, short, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
-	theme = enrichTheme(input, short, theme)
+	theme := analyzeReportTheme(input, short)
 	theme.Route = "new_listing"
 	market := marketContext(input)
 	profile := Profile{
@@ -53,7 +52,7 @@ func analyzeNewListing(input Input, lines []foundation.KLine) Analysis {
 		Tags:        uniqueStrings(append([]string{"上市初期", trend.Phase, "数据积累中"}, theme.Primary), 5),
 		Confidence:  round2(clamp(.26+float64(len(lines))*.009, .26, .43)),
 	}
-	fundamentalValue := analyzeFundamentals(input.Fundamentals)
+	fundamentalValue := analyzeFundamentals(input.Symbol, input.Fundamentals)
 	researchValue := analyzeResearch(input.Reports)
 	stockNewsValue, themeNewsValue := analyzeRecentNews(input, theme)
 	fundamental := &fundamentalValue
@@ -67,11 +66,14 @@ func analyzeNewListing(input Input, lines []foundation.KLine) Analysis {
 		Detail:          fmt.Sprintf("上市仅%d个交易日，暂无20日同周期相对强度；不参与本次评分", len(lines)),
 	}
 	risk := buildNewListingRiskControl(trend, market)
-	plan := buildNewListingActionPlan(profile, trend, risk, quote.Price)
-	nextDay := buildNewListingNextDayPlan(trend, risk, market)
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		risk.PositionFormula = "按港股每手股数及上市期风险上限计算仓位"
+	}
+	plan := buildNewListingActionPlan(input.Symbol, profile, trend, risk, quote.Price)
+	nextDay := buildNewListingNextDayPlan(input.Symbol, trend, risk, market)
 	signals := buildNewListingSignals(trend, short, theme, market, risk, fundamental, research)
 	scorecard := buildNewListingScorecard(profile, signals)
-	risks := buildNewListingRisks(trend, theme, market)
+	risks := buildNewListingRisks(input.Symbol, trend, theme, market)
 	conclusion := Conclusion{
 		Headline: fmt.Sprintf("上市初期 · %s · 观察优先", trend.Phase),
 		Summary:  fmt.Sprintf("%s当前仅有%d个交易日样本，已切换到新股价格发现模型。上市期涨跌、区间位置、换手和流动性可作观察依据，但均线、ATR和成熟趋势尚未形成。", name, len(lines)),
@@ -228,18 +230,22 @@ func buildNewListingRiskControl(trend TrendAnalysis, market *MarketContext) Risk
 	}
 }
 
-func buildNewListingActionPlan(profile Profile, trend TrendAnalysis, risk RiskControl, current float64) ActionPlan {
+func buildNewListingActionPlan(symbol string, profile Profile, trend TrendAnalysis, risk RiskControl, current float64) ActionPlan {
 	entryLow := round2(math.Max(risk.StopPrice*1.02, current*(1-clamp(trend.ObservedVolatility/2, 1.5, 4)/100)))
 	entryHigh := round2(math.Max(current, entryLow+.01))
 	holdLow := round2(math.Max(risk.StopPrice*1.03, current*(1-clamp(trend.ObservedVolatility/3, 1, 3)/100)))
 	holdHigh := round2(math.Max(current*1.02, holdLow+.01))
 	firstTarget := round2(math.Max(risk.TakeProfitFirst, current*1.01))
 	secondTarget := round2(math.Max(risk.TakeProfitSecond, firstTarget+.01))
+	entryAction := "满足基本面/题材与承接条件后，最多使用观察仓，不追首日或高波动拉升。"
+	if foundation.IsHongKongSymbol(symbol) {
+		entryAction = "基本面与价格承接得到确认后，最多使用观察仓，不追首日或高波动拉升。"
+	}
 	return ActionPlan{
 		DecisionMode: "non_short", DecisionLabel: "新股价格发现", DecisionConfidence: profile.Confidence, Horizon: "观察期 / 数据积累",
 		Rationale:     "上市交易日不足20日，价格计划只用于小仓验证和风险边界，不代表成熟趋势买点。",
 		PricingSource: "local-rules", CurrentAction: "观察优先，等待价格区间形成",
-		Entry:           ActionPriceZone{Label: "观察仓参考价格", PriceLow: entryLow, PriceHigh: entryHigh, PriceText: formatActionPriceRange(entryLow, entryHigh), Reason: "只在上市区间内出现缩量承接、且非首日脉冲时考虑观察仓。", Action: "满足基本面/题材与承接条件后，最多使用观察仓，不追首日或高波动拉升。"},
+		Entry:           ActionPriceZone{Label: "观察仓参考价格", PriceLow: entryLow, PriceHigh: entryHigh, PriceText: formatActionPriceRange(entryLow, entryHigh), Reason: "只在上市区间内出现缩量承接、且非首日脉冲时考虑观察仓。", Action: entryAction},
 		Hold:            ActionPriceZone{Label: "持有价格", PriceLow: holdLow, PriceHigh: holdHigh, PriceText: formatActionPriceRange(holdLow, holdHigh), Reason: "持有前提是价格没有有效跌破上市期低点，且波动逐步收敛。", Action: "数据未积累前不扩大仓位；跌破失效位或波动失控时退出。"},
 		TakeProfit:      ActionPriceZone{Label: "止盈价格", PriceLow: firstTarget, PriceHigh: secondTarget, PriceText: formatActionPriceRange(firstTarget, secondTarget), Reason: "目标仅按受限样本的风险距离计算，不把上市初期上涨外推为趋势。", Action: "到达第一目标分批兑现，不因短期强势继续追高。"},
 		StopLoss:        ActionPriceZone{Label: "止损价格", PriceLow: 0, PriceHigh: risk.StopPrice, PriceText: fmt.Sprintf("≤ %.2f 元", risk.StopPrice), Reason: "上市区间失效位下方的保护性参考，跌破说明原观察假设失效。", Action: "触发后停止新增仓位，已有仓位按纪律减仓或止损。"},
@@ -250,7 +256,7 @@ func buildNewListingActionPlan(profile Profile, trend TrendAnalysis, risk RiskCo
 	}
 }
 
-func buildNewListingNextDayPlan(trend TrendAnalysis, risk RiskControl, market *MarketContext) NextDayPlan {
+func buildNewListingNextDayPlan(symbol string, trend TrendAnalysis, risk RiskControl, market *MarketContext) NextDayPlan {
 	volatility := clamp(trend.ObservedVolatility*.7, 3, 12)
 	low := round2(trend.LatestClose * (1 - volatility/100))
 	high := round2(trend.LatestClose * (1 + volatility/100))
@@ -262,6 +268,10 @@ func buildNewListingNextDayPlan(trend TrendAnalysis, risk RiskControl, market *M
 	if market != nil && (market.Phase == "退潮" || market.Phase == "冰点") {
 		bias = "防守观察"
 	}
+	marketCheck := "确认市场情绪是否恶化"
+	if foundation.IsHongKongSymbol(symbol) {
+		marketCheck = "核对恒生指数近期波动"
+	}
 	return NextDayPlan{
 		Bias: bias, Score: 40, Expectation: fmt.Sprintf("上市初期只观察%.2f—%.2f的正常波动和承接，不以单日涨跌推断趋势；有效站上%.2f且波动收敛才提高关注。", low, high, confirmation), ExpectedLow: low, ExpectedHigh: high,
 		Levels: []PriceLevel{{Label: "上市区间低点", Price: trend.ListingLow, Detail: "失守后观察假设失效"}, {Label: "承接观察", Price: risk.EntryReference, Detail: "只作观察锚点，不等同买点"}, {Label: "价格发现确认", Price: confirmation, Detail: "需要收盘和换手共同确认"}, {Label: "计划失效", Price: risk.StopPrice, Detail: "触发后执行风控"}},
@@ -271,7 +281,7 @@ func buildNewListingNextDayPlan(trend TrendAnalysis, risk RiskControl, market *M
 			{Key: "volatile", Name: "高波动分歧", Priority: "回避", Trigger: fmt.Sprintf("日内振幅超过%.1f%%", volatility*2), Confirmation: "高低点快速扩张", Action: "不新增仓位，等待波动收敛", Invalidation: "波动恢复到可承受范围"},
 			{Key: "breakdown", Name: "上市区间失效", Priority: "回避", Trigger: fmt.Sprintf("跌破%.2f", risk.StopPrice), Confirmation: "反抽不能收回", Action: "取消新增计划并执行风控", Invalidation: "重新形成更高低点后再评估"},
 		},
-		PreOpenChecks:  []string{"核对上市公告、临时停牌和监管风险", "确认市场情绪是否恶化", "不把首日涨跌外推成趋势"},
+		PreOpenChecks:  []string{"核对上市公告、临时停牌和监管风险", marketCheck, "不把首日涨跌外推成趋势"},
 		OpeningChecks:  []string{"观察相对上市区间的位置", "观察开盘后波动是否失控", "确认成交和换手没有异常放大"},
 		IntradayChecks: []string{"高低点是否快速扩张", "承接是否逐步抬高", "价格是否跌破上市期低点"},
 		CloseChecks:    []string{"收盘是否留在上市区间内", "记录新高、新低和振幅", "累计交易日是否接近20日模型门槛"},
@@ -354,13 +364,13 @@ func buildNewListingScorecard(profile Profile, signals []Signal) Scorecard {
 	return Scorecard{AlgorithmVersion: "stock-score-v3", Overall: overall, Opportunity: int(math.Round(clamp(opportunity, 0, 100))), Risk: int(math.Round(clamp(100-riskResilience, 0, 100))), Coverage: int(math.Round(coverage * 100)), Grade: "观察", Direction: "观察", Conviction: "较低", Dimensions: dimensions, PositiveSignals: uniqueStrings(positive, 5), NegativeSignals: uniqueStrings(negative, 5)}
 }
 
-func buildNewListingRisks(trend TrendAnalysis, theme ThemeAnalysis, market *MarketContext) []string {
+func buildNewListingRisks(symbol string, trend TrendAnalysis, theme ThemeAnalysis, market *MarketContext) []string {
 	risks := []string{
 		fmt.Sprintf("上市仅%d个交易日，尚未形成20/60/120日均线和成熟支撑结构", trend.HistoryDays),
 		fmt.Sprintf("价格发现期观测波动约%.1f%%，首日或早期脉冲可能放大回撤", trend.ObservedVolatility),
 		"上市区间和换手仍在形成，不能用短样本外推长期趋势",
 	}
-	if theme.Primary == "" {
+	if !foundation.IsHongKongSymbol(symbol) && theme.Primary == "" {
 		risks = append(risks, "尚未确认稳定题材归属，持续性证据不足")
 	}
 	if market != nil && (market.Phase == "退潮" || market.Phase == "冰点") {
@@ -375,7 +385,7 @@ func buildNewListingEvidence(input Input, trend TrendAnalysis, short ShortTermAn
 		{Category: "上市样本", Title: fmt.Sprintf("上市%d个交易日 · 受限模型", trend.HistoryDays), Detail: "本次不计算成熟均线、ATR和长周期收益", Source: latest.Meta.Source, AsOf: latest.Time.Format("2006-01-02")},
 		{Category: "价格发现", Title: fmt.Sprintf("上市期%+.1f%% · 区间位置%.0f%%", trend.ListingReturn, trend.ListingRangePosition), Detail: strings.Join(trend.Reasons, "；"), Source: latest.Meta.Source, AsOf: latest.Time.Format("2006-01-02")},
 		{Category: "流动性", Title: fmt.Sprintf("平均成交额%.1f亿元 · 换手%.1f%%", trend.AverageAmount/100_000_000, trend.AverageTurnover), Detail: fmt.Sprintf("可观测波动约%.1f%%", trend.ObservedVolatility), Source: latest.Meta.Source, AsOf: latest.Time.Format("2006-01-02")},
-		{Category: "短线", Title: short.State, Detail: strings.Join(short.Reasons, "；"), Source: limitUpSource(input.LimitUps), AsOf: latestLimitUpDate(input.Symbol, input.LimitUps)},
+		shortTermEvidence(input, short, latest),
 	}
 	if theme.Primary != "" {
 		evidence = append(evidence, Evidence{Category: "题材", Title: theme.Primary, Detail: theme.Description, Source: firstNonEmpty(theme.Source, "题材归因"), AsOf: theme.AsOf})
@@ -406,12 +416,16 @@ func buildNewListingDataQuality(input Input, profile Profile, lines []foundation
 	} else {
 		quality = append(quality, DataQuality{Key: "quote", Status: "limited", Message: "实时行情不可用，使用最新日K收盘价"})
 	}
-	if short.ExactLimitUpData {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "limit_up", Status: "not_applicable", Message: "港股无 A 股日涨跌停板"})
+	} else if short.ExactLimitUpData {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "ready", Message: "已匹配精确涨停事件"})
 	} else {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "limited", Message: "上市初期涨停识别仅作辅助参考"})
 	}
-	if theme.Primary != "" {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "theme", Status: "not_applicable", Message: "当前题材目录覆盖 A 股"})
+	} else if theme.Primary != "" {
 		status := "limited"
 		if theme.IsHot && theme.Resonance.Available {
 			status = "ready"
@@ -420,7 +434,9 @@ func buildNewListingDataQuality(input Input, profile Profile, lines []foundation
 	} else {
 		quality = append(quality, DataQuality{Key: "theme", Status: "missing", Message: "未匹配稳定题材"})
 	}
-	if market != nil {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "market_emotion", Status: "not_applicable", Message: "当前市场情绪指标覆盖 A 股"})
+	} else if market != nil {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "ready", Message: "已使用最近市场情绪缓存"})
 	} else {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "limited", Message: "市场情绪缓存暂不可用"})
@@ -431,13 +447,15 @@ func buildNewListingDataQuality(input Input, profile Profile, lines []foundation
 	} else {
 		quality = append(quality, DataQuality{Key: "stock_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的个股新闻/公告", recentNewsWindowDays)})
 	}
-	if themeNews != nil && themeNews.Available {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "theme_news", Status: "not_applicable", Message: "题材新闻匹配依赖 A 股题材目录"})
+	} else if themeNews != nil && themeNews.Available {
 		quality = append(quality, DataQuality{Key: "theme_news", Status: "ready", Message: fmt.Sprintf("已匹配近%d日%d条题材新闻", themeNews.WindowDays, themeNews.ArticleCount)})
 	} else {
 		quality = append(quality, DataQuality{Key: "theme_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的题材新闻", recentNewsWindowDays)})
 	}
 	if profile.PrimaryType != "emotion_leader" {
-		status, message := fundamentalQualityStatus(fundamental)
+		status, message := fundamentalQualityStatus(input.Symbol, fundamental)
 		if status == "" {
 			quality = append(quality, DataQuality{Key: "fundamental", Status: "limited", Message: "最新F10财务指标暂不可用"})
 		} else {

@@ -39,31 +39,36 @@ func Analyze(input Input) (Analysis, error) {
 	trend, chart := analyzeTrend(lines)
 	currentPrice := firstPositive(quote.Price, trend.LatestClose)
 	shortTerm := analyzeShortTerm(input.Symbol, lines, input.LimitUps)
-	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
-	theme = enrichTheme(input, shortTerm, theme)
+	theme := analyzeReportTheme(input, shortTerm)
 	market := marketContext(input)
-	shortTermQuantitative := buildShortTermQuantitativePlan(input, shortTerm, theme, market)
+	var shortTermQuantitative ShortTermQuantitativePlan
+	if !foundation.IsHongKongSymbol(input.Symbol) {
+		shortTermQuantitative = buildShortTermQuantitativePlan(input, shortTerm, theme, market)
+	}
 	profile := classifyProfile(trend, shortTerm, theme, market)
-	fundamentalValue := analyzeFundamentals(input.Fundamentals)
+	fundamentalValue := analyzeFundamentals(input.Symbol, input.Fundamentals)
 	fundamental := &fundamentalValue
 	researchValue := analyzeResearch(input.Reports)
 	research := &researchValue
 	stockNewsValue, themeNewsValue := analyzeRecentNews(input, theme)
 	stockNews := &stockNewsValue
 	themeNews := &themeNewsValue
-	risks := buildRisks(profile, trend, shortTerm, theme, market)
+	risks := buildRisks(input.Symbol, profile, trend, shortTerm, theme, market)
 	timeframes := analyzeTimeframes(lines)
 	relative := analyzeRelativeStrength(input, lines)
 	riskControl := buildRiskControl(profile, trend, shortTerm, market)
-	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl, shortTermQuantitative, currentPrice)
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		riskControl.PositionFormula = "按每股风险与仓位上限计算股数，再按该港股的每手股数向下取整"
+	}
+	action := buildActionPlan(input.Symbol, profile, trend, shortTerm, theme, market, relative, riskControl, shortTermQuantitative, currentPrice)
 	if action.DecisionMode != "short_term" {
 		riskControl = alignRiskControlWithActionPlan(riskControl, action)
 	}
 	riskControl = finalizeRiskControl(riskControl, profile, trend, shortTerm, market)
-	nextDay := buildNextDayPlan(lines, profile, trend, shortTerm, theme, market, relative, riskControl)
+	nextDay := buildNextDayPlan(input.Symbol, lines, profile, trend, shortTerm, theme, market, relative, riskControl)
 	signals := buildSignals(trend, shortTerm, theme, market, relative, riskControl, timeframes, fundamental, research)
 	scorecard := buildScorecard(profile, signals)
-	conclusion := buildConclusion(name, profile, trend, shortTerm, action, risks)
+	conclusion := buildConclusion(input.Symbol, name, profile, trend, shortTerm, action, risks)
 	evidence := buildEvidence(input, profile, trend, shortTerm, theme, market, relative, riskControl, lines, fundamental, research, stockNews, themeNews)
 	quality := buildDataQuality(input, profile, lines, shortTerm, theme, market, relative, fundamental, research, stockNews, themeNews)
 
@@ -97,110 +102,6 @@ func Analyze(input Input) (Analysis, error) {
 		shortTermQuantitative: &shortTermQuantitative,
 		dailyBars:             compactDailyBars(lines, 120),
 	}, nil
-}
-
-func analyzeFundamentals(item *foundation.StockFundamentals) FundamentalAnalysis {
-	if item == nil || strings.TrimSpace(item.ReportDate) == "" {
-		return FundamentalAnalysis{Quality: "数据不足", Sustainability: "数据不足", Summary: "尚未取得最新F10财务数据"}
-	}
-	// Keep the non-zero fallback for older providers/fixtures, while allowing a
-	// provider to explicitly mark a legitimate zero value as available.
-	hasDeductedProfit := item.DeductedNetProfitAvailable || item.DeductedNetProfit != 0 || item.DeductedNetProfitYearOverYear != 0
-	recurringProfit := item.NetProfit
-	recurringGrowth := item.NetProfitYearOverYear
-	nonRecurringProfit := 0.0
-	nonRecurringRatio := 0.0
-	sustainability := "待确认"
-	sustainabilityFlags := make([]string, 0, 3)
-	if hasDeductedProfit {
-		recurringProfit = item.DeductedNetProfit
-		recurringGrowth = item.DeductedNetProfitYearOverYear
-		nonRecurringProfit = item.NetProfit - item.DeductedNetProfit
-		if math.Abs(item.NetProfit) > 1e-9 {
-			nonRecurringRatio = math.Abs(nonRecurringProfit) / math.Abs(item.NetProfit) * 100
-		}
-		sustainability = "较好"
-		if nonRecurringProfit > 0 && nonRecurringRatio >= 50 {
-			sustainability = "较差"
-			sustainabilityFlags = append(sustainabilityFlags, "净利润主要依赖非经常性损益")
-		} else if nonRecurringProfit > 0 && nonRecurringRatio >= 30 {
-			sustainability = "一般"
-			sustainabilityFlags = append(sustainabilityFlags, "非经常性损益占比较高")
-		} else if nonRecurringProfit > 0 && nonRecurringRatio >= 15 {
-			sustainability = "一般"
-			sustainabilityFlags = append(sustainabilityFlags, "存在一定一次性收益影响")
-		}
-		if recurringProfit <= 0 && item.NetProfit > 0 {
-			sustainability = "较差"
-			sustainabilityFlags = append(sustainabilityFlags, "剔除非经常性损益后归母利润为负")
-		}
-	} else {
-		sustainabilityFlags = append(sustainabilityFlags, "缺少扣非净利润，持续性无法完全核验")
-	}
-	score := 50.0
-	score += clamp(item.RevenueYearOverYear/8, -15, 15)
-	score += clamp(recurringGrowth/6, -20, 20)
-	if hasDeductedProfit {
-		switch {
-		case recurringProfit <= 0 && item.NetProfit > 0:
-			score -= 20
-		case nonRecurringProfit > 0 && nonRecurringRatio >= 50:
-			score -= 18
-		case nonRecurringProfit > 0 && nonRecurringRatio >= 30:
-			score -= 12
-		case nonRecurringProfit > 0 && nonRecurringRatio >= 15:
-			score -= 6
-		}
-	}
-	if item.ROE >= 15 {
-		score += 12
-	} else if item.ROE >= 8 {
-		score += 6
-	} else if item.ROE > 0 && item.ROE < 3 {
-		score -= 6
-	} else if item.ROE < 0 {
-		score -= 15
-	}
-	if item.GrossMargin >= 35 {
-		score += 8
-	} else if item.GrossMargin > 0 && item.GrossMargin < 12 {
-		score -= 8
-	}
-	if item.DebtRatio >= 75 {
-		score -= 12
-	} else if item.DebtRatio > 0 && item.DebtRatio <= 45 {
-		score += 5
-	}
-	if item.OperatingCashFlowPerShare > 0 {
-		score += 5
-	} else if item.OperatingCashFlowPerShare < 0 {
-		score -= 5
-	}
-	finalScore := int(math.Round(clamp(score, 0, 100)))
-	quality := "中性"
-	if finalScore >= 72 {
-		quality = "较好"
-	} else if finalScore >= 58 {
-		quality = "稳健"
-	} else if finalScore < 35 {
-		quality = "承压"
-	} else if finalScore < 48 {
-		quality = "偏弱"
-	}
-	summary := fmt.Sprintf("%s：营收同比%+.1f%%，归母净利同比%+.1f%%，持续性口径同比%+.1f%%，ROE %.1f%%，毛利率%.1f%%，负债率%.1f%%", firstNonEmpty(item.ReportName, item.ReportDate), item.RevenueYearOverYear, item.NetProfitYearOverYear, recurringGrowth, item.ROE, item.GrossMargin, item.DebtRatio)
-	if hasDeductedProfit {
-		summary += fmt.Sprintf("；非经常性损益占归母净利%.1f%%，扣非净利润%.2f", nonRecurringRatio, recurringProfit)
-	} else {
-		summary += "；未取得扣非净利润，未将利润增长完全视为可持续增长"
-	}
-	return FundamentalAnalysis{
-		Available: true, Score: finalScore, Quality: quality, ReportDate: item.ReportDate, ReportName: item.ReportName,
-		Revenue: item.Revenue, RevenueYearOverYear: item.RevenueYearOverYear, NetProfit: item.NetProfit,
-		NetProfitYearOverYear: item.NetProfitYearOverYear, RecurringNetProfitAvailable: hasDeductedProfit, RecurringNetProfit: recurringProfit, RecurringNetProfitYearOverYear: recurringGrowth,
-		NonRecurringProfit: nonRecurringProfit, NonRecurringProfitRatio: round2(nonRecurringRatio), Sustainability: sustainability, SustainabilityFlags: uniqueStrings(sustainabilityFlags, 4), EPS: item.EPS, ROE: item.ROE, GrossMargin: item.GrossMargin,
-		DebtRatio: item.DebtRatio, OperatingCashFlowPerShare: item.OperatingCashFlowPerShare,
-		Summary: summary, Source: item.Meta.Source,
-	}
 }
 
 func analyzeResearch(items []foundation.MarketResearchItem) ResearchAnalysis {
@@ -406,13 +307,16 @@ func analyzeTrend(lines []foundation.KLine) (TrendAnalysis, []TrendPoint) {
 	}, chart
 }
 
+const hongKongResearchScope = "港股研究使用恒生指数、港股交易时段和证券报价币种。A 股涨跌停、连板、题材与情绪指标不适用。港股主营资料暂未接入，业务信息以财报及公告为准。"
+
 func analyzeShortTerm(symbol string, lines []foundation.KLine, events []foundation.LimitUpEvent) ShortTermAnalysis {
+	hasPriceLimit := !foundation.IsHongKongSymbol(symbol)
 	threshold := limitUpThreshold(symbol)
 	returns := dailyReturns(lines)
 	recent20 := tailFloat(returns, 20)
 	limitFlags := make([]bool, len(recent20))
 	for index, value := range recent20 {
-		limitFlags[index] = value >= threshold
+		limitFlags[index] = hasPriceLimit && value >= threshold
 	}
 	limitCount := 0
 	for _, value := range limitFlags {
@@ -423,7 +327,7 @@ func analyzeShortTerm(symbol string, lines []foundation.KLine, events []foundati
 	maxStreak := maxBoolStreak(limitFlags)
 	matching := make([]foundation.LimitUpEvent, 0)
 	for _, event := range events {
-		if event.Symbol == symbol {
+		if hasPriceLimit && event.Symbol == symbol {
 			matching = append(matching, event)
 		}
 	}
@@ -454,7 +358,10 @@ func analyzeShortTerm(symbol string, lines []foundation.KLine, events []foundati
 	case avgAmount > 0 && avgAmount < 100_000_000:
 		tradability = "流动性偏低"
 	}
-	reasons := []string{fmt.Sprintf("近20日识别到%d个涨停日，最高%d连板", limitCount, maxStreak)}
+	var reasons []string
+	if hasPriceLimit {
+		reasons = append(reasons, fmt.Sprintf("近20日识别到%d个涨停日，最高%d连板", limitCount, maxStreak))
+	}
 	if return5 >= 5 {
 		reasons = append(reasons, fmt.Sprintf("近5日累计上涨%.1f%%", return5))
 	}
@@ -597,8 +504,16 @@ func analyzeTheme(symbol string, short ShortTermAnalysis, cached []foundation.St
 	}
 }
 
+func analyzeReportTheme(input Input, short ShortTermAnalysis) ThemeAnalysis {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		return ThemeAnalysis{Route: "trend", Description: "港股主营资料暂未接入，业务信息以公司财报及公告为准"}
+	}
+	base := analyzeTheme(input.Symbol, short, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
+	return enrichTheme(input, short, base)
+}
+
 func marketContext(input Input) *MarketContext {
-	if input.MarketEmotion == nil {
+	if foundation.IsHongKongSymbol(input.Symbol) || input.MarketEmotion == nil {
 		return nil
 	}
 	item := input.MarketEmotion
@@ -661,13 +576,21 @@ func classifyProfile(trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAn
 	}
 }
 
-func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, quantitative ShortTermQuantitativePlan, currentPrice float64) ActionPlan {
+func buildActionPlan(symbol string, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, quantitative ShortTermQuantitativePlan, currentPrice float64) ActionPlan {
+	rationale := "当前先按趋势结构、题材强度、基本面与机构预期的交集生成价格计划，最终由AI全局研判修正。"
+	holdStrength := "个股相对题材或指数没有持续走弱"
+	entryStrength := "题材强度或相对强度重新改善"
+	if foundation.IsHongKongSymbol(symbol) {
+		rationale = "结合趋势结构、相对恒生指数的表现及已披露的公司财务数据生成价格计划。"
+		holdStrength = "个股相对恒生指数没有持续走弱"
+		entryStrength = "个股相对恒生指数的强度重新改善"
+	}
 	plan := ActionPlan{
 		DecisionMode:       "non_short",
 		DecisionLabel:      "趋势与价值定价",
 		DecisionConfidence: profile.Confidence,
 		Horizon:            "波段 / 中期趋势",
-		Rationale:          "当前先按趋势结构、题材强度、基本面与机构预期的交集生成价格计划，最终由AI全局研判修正。",
+		Rationale:          rationale,
 		PricingSource:      "local-rules",
 		CurrentAction:      "等待结构确认",
 		EntryConditions: []string{
@@ -676,7 +599,7 @@ func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalys
 		},
 		HoldConditions: []string{
 			"中期趋势线保持向上",
-			"个股相对题材或指数没有持续走弱",
+			holdStrength,
 		},
 		AvoidConditions: []string{
 			"高开加速且量价明显失衡时不追",
@@ -701,7 +624,7 @@ func buildActionPlan(profile Profile, trend TrendAnalysis, short ShortTermAnalys
 		plan.EntryConditions = []string{
 			fmt.Sprintf("回踩%.2f附近缩量企稳，或放量突破%.2f", trend.Support, trend.Resistance),
 			"20日与60日趋势没有同步转弱",
-			"题材强度或相对强度重新改善",
+			entryStrength,
 		}
 		plan.HoldConditions = []string{"收盘维持在20日或60日趋势线上方", "上涨放量、回调缩量的量价关系未破坏"}
 		plan.AvoidConditions = []string{"距离阶段高点过近但量能不能确认", "放量滞涨并连续跌破短期均线"}
@@ -1057,7 +980,7 @@ func formatActionPriceRange(low, high float64) string {
 	return fmt.Sprintf("%.2f—%.2f 元", low, high)
 }
 
-func buildRisks(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext) []string {
+func buildRisks(symbol string, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext) []string {
 	risks := make([]string, 0, 6)
 	if trend.RangePosition60 >= 90 {
 		risks = append(risks, "价格位于60日区间高位，追涨的盈亏比下降")
@@ -1071,12 +994,12 @@ func buildRisks(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, t
 	if short.LatestOpenCount >= 2 {
 		risks = append(risks, "最近涨停反复开板，封板质量和次日溢价存在不确定性")
 	}
-	if theme.Primary == "" {
+	if !foundation.IsHongKongSymbol(symbol) && theme.Primary == "" {
 		risks = append(risks, "暂未确认稳定题材归属，个股持续性缺少板块共振证据")
 	}
-	if market == nil {
+	if market == nil && !foundation.IsHongKongSymbol(symbol) {
 		risks = append(risks, "市场情绪缓存尚未提供，本次未纳入整体赚钱效应")
-	} else if market.Phase == "退潮" {
+	} else if market != nil && market.Phase == "退潮" {
 		risks = append(risks, "市场处于退潮阶段，强势股补跌风险高于常态")
 	}
 	if profile.PrimaryType == "weak_risk" {
@@ -1088,9 +1011,12 @@ func buildRisks(profile Profile, trend TrendAnalysis, short ShortTermAnalysis, t
 	return uniqueStrings(risks, 5)
 }
 
-func buildConclusion(name string, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, action ActionPlan, risks []string) Conclusion {
+func buildConclusion(symbol, name string, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, action ActionPlan, risks []string) Conclusion {
 	headline := fmt.Sprintf("%s · %s · %s", profile.TypeLabel, trend.Phase, action.CurrentAction)
 	summary := fmt.Sprintf("%s当前趋势得分%d，短线状态为%s。分析优先级由%s路径主导，判断以可验证的趋势、量价和题材证据为准。", name, trend.Score, short.State, profile.TypeLabel)
+	if foundation.IsHongKongSymbol(symbol) {
+		summary = fmt.Sprintf("%s当前趋势得分%d，短线状态为%s，按%s路径观察量价与恒生指数相对强度。", name, trend.Score, short.State, profile.TypeLabel)
+	}
 	bestPath := firstNonEmpty(action.Entry.Action, firstString(action.EntryConditions), "等待价格和量能共同确认")
 	mainRisk := firstNonEmpty(firstString(risks), "关键趋势位失守")
 	return Conclusion{
@@ -1103,11 +1029,23 @@ func buildConclusion(name string, profile Profile, trend TrendAnalysis, short Sh
 	}
 }
 
+func shortTermEvidence(input Input, short ShortTermAnalysis, latest foundation.KLine) Evidence {
+	row := Evidence{Category: "短线", Title: short.State, Detail: strings.Join(short.Reasons, "；")}
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		row.Source = latest.Meta.Source
+		row.AsOf = latest.Time.Format("2006-01-02")
+	} else {
+		row.Source = limitUpSource(input.LimitUps)
+		row.AsOf = latestLimitUpDate(input.Symbol, input.LimitUps)
+	}
+	return row
+}
+
 func buildEvidence(input Input, profile Profile, trend TrendAnalysis, short ShortTermAnalysis, theme ThemeAnalysis, market *MarketContext, relative RelativeStrength, risk RiskControl, lines []foundation.KLine, fundamental *FundamentalAnalysis, research *ResearchAnalysis, stockNews *NewsAnalysis, themeNews *NewsAnalysis) []Evidence {
 	evidence := []Evidence{
 		{Category: "趋势", Title: fmt.Sprintf("%s · %d分", trend.Strength, trend.Score), Detail: strings.Join(trend.Reasons, "；"), Source: lines[len(lines)-1].Meta.Source, AsOf: lines[len(lines)-1].Time.Format("2006-01-02")},
 		{Category: "量价", Title: fmt.Sprintf("近20日%+.1f%% · 量比%.2f", trend.Return20, trend.VolumeRatio), Detail: fmt.Sprintf("60日区间位置%.0f%%，距120日高点%+.1f%%", trend.RangePosition60, trend.DrawdownFromHigh120), Source: lines[len(lines)-1].Meta.Source, AsOf: lines[len(lines)-1].Time.Format("2006-01-02")},
-		{Category: "短线", Title: short.State, Detail: strings.Join(short.Reasons, "；"), Source: limitUpSource(input.LimitUps), AsOf: latestLimitUpDate(input.Symbol, input.LimitUps)},
+		shortTermEvidence(input, short, lines[len(lines)-1]),
 	}
 	if theme.Primary != "" {
 		detail := theme.Description
@@ -1146,12 +1084,16 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 	} else {
 		quality = append(quality, DataQuality{Key: "quote", Status: "limited", Message: "实时行情不可用，使用最新日K收盘价"})
 	}
-	if short.ExactLimitUpData {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "limit_up", Status: "not_applicable", Message: "港股无 A 股日涨跌停板"})
+	} else if short.ExactLimitUpData {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "ready", Message: "已匹配精确涨停事件"})
 	} else {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "limited", Message: "涨停次数主要由日K涨幅近似识别"})
 	}
 	switch {
+	case foundation.IsHongKongSymbol(input.Symbol):
+		quality = append(quality, DataQuality{Key: "theme", Status: "not_applicable", Message: "当前题材目录覆盖 A 股"})
 	case theme.IsHot && theme.Resonance.Available:
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("已完成事件驱动题材归因：%s；共振%d分", theme.Primary, theme.Resonance.Score)})
 	case theme.IsHot:
@@ -1175,7 +1117,9 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 	default:
 		quality = append(quality, DataQuality{Key: "theme", Status: "missing", Message: "未匹配稳定题材"})
 	}
-	if market != nil {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "market_emotion", Status: "not_applicable", Message: "当前市场情绪指标覆盖 A 股"})
+	} else if market != nil {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "ready", Message: "已使用最近市场情绪缓存"})
 	} else {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "limited", Message: "市场情绪缓存暂不可用"})
@@ -1190,13 +1134,15 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 	} else {
 		quality = append(quality, DataQuality{Key: "stock_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的个股新闻/公告", recentNewsWindowDays)})
 	}
-	if themeNews != nil && themeNews.Available {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "theme_news", Status: "not_applicable", Message: "题材新闻匹配依赖 A 股题材目录"})
+	} else if themeNews != nil && themeNews.Available {
 		quality = append(quality, DataQuality{Key: "theme_news", Status: "ready", Message: fmt.Sprintf("已匹配近%d日%d条题材新闻", themeNews.WindowDays, themeNews.ArticleCount)})
 	} else {
 		quality = append(quality, DataQuality{Key: "theme_news", Status: "limited", Message: fmt.Sprintf("近%d日暂无匹配的题材新闻", recentNewsWindowDays)})
 	}
 	if profile.PrimaryType != "emotion_leader" {
-		status, message := fundamentalQualityStatus(fundamental)
+		status, message := fundamentalQualityStatus(input.Symbol, fundamental)
 		if status == "" {
 			quality = append(quality, DataQuality{Key: "fundamental", Status: "limited", Message: "最新F10财务指标暂不可用"})
 		} else {
@@ -1214,9 +1160,15 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 	return quality
 }
 
-func fundamentalQualityStatus(fundamental *FundamentalAnalysis) (string, string) {
+func fundamentalQualityStatus(symbol string, fundamental *FundamentalAnalysis) (string, string) {
 	if fundamental == nil || !fundamental.Available {
 		return "", ""
+	}
+	if foundation.IsHongKongSymbol(symbol) {
+		if fundamental.Revenue == nil || fundamental.NetProfit == nil {
+			return "limited", "港股利润表缺少收入或股东应占溢利"
+		}
+		return "ready", "已取得港股利润表收入及股东应占溢利，其他指标按实际披露展示"
 	}
 	if !fundamental.RecurringNetProfitAvailable {
 		return "limited", "已接入最新东方财富F10，但扣非净利润缺失，收益持续性待确认"

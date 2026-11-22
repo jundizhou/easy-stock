@@ -29,6 +29,18 @@ type KLineProvider interface {
 	KLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error)
 }
 
+// HongKongKLineProvider 提供港股 K 线：港股复权序列的字段与接口都跟 A 股不同，
+// 单独成一路，避免与 A 股主备链混用。
+type HongKongKLineProvider interface {
+	HongKongKLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error)
+}
+
+// HongKongFinancialProvider 提供港股多期财务：A 股的 HSF10 主财务表不覆盖港股，
+// 港股要走 HKF10 主指标表。
+type HongKongFinancialProvider interface {
+	HongKongFinancialHistory(ctx context.Context, symbol string, limit int) ([]foundation.StockFundamentals, error)
+}
+
 type NewsProvider interface {
 	LatestNews(ctx context.Context, limit int) ([]foundation.NewsItem, error)
 }
@@ -182,6 +194,8 @@ type Config struct {
 	Realtime                 RealtimeProvider
 	KLinePrimary             KLineProvider
 	KLineFallback            KLineProvider
+	HongKongKLine            HongKongKLineProvider
+	HongKongFinancials       HongKongFinancialProvider
 	News                     NewsProvider
 	StockNews                StockNewsSearchProvider
 	SectorMap                SectorMapProvider

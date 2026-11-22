@@ -813,7 +813,9 @@ type AbnormalItem struct {
 	Events10d    int     `json:"events_10d,omitempty"`
 	// LastTriggerDate 是最近一次越过异常波动阈值的交易日（YYYY-MM-DD）：
 	// 监控个股的「触发日期」。空串 = 最近 30 个交易日都没越过阈值。
-	LastTriggerDate    string           `json:"last_trigger_date,omitempty"`
+	LastTriggerDate string `json:"last_trigger_date,omitempty"`
+	// ThresholdNote 说明阈值口径适用范围（港股按 A 股口径估算时非空）。
+	ThresholdNote      string           `json:"threshold_note,omitempty"`
 	Windows            []AbnormalWindow `json:"windows,omitempty"`
 	WindowAvailability map[string]bool  `json:"window_availability,omitempty"`
 	IsST               bool             `json:"is_st,omitempty"`
@@ -1085,7 +1087,8 @@ func abnormalItem(row foundation.MarketSnapshotRow) AbnormalItem {
 		Symbol: row.Symbol, Name: row.Name, Board: row.Board,
 		Price: row.Price, ChangePercent: row.ChangePercent,
 		TurnoverRate: row.TurnoverRate, VolumeRatio: row.VolumeRatio, Amount: row.Amount,
-		Level: "",
+		Level:         "",
+		ThresholdNote: abnormalThresholdNote(row.Symbol),
 	}
 }
 

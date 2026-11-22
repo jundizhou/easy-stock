@@ -11,10 +11,26 @@ import (
 	"easy-stock/backend/internal/foundation"
 )
 
-// 熔断参数。
-//
-// 监控会批量读取标的日线。连续失败的数据源暂时冷却，避免每只标的
-// 都重复等待同一次故障；冷却结束后重新尝试主源。
+// marketKLineChain keeps failures local to providers that serve the requested market.
+type marketKLineChain struct {
+	hongKong HongKongKLineProvider
+	aStock   KLineProvider
+}
+
+func newMarketKLineChain(hongKong HongKongKLineProvider, aStock KLineProvider) KLineProvider {
+	return &marketKLineChain{hongKong: hongKong, aStock: aStock}
+}
+
+func (c *marketKLineChain) KLine(ctx context.Context, symbol, period string, limit int) ([]foundation.KLine, error) {
+	if foundation.IsHongKongSymbol(symbol) {
+		if isNilProvider(c.hongKong) {
+			return nil, fmt.Errorf("港股日线源不可用")
+		}
+		return c.hongKong.HongKongKLine(ctx, symbol, period, limit)
+	}
+	return c.aStock.KLine(ctx, symbol, period, limit)
+}
+
 const (
 	breakerThreshold = 3
 	breakerCooldown  = 2 * time.Minute
@@ -145,7 +161,10 @@ func (c *klineChain) record(index int, err error) {
 // isNilProvider 识别「接口非 nil、底层指针为 nil」的坏源。
 // 这种源一旦进入链路，会在调用时 panic，而 panic 发生在交易决策的中途，
 // 代价远大于这里多做一次判断。
-func isNilProvider(provider KLineProvider) bool {
+func isNilProvider(provider any) bool {
+	if provider == nil {
+		return true
+	}
 	value := reflect.ValueOf(provider)
 	switch value.Kind() {
 	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func:
