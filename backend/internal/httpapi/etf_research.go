@@ -47,6 +47,18 @@ func (s *Server) instrumentDirectoryHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) resolveResearchInstrument(ctx context.Context, request stockanalysis.ResearchRequest, generic bool) (stockanalysis.ResearchRequest, error) {
+	if foundation.IsHongKongSymbol(request.Symbol) {
+		quotes, err := s.realtimeProvider.Realtime(ctx, []string{request.Symbol})
+		if err != nil {
+			return request, err
+		}
+		if len(quotes) == 0 || quotes[0].Symbol != request.Symbol {
+			return request, fmt.Errorf("港股证券类型暂不可用")
+		}
+		if err := validateHongKongEquity(quotes[0]); err != nil {
+			return request, err
+		}
+	}
 	isFund := foundation.IsListedFundCandidate(request.Symbol)
 	if request.InstrumentType == "etf" && !isFund {
 		return request, fmt.Errorf("ETF代码与标的类型不一致")

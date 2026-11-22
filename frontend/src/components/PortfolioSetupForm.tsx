@@ -1,12 +1,12 @@
 import { Activity, BrainCircuit, LoaderCircle, Plus, RefreshCw, Search, ShieldCheck, Trash2, WalletCards } from 'lucide-react';
-import { KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { BackendConfig, PortfolioHolding, StockDirectoryEntry } from '../lib/backend';
-import { defaultPortfolioAssets, maxPortfolioHoldings, PortfolioDraft, portfolioDraftToHoldingsWithAssets, portfolioHoldingCost, portfolioProfiles } from '../lib/portfolio-draft';
+import { defaultPortfolioAssets, maxPortfolioHoldings, PortfolioDraft, portfolioDraftToHoldingsWithAssets, portfolioHoldingCost, portfolioRate, portfolioProfiles } from '../lib/portfolio-draft';
 import { loadPortfolioQuotes, usePortfolioQuotes } from '../lib/use-portfolio-quotes';
 import { valuePortfolio } from '../lib/portfolio-valuation';
 import './portfolio-valuation.css';
-import { resolveStockDirectorySymbol, searchStockDirectory } from '../lib/stock-analysis';
-import { fetchMonitorStockSuggest } from '../lib/monitor';
+import { directStockCode, resolveStockDirectorySymbol } from '../lib/stock-analysis';
+import { useStockSuggestions } from '../lib/use-stock-suggestions';
 
 type Props = {
 	draft: PortfolioDraft;
@@ -32,6 +32,19 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 	useEffect(() => setAssetsInput(String(draft.totalAssets ?? defaultPortfolioAssets)), [draft.totalAssets]);
 	useEffect(() => () => { addRequest.current?.abort(); }, []);
 	const market = usePortfolioQuotes(config, draft.holdings.map((holding) => holding.symbol));
+	// Keep the dated conversion on the plan for schedule snapshots and offline cost estimates.
+	useEffect(() => {
+		let changed = false;
+		const holdings = draft.holdings.map(holding => {
+			const quote = market.quotes[holding.symbol];
+			if (!holding.symbol.endsWith('.HK') || !quote?.currency) return holding;
+			const conversion = quote.cny_conversion || (holding.currency === quote.currency ? holding.cnyConversion : undefined);
+			if (holding.currency === quote.currency && holding.cnyConversion?.date === conversion?.date && holding.cnyConversion?.rate === conversion?.rate) return holding;
+			changed = true;
+			return { ...holding, currency: quote.currency, cnyConversion: conversion };
+		});
+		if (changed) onChange({ ...draft, holdings });
+	}, [market.quotes, draft, onChange]);
 	const latestQuotes = useRef(market.quotes);
 	latestQuotes.current = market.quotes;
 	const totalAssets = Number(assetsInput);
@@ -47,58 +60,25 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 	const remainingWeight = totalWeight === null ? null : 100 - totalWeight;
 	const emptyQuantity = valuation.holdings.some((item) => item.quantity === 0);
 	const quantityExceedsAssets = assetsValid && valuation.holdings.some((item) => item.marketValue !== null && item.marketValue > totalAssets + 1e-6);
-	// 本地目录只有 A 股 + ETF，港股不在其中。输入未被本地目录命中、
-	// 也不是可直接解析的代码时，走后端建议接口补港股候选；与个股分析
-	// 共用同一个 suggest 接口，港股命中只取 .HK。
-	const [remoteHits, setRemoteHits] = useState<StockDirectoryEntry[]>([]);
-	const isHongKongQuery = /^(?:\d{5}|HK\d{5}|\d{5}\.HK)$/.test(query.trim().toUpperCase());
-	const localSuggestions = useMemo(() => (isHongKongQuery ? [] : searchStockDirectory(directory, query)), [directory, query, isHongKongQuery]);
-	useEffect(() => {
-		const needle = query.trim().toUpperCase();
-		// 6 位 A 股与带后缀的港股代码可以直接解析；裸 5 位仍要查一次，
-		// 否则下拉里看不到「00700 腾讯控股」。
-		const directlyResolvable = /^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(needle) || /^(?:HK\d{5}|\d{5}\.HK)$/.test(needle);
-		if (!needle || !config || directlyResolvable || localSuggestions.length > 0) {
-			setRemoteHits([]);
-			return;
-		}
-		let cancelled = false;
-		const timer = window.setTimeout(() => {
-			fetchMonitorStockSuggest(config, needle).then((response) => {
-				if (cancelled) return;
-				const hits = Array.isArray(response?.data) ? response.data : [];
-				setRemoteHits(hits.filter((hit) => hit.symbol?.endsWith('.HK')).map((hit) => ({
-					symbol: hit.symbol, code: hit.code, name: hit.name, instrument_type: 'stock' as const,
-				})));
-			}).catch(() => { if (!cancelled) setRemoteHits([]); });
-		}, 220);
-		return () => { cancelled = true; window.clearTimeout(timer); };
-	}, [config, query, localSuggestions.length]);
-	const searchableDirectory = useMemo(() => {
-		if (remoteHits.length === 0) return directory;
-		const seen = new Set(directory.map((item) => item.symbol));
-		return [...directory, ...remoteHits.filter((item) => !seen.has(item.symbol))];
-	}, [directory, remoteHits]);
-	// 裸 5 位时本地 A 股的模糊命中（00700 → 000700/300700）纯属巧合，直接屏蔽，
-	// 只留远端港股候选。
-	const suggestions = useMemo(() => {
-		const pool = isHongKongQuery ? remoteHits : searchStockDirectory(searchableDirectory, query);
-		return pool.filter((item) => !draft.holdings.some((holding) => holding.symbol === item.symbol));
-	}, [isHongKongQuery, remoteHits, searchableDirectory, draft.holdings, query]);
+	const { suggestions: matches } = useStockSuggestions(config, query, directory);
+	const suggestions = matches.filter(item => !draft.holdings.some(holding => holding.symbol === item.symbol));
 
 	const addHolding = async (entry?: StockDirectoryEntry) => {
 		if (disabled || addRequest.current) return;
-		const resolved = entry?.symbol || resolveStockDirectorySymbol(query, searchableDirectory);
-		const stock = entry || searchableDirectory.find((item) => item.symbol === resolved || item.code === resolved);
-		const symbol = stock?.symbol;
-		if (!symbol || !stock) { setError('未找到唯一匹配的股票 / ETF / 港股，请从搜索结果中选择'); return; }
+		const resolved = entry?.symbol || resolveStockDirectorySymbol(query, matches);
+		const stock = entry || matches.find(item => item.symbol === resolved || item.code === resolved)
+			|| directory.find(item => item.symbol === resolved || item.code === resolved);
+		const symbol = stock?.symbol || (directStockCode(query).endsWith('.HK') ? directStockCode(query) : '');
+		if (!symbol) { setError('未找到唯一匹配的股票 / ETF / 港股，请从搜索结果中选择'); return; }
 		if (draft.holdings.some((item) => item.symbol === symbol)) { setError('此标的已经在持仓中'); return; }
 		if (draft.holdings.length >= maxPortfolioHoldings) { setError(`最多添加 ${maxPortfolioHoldings} 只持仓标的`); return; }
 		const controller = new AbortController();
 		addRequest.current = controller;
 		setAdding(true);
 		setError('');
-		let snapshot: { entryPrice?: number; entryPriceTime?: string } = {};
+		let snapshot: { entryPrice?: number; entryPriceTime?: string; currency?: string; cnyConversion?: PortfolioDraft['holdings'][number]['cnyConversion'] } = {};
+		let name = stock?.name || symbol;
+		let instrumentType = stock?.instrument_type;
 		let priceError = '';
 		const timeout = window.setTimeout(() => controller.abort('timeout'), 10000);
 		try {
@@ -106,7 +86,9 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 			const quotes = await loadPortfolioQuotes(config, [symbol], controller.signal);
 			const quote = quotes[symbol];
 			if (!quote || quote.meta?.stale) throw new Error('暂无有效行情');
-			snapshot = { entryPrice: quote.price, entryPriceTime: quote.trade_time || quote.meta?.fetched_at };
+			name = quote.name || name;
+			instrumentType = quote.instrument_type || instrumentType;
+			snapshot = { currency: quote.currency, cnyConversion: quote.cny_conversion, entryPrice: quote.price, entryPriceTime: quote.trade_time || quote.meta?.fetched_at };
 		} catch {
 			priceError = '未取得添加时的有效价格，请手动填写持仓成本';
 		} finally {
@@ -124,8 +106,9 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 		// Allow editing a full portfolio; enforce the asset budget on submission.
 		const weight = remaining > 0 ? Math.min(10, remaining) : 10;
 		const assets = current.totalAssets ?? defaultPortfolioAssets;
-		const quantity = snapshot.entryPrice ? String(Math.floor(assets * weight / 100 / snapshot.entryPrice + 1e-9)) : '';
-		onChange({ ...current, holdings: [...current.holdings, { symbol, name: stock.name, instrumentType: stock.instrument_type, weight, quantity, costPrice: snapshot.entryPrice ? String(snapshot.entryPrice) : '', ...snapshot }] });
+		const rate = portfolioRate({ symbol, ...snapshot });
+		const quantity = snapshot.entryPrice && rate !== null ? String(Math.floor(assets * weight / 100 / (snapshot.entryPrice * rate) + 1e-9)) : '';
+		onChange({ ...current, holdings: [...current.holdings, { symbol, name, instrumentType, weight, quantity, costPrice: snapshot.entryPrice ? String(snapshot.entryPrice) : '', ...snapshot }] });
 		setQuery('');
 		setSuggestionsOpen(false);
 		setError(priceError);
@@ -142,7 +125,7 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 		}
 		if (event.key === 'ArrowDown') { event.preventDefault(); setActiveSuggestion((current) => (current + 1) % suggestions.length); }
 		else if (event.key === 'ArrowUp') { event.preventDefault(); setActiveSuggestion((current) => (current - 1 + suggestions.length) % suggestions.length); }
-		else if (event.key === 'Enter') { event.preventDefault(); void addHolding(suggestions[activeSuggestion] || suggestions[0]); }
+		else if (event.key === 'Enter') { event.preventDefault(); void addHolding(directStockCode(query) ? undefined : suggestions[activeSuggestion] || suggestions[0]); }
 		else if (event.key === 'Escape') setSuggestionsOpen(false);
 	};
 
@@ -160,7 +143,7 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 				<div><span>总盈亏</span><strong className={profitClass(valuation.profit)}>{money(valuation.profit, true)}</strong></div>
 				<div><span>持仓盈亏率</span><strong className={profitClass(valuation.profitPercent)}>{percent(valuation.profitPercent)}</strong></div>
 			</div>
-			<p className="portfolio-valuation-note">持仓占比与数量联动，修改占比时按总资产 × 占比 ÷ 最新价取整，无行情时使用成本价。盈亏按最新价估算，不含交易费用。</p>
+			<p className="portfolio-valuation-note">持仓占比与数量联动，修改占比时按总资产 × 占比 ÷ 最新价取整，无行情时使用成本价。账户金额以人民币列示。外币成本和市值均按同一参考汇率折算，盈亏不含汇兑损益及交易费用。</p>
 			{market.error && <p className="portfolio-quote-warning" role="status">{market.error}</p>}
 			{draft.holdings.some((holding) => portfolioHoldingCost(holding) === null) && <p className="portfolio-quote-warning">部分持仓缺少有效成本，总盈亏待补齐成本与行情后显示。</p>}
 			{quantityExceedsAssets && <p className="portfolio-quote-warning" role="alert">持仓数量对应的市值超过总资产，请减少持仓数量或增加总资产。</p>}
@@ -190,8 +173,11 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 					const value = valuation.holdings[index];
 					const quote = market.quotes[holding.symbol];
 					const otherMarketValue = valuation.holdings.reduce((total, item, itemIndex) => itemIndex === index ? total : total + (item.marketValue ?? 0), 0);
-					const maxQuantity = value.price !== null && assetsValid ? Math.max(0, Math.floor((totalAssets - otherMarketValue) / value.price + 1e-9)) : undefined;
-					const sizingPrice = value.price ?? value.costPrice;
+					const nativePrice = value.price ?? value.costPrice;
+					const sizingPrice = nativePrice !== null && value.rate !== null ? nativePrice * value.rate : null;
+					const maxQuantity = sizingPrice !== null && assetsValid ? Math.max(0, Math.floor((totalAssets - otherMarketValue) / sizingPrice + 1e-9)) : undefined;
+					const currency = quote?.currency || holding.currency;
+					const isHK = holding.symbol.endsWith('.HK');
 					const weightInput = editingInput?.symbol === holding.symbol && editingInput.field === 'weight' ? editingInput.value : String(Math.round((value.weightPercent ?? holding.weight) * 100) / 100);
 					const quantityInput = editingInput?.symbol === holding.symbol && editingInput.field === 'quantity' ? editingInput.value : holding.quantity?.trim() ? holding.quantity : String(value.quantity ?? '');
  const isFund = holding.instrumentType === 'etf' || directory.some(v => v.symbol === holding.symbol && v.instrument_type === 'etf');
@@ -214,15 +200,16 @@ export function PortfolioSetupForm({ draft, config, directory, disabled = false,
 							const weight = assetsValid && sizingPrice !== null ? quantity * sizingPrice / totalAssets * 100 : null;
 							updateHolding(holding.symbol, { quantity: String(quantity), ...(weight !== null && weight > 0 ? { weight } : {}) });
 						}} onBlur={() => setEditingInput(null)} placeholder="待补齐价格" /></label>
-						<label className="portfolio-cost-input"><span>持仓成本</span><input inputMode="decimal" value={holding.costPrice} disabled={disabled} aria-label={`${holding.name}持仓成本`} aria-invalid={Boolean(holding.costPrice.trim()) && value.costPrice === null} onChange={(event) => updateHolding(holding.symbol, { costPrice: event.target.value })} onBlur={() => { if (!holding.costPrice.trim() && holding.entryPrice) updateHolding(holding.symbol, { costPrice: String(holding.entryPrice) }); }} placeholder={holding.entryPrice ? String(holding.entryPrice) : '请输入成本'} title={holding.entryPrice ? `添加时价格 ${holding.entryPrice} 元，可修改` : '未取得添加时价格，请填写实际成本'} /></label>
+						<label className="portfolio-cost-input"><span>持仓成本{isHK && currency ? '（' + currency + '）' : ''}</span><input inputMode="decimal" value={holding.costPrice} disabled={disabled} aria-label={`${holding.name}持仓成本`} aria-invalid={Boolean(holding.costPrice.trim()) && value.costPrice === null} onChange={(event) => updateHolding(holding.symbol, { costPrice: event.target.value })} onBlur={() => { if (!holding.costPrice.trim() && holding.entryPrice) updateHolding(holding.symbol, { costPrice: String(holding.entryPrice) }); }} placeholder={holding.entryPrice ? String(holding.entryPrice) : '请输入成本'} title={holding.entryPrice ? `添加时价格 ${holding.entryPrice} ${isHK ? currency || '（币种待确认）' : '元'}，可修改` : '未取得添加时价格，请填写实际成本'} /></label>
 						<button type="button" className="portfolio-remove" onClick={() => onChange({ ...draft, holdings: draft.holdings.filter((item) => item.symbol !== holding.symbol) })} disabled={disabled} aria-label={`删除${holding.name}`} title="删除"><Trash2 size={16} /></button>
 						<div className="portfolio-holding-valuation">
-							<div><span>最新价格</span><strong>{money(value.price, false, isFund ? 3 : 2)}</strong><small className={profitClass(quote?.change_percent ?? null)}>日涨跌 {percent(quote?.change_percent ?? null)}</small></div>
+							<div><span>最新价格</span><strong>{money(value.price, false, isFund ? 3 : 2, isHK ? currency || '币种待确认' : '元')}</strong><small className={profitClass(quote?.change_percent ?? null)}>日涨跌 {percent(quote?.change_percent ?? null)}</small></div>
 							<div><span>持有数量（估算）</span><strong>{value.quantity === null ? '—' : `${value.quantity.toLocaleString('zh-CN')} ${isFund ? '份' : '股'}`}</strong></div>
 							<div><span>持仓市值</span><strong>{money(value.marketValue)}</strong></div>
 							<div><span>持仓盈亏</span><strong className={profitClass(value.profit)}>{money(value.profit, true)}</strong></div>
 							<div><span>盈亏比例</span><strong className={profitClass(value.profitPercent)}>{percent(value.profitPercent)}</strong></div>
 						</div>
+						{isHK && <small className="portfolio-quote-time">{value.rate === null ? '报价币种或人民币汇率缺失，市值与巡检权重待补齐' : currency !== 'CNY' ? 'ECB 参考汇率 ' + (quote?.cny_conversion?.date || holding.cnyConversion?.date) + ' · 1 ' + currency + ' = ' + value.rate.toFixed(5) + ' CNY' : '人民币报价'}</small>}
 						{quote && <small className="portfolio-quote-time">{quoteTime(quote.trade_time || quote.meta?.fetched_at)}{quote.meta?.stale || market.error ? ' · 上次行情快照' : ''}</small>}
 					</article>;
 				})}
@@ -240,10 +227,10 @@ function marketLabel(symbol: string) {
 	return 'A股';
 }
 
-function money(value: number | null, signed = false, precision = 2) {
+function money(value: number | null, signed = false, precision = 2, unit = '元') {
 	if (value === null || !Number.isFinite(value)) return '—';
 	const rounded = Math.round(value * 10 ** precision) / 10 ** precision;
-	return `${signed && rounded > 0 ? '+' : ''}${rounded.toLocaleString('zh-CN', { minimumFractionDigits: precision, maximumFractionDigits: precision })} 元`;
+	return `${signed && rounded > 0 ? '+' : ''}${rounded.toLocaleString('zh-CN', { minimumFractionDigits: precision, maximumFractionDigits: precision })} ${unit}`;
 }
 function percent(value: number | null) {
 	if (value === null || !Number.isFinite(value)) return '—';

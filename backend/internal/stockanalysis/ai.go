@@ -158,7 +158,7 @@ func EnrichWithAI(ctx context.Context, prompter agent.Prompter, analysis *Analys
 		return err
 	}
 	methodologyContext = truncateText(methodologyContext, 6_000)
-	prompt := `你是 easy-stock 的A股全局交易决策器。请基于输入的全部结构化事实，先判断收益来源和执行方式，再生成与交易类型匹配的决策。
+	prompt := marketResearchInstructions(`你是 easy-stock 的{{market}}全局交易决策器。请基于输入的全部结构化事实，先判断收益来源和执行方式，再生成与交易类型匹配的决策。
 
 必须遵守：
 1. 不编造输入JSON之外的实时数据、机构持仓、游资席位或公司事实。
@@ -182,7 +182,7 @@ func EnrichWithAI(ctx context.Context, prompter agent.Prompter, analysis *Analys
 只填写与decision_mode对应的计划：non_short时short_term_playbook可为空对象；short_term时non_short_price_plan可为空对象。
 
 [结构化分析JSON]
-` + string(encoded)
+`, analysis.Symbol) + string(encoded)
 	if strings.TrimSpace(methodologyContext) != "" {
 		prompt += "\n\n[本地游资心法的相关历史经验，仅作为短线风险与执行约束，不代表真人观点]\n" + methodologyContext
 	}

@@ -1,17 +1,18 @@
 import type { Quote } from './backend';
-import { defaultPortfolioAssets, portfolioHoldingCost, portfolioValuationQuantity, type PortfolioDraft, type PortfolioDraftHolding } from './portfolio-draft';
+import { defaultPortfolioAssets, portfolioRate, portfolioHoldingCost, portfolioValuationQuantity, type PortfolioDraft, type PortfolioDraftHolding } from './portfolio-draft';
 
 export function valuePortfolioHolding(holding: PortfolioDraftHolding, totalAssets: number, quote?: Quote) {
 	const costPrice = portfolioHoldingCost(holding);
 	const validAssets = Number.isFinite(totalAssets) && totalAssets > 0;
-	const quantity = portfolioValuationQuantity(holding, totalAssets);
+	const rate = portfolioRate(holding, quote);
+	const quantity = portfolioValuationQuantity(holding, totalAssets, rate);
 	const price = quote && Number.isFinite(quote.price) && quote.price > 0 ? quote.price : null;
-	const costValue = quantity !== null && costPrice !== null ? quantity * costPrice : null;
-	const marketValue = quantity !== null && price !== null ? quantity * price : null;
+	const costValue = quantity !== null && costPrice !== null && rate !== null ? quantity * costPrice * rate : null;
+	const marketValue = quantity !== null && price !== null && rate !== null ? quantity * price * rate : null;
 	const weightPercent = marketValue !== null && validAssets ? marketValue / totalAssets * 100 : null;
 	const profit = marketValue !== null && costValue !== null ? marketValue - costValue : null;
 	const profitPercent = price !== null && costPrice !== null ? (price / costPrice - 1) * 100 : null;
-	return { quantity, price, costPrice, costValue, marketValue, weightPercent, profit, profitPercent };
+	return { quantity, rate, price, costPrice, costValue, marketValue, weightPercent, profit, profitPercent };
 }
 
 export function valuePortfolio(draft: PortfolioDraft, quotes: Record<string, Quote>) {

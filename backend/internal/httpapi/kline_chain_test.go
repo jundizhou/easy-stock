@@ -249,25 +249,20 @@ func TestMarketKLineChainKeepsAStockOnAStockChain(t *testing.T) {
 	}
 }
 
-// 港股源失败时回落到 A 股链（原 loadKLine 的兜底行为），并保留错误链。
-func TestMarketKLineChainFallsBackWhenHongKongFails(t *testing.T) {
+func TestHongKongFailuresLeaveASharePrimaryAvailable(t *testing.T) {
 	aStock := &stubKLine{bars: okBars(2)}
-	hongKong := &stubHongKongKLine{err: errors.New("hk 源断")}
-	bars, err := newMarketKLineChain(hongKong, aStock).KLine(context.Background(), "00700.HK", "day", 60)
-	if err != nil || len(bars) != 2 {
-		t.Fatalf("港股源失败应回落 A 股链：bars=%d err=%v", len(bars), err)
+	hk := &stubHongKongKLine{err: errors.New("hk unavailable")}
+	for _, provider := range []KLineProvider{newMarketKLineChain(hk, aStock), newMarketKLineChain(nil, aStock)} {
+		for range breakerThreshold {
+			if _, err := provider.KLine(context.Background(), "00700.HK", "day", 60); err == nil {
+				t.Fatal("HK request silently crossed markets")
+			}
+		}
 	}
-	if hongKong.hits != 1 || aStock.hits != 1 {
-		t.Fatalf("回落路径未按预期调用：hk=%d a=%d", hongKong.hits, aStock.hits)
+	if aStock.hits != 0 {
+		t.Fatal("HK failures reached A-share provider")
 	}
-}
-
-// 没装港股源时行为与改造前完全一致（不要因为多一层分发改变 A 股语义）。
-func TestMarketKLineChainWithoutHongKongSourceDegradesToAStock(t *testing.T) {
-	aStock := &stubKLine{bars: okBars(4)}
-	provider := newMarketKLineChain(nil, aStock)
-	bars, err := provider.KLine(context.Background(), "00700.HK", "day", 60)
-	if err != nil || len(bars) != 4 {
-		t.Fatalf("无港股源时应直接用 A 股链：bars=%d err=%v", len(bars), err)
+	if _, err := newMarketKLineChain(hk, aStock).KLine(context.Background(), "600519.SH", "day", 60); err != nil || aStock.hits != 1 {
+		t.Fatal("A-share source unavailable", err)
 	}
 }

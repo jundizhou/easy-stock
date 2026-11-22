@@ -42,7 +42,10 @@ func Analyze(input Input) (Analysis, error) {
 	theme := analyzeTheme(input.Symbol, shortTerm, input.CachedThemes, input.Concepts, input.Industry, input.Themes, input.LimitUps, input.Business, input.BusinessDetail, input.BusinessSource)
 	theme = enrichTheme(input, shortTerm, theme)
 	market := marketContext(input)
-	shortTermQuantitative := buildShortTermQuantitativePlan(input, shortTerm, theme, market)
+	var shortTermQuantitative ShortTermQuantitativePlan
+	if !foundation.IsHongKongSymbol(input.Symbol) {
+		shortTermQuantitative = buildShortTermQuantitativePlan(input, shortTerm, theme, market)
+	}
 	profile := classifyProfile(trend, shortTerm, theme, market)
 	fundamentalValue := analyzeFundamentals(input.Fundamentals)
 	fundamental := &fundamentalValue
@@ -55,6 +58,9 @@ func Analyze(input Input) (Analysis, error) {
 	timeframes := analyzeTimeframes(lines)
 	relative := analyzeRelativeStrength(input, lines)
 	riskControl := buildRiskControl(profile, trend, shortTerm, market)
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		riskControl.PositionFormula = "按每股风险与仓位上限计算股数，再按该港股的每手股数向下取整"
+	}
 	action := buildActionPlan(profile, trend, shortTerm, theme, market, relative, riskControl, shortTermQuantitative, currentPrice)
 	if action.DecisionMode != "short_term" {
 		riskControl = alignRiskControlWithActionPlan(riskControl, action)
@@ -406,13 +412,16 @@ func analyzeTrend(lines []foundation.KLine) (TrendAnalysis, []TrendPoint) {
 	}, chart
 }
 
+const hongKongResearchScope = "港股研究使用恒生指数、港股交易时段和证券报价币种。A 股涨跌停、连板、题材与情绪指标不适用。港股主营资料暂未接入，业务信息以财报及公告为准。"
+
 func analyzeShortTerm(symbol string, lines []foundation.KLine, events []foundation.LimitUpEvent) ShortTermAnalysis {
+	hasPriceLimit := !foundation.IsHongKongSymbol(symbol)
 	threshold := limitUpThreshold(symbol)
 	returns := dailyReturns(lines)
 	recent20 := tailFloat(returns, 20)
 	limitFlags := make([]bool, len(recent20))
 	for index, value := range recent20 {
-		limitFlags[index] = value >= threshold
+		limitFlags[index] = hasPriceLimit && value >= threshold
 	}
 	limitCount := 0
 	for _, value := range limitFlags {
@@ -423,7 +432,7 @@ func analyzeShortTerm(symbol string, lines []foundation.KLine, events []foundati
 	maxStreak := maxBoolStreak(limitFlags)
 	matching := make([]foundation.LimitUpEvent, 0)
 	for _, event := range events {
-		if event.Symbol == symbol {
+		if hasPriceLimit && event.Symbol == symbol {
 			matching = append(matching, event)
 		}
 	}
@@ -454,7 +463,10 @@ func analyzeShortTerm(symbol string, lines []foundation.KLine, events []foundati
 	case avgAmount > 0 && avgAmount < 100_000_000:
 		tradability = "流动性偏低"
 	}
-	reasons := []string{fmt.Sprintf("近20日识别到%d个涨停日，最高%d连板", limitCount, maxStreak)}
+	var reasons []string
+	if hasPriceLimit {
+		reasons = append(reasons, fmt.Sprintf("近20日识别到%d个涨停日，最高%d连板", limitCount, maxStreak))
+	}
 	if return5 >= 5 {
 		reasons = append(reasons, fmt.Sprintf("近5日累计上涨%.1f%%", return5))
 	}
@@ -1146,12 +1158,16 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 	} else {
 		quality = append(quality, DataQuality{Key: "quote", Status: "limited", Message: "实时行情不可用，使用最新日K收盘价"})
 	}
-	if short.ExactLimitUpData {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "limit_up", Status: "not_applicable", Message: "港股无 A 股日涨跌停板"})
+	} else if short.ExactLimitUpData {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "ready", Message: "已匹配精确涨停事件"})
 	} else {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "limited", Message: "涨停次数主要由日K涨幅近似识别"})
 	}
 	switch {
+	case foundation.IsHongKongSymbol(input.Symbol):
+		quality = append(quality, DataQuality{Key: "theme", Status: "not_applicable", Message: "当前题材目录覆盖 A 股"})
 	case theme.IsHot && theme.Resonance.Available:
 		quality = append(quality, DataQuality{Key: "theme", Status: "ready", Message: fmt.Sprintf("已完成事件驱动题材归因：%s；共振%d分", theme.Primary, theme.Resonance.Score)})
 	case theme.IsHot:
@@ -1175,7 +1191,9 @@ func buildDataQuality(input Input, profile Profile, lines []foundation.KLine, sh
 	default:
 		quality = append(quality, DataQuality{Key: "theme", Status: "missing", Message: "未匹配稳定题材"})
 	}
-	if market != nil {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "market_emotion", Status: "not_applicable", Message: "当前市场情绪指标覆盖 A 股"})
+	} else if market != nil {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "ready", Message: "已使用最近市场情绪缓存"})
 	} else {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "limited", Message: "市场情绪缓存暂不可用"})

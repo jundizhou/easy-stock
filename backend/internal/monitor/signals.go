@@ -166,7 +166,7 @@ func computeSignals(bars []foundation.KLine) map[string]bool {
 // 未定格的棒（与 highLowFlags 同一判断），剔除后才参与比较。
 func closedSeries(bars []foundation.KLine) (closes []float64, volumes []float64) {
 	historic := bars
-	if len(bars) > 0 && barDate(bars[len(bars)-1]) == foundation.LatestAStockSession(time.Now()) {
+	if len(bars) > 0 && barDate(bars[len(bars)-1]) == foundation.LatestSymbolSession(bars[len(bars)-1].Symbol, time.Now()) {
 		historic = bars[:len(bars)-1]
 	}
 	for _, bar := range historic {

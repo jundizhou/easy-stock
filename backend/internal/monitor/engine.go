@@ -280,7 +280,8 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 		e.flushDigest(ctx, now)
 		trading, tradeDate, sessionOpen := sessionState(now)
-		if !trading {
+		hkOpen := foundation.HongKongMarketOpen(now)
+		if !trading && !hkOpen {
 			continue
 		}
 		if nextQuotes.IsZero() {
@@ -290,7 +291,7 @@ func (e *Engine) Run(ctx context.Context) {
 			nextDeviation = now.Add(30 * time.Second)
 			nextSector = now.Add(10 * time.Second)
 		}
-		if sessionOpen && !nextQuotes.After(now) {
+		if (sessionOpen || hkOpen) && !nextQuotes.After(now) {
 			nextQuotes = now.Add(secondsMax(settings.QuoteIntervalSec, 3))
 			e.runQuotesTask(ctx, now, tradeDate)
 		}
@@ -298,11 +299,11 @@ func (e *Engine) Run(ctx context.Context) {
 			nextSnapshot = now.Add(secondsMax(settings.SnapshotIntervalSec, 10))
 			e.runSnapshotTask(ctx, now, tradeDate)
 		}
-		if e.lastDateRun != tradeDate {
+		if trading && e.lastDateRun != tradeDate {
 			e.runDateRules(ctx, now)
 			e.lastDateRun = tradeDate
 		}
-		if sessionOpen && !nextDeviation.After(now) {
+		if (sessionOpen || hkOpen) && !nextDeviation.After(now) {
 			nextDeviation = now.Add(60 * time.Second)
 			e.runDeviationTask(ctx, now, tradeDate)
 		}
@@ -312,6 +313,14 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 		e.maybePrune(ctx, now)
 	}
+}
+
+func symbolMarketOpen(symbol string, now time.Time) bool {
+	if foundation.IsHongKongSymbol(symbol) {
+		return foundation.HongKongMarketOpen(now)
+	}
+	_, _, open := sessionState(now)
+	return open
 }
 
 func secondsMax(value, minimum int) time.Duration {
@@ -386,8 +395,11 @@ func (e *Engine) runQuotesTask(ctx context.Context, now time.Time, tradeDate str
 		if err != nil {
 			continue
 		}
-		scopeSymbols[rule.ID] = symbols
 		for _, symbol := range symbols {
+			if !symbolMarketOpen(symbol, now) {
+				continue
+			}
+			scopeSymbols[rule.ID] = append(scopeSymbols[rule.ID], symbol)
 			targets[symbol] = true
 		}
 	}
@@ -429,6 +441,9 @@ func (e *Engine) runQuotesTask(ctx context.Context, now time.Time, tradeDate str
 }
 
 func quoteUsableForRule(quote foundation.Quote, now time.Time, tradeDate string) bool {
+	if foundation.IsHongKongSymbol(quote.Symbol) && quote.TradeTime.IsZero() {
+		return false
+	}
 	return quote.Price > 0 && !quote.Meta.Stale && !quote.Meta.CarryForward &&
 		(quote.Meta.TradeDate == "" || quote.Meta.TradeDate == tradeDate) &&
 		(quote.TradeTime.IsZero() || quote.TradeTime.In(foundation.AStockLocation).Format("2006-01-02") == tradeDate) &&
@@ -848,7 +863,7 @@ func (e *Engine) indexCloses(ctx context.Context, id string, now time.Time) ([]f
 	e.mu.Lock()
 	cached, ok := e.indexSeries[id]
 	e.mu.Unlock()
-	if ok && !indexCacheStale(cached, now) && len(cached.closes) > 1 {
+	if ok && !indexCacheStale(cached, now, id) && len(cached.closes) > 1 {
 		return cached.closes, true
 	}
 	if e.index == nil {
@@ -1164,6 +1179,7 @@ type abnormalDeviationResult struct {
 }
 
 type candidateQuote struct {
+	TradeDate     string
 	Price         float64
 	ChangePercent float64
 }
@@ -1179,13 +1195,17 @@ type signalResult struct {
 // 结果进缓存，快照任务与页面视图共用，不再单独拉数据。
 func (e *Engine) runDeviationTask(ctx context.Context, now time.Time, tradeDate string) {
 	startedAt := now
-	rows, err := e.snapshotRows(ctx)
-	if err == nil {
-		err = e.snapshotRuleError(e.now(), tradeDate)
-	}
-	if err != nil {
-		e.recordRun(ctx, "deviation", startedAt, taskResult{err: err}, 0)
-		return
+	var rows []foundation.MarketSnapshotRow
+	var snapshotErr error
+	_, _, mainlandOpen := sessionState(now)
+	if mainlandOpen {
+		rows, snapshotErr = e.snapshotRows(ctx)
+		if snapshotErr == nil {
+			snapshotErr = e.snapshotRuleError(now, tradeDate)
+		}
+		if snapshotErr != nil {
+			rows = nil
+		}
 	}
 	candidates := e.deviationCandidates(ctx, rows)
 	// 技术信号规则的标的也要进候选池：它可能不在偏离/新高低标的里。
@@ -1201,8 +1221,15 @@ func (e *Engine) runDeviationTask(ctx context.Context, now time.Time, tradeDate 
 			}
 		}
 	}
+	active := candidates[:0]
+	for _, symbol := range candidates {
+		if symbolMarketOpen(symbol, now) && (snapshotErr == nil || foundation.IsHongKongSymbol(symbol)) {
+			active = append(active, symbol)
+		}
+	}
+	candidates = active
 	if len(candidates) == 0 {
-		e.recordRun(ctx, "deviation", startedAt, taskResult{}, 0)
+		e.recordRun(ctx, "deviation", startedAt, taskResult{err: snapshotErr}, 0)
 		return
 	}
 	results := e.computeCandidates(ctx, candidates, now)
@@ -1235,15 +1262,18 @@ func (e *Engine) runDeviationTask(ctx context.Context, now time.Time, tradeDate 
 	}
 	triggered, evaluated := 0, 0
 	evaluate := func(rule Rule, symbol string, prepare func(*Observation)) {
-		if e.snapshotRuleError(e.now(), tradeDate) != nil {
-			return
-		}
 		covered, err := e.ruleCoversSymbol(ctx, rule, symbol)
 		if err != nil || !covered {
 			return
 		}
 		row, ok := e.snapshotSymbolRow(symbol)
-		if !ok || (row.TradeDate != "" && row.TradeDate != tradeDate) {
+		if foundation.IsHongKongSymbol(symbol) {
+			sample := results.quote[symbol]
+			if sample.TradeDate != tradeDate || sample.Price <= 0 {
+				return
+			}
+			row = foundation.MarketSnapshotRow{Symbol: symbol, TradeDate: tradeDate, Price: sample.Price, ChangePercent: sample.ChangePercent}
+		} else if !ok || e.snapshotRuleError(e.now(), tradeDate) != nil || (row.TradeDate != "" && row.TradeDate != tradeDate) {
 			return
 		}
 		observation := FromSnapshotRow(row)
@@ -1283,7 +1313,7 @@ func (e *Engine) runDeviationTask(ctx context.Context, now time.Time, tradeDate 
 			})
 		}
 	}
-	e.recordRun(ctx, "deviation", startedAt, taskResult{evaluated: evaluated}, triggered)
+	e.recordRun(ctx, "deviation", startedAt, taskResult{evaluated: evaluated, err: snapshotErr}, triggered)
 }
 
 // signalRuleSymbols 汇总全部启用 signal 规则解析出的标的并集。
@@ -1502,6 +1532,7 @@ func (e *Engine) computeCandidates(ctx context.Context, symbols []string, now ti
 				if inSnapshot && row.Price > 0 {
 					mu.Lock()
 					results.quote[symbol] = candidateQuote{
+						TradeDate:     row.TradeDate,
 						Price:         round2(row.Price),
 						ChangePercent: round2(row.ChangePercent),
 					}
@@ -1510,6 +1541,7 @@ func (e *Engine) computeCandidates(ctx context.Context, symbols []string, now ti
 					lastClose := bars[len(bars)-1].Close
 					mu.Lock()
 					results.quote[symbol] = candidateQuote{
+						TradeDate:     barDate(bars[len(bars)-1]),
 						Price:         round2(lastClose),
 						ChangePercent: round2((lastClose/bars[len(bars)-2].Close - 1) * 100),
 					}
@@ -1529,7 +1561,7 @@ func (e *Engine) computeCandidates(ctx context.Context, symbols []string, now ti
 				// 用实时快照价覆盖日线 today-bar 的收盘价，让偏离值随快照行情跳动。
 				// bars 是共享缓存切片，不能直接改末根，复制末根后再覆盖。
 				devBars := bars
-				if inSnapshot && row.Price > 0 && barDate(bars[len(bars)-1]) == foundation.LatestAStockSession(now) {
+				if inSnapshot && row.Price > 0 && barDate(bars[len(bars)-1]) == foundation.LatestSymbolSession(symbol, now) {
 					last := bars[len(bars)-1]
 					last.Close = row.Price
 					devBars = append(bars[:len(bars)-1:len(bars)-1], last)
@@ -1539,7 +1571,7 @@ func (e *Engine) computeCandidates(ctx context.Context, symbols []string, now ti
 				dev30, ok30 := deviationWindowDev(devBars, aligned, 30)
 				if ok3 || ok10 || ok30 {
 					bases := abnormalWindowBases(devBars)
-					result := deviationResult{Dev3: dev3, Dev10: dev10, Dev30: dev30, Base3: bases[0], Base10: bases[1], Base30: bases[2], FetchedAt: now, DailyAsOf: barDate(devBars[len(devBars)-1]), Stale: barDate(devBars[len(devBars)-1]) != foundation.LatestAStockSession(now)}
+					result := deviationResult{Dev3: dev3, Dev10: dev10, Dev30: dev30, Base3: bases[0], Base10: bases[1], Base30: bases[2], FetchedAt: now, DailyAsOf: barDate(devBars[len(devBars)-1]), Stale: barDate(devBars[len(devBars)-1]) != foundation.LatestSymbolSession(symbol, now)}
 					mu.Lock()
 					results.abnormal[symbol] = abnormalDeviationResult{deviationResult: result, Available: [3]bool{ok3, ok10, ok30}}
 					if ok3 && ok10 && ok30 {
@@ -1572,7 +1604,7 @@ func (e *Engine) dailyBars(ctx context.Context, symbol string, limit int, now ti
 	e.mu.Lock()
 	cached, ok := e.klines[symbol]
 	e.mu.Unlock()
-	if ok && cached.day == today && len(cached.bars) >= limit && !klineCacheStale(cached, now) {
+	if ok && cached.day == today && len(cached.bars) >= limit && !klineCacheStale(cached, now, symbol) {
 		return cached.bars, true
 	}
 	if e.kline == nil {
@@ -1594,7 +1626,10 @@ func (e *Engine) dailyBars(ctx context.Context, symbol string, limit int, now ti
 // 触发判断停在首次取数的时点——页面上现价在跳、偏离值不动，
 // 看起来就像「异动预警没接实时行情」。若首取发生在开盘前，
 // 序列里甚至还没有今天这根棒，整天都是昨日口径。
-func klineCacheStale(cached klineEntry, now time.Time) bool {
+func klineCacheStale(cached klineEntry, now time.Time, symbol string) bool {
+	if foundation.IsHongKongSymbol(symbol) {
+		return (foundation.HongKongMarketOpen(now) || foundation.HongKongMarketOpen(cached.FetchedAt)) && now.Sub(cached.FetchedAt) >= time.Minute
+	}
 	local := now.In(foundation.AStockLocation)
 	if !foundation.IsAStockTradingDay(local) {
 		return false
@@ -1610,8 +1645,11 @@ func klineCacheStale(cached klineEntry, now time.Time) bool {
 // 指数序列绝大多数时间是固定的历史值，只有最后一根是今天的实时棒；
 // 交易时段的指数今日点若一直用缓存，偏离值的「市场中性」修正会停在首取时点，
 // 与实时快照里的个股现价对不上。交易时段给它一个短 TTL，收盘后按长缓存兜底。
-func indexCacheStale(cached cachedIndexSeries, now time.Time) bool {
+func indexCacheStale(cached cachedIndexSeries, now time.Time, id string) bool {
 	age := now.Sub(cached.FetchedAt)
+	if id == "hsi" && foundation.HongKongMarketOpen(now) {
+		return age >= 20*time.Second
+	}
 	local := now.In(foundation.AStockLocation)
 	if foundation.IsAStockTradingDay(local) {
 		minute := local.Hour()*60 + local.Minute()
@@ -1634,7 +1672,7 @@ func highLowFlags(bars []foundation.KLine) (high bool, low bool, have bool) {
 	}
 	historic := bars
 	today := bars[len(bars)-1].Time.In(foundation.AStockLocation).Format("2006-01-02")
-	if today == foundation.LatestAStockSession(time.Now()) {
+	if today == foundation.LatestSymbolSession(bars[len(bars)-1].Symbol, time.Now()) {
 		historic = bars[:len(bars)-1]
 	}
 	if len(historic) == 0 {
@@ -1941,11 +1979,13 @@ func (e *Engine) CurrentStatus() Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	status := e.status
-	_, _, status.SessionOpen = sessionState(e.now())
+	now := e.now()
+	_, _, mainlandOpen := sessionState(now)
+	status.SessionOpen = mainlandOpen || foundation.HongKongMarketOpen(now)
 	if !e.snapFetchedAt.IsZero() {
 		status.SnapshotAgeSeconds = int64(e.now().Sub(e.snapFetchedAt).Seconds())
 	}
-	status.SnapshotStale = status.SnapshotStale || e.snapError != "" || (status.SessionOpen && status.SnapshotAgeSeconds > 60)
+	status.SnapshotStale = status.SnapshotStale || e.snapError != "" || (mainlandOpen && status.SnapshotAgeSeconds > 60)
 	if e.snapError != "" {
 		status.SnapshotWarning = e.snapError
 	}

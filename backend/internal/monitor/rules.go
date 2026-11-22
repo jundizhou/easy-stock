@@ -365,6 +365,9 @@ func orZero(value *float64) float64 {
 }
 
 func observationValue(obs Observation, field string) (float64, bool) {
+	if (field == "limit_up" || field == "limit_down" || field == "broken_limit") && foundation.IsHongKongSymbol(obs.SnapshotRow.Symbol) {
+		return 0, false
+	}
 	switch field {
 	case "last":
 		return obs.Price, obs.Price > 0

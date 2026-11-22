@@ -15,14 +15,20 @@ export function searchStockDirectory(stocks: StockDirectoryEntry[], query: strin
 		.map((item) => item.stock);
 }
 
-export function resolveStockDirectorySymbol(value: string, stocks: StockDirectoryEntry[]) {
-	const normalized = normalizeAnalysisSymbol(value);
-	if (/^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(normalized)) return normalized;
-	// 港股：00700.HK / HK00700 / 裸 5 位代码（A 股一律 6 位）。
-	if (/^\d{5}\.HK$/.test(normalized)) return normalized;
-	if (/^HK(\d{5})$/.test(normalized)) return `${normalized.slice(2)}.HK`;
-	if (/^\d{5}$/.test(normalized)) return `${normalized}.HK`;
+export function directStockCode(value: string) {
+	const code = normalizeAnalysisSymbol(value);
+	const hk = /^(?:HK(\d{5})|(\d{5})(?:\.HK)?)$/.exec(code);
+	if (hk) return (hk[1] || hk[2]) + '.HK';
+	const mainland = /^(SH|SZ|BJ)(\d{6})$/.exec(code);
+	if (mainland) return mainland[2] + '.' + mainland[1];
+	if (/^\d{6}(?:\.(?:SH|SZ|BJ))?$/.test(code)) return code;
+	return '';
+}
 
+export function resolveStockDirectorySymbol(value: string, stocks: StockDirectoryEntry[]) {
+	const direct = directStockCode(value);
+	if (direct) return direct;
+	if (/^(?:[A-Z]{2}\d+|\d+\.[A-Z]+)$/.test(normalizeAnalysisSymbol(value))) return '';
 	const needle = normalizeStockSearchText(value);
 	const exactMatches = stocks.filter((stock) => {
 		return normalizeStockSearchText(stock.symbol) === needle
@@ -90,6 +96,7 @@ export function signedPercent(value: number) {
 }
 
 export type PositionSizingInput = {
+	boardLot?: number;
 	accountCapital: number;
 	riskPercent: number;
 	entryPrice: number;
@@ -107,15 +114,15 @@ export type PositionSizingResult = {
 };
 
 export function calculatePositionSizing(input: PositionSizingInput): PositionSizingResult {
-	const { accountCapital, riskPercent, entryPrice, stopPrice, maxPositionPercent } = input;
-	if (![accountCapital, riskPercent, entryPrice, stopPrice, maxPositionPercent].every(Number.isFinite) || accountCapital <= 0 || riskPercent <= 0 || entryPrice <= 0 || stopPrice <= 0 || entryPrice <= stopPrice || maxPositionPercent <= 0) {
+	const { boardLot = 100, accountCapital, riskPercent, entryPrice, stopPrice, maxPositionPercent } = input;
+	if (!Number.isInteger(boardLot) || boardLot <= 0 || ![accountCapital, riskPercent, entryPrice, stopPrice, maxPositionPercent].every(Number.isFinite) || accountCapital <= 0 || riskPercent <= 0 || entryPrice <= 0 || stopPrice <= 0 || entryPrice <= stopPrice || maxPositionPercent <= 0) {
 		return { shares: 0, positionValue: 0, positionPercent: 0, maxLoss: 0, allowedLoss: 0, riskPerShare: 0 };
 	}
 	const allowedLoss = accountCapital * riskPercent / 100;
 	const riskPerShare = entryPrice - stopPrice;
-	const sharesByRisk = Math.floor(allowedLoss / riskPerShare / 100) * 100;
+	const sharesByRisk = Math.floor(allowedLoss / riskPerShare / boardLot) * boardLot;
 	const positionCap = accountCapital * Math.min(maxPositionPercent, 100) / 100;
-	const sharesByPosition = Math.floor(positionCap / entryPrice / 100) * 100;
+	const sharesByPosition = Math.floor(positionCap / entryPrice / boardLot) * boardLot;
 	const shares = Math.max(Math.min(sharesByRisk, sharesByPosition), 0);
 	const positionValue = shares * entryPrice;
 	return {

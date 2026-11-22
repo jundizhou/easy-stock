@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +79,16 @@ func (c *Client) Realtime(ctx context.Context, symbols []string) ([]foundation.Q
 			// 港股第 36/37 列是成交量（股）与成交额（港元），A 股这两列口径不同，
 			// 只在港股补，避免把 A 股的手数当成股数写进同一个字段。
 			if markets[key] == "HK" && len(fields) > 37 {
+				quote.Currency = fieldAt(fields, 75)
+				if lot, err := strconv.Atoi(fieldAt(fields, 60)); err == nil && lot > 0 {
+					quote.BoardLot = lot
+				}
+				switch fieldAt(fields, 63) {
+				case "GP":
+					quote.InstrumentType = "stock"
+				case "GP-FUND":
+					quote.InstrumentType = "etf"
+				}
 				quote.Volume = parseFloat(fieldAt(fields, 36))
 				quote.Amount = parseFloat(fieldAt(fields, 37))
 			}

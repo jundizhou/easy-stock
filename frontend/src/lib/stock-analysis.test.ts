@@ -65,3 +65,9 @@ describe('stock analysis helpers', () => {
 		expect(calculatePositionSizing({ accountCapital: 200_000, riskPercent: 1, entryPrice: 20, stopPrice: 20.5, maxPositionPercent: 30 }).shares).toBe(0);
 	});
 });
+
+it('港股按证券每手股数向下取整', () => {
+	const input = { accountCapital: 200000, riskPercent: 0.8, entryPrice: 20, stopPrice: 19, maxPositionPercent: 30 };
+	expect(calculatePositionSizing({ ...input, boardLot: 500 }).shares).toBe(1500);
+	expect(calculatePositionSizing({ ...input, boardLot: 0 }).shares).toBe(0);
+});

@@ -43,9 +43,6 @@ func (c *Client) HongKongKLine(ctx context.Context, symbol string, period string
 			QFQDay   [][]any `json:"qfqday"`
 			QFQWeek  [][]any `json:"qfqweek"`
 			QFQMonth [][]any `json:"qfqmonth"`
-			Day      [][]any `json:"day"`
-			Week     [][]any `json:"week"`
-			Month    [][]any `json:"month"`
 		} `json:"data"`
 	}
 	start := time.Now()
@@ -64,17 +61,6 @@ func (c *Client) HongKongKLine(ctx context.Context, symbol string, period string
 		rows = node.QFQMonth
 	}
 	if len(rows) == 0 {
-		// 极端情况下上游不给复权序列，退回未复权，宁可少精度也不要整段缺失。
-		switch period {
-		case "week":
-			rows = node.Week
-		case "month":
-			rows = node.Month
-		default:
-			rows = node.Day
-		}
-	}
-	if len(rows) == 0 {
 		return nil, fmt.Errorf("tencent hk kline unavailable")
 	}
 
@@ -89,12 +75,20 @@ func (c *Client) HongKongKLine(ctx context.Context, symbol string, period string
 		if parseErr != nil {
 			continue
 		}
-		lines = append(lines, foundation.KLine{
+		bar := foundation.KLine{
 			Symbol: normalized.Canonical, Time: day,
 			Open: parseFloat(anyString(row[1])), Close: parseFloat(anyString(row[2])),
 			High: parseFloat(anyString(row[3])), Low: parseFloat(anyString(row[4])),
 			Volume: parseFloat(anyString(row[5])), Meta: meta,
-		})
+		}
+		if bar.Close <= 0 || bar.Open <= 0 || bar.High <= 0 || bar.Low <= 0 {
+			continue
+		}
+		if len(row) >= 9 {
+			bar.TurnoverRate = parseFloat(anyString(row[7]))
+			bar.Amount = 10000 * parseFloat(anyString(row[8]))
+		}
+		lines = append(lines, bar)
 	}
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("tencent hk kline returned no valid bars")

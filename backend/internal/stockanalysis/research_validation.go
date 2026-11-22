@@ -630,7 +630,7 @@ func researchPricesStale(snapshot ResearchSnapshot) bool {
 	if len(snapshot.DailyBars) == 0 {
 		return true
 	}
-	lag, valid := foundation.AStockSessionLag(snapshot.DailyBars[len(snapshot.DailyBars)-1].Date, snapshot.CutoffAt)
+	lag, valid := foundation.SymbolSessionLag(snapshot.Symbol, snapshot.DailyBars[len(snapshot.DailyBars)-1].Date, snapshot.CutoffAt)
 	return !valid || lag > 5
 }
 
@@ -639,11 +639,11 @@ func researchPriceFreshnessReason(snapshot ResearchSnapshot) string {
 		return "缺少日线行情，不能形成交易计划"
 	}
 	date := snapshot.DailyBars[len(snapshot.DailyBars)-1].Date
-	_, valid := foundation.AStockSessionLag(date, snapshot.CutoffAt)
+	_, valid := foundation.SymbolSessionLag(snapshot.Symbol, date, snapshot.CutoffAt)
 	if !valid {
 		return "日线日期无效或晚于分析时点，不能形成交易计划"
 	}
-	return fmt.Sprintf("日线截至%s，落后最近已完成交易日%s超过5个交易日（不计休市日），需更新行情后制定交易计划", date, foundation.LatestCompletedAStockSession(snapshot.CutoffAt).Format("2006-01-02"))
+	return fmt.Sprintf("日线截至%s，落后最近已完成交易日%s超过5个交易日（不计休市日），需更新行情后制定交易计划", date, foundation.LatestCompletedSymbolSession(snapshot.Symbol, snapshot.CutoffAt).Format("2006-01-02"))
 }
 
 // A quantitative snapshot is useful while AI runs, but is not a completed plan.

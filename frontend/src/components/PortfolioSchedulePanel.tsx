@@ -60,9 +60,11 @@ export function PortfolioSchedulePanel({ config, plan, disabled, onOpenSettings,
   if (!config || !loaded || saving) return;
   setSaving(true); onBusyChange(true); setError(''); setMessage('');
   try {
+   const request = !form.enabled && saved ? saved.request : scheduleRequest(plan);
+   if (form.enabled && request.holdings.some(item => item.weight_percent <= 0)) throw new Error('请补齐持仓数量、报价和人民币汇率，再保存定时巡检');
    const { data } = await requestJSON<{ data: PortfolioSchedule }>(config, path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
     enabled: form.enabled, interval: form.interval, unit: form.unit, start_date: form.start_date, time: form.time,
-    channels: form.channels, request: scheduleRequest(plan),
+    channels: form.channels, request,
    }) });
    setSaved(data); setForm(data);
    setMessage(data.enabled ? '定时巡检已保存，已同步当前方案的持仓与研究设置' : '定时巡检已停用');

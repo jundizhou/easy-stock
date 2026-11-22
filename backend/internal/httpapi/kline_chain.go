@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"sync"
 	"time"
@@ -12,59 +11,24 @@ import (
 	"easy-stock/backend/internal/foundation"
 )
 
-// 熔断参数。
-//
-// 监控会批量读取标的日线。连续失败的数据源暂时冷却，避免每只标的
-// 都重复等待同一次故障；冷却结束后重新尝试主源。
-// marketKLineChain 按市场分流日线请求。
-//
-// A 股主备链（东财 push2his / 新浪 CN_MarketDataService）都不覆盖港股，
-// 港股复权序列只能走腾讯 hkfqkline。两条链各自持有熔断状态：港股源抖动
-// 不该把 A 股主源一起冷却，反之亦然。
-//
-// 港股源失败时仍回落到 A 股链：这是"上游整体抖动"时的兜底机会，
-// 与个股分析里 loadKLine 的历史行为一致。
+// marketKLineChain keeps failures local to providers that serve the requested market.
 type marketKLineChain struct {
 	hongKong HongKongKLineProvider
 	aStock   KLineProvider
 }
 
 func newMarketKLineChain(hongKong HongKongKLineProvider, aStock KLineProvider) KLineProvider {
-	if aStock == nil || isNilProvider(aStock) {
-		aStock = &klineChain{}
-	}
-	if hongKong == nil || isNilInterface(hongKong) {
-		return aStock
-	}
 	return &marketKLineChain{hongKong: hongKong, aStock: aStock}
 }
 
-func (c *marketKLineChain) KLine(ctx context.Context, symbol string, period string, limit int) ([]foundation.KLine, error) {
-	if !foundation.IsHongKongSymbol(symbol) {
-		return c.aStock.KLine(ctx, symbol, period, limit)
-	}
-	lines, err := c.hongKong.HongKongKLine(ctx, symbol, period, limit)
-	if err == nil && len(lines) > 0 {
-		return lines, nil
-	}
-	if err != nil {
-		log.Printf("event=hong_kong_kline_failed symbol=%s period=%s err=%v", symbol, period, err)
+func (c *marketKLineChain) KLine(ctx context.Context, symbol, period string, limit int) ([]foundation.KLine, error) {
+	if foundation.IsHongKongSymbol(symbol) {
+		if isNilProvider(c.hongKong) {
+			return nil, fmt.Errorf("港股日线源不可用")
+		}
+		return c.hongKong.HongKongKLine(ctx, symbol, period, limit)
 	}
 	return c.aStock.KLine(ctx, symbol, period, limit)
-}
-
-// isNilInterface 识别接口里装着的 nil 指针（任意接口类型）。
-func isNilInterface(value any) bool {
-	if value == nil {
-		return true
-	}
-	reflected := reflect.ValueOf(value)
-	switch reflected.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func:
-		return reflected.IsNil()
-	default:
-		return false
-	}
 }
 
 const (
@@ -197,7 +161,10 @@ func (c *klineChain) record(index int, err error) {
 // isNilProvider 识别「接口非 nil、底层指针为 nil」的坏源。
 // 这种源一旦进入链路，会在调用时 panic，而 panic 发生在交易决策的中途，
 // 代价远大于这里多做一次判断。
-func isNilProvider(provider KLineProvider) bool {
+func isNilProvider(provider any) bool {
+	if provider == nil {
+		return true
+	}
 	value := reflect.ValueOf(provider)
 	switch value.Kind() {
 	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func:

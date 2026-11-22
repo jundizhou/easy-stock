@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"easy-stock/backend/internal/foundation"
 	"easy-stock/backend/internal/agent"
+	"easy-stock/backend/internal/foundation"
 )
 
 func TestAnalyzeNewListingWithOneTradingDay(t *testing.T) {
@@ -1236,4 +1236,27 @@ func (p fakeStockPrompter) Prompt(_ context.Context, prompt string) (agent.Promp
 		*p.prompt = prompt
 	}
 	return agent.PromptResult{Content: p.content}, nil
+}
+
+func TestHongKongRallyDoesNotCreateLimitUpStrategy(t *testing.T) {
+	lines := []foundation.KLine{{Close: 100}, {Close: 112}, {Close: 125.44}}
+	short := analyzeShortTerm("00700.HK", lines, nil)
+	profile := classifyProfile(TrendAnalysis{}, short, ThemeAnalysis{}, nil)
+	if short.LimitUpCount20 != 0 || short.MaxLimitStreak20 != 0 || profile.PrimaryType == "emotion_leader" {
+		t.Fatalf("HK rally generated an A-share limit strategy: %+v %+v", short, profile)
+	}
+	input := Input{Symbol: "00700.HK"}
+	for _, rows := range [][]DataQuality{
+		buildDataQuality(input, profile, lines, short, ThemeAnalysis{}, nil, RelativeStrength{}, nil, nil, nil, nil),
+		buildNewListingDataQuality(input, profile, lines, short, ThemeAnalysis{}, nil, RelativeStrength{}, nil, nil, nil, nil),
+	} {
+		for _, row := range rows {
+			switch row.Key {
+			case "market_emotion", "theme", "limit_up":
+				if row.Status != "not_applicable" {
+					t.Errorf("%+v", row)
+				}
+			}
+		}
+	}
 }

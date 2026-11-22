@@ -222,18 +222,33 @@ func (e *Engine) deviationEventCounts(ctx context.Context, days int) map[string]
 	if days < 1 {
 		return nil
 	}
-	end := foundation.LatestAStockSession(e.now())
-	day, err := time.ParseInLocation("2006-01-02", end, foundation.AStockLocation)
-	if err != nil {
-		return nil
-	}
-	for remaining := days - 1; remaining > 0; {
-		day = day.AddDate(0, 0, -1)
-		if foundation.IsAStockTradingDay(day) {
-			remaining--
+	now := e.now()
+	counts := map[string]int{}
+	for _, market := range []struct {
+		hk         bool
+		end        string
+		tradingDay func(time.Time) bool
+	}{
+		{false, foundation.LatestAStockSession(now), foundation.IsAStockTradingDay},
+		{true, foundation.LatestHongKongSession(now), foundation.IsHongKongTradingDay},
+	} {
+		day, err := time.ParseInLocation("2006-01-02", market.end, foundation.AStockLocation)
+		if err != nil {
+			continue
+		}
+		for remaining := days - 1; remaining > 0; {
+			day = day.AddDate(0, 0, -1)
+			if market.tradingDay(day) {
+				remaining--
+			}
+		}
+		events, _ := e.store.DeviationCounts(ctx, day.Format("2006-01-02"), market.end)
+		for symbol, count := range events {
+			if foundation.IsHongKongSymbol(symbol) == market.hk {
+				counts[symbol] = count
+			}
 		}
 	}
-	counts, _ := e.store.DeviationCounts(ctx, day.Format("2006-01-02"), end)
 	return counts
 }
 
@@ -352,7 +367,7 @@ func (e *Engine) AbnormalCalc(ctx context.Context, symbol string) (AbnormalCalcV
 	// 和页面现价同步跳动，否则看起来像没接实时行情。bars 是共享缓存切片，
 	// 不能直接改末根，复制末根后再覆盖。
 	calcBars := bars
-	currentSession := barDate(bars[len(bars)-1]) == foundation.LatestAStockSession(view.GeneratedAt)
+	currentSession := barDate(bars[len(bars)-1]) == foundation.LatestSymbolSession(symbol, view.GeneratedAt)
 	projectionPrice := view.Price
 	if inSnapshot && row.Price > 0 && currentSession {
 		last := bars[len(bars)-1]
@@ -541,7 +556,7 @@ func (e *Engine) abnormalItemForSymbol(ctx context.Context, symbol string, event
 	item.LastTriggerDate = lastAbnormalTriggerDate(calc.Rows, calc.Board, calc.IsST)
 	if len(calc.Rows) > 0 {
 		item.DailyAsOf = calc.Rows[len(calc.Rows)-1].Date
-		item.Historical = item.DailyAsOf != foundation.LatestAStockSession(calc.GeneratedAt)
+		item.Historical = item.DailyAsOf != foundation.LatestSymbolSession(symbol, calc.GeneratedAt)
 		item.CalculatedAt = &calc.GeneratedAt
 	}
 	if eventCounts != nil {

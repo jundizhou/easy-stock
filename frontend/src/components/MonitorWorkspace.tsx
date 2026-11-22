@@ -1,3 +1,5 @@
+import { useStockSuggestions } from '../lib/use-stock-suggestions';
+import { directStockCode } from '../lib/stock-analysis';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	Plus, RefreshCw, Radar, Trash2, Save, FlaskConical, LoaderCircle, X, ArrowRightLeft,
@@ -13,7 +15,7 @@ import {
 	fetchMonitorEvents, deleteMonitorEvent, clearMonitorEvents,
 	fetchMonitorSettings, saveMonitorSettings, fetchMonitorRadar, radarKindLabels,
 	fetchMonitorSectors, monitorSectorFieldHints, monitorSectorDimensionLabels,
-	fetchMonitorTargets, fetchMonitorStockSuggest, fetchMonitorWatchlist, fetchMonitorWatchFunds, addMonitorWatch, removeMonitorWatch, clearMonitorWatch, updateMonitorWatchNote,
+	fetchMonitorTargets, fetchMonitorWatchlist, fetchMonitorWatchFunds, addMonitorWatch, removeMonitorWatch, clearMonitorWatch, updateMonitorWatchNote,
 	fetchMonitorAbnormal, fetchMonitorAbnormalCalc, monitorAbnormalLevelLabels, monitorAbnormalBoardLabels,
 	monitorRuleTypeLabels, monitorFieldLabels, monitorScopeLabels, monitorSignalHints,
 	type MonitorRule, type MonitorRuleType, type MonitorEvent,
@@ -192,32 +194,11 @@ export function MonitorWorkspace({ config, refreshKey, onOpenMarketIndexes }: { 
 // 支持名称、代码、拼音（后端走东财建议接口，上游原生支持拼音，前端不用带拼音表）。
 function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onAdded: () => void }) {
 	const [query, setQuery] = useState('');
-	const [hits, setHits] = useState<MonitorSymbolHit[]>([]);
+	const { suggestions: hits, loading: suggesting, error: suggestError } = useStockSuggestions(config, query);
 	const [suggestOpen, setSuggestOpen] = useState(false);
-	const [suggesting, setSuggesting] = useState(false);
-	const [pending, setPending] = useState<MonitorSymbolHit | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
 	const boxRef = useRef<HTMLDivElement | null>(null);
-
-	// 搜索防抖：输入停 250ms 才打接口，清空即收起候选。
-	useEffect(() => {
-		if (!config || !query.trim()) { setHits([]); setSuggestOpen(false); return; }
-		const timer = window.setTimeout(async () => {
-			setSuggesting(true);
-			try {
-				const data = (await fetchMonitorStockSuggest(config, query.trim())).data;
-				setHits(data);
-				setSuggestOpen(true);
-				setError('');
-			} catch (cause) {
-				setError(String((cause as Error).message));
-			} finally {
-				setSuggesting(false);
-			}
-		}, 250);
-		return () => window.clearTimeout(timer);
-	}, [config, query]);
 
 	// 点击别处收起候选下拉。
 	useEffect(() => {
@@ -234,7 +215,7 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 		try {
 			await addMonitorWatch(config, { symbol: hit.symbol, name: hit.name, note: '' });
 			onAdded();
-			setQuery(''); setHits([]); setSuggestOpen(false); setPending(null);
+			setQuery(''); setSuggestOpen(false);
 		} catch (cause) {
 			setError(String((cause as Error).message));
 		} finally {
@@ -242,21 +223,17 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 		}
 	};
 
-	// 港股 5 位、A 股 6 位都可以直接回车添加，不必等建议下拉。
-	// 港股裸 5 位补 .HK 后缀再提交，保证关注仓里存的是可判别市场的规范代码。
-	const directQuery = query.trim().toUpperCase();
-	const directCode = directQuery.match(/^(\d{6}|\d{5})$/);
-	const directSymbol = directCode ? (directCode[1].length === 5 ? `${directCode[1]}.HK` : directCode[1]) : '';
+	const directSymbol = directStockCode(query);
 	return (
 		<div className="monitor-watch-search" ref={boxRef}>
 			<Search size={14} aria-hidden="true" />
 			<input
 				value={query}
-				onChange={(event) => { setQuery(event.target.value); setPending(null); }}
+				onChange={(event) => { setQuery(event.target.value); setSuggestOpen(Boolean(event.target.value.trim())); }}
 				onKeyDown={(event) => {
 					// 直接输 6 位 A 股 / 5 位港股代码回车也能加，不必等搜索结果。
 					if (event.key === 'Enter' && directSymbol && !busy) {
-						void add(pending || { symbol: directSymbol, code: directCode![1], name: '' });
+						void add({ symbol: directSymbol, code: directSymbol.split('.')[0], name: '' });
 					}
 				}}
 				placeholder="搜索添加：名称 / 代码 / 拼音，如 gzmt、00700"
@@ -267,7 +244,7 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 				<div className="monitor-suggest" role="listbox">
 					{hits.map((hit) => (
 						<button type="button" key={hit.symbol} role="option" aria-selected="false" disabled={busy}
-							onClick={() => { setPending(hit); void add(hit); }}>
+							onClick={() => void add(hit)}>
 							<strong>{hit.name}</strong>
 							<small>{hit.symbol}</small>
 						</button>
@@ -277,7 +254,7 @@ function WatchSearchBox({ config, onAdded }: { config: BackendConfig | null; onA
 			{suggestOpen && !suggesting && hits.length === 0 && (
 				<div className="monitor-suggest empty"><span>没有匹配的标的，换个关键词试试（支持 A 股与港股）</span></div>
 			)}
-			{error && <div className="monitor-suggest empty"><span>搜索失败：{error}</span></div>}
+			{(error || suggestError) && <div className="monitor-suggest empty"><span>搜索失败：{error || suggestError}</span></div>}
 		</div>
 	);
 }
@@ -384,7 +361,7 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 	const [calcLoading, setCalcLoading] = useState(false);
 	const [calcError, setCalcError] = useState('');
 	const [query, setQuery] = useState('');
-	const [hits, setHits] = useState<MonitorSymbolHit[]>([]);
+	const { suggestions: hits } = useStockSuggestions(config, query);
 	// 侧栏监控清单（关注仓）：异动页是查询台，用户把个股加进来，
 	// 系统持续算这些标的的 3/10/30 日偏离，折叠列表跟智能雷达同形态。
 	const [watch, setWatch] = useState<MonitorWatchItem[]>([]);
@@ -471,21 +448,6 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 
 	useEffect(() => { void loadCalc(config, calcSymbol); }, [config, calcSymbol, loadCalc, view?.generated_at]);
 
-	// 搜索防抖：250ms 内只发一次建议请求。
-	useEffect(() => {
-		if (!config || query.trim().length < 1) {
-			setHits([]);
-			return;
-		}
-		let alive = true;
-		const timer = setTimeout(() => {
-			fetchMonitorStockSuggest(config, query.trim())
-				.then((payload) => { if (alive) setHits((payload.data ?? []).slice(0, 6)); })
-				.catch(() => { if (alive) setHits([]); });
-		}, 250);
-		return () => { alive = false; clearTimeout(timer); };
-	}, [config, query]);
-
 	const addWatch = async (target: { symbol: string; name?: string }) => {
 		if (!config || watchPending) return;
 		setWatchPending(target.symbol);
@@ -495,7 +457,6 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 			await loadWatch(config);
 			setWatchNotice(`已将 ${target.name || target.symbol} 加入监控，右侧列表持续跟踪`);
 			setQuery('');
-			setHits([]);
 			// 若此前乐观移除过，重新加入时恢复显示。
 			setRemoved((prev) => {
 				if (!prev.has(target.symbol)) return prev;
@@ -624,7 +585,7 @@ function AbnormalTab({ config }: { config: BackendConfig | null }) {
 					/>
 					{hits.length > 0 && (
 						<div className="monitor-abn-hits">
-							{hits.map((hit) => (
+							{hits.slice(0, 6).map((hit) => (
 								<div className="monitor-abn-hit" key={hit.symbol}>
 									<button
 										type="button"

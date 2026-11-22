@@ -67,6 +67,9 @@ func analyzeNewListing(input Input, lines []foundation.KLine) Analysis {
 		Detail:          fmt.Sprintf("上市仅%d个交易日，暂无20日同周期相对强度；不参与本次评分", len(lines)),
 	}
 	risk := buildNewListingRiskControl(trend, market)
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		risk.PositionFormula = "按港股每手股数及上市期风险上限计算仓位"
+	}
 	plan := buildNewListingActionPlan(profile, trend, risk, quote.Price)
 	nextDay := buildNewListingNextDayPlan(trend, risk, market)
 	signals := buildNewListingSignals(trend, short, theme, market, risk, fundamental, research)
@@ -406,12 +409,16 @@ func buildNewListingDataQuality(input Input, profile Profile, lines []foundation
 	} else {
 		quality = append(quality, DataQuality{Key: "quote", Status: "limited", Message: "实时行情不可用，使用最新日K收盘价"})
 	}
-	if short.ExactLimitUpData {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "limit_up", Status: "not_applicable", Message: "港股无 A 股日涨跌停板"})
+	} else if short.ExactLimitUpData {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "ready", Message: "已匹配精确涨停事件"})
 	} else {
 		quality = append(quality, DataQuality{Key: "limit_up", Status: "limited", Message: "上市初期涨停识别仅作辅助参考"})
 	}
-	if theme.Primary != "" {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "theme", Status: "not_applicable", Message: "当前题材目录覆盖 A 股"})
+	} else if theme.Primary != "" {
 		status := "limited"
 		if theme.IsHot && theme.Resonance.Available {
 			status = "ready"
@@ -420,7 +427,9 @@ func buildNewListingDataQuality(input Input, profile Profile, lines []foundation
 	} else {
 		quality = append(quality, DataQuality{Key: "theme", Status: "missing", Message: "未匹配稳定题材"})
 	}
-	if market != nil {
+	if foundation.IsHongKongSymbol(input.Symbol) {
+		quality = append(quality, DataQuality{Key: "market_emotion", Status: "not_applicable", Message: "当前市场情绪指标覆盖 A 股"})
+	} else if market != nil {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "ready", Message: "已使用最近市场情绪缓存"})
 	} else {
 		quality = append(quality, DataQuality{Key: "market_emotion", Status: "limited", Message: "市场情绪缓存暂不可用"})

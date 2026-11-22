@@ -56,6 +56,10 @@ func NormalizeSymbol(input string) (Symbol, error) {
 		return Symbol{}, fmt.Errorf("unsupported market %q", market)
 	}
 
+	if (market == "HK") != (len(code) == 5) {
+		return Symbol{}, fmt.Errorf("invalid code length for %s: %q", market, input)
+	}
+
 	sinaPrefix := strings.ToLower(market)
 	emMarket := "0"
 	switch market {

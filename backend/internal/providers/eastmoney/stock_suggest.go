@@ -19,12 +19,13 @@ var suggestHKQuoteID = regexp.MustCompile(`^116\.(\d{5})$`)
 // SymbolHit 是一次股票搜索的命中项：建议接口天然支持名称、代码、
 // 拼音全拼与拼音首字母（如 hjsj → 华胜天成），无需本地拼音表。
 type SymbolHit struct {
-	Symbol string `json:"symbol"`
-	Code   string `json:"code"`
-	Name   string `json:"name"`
+	InstrumentType string `json:"instrument_type,omitempty"`
+	Symbol         string `json:"symbol"`
+	Code           string `json:"code"`
+	Name           string `json:"name"`
 }
 
-// StockSuggest 用东财建议接口搜 A 股。query 可以是名称、6 位代码或拼音；
+// StockSuggest 用东财建议接口查找 A 股与港股。query 可以是名称、代码或拼音；
 // 返回带后缀的规范代码（600519.SH / 000858.SZ），命中为空不算错误。
 func (c *Client) StockSuggest(ctx context.Context, query string, count int) ([]SymbolHit, error) {
 	query = strings.TrimSpace(query)

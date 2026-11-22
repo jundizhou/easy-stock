@@ -16,7 +16,17 @@ type SourceMeta struct {
 	CarryForward    bool       `json:"carry_forward,omitempty"`
 }
 
+// CurrencyConversion converts one unit of the quote currency to CNY.
+type CurrencyConversion struct {
+	Rate float64 `json:"rate"`
+	Date string  `json:"date"`
+}
+
 type Quote struct {
+	BoardLot       int                 `json:"board_lot,omitempty"`
+	CNYConversion  *CurrencyConversion `json:"cny_conversion,omitempty"`
+	Currency       string              `json:"currency,omitempty"`
+	InstrumentType string              `json:"instrument_type,omitempty"`
 	// Book is the provider's visible best bid/ask, in shares. Nil means unavailable.
 	Book      *QuoteBook      `json:"book,omitempty"`
 	Valuation *StockValuation `json:"valuation,omitempty"`

@@ -272,6 +272,10 @@ export type SourceMeta = {
 };
 
 export type Quote = {
+ board_lot?: number;
+ cny_conversion?: { rate: number; date: string };
+ currency?: string;
+ instrument_type?: 'stock' | 'etf';
  volume?: number;
  amount?: number;
   symbol: string;

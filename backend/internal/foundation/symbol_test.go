@@ -83,7 +83,7 @@ func TestIsHongKongSymbol(t *testing.T) {
 }
 
 func TestNormalizeSymbolRejectsUnknownMarket(t *testing.T) {
-	for _, input := range []string{"00700.US", "us00700"} {
+	for _, input := range []string{"00700.US", "us00700", "00700.SH", "bj00700", "600519.HK", "HK600519"} {
 		if _, err := NormalizeSymbol(input); err == nil {
 			t.Fatalf("NormalizeSymbol(%q) error = nil, want error", input)
 		}

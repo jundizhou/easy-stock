@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { requestJSON, type BackendConfig, type Quote } from './backend';
 
 export async function loadPortfolioQuotes(config: BackendConfig, symbols: string[], signal?: AbortSignal) {
-	const payload = await requestJSON<{ data: Quote[] }>(config, `/api/v1/quotes/realtime?symbols=${encodeURIComponent(symbols.join(','))}`, { signal });
+	const payload = await requestJSON<{ data: Quote[] }>(config, `/api/v1/quotes/realtime?symbols=${encodeURIComponent(symbols.join(','))}${symbols.some(s => s.endsWith('.HK')) ? '&account_currency=CNY' : ''}`, { signal });
 	return Object.fromEntries((Array.isArray(payload.data) ? payload.data : []).filter((quote) => symbols.includes(quote.symbol) && Number.isFinite(quote.price) && quote.price > 0).map((quote) => [quote.symbol, quote]));
 }
 

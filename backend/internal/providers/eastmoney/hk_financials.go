@@ -12,17 +12,9 @@ import (
 	"easy-stock/backend/internal/foundation"
 )
 
-// hkFinancialHistoryColumns 是港股 F10 主指标表返回的列快照：
-// OPERATE_INCOME 营业额、HOLDER_PROFIT 股东应占溢利、GROSS_PROFIT_RATIO 毛利率、
-// DEBT_ASSET_RATIO 资产负债率、ROE_AVG 平均净资产收益率、PER_NETCASH_OPERATE 每股经营现金流。
-// 港股披露口径与 A 股一致（年初至今累计），但没有「扣非净利润」，也不带公告日期。
-const hkFinancialHistoryColumns = "SECUCODE,SECURITY_NAME_ABBR,REPORT_DATE,REPORT_TYPE,DATE_TYPE_CODE,OPERATE_INCOME,OPERATE_INCOME_YOY,HOLDER_PROFIT,HOLDER_PROFIT_YOY,BASIC_EPS,ROE_AVG,GROSS_PROFIT_RATIO,DEBT_ASSET_RATIO,PER_NETCASH_OPERATE,CURRENCY,IS_CNY_CODE"
+// The indicator table supplies ratios. Monetary values come from the original-currency income statement.
+const hkFinancialHistoryColumns = "SECUCODE,REPORT_DATE,REPORT_TYPE,ROE_AVG,GROSS_PROFIT_RATIO,DEBT_ASSET_RATIO,PER_NETCASH_OPERATE,CURRENCY"
 
-// HongKongFinancialHistory 返回港股最近若干期主要财务指标（新到旧）。
-//
-// A 股的 RPT_F10_FINANCE_MAINFINADATA 不覆盖港股（SECUCODE=00700.HK 查不到），
-// 港股要走 RPT_HKF10_FN_MAININDICATOR。两者报告期口径相同，字段名不同，
-// 这里统一映射到 foundation.StockFundamentals，并把计价货币一并带出。
 func (c *Client) HongKongFinancialHistory(ctx context.Context, symbol string, limit int) ([]foundation.StockFundamentals, error) {
 	limit = max(1, min(limit, 8))
 	normalized, err := foundation.NormalizeSymbol(symbol)
@@ -51,14 +43,8 @@ func (c *Client) HongKongFinancialHistory(ctx context.Context, symbol string, li
 		Result  *struct {
 			Data []struct {
 				Symbol        string          `json:"SECUCODE"`
-				Name          string          `json:"SECURITY_NAME_ABBR"`
 				ReportDate    string          `json:"REPORT_DATE"`
 				ReportName    string          `json:"REPORT_TYPE"`
-				Revenue       financialNumber `json:"OPERATE_INCOME"`
-				RevenueYoY    financialNumber `json:"OPERATE_INCOME_YOY"`
-				NetProfit     financialNumber `json:"HOLDER_PROFIT"`
-				NetProfitYoY  financialNumber `json:"HOLDER_PROFIT_YOY"`
-				EPS           financialNumber `json:"BASIC_EPS"`
 				ROE           financialNumber `json:"ROE_AVG"`
 				GrossMargin   financialNumber `json:"GROSS_PROFIT_RATIO"`
 				DebtRatio     financialNumber `json:"DEBT_ASSET_RATIO"`
@@ -77,6 +63,14 @@ func (c *Client) HongKongFinancialHistory(ctx context.Context, symbol string, li
 		return nil, fmt.Errorf("eastmoney hk financials returned no data for %s", normalized.Canonical)
 	}
 
+	oldest := strings.Fields(payload.Result.Data[len(payload.Result.Data)-1].ReportDate)
+	if len(oldest) == 0 {
+		return nil, fmt.Errorf("港股报告缺少报告期")
+	}
+	statements, statementURL, err := c.hkIncomeStatements(ctx, normalized.Canonical, oldest[0])
+	if err != nil {
+		return nil, err
+	}
 	items := make([]foundation.StockFundamentals, 0, min(limit, len(payload.Result.Data)))
 	seen := map[string]bool{}
 	for _, raw := range payload.Result.Data {
@@ -87,18 +81,25 @@ func (c *Client) HongKongFinancialHistory(ctx context.Context, symbol string, li
 		if cut, _, ok := strings.Cut(reportDate, " "); ok {
 			reportDate = cut
 		}
-		if reportDate == "" || seen[reportDate] {
+		if raw.Symbol != normalized.Canonical || reportDate == "" || seen[reportDate] {
 			continue
+		}
+		statement := statements[reportDate]
+		if statement == nil || statement.conflict || statement.currency == "" || !statement.revenue.Available || !statement.profit.Available {
+			continue
+		}
+		if raw.Currency != statement.currency {
+			raw.CashFlowPerSH = financialNumber{}
 		}
 		seen[reportDate] = true
 		reportName := strings.TrimSpace(raw.ReportName)
 		if reportName == "" {
-			reportName = hkReportName(reportDate)
+			reportName = reportDate
 		}
 		fields := []string{}
 		for name, number := range map[string]financialNumber{
-			"revenue": raw.Revenue, "revenue_yoy": raw.RevenueYoY, "net_profit": raw.NetProfit, "net_profit_yoy": raw.NetProfitYoY,
-			"eps": raw.EPS, "roe": raw.ROE, "gross_margin": raw.GrossMargin, "debt_ratio": raw.DebtRatio,
+			"revenue": statement.revenue, "revenue_yoy": statement.revenueYoY, "net_profit": statement.profit, "net_profit_yoy": statement.profitYoY,
+			"eps": statement.eps, "roe": raw.ROE, "gross_margin": raw.GrossMargin, "debt_ratio": raw.DebtRatio,
 			"operating_cash_flow_per_share": raw.CashFlowPerSH,
 		} {
 			if number.Available {
@@ -108,17 +109,17 @@ func (c *Client) HongKongFinancialHistory(ctx context.Context, symbol string, li
 		sort.Strings(fields)
 		items = append(items, foundation.StockFundamentals{
 			Symbol: normalized.Canonical, ReportDate: reportDate, ReportName: reportName,
-			Revenue: raw.Revenue.Value, RevenueYearOverYear: raw.RevenueYoY.Value,
-			NetProfit: raw.NetProfit.Value, NetProfitYearOverYear: raw.NetProfitYoY.Value,
+			Revenue: statement.revenue.Value, RevenueYearOverYear: statement.revenueYoY.Value,
+			NetProfit: statement.profit.Value, NetProfitYearOverYear: statement.profitYoY.Value,
 			// 港股没有扣非净利润口径，显式标记不可用，避免下游把它当成 0。
 			DeductedNetProfitAvailable: false,
-			EPS:                        raw.EPS.Value, ROE: raw.ROE.Value,
+			EPS:                        statement.eps.Value, ROE: raw.ROE.Value,
 			GrossMargin: raw.GrossMargin.Value, DebtRatio: raw.DebtRatio.Value,
 			OperatingCashFlowPerShare: raw.CashFlowPerSH.Value,
-			Currency:                  strings.ToUpper(strings.TrimSpace(raw.Currency)),
+			Currency:                  statement.currency,
 			Meta: foundation.SourceMeta{
 				Source: "eastmoney:hkf10-financials", AvailableFields: fields,
-				SourceURL: requestURL, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds(),
+				SourceURL: statementURL, FetchedAt: time.Now(), LatencyMS: time.Since(start).Milliseconds(),
 			},
 		})
 	}
@@ -128,22 +129,63 @@ func (c *Client) HongKongFinancialHistory(ctx context.Context, symbol string, li
 	return items, nil
 }
 
-// hkReportName 在上游没给中文报表名时按月份推断，如 2026-09-30 → 2026年三季报。
-func hkReportName(reportDate string) string {
-	if len(reportDate) < 10 {
-		return reportDate
+// Income statement rows bind each amount to a reporting period and its original currency.
+type hkIncomePeriod struct {
+	currency                                    string
+	conflict                                    bool
+	revenue, revenueYoY, profit, profitYoY, eps financialNumber
+}
+
+func (c *Client) hkIncomeStatements(ctx context.Context, symbol, oldest string) (map[string]*hkIncomePeriod, string, error) {
+	params := url.Values{
+		"reportName": {"RPT_HKF10_FN_INCOME"},
+		"columns":    {"SECUCODE,REPORT_DATE,ITEM_NAME,CURRENCY_CODE,AMOUNT,YOY_RATIO"},
+		"filter":     {fmt.Sprintf(`(SECUCODE="%s")(REPORT_DATE>='%s')(ITEM_NAME in ("营运收入","经营收入总额","股东应占溢利","每股基本盈利"))`, symbol, escapeEastMoneyFilter(oldest))},
+		"pageSize":   {"100"}, "sortColumns": {"REPORT_DATE"}, "sortTypes": {"-1"}, "source": {"HSF10"}, "client": {"PC"},
 	}
-	year := reportDate[:4]
-	switch reportDate[5:10] {
-	case "03-31":
-		return year + "年一季报"
-	case "06-30":
-		return year + "年中报"
-	case "09-30":
-		return year + "年三季报"
-	case "12-31":
-		return year + "年年报"
-	default:
-		return reportDate
+	address := c.f10BaseURL + "/api/data/v1/get?" + params.Encode()
+	var response struct {
+		Success bool
+		Result  struct {
+			Data []struct {
+				Symbol   string `json:"SECUCODE"`
+				Date     string `json:"REPORT_DATE"`
+				Name     string `json:"ITEM_NAME"`
+				Currency string `json:"CURRENCY_CODE"`
+				Amount   financialNumber
+				YoY      financialNumber `json:"YOY_RATIO"`
+			}
+		}
 	}
+	if err := c.getJSONWithRetry(ctx, address, &response); err != nil {
+		return nil, address, err
+	}
+	if !response.Success {
+		return nil, address, fmt.Errorf("港股利润表不可用")
+	}
+	periods := map[string]*hkIncomePeriod{}
+	for _, row := range response.Result.Data {
+		date, _, _ := strings.Cut(row.Date, " ")
+		if row.Symbol != symbol || date == "" || row.Currency == "" {
+			continue
+		}
+		p := periods[date]
+		if p == nil {
+			p = &hkIncomePeriod{currency: row.Currency}
+			periods[date] = p
+		}
+		if p.currency != row.Currency {
+			p.conflict = true
+			continue
+		}
+		switch row.Name {
+		case "营运收入", "经营收入总额":
+			p.revenue, p.revenueYoY = row.Amount, row.YoY
+		case "股东应占溢利":
+			p.profit, p.profitYoY = row.Amount, row.YoY
+		case "每股基本盈利":
+			p.eps = row.Amount
+		}
+	}
+	return periods, address, nil
 }

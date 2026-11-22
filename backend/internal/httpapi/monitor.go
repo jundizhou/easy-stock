@@ -145,6 +145,24 @@ func (s *Server) monitorSuggest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	var hk []string
+	for _, hit := range hits {
+		if foundation.IsHongKongSymbol(hit.Symbol) {
+			hk = append(hk, hit.Symbol)
+		}
+	}
+	if len(hk) > 0 && s.realtimeProvider != nil {
+		quotes, _ := s.realtimeProvider.Realtime(r.Context(), hk)
+		types := map[string]string{}
+		for _, q := range quotes {
+			types[q.Symbol] = q.InstrumentType
+		}
+		for i := range hits {
+			if kind := types[hits[i].Symbol]; kind != "" {
+				hits[i].InstrumentType = kind
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": hits})
 }
 

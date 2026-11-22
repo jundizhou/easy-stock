@@ -154,7 +154,7 @@ func (c *Client) Realtime(ctx context.Context, symbols []string) ([]foundation.Q
 			return nil, err
 		}
 		normalized = append(normalized, n)
-		sinaCodes = append(sinaCodes, n.Sina)
+		sinaCodes = append(sinaCodes, realtimeCode(n))
 	}
 
 	values := url.Values{}
@@ -296,11 +296,18 @@ func decodeSinaBody(body []byte, contentTypes ...string) string {
 	return string(decoded)
 }
 
+func realtimeCode(symbol foundation.Symbol) string {
+	if symbol.Market == "HK" {
+		return "rt_" + symbol.Sina
+	}
+	return symbol.Sina
+}
+
 func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.SourceMeta) ([]foundation.Quote, error) {
 	lines := strings.Split(body, ";")
 	byCode := map[string]foundation.Symbol{}
 	for _, symbol := range symbols {
-		byCode[symbol.Sina] = symbol
+		byCode[realtimeCode(symbol)] = symbol
 	}
 	quotes := make([]foundation.Quote, 0, len(symbols))
 	for _, line := range lines {
@@ -320,7 +327,7 @@ func parseRealtime(body string, symbols []foundation.Symbol, meta foundation.Sou
 			continue
 		}
 		fields := strings.Split(payload, ",")
-		// 港股与 A 股的行情串不是同一套字段：港股只有 19 列、买卖盘五档缺失、
+		// 港股与 A 股的行情串不是同一套字段：港股前 19 列包含量价与时间、买卖盘五档缺失、
 		// 日期时间用斜杠格式。按市场分流，避免港股落进 A 股解析拿不到行情。
 		if symbol.Market == "HK" {
 			if quote, ok := parseHongKongRealtime(fields, symbol, meta); ok {
@@ -375,7 +382,7 @@ var sinaHongKongLocation = time.FixedZone("Asia/Hong_Kong", 8*3600)
 //
 // 字段布局（19 列）：0 英文名、1 中文名、2 今开、3 昨收、4 最高、5 最低、
 // 6 现价、7 涨跌额、8 涨跌幅、9 买一价、10 卖一价、11 成交额、12 成交量、
-// 15/16 52 周高低、17 日期（2026/11/20）、18 时间（16:07）。
+// 15/16 52 周高低、17 日期（2026/11/20）、18 实时报价时间（16:08:36）。
 // 港股不返回买卖盘数量，所以 Book 留空；价格缺失或非正则视为无行情，
 // 不伪造 0 填充。
 func parseHongKongRealtime(fields []string, symbol foundation.Symbol, meta foundation.SourceMeta) (foundation.Quote, bool) {
@@ -407,7 +414,10 @@ func parseHongKongRealtime(fields []string, symbol foundation.Symbol, meta found
 			changePercent = change / prevClose * 100
 		}
 	}
-	tradeTime, _ := time.ParseInLocation("2006/01/02 15:04", strings.TrimSpace(fields[17])+" "+strings.TrimSpace(fields[18]), sinaHongKongLocation)
+	tradeTime, err := time.ParseInLocation("2006/01/02 15:04:05", strings.TrimSpace(fields[17])+" "+strings.TrimSpace(fields[18]), sinaHongKongLocation)
+	if err != nil {
+		return foundation.Quote{}, false
+	}
 	return foundation.Quote{
 		Symbol:        symbol.Canonical,
 		Volume:        volume,

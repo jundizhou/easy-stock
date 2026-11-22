@@ -92,11 +92,11 @@ func TestClientRealtimeHonorsGB18030EvenWhenBytesAreValidUTF8(t *testing.T) {
 
 func TestClientRealtimeParsesHongKongQuote(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 港股请求走 hk 前缀，且响应字段布局与 A 股不同（19 列、斜杠日期）。
-		if got := r.URL.Query().Get("list"); got != "hk00700" {
-			t.Fatalf("list = %q, want hk00700", got)
+		// 港股实时行情走 rt_hk 前缀，且响应字段布局与 A 股不同（19 列、斜杠日期）。
+		if got := r.URL.Query().Get("list"); got != "rt_hk00700" {
+			t.Fatalf("list = %q, want rt_hk00700", got)
 		}
-		w.Write([]byte(`var hq_str_hk00700="TENCENT,腾讯控股,341.000,348.400,349.600,339.600,344.000,-4.400,-1.263,344.00000,344.00000,13102850465,38224869,0.000,0.000,631.641,339.600,2026/11/20,16:07";`))
+		w.Write([]byte(`var hq_str_rt_hk00700="TENCENT,腾讯控股,341.000,348.400,349.600,339.600,344.000,-4.400,-1.263,344.00000,344.00000,13102850465,38224869,0.000,0.000,631.641,339.600,2026/11/20,16:07:00";`))
 	}))
 	defer server.Close()
 
