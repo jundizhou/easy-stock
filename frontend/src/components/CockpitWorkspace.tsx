@@ -1,10 +1,11 @@
-import { AlertTriangle, BarChart3, BookMarked, BookOpen, BrainCircuit, Bot, Flame, Gauge, LayoutDashboard, RefreshCw, Sparkles, WalletCards } from 'lucide-react';
+import { AlertTriangle, BarChart3, BookMarked, BookOpen, BrainCircuit, Bot, Flame, Gauge, LayoutDashboard, RefreshCw, Sparkles, WalletCards, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useId, useMemo, useState } from 'react';
 import type { BackendConfig, MarketEmotionHistory, MarketEmotionPoint, MarketIndexSnapshot, PortfolioInspectionJob, SourceHealth } from '../lib/backend';
 import { requestJSON } from '../lib/backend';
 import { sourceSummaryLabel, sourceHealthSummary } from '../lib/source-health';
 import { pollShortTermProgress } from '../lib/short-term-progress';
+import { marketDay } from '../lib/theme-kline-queue';
 import {
 	type AttentionItem,
 	type CockpitTarget,
@@ -58,6 +59,22 @@ const loadSources = async (config: BackendConfig, signal: AbortSignal, publish: 
 	const payload = await requestJSON<{ sources: SourceHealth[] }>(config, '/api/v1/sources', { signal });
 	publish(payload.sources || []);
 };
+
+const attentionStorageKey = 'easy-stock.cockpit.dismissed-attention';
+type DismissedAttention = { day: string; keys: string[] };
+
+function readDismissedAttention(): DismissedAttention {
+	const day = marketDay();
+	try {
+		const saved = JSON.parse(localStorage.getItem(attentionStorageKey) || 'null');
+		if (saved?.day === day && Array.isArray(saved.keys) && saved.keys.every((key: unknown) => typeof key === 'string')) return saved;
+	} catch { /* Storage may be unavailable. */ }
+	return { day, keys: [] };
+}
+
+function attentionKey(item: AttentionItem) {
+	return JSON.stringify([item.id, item.occurrence]);
+}
 
 function clock(iso: string) {
 	if (!iso) return '未加载';
@@ -202,7 +219,18 @@ export function CockpitWorkspace({ config, refreshKey, onNavigate, onAskAI, onRe
 		sources: sources.data,
 	}), [indexes.data, emotion.data, inspections.data, sources.data]);
 
-	const attention: AttentionItem[] = useMemo(() => buildAttentionItems(input), [input]);
+	const [dismissed, setDismissed] = useState(readDismissedAttention);
+	const today = marketDay();
+	const items = useMemo(() => buildAttentionItems(input), [input]);
+	const attention = items.filter((item) => dismissed.day !== today || !dismissed.keys.includes(attentionKey(item)));
+	function dismissAttention(item: AttentionItem) {
+		const day = marketDay();
+		const keys = new Set(dismissed.day === day ? dismissed.keys : []);
+		keys.add(attentionKey(item));
+		const next = { day, keys: [...keys] };
+		setDismissed(next);
+		try { localStorage.setItem(attentionStorageKey, JSON.stringify(next)); } catch { /* Still dismissed in this view. */ }
+	}
 	const pendingCount = attention.filter((item) => item.level !== 'info').length;
 	const anyLoaded = Boolean(indexes.data || emotion.data || inspections.data || sources.data);
 
@@ -292,15 +320,20 @@ export function CockpitWorkspace({ config, refreshKey, onNavigate, onAskAI, onRe
 				{/* 侧栏：盯盘用，密度高于主区，独立滚动。 */}
 				<aside className="cockpit-rail" aria-label="盯盘侧栏">
 					<Card title="需要你处理" icon={<AlertTriangle size={17} aria-hidden="true" />} className="cockpit-attention">
-						{!anyLoaded ? <p className="cockpit-muted">等待模块数据…</p> : (
+						{!anyLoaded ? <p className="cockpit-muted">等待模块数据…</p> : !attention.length ? <p className="cockpit-muted">当前提醒已全部关闭</p> : (
 							<ul className="cockpit-attention-list">
 								{attention.map((item) => (
 									<li key={item.id} className={`level-${item.level}`}>
-										<button type="button" disabled={!item.target} onClick={() => item.target && onNavigate(item.target)}>
+										<button className="cockpit-attention-open" type="button" disabled={!item.target} onClick={() => item.target && onNavigate(item.target)}>
 											<span className="cockpit-level">{item.level === 'danger' ? '高' : item.level === 'warn' ? '中' : '正常'}</span>
 											<span className="cockpit-attention-text"><strong>{item.title}</strong><small>{item.detail}</small></span>
 											{item.target && <em>{cockpitTargetLabels[item.target]}</em>}
 										</button>
+										{item.level !== 'info' && (
+											<button type="button" className="cockpit-attention-dismiss" aria-label={`关闭提醒：${item.title}`} title="今天关闭这条提醒" onClick={() => dismissAttention(item)}>
+												<X size={14} aria-hidden="true" />
+											</button>
+										)}
 									</li>
 								))}
 							</ul>

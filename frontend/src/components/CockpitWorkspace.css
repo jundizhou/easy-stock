@@ -279,7 +279,12 @@
 	list-style: none;
 }
 
-.cockpit-attention-list button {
+.cockpit-attention-list li {
+	position: relative;
+	min-width: 0;
+}
+
+.cockpit-attention-open {
 	display: grid;
 	grid-template-columns: auto minmax(0, 1fr) auto;
 	gap: 8px;
@@ -295,20 +300,50 @@
 	cursor: pointer;
 }
 
-.cockpit-attention-list button:disabled {
+.cockpit-attention-open:enabled {
+	padding-right: 32px;
+}
+
+.cockpit-attention-open:disabled {
 	cursor: default;
 }
 
-.cockpit-attention-list li.level-danger button {
+.level-danger .cockpit-attention-open {
 	border-left-color: var(--theme-red-solid);
 }
 
-.cockpit-attention-list li.level-warn button {
+.level-warn .cockpit-attention-open {
 	border-left-color: var(--theme-amber-solid);
 }
 
-.cockpit-attention-list li.level-info button {
+.level-info .cockpit-attention-open {
 	border-left-color: var(--theme-green-solid);
+}
+
+.cockpit-attention-dismiss {
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	display: grid;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--theme-muted);
+	cursor: pointer;
+}
+
+.cockpit-attention-dismiss:hover,
+.cockpit-attention-dismiss:focus-visible {
+	background: var(--theme-surface-3);
+	color: var(--theme-text);
+}
+
+.cockpit-attention-dismiss:focus-visible {
+	outline: 2px solid var(--theme-blue);
 }
 
 /* 等级标签沿用系统的状态胶囊：11px / 700 / 999 圆角。 */

@@ -7,6 +7,7 @@ export type AttentionLevel = 'danger' | 'warn' | 'info';
 
 export type AttentionItem = {
 	id: string;
+	occurrence?: string;
 	level: AttentionLevel;
 	title: string;
 	detail: string;
@@ -64,7 +65,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 	for (const index of input.indexes || []) {
 		if (typeof index.change_percent === 'number' && index.change_percent <= INDEX_DROP_THRESHOLD) {
 			items.push({
-				id: `index-${index.secid}`,
+				id: `index-${index.id || index.secid}`,
 				level: 'warn',
 				title: `${index.name} 下跌 ${Math.abs(index.change_percent).toFixed(2)}%`,
 				detail: '大盘走弱，检查持仓与情绪是否同步承压',
@@ -78,6 +79,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 		if (emotionPhaseTone(latest.phase) === 'down') {
 			items.push({
 				id: 'emotion-phase',
+				occurrence: latest.phase,
 				level: 'warn',
 				title: `短线情绪处于「${latest.phase}」`,
 				detail: `情绪分 ${Math.round(latest.emotion_score)}，追高与接力风险上升`,
@@ -100,6 +102,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 		if (inspection.status === 'failed' || inspection.status === 'interrupted') {
 			items.push({
 				id: 'inspection-incomplete',
+				occurrence: inspection.id,
 				level: 'warn',
 				title: '最近一次持仓巡检未完成',
 				detail: inspection.resume_available ? '可在巡检页恢复继续，已完成的研究会复用' : inspection.error || inspection.message || '请进入巡检页查看原因',
@@ -111,6 +114,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 			if (conclusion.risk_level?.includes('高')) {
 				items.push({
 					id: 'portfolio-risk-high',
+					occurrence: inspection.id,
 					level: 'danger',
 					title: `持仓风险等级：${conclusion.risk_level}`,
 					detail: conclusion.primary_risks?.[0] || conclusion.executive_summary || '进入巡检报告查看主要风险',
@@ -119,6 +123,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 			} else if (typeof conclusion.health_score === 'number' && conclusion.health_score < HEALTH_WARN_SCORE) {
 				items.push({
 					id: 'portfolio-health-low',
+					occurrence: inspection.id,
 					level: 'warn',
 					title: `持仓健康分 ${conclusion.health_score}，低于 ${HEALTH_WARN_SCORE} 分`,
 					detail: conclusion.primary_risks?.[0] || '进入巡检报告查看逐股调整建议',
@@ -132,6 +137,7 @@ export function buildAttentionItems(input: CockpitInput): AttentionItem[] {
 	if (failedSources.length) {
 		items.push({
 			id: 'sources-failed',
+			occurrence: JSON.stringify(failedSources.map((source) => source.id).sort()),
 			level: 'warn',
 			title: `${failedSources.length} 个数据源异常`,
 			detail: failedSources.slice(0, 3).map((source) => source.name).join('、'),
