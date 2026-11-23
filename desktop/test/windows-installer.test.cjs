@@ -15,7 +15,7 @@ const helper = path.resolve(__dirname, '../scripts/stop-installed-app.ps1');
 const windows = { skip: process.platform !== 'win32', timeout: 30000 };
 
 async function builderFixture(t, platform, mode = 'release') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-builder-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock $builder-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const scripts = path.join(root, 'scripts');
   fs.mkdirSync(scripts);
@@ -26,6 +26,11 @@ async function builderFixture(t, platform, mode = 'release') {
   fs.copyFileSync(path.resolve(__dirname, '../assets/installer.nsh'), path.join(root, 'assets/installer.nsh'));
   fs.writeFileSync(path.join(root, 'update-feed.cjs'), 'exports.resolveUpdateFeed = () => ({ provider: "generic", url: "https://example.invalid" });');
   const mock = path.join(root, 'mock-builder.mjs');
+  const extractorRoot = path.join(root, '7zip ${NSIS_VERSION} toolset');
+  fs.mkdirSync(path.join(extractorRoot, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(extractorRoot, 'bin', '7za.exe'), 'fixture');
+  fs.writeFileSync(path.join(extractorRoot, 'LICENSE.txt'), 'fixture license');
+  fs.writeFileSync(path.join(extractorRoot, 'COPYING'), 'fixture license');
   fs.writeFileSync(mock, `
     import fs from 'node:fs'; import path from 'node:path';
     export const Arch = { x64: 'x64', arm64: 'arm64' };
@@ -39,11 +44,22 @@ async function builderFixture(t, platform, mode = 'release') {
       return [artifact];
     }
   `);
+  const toolsetMock = path.join(root, 'mock-toolset.mjs');
+  fs.writeFileSync(toolsetMock, `
+    import assert from 'node:assert/strict';
+    export async function downloadBuilderToolset(options) {
+      assert.equal(options.releaseName, '7zip@1.0.0');
+      assert.equal(options.filenameWithExt, '7zip-win-x64.tar.gz');
+      assert.equal(options.checksums[options.filenameWithExt], 'be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3');
+      assert.equal(options.githubOrgRepo, 'electron-userland/electron-builder-binaries');
+      return ${JSON.stringify(extractorRoot)};
+    }
+  `);
   const loader = path.join(root, 'loader.mjs');
   const blockmapModule = pathToFileURL(require.resolve('app-builder-lib/out/targets/blockmap/blockmap.js')).href;
   fs.writeFileSync(loader, `
     import { registerHooks } from 'node:module';
-    const modules = ${JSON.stringify({ 'electron-builder': pathToFileURL(mock).href, 'app-builder-lib/out/targets/blockmap/blockmap.js': blockmapModule })};
+    const modules = ${JSON.stringify({ 'electron-builder': pathToFileURL(mock).href, 'app-builder-lib/out/util/electronGet.js': pathToFileURL(toolsetMock).href, 'app-builder-lib/out/targets/blockmap/blockmap.js': blockmapModule })};
     registerHooks({ resolve(specifier, context, next) {
       return modules[specifier] ? { url: modules[specifier], shortCircuit: true } : next(specifier, context);
     }});
@@ -56,7 +72,7 @@ async function builderFixture(t, platform, mode = 'release') {
   return { root, options, artifact: path.join(options.config.directories.output, options.config.nsis.artifactName) };
 }
 
-test('Windows release uses direct ZIP extraction and keeps a valid installer blockmap', async (t) => {
+test('Windows release uses standalone direct extraction and keeps a valid installer blockmap', async (t) => {
   const { options, artifact } = await builderFixture(t, 'windows');
   assert.equal(options.config.nsis.useZip, true);
   assert.equal(options.config.nsis.differentialPackage, false);
@@ -67,22 +83,48 @@ test('Windows release uses direct ZIP extraction and keeps a valid installer blo
   const extraction = fs.readFileSync(path.join(options.config.directories.output, 'easy-stock-direct-extract.nsh'), 'utf8');
   assert.match(hook, /-InstallDirectory "\$INSTDIR"/);
   assert.match(hook, /!ifndef BUILD_UNINSTALLER\s+!include/);
-  assert.ok(extraction.includes(String.raw`StrCpy $R8 "\\?\$INSTDIR"`));
-  assert.ok(extraction.includes(String.raw`StrCpy $R8 "\\?\UNC\$R8"`));
-  assert.match(extraction, /nsisunz::Unzip .* "\$R8"/);
+  assert.match(extraction, /File \/oname=\$PLUGINSDIR\\easy-stock-7za\.exe "[^"\r\n]+7za\.exe"/);
+  assert.ok(extraction.includes(String.raw`nsExec::ExecToLog '"$PLUGINSDIR\easy-stock-7za.exe" x "$PLUGINSDIR\app-$packageArch.zip" "-o$INSTDIR" -y -bso0 -bsp0'`));
+  assert.match(extraction, /Pop \$R0\s+StrCmp \$R0 "0" easyStockExtractionDone/);
+  assert.doesNotMatch(extraction, /nsisunz|Nsis7z|CopyFiles|7z-out|LoopExtract/);
+  assert.match(extraction, /File \/oname=7zip-LICENSE\.txt/);
+  assert.match(extraction, /File \/oname=7zip-COPYING\.txt/);
   assert.match(extraction, /\/SD IDOK/);
   assert.match(extraction, /SetErrorLevel 2\s+Quit/);
   assert.match(hook, /!insertmacro easyStockPrepareUpgradeTemp/);
   assert.match(extraction, /GetTempFileName \$R9 "\$R8"/);
   assert.match(extraction, /ReadEnvStr \$easyStockPreviousTemp "TEMP"/);
   assert.match(extraction, /SetEnvironmentVariableW\(w "TEMP", w "\$easyStockPreviousTemp"\)/);
-  assert.match(extraction, /!macro customInstall\s+!insertmacro easyStockRestoreUpgradeTemp/);
+  assert.match(extraction, /!macro customInstall\s+!insertmacro easyStockRestoreUpgradeTemp\s+!insertmacro easyStockFinishInstallProgress/);
+  assert.match(extraction, /!insertmacro easyStockStartInstallProgress\s+File \/oname=\$PLUGINSDIR\\easy-stock-7za\.exe/);
+  assert.equal((extraction.match(/!insertmacro easyStockStartInstallProgress/g) || []).length, 1);
+  assert.doesNotMatch(hook, /!insertmacro easyStockStartInstallProgress/);
+  assert.match(extraction, /IfSilent easyStockProgressStarted/);
+  assert.match(extraction, /SendMessage \$mui\.InstFilesPage\.ProgressBar 0x40A 1 30/);
+  assert.match(extraction, /SendMessage \$mui\.InstFilesPage\.ProgressBar 0x40A 0 0/);
   const map = JSON.parse(gunzipSync(fs.readFileSync(`${artifact}.blockmap`)));
   assert.equal(map.version, '2');
   assert.equal(map.files[0].sizes.reduce((sum, size) => sum + size, 0), fs.statSync(artifact).size);
   assert.equal(map.files[0].checksums.length, map.files[0].sizes.length);
   assert.equal(createHash('sha256').update(fs.readFileSync(artifact)).digest('hex'),
     createHash('sha256').update(Buffer.alloc(100003, 37)).digest('hex'));
+});
+
+test('makensis compiles the generated hook with dollar signs in build and toolset paths', {
+  // The default compiler for macOS and Linux is an x64 binary.
+  skip: process.platform !== 'win32' && process.arch !== 'x64' && !process.env.ELECTRON_BUILDER_NSIS_DIR,
+}, async (t) => {
+  const { options } = await builderFixture(t, 'windows');
+  const { getMakeNsisPath } = require('app-builder-lib/out/toolsets/windows.js');
+  const compiler = await getMakeNsisPath();
+  const output = options.config.directories.output;
+  const source = path.join(__dirname, 'fixtures', 'windows-installer-paths.nsi');
+  await execute(compiler.path, ['-NOCD', '-WX', `-DBUILD_RESOURCES_DIR=${path.resolve(__dirname, '../assets')}`, source], {
+    cwd: output,
+    env: { ...process.env, ...compiler.env },
+    windowsHide: true,
+  });
+  assert.ok(fs.statSync(path.join(output, 'installer-paths.exe')).size > 0);
 });
 
 test('directory and macOS builds do not generate Windows installer blockmaps', async (t) => {
