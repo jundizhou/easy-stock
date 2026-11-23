@@ -26,7 +26,7 @@ async function builderFixture(t, platform, mode = 'release') {
   fs.copyFileSync(path.resolve(__dirname, '../assets/installer.nsh'), path.join(root, 'assets/installer.nsh'));
   fs.writeFileSync(path.join(root, 'update-feed.cjs'), 'exports.resolveUpdateFeed = () => ({ provider: "generic", url: "https://example.invalid" });');
   const mock = path.join(root, 'mock-builder.mjs');
-  const extractorRoot = path.join(root, '7zip toolset');
+  const extractorRoot = path.join(root, '7zip ${NSIS_VERSION} toolset');
   fs.mkdirSync(path.join(extractorRoot, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(extractorRoot, 'bin', '7za.exe'), 'fixture');
   fs.writeFileSync(path.join(extractorRoot, 'LICENSE.txt'), 'fixture license');
@@ -89,8 +89,6 @@ test('Windows release uses standalone direct extraction and keeps a valid instal
   assert.doesNotMatch(extraction, /nsisunz|Nsis7z|CopyFiles|7z-out|LoopExtract/);
   assert.match(extraction, /File \/oname=7zip-LICENSE\.txt/);
   assert.match(extraction, /File \/oname=7zip-COPYING\.txt/);
-  assert.ok(extraction.includes('$$builder-'), 'compiler paths must escape literal dollar signs');
-  assert.ok(hook.includes('$$builder-'), 'include paths must escape literal dollar signs');
   assert.match(extraction, /\/SD IDOK/);
   assert.match(extraction, /SetErrorLevel 2\s+Quit/);
   assert.match(hook, /!insertmacro easyStockPrepareUpgradeTemp/);
@@ -110,6 +108,23 @@ test('Windows release uses standalone direct extraction and keeps a valid instal
   assert.equal(map.files[0].checksums.length, map.files[0].sizes.length);
   assert.equal(createHash('sha256').update(fs.readFileSync(artifact)).digest('hex'),
     createHash('sha256').update(Buffer.alloc(100003, 37)).digest('hex'));
+});
+
+test('makensis compiles the generated hook with dollar signs in build and toolset paths', {
+  // The default compiler for macOS and Linux is an x64 binary.
+  skip: process.platform !== 'win32' && process.arch !== 'x64' && !process.env.ELECTRON_BUILDER_NSIS_DIR,
+}, async (t) => {
+  const { options } = await builderFixture(t, 'windows');
+  const { getMakeNsisPath } = require('app-builder-lib/out/toolsets/windows.js');
+  const compiler = await getMakeNsisPath();
+  const output = options.config.directories.output;
+  const source = path.join(__dirname, 'fixtures', 'windows-installer-paths.nsi');
+  await execute(compiler.path, ['-NOCD', '-WX', `-DBUILD_RESOURCES_DIR=${path.resolve(__dirname, '../assets')}`, source], {
+    cwd: output,
+    env: { ...process.env, ...compiler.env },
+    windowsHide: true,
+  });
+  assert.ok(fs.statSync(path.join(output, 'installer-paths.exe')).size > 0);
 });
 
 test('directory and macOS builds do not generate Windows installer blockmaps', async (t) => {

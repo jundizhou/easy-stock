@@ -124,7 +124,8 @@ if (platform === 'windows' && mode === 'release') {
     checksums: { '7zip-win-x64.tar.gz': 'be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3' },
     githubOrgRepo: 'electron-userland/electron-builder-binaries',
   });
-  const nsisPath = (value) => value.replace(/\$/g, () => '$$').replace(/"/g, () => '$\\"');
+  // File and !include take compiler paths. Emit a literal dollar even before a define or environment reference.
+  const nsisPath = (value) => value.replaceAll('$', '${U+0024}').replace(/"/g, () => '$\\"');
   const originalInclude = config.nsis.include;
   const hook = fs.readFileSync(originalInclude, 'utf8');
   const hookStart = '!macro customCheckAppRunning';
