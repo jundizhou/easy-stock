@@ -18,7 +18,8 @@ it.each(['detail', 'list'])('在实际展开行展示港股阈值口径（%s）'
 		if (path.includes('/overview')) return { data: { engine: {}, events_today: 0 } } as never;
 		return { data: null } as never;
 	});
-	render(<MonitorWorkspace config={{ backendUrl: 'http://localhost', token: '' }} refreshKey={0} onOpenMarketIndexes={() => {}} />);
+	render(<MonitorWorkspace config={{ backendUrl: 'http://localhost', token: '' }} refreshKey={0} portfolioRefreshKey={0}
+		onOpenSettings={vi.fn()} onOpenNotificationSettings={vi.fn()} onOpenStockAnalysis={vi.fn()} onOpenMarketIndexes={vi.fn()} />);
 	fireEvent.click(screen.getByRole('button', { name: '异动预警' }));
 	const row = await screen.findByTitle('点击展开该股的异动明细');
 	expect(screen.queryByText(note)).toBeNull();
