@@ -13,6 +13,13 @@ type adjustedHistoryFallback interface {
 	AdjustedKLine(context.Context, string, int) ([]foundation.KLine, error)
 }
 
+// Only providers serving forward-adjusted bars may back theme constituent returns.
+type adjustedDailyBars struct{ provider KLineProvider }
+
+func (p adjustedDailyBars) AdjustedKLine(ctx context.Context, symbol string, limit int) ([]foundation.KLine, error) {
+	return p.provider.KLine(ctx, symbol, "day", limit)
+}
+
 type themeIndexHistory struct {
 	primary    adjustedHistoryFallback
 	fallback   adjustedHistoryFallback

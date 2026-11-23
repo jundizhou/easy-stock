@@ -31,6 +31,7 @@ import (
 	"easy-stock/backend/internal/providers/hotstock"
 	marketoverviewprovider "easy-stock/backend/internal/providers/marketoverview"
 	"easy-stock/backend/internal/providers/sina"
+	"easy-stock/backend/internal/providers/tdx"
 	"easy-stock/backend/internal/providers/tencent"
 	"easy-stock/backend/internal/review"
 	"easy-stock/backend/internal/runtimelog"
@@ -151,6 +152,8 @@ func NewServer(config any) *Server {
 	sinaClient := sina.NewClient()
 	eastMoneyClient := eastmoney.NewClient(eastMoneyDesktopOptions()...)
 	tencentClient := tencent.NewClient()
+	tdxClient := tdx.NewClient()
+	adjustedBars := newKLineChain(tdxClient, eastMoneyClient)
 	if cfg.ETF == nil {
 		cfg.ETF = fund.NewClient()
 		if cfg.ETFDirectionMarket == nil {
@@ -179,8 +182,10 @@ func NewServer(config any) *Server {
 		}
 		cfg.Realtime = realtimeFallback{primary: sinaClient, fallback: tencentClient}
 	}
+	stockBarSources := []KLineProvider{cfg.KLinePrimary}
 	if cfg.KLinePrimary == nil {
-		cfg.KLinePrimary = eastMoneyClient
+		stockBarSources = []KLineProvider{tdxClient, eastMoneyClient}
+		cfg.KLinePrimary = adjustedBars
 	}
 	if cfg.KLineFallback == nil {
 		cfg.KLineFallback = sinaClient
@@ -240,7 +245,7 @@ func NewServer(config any) *Server {
 	}
 	if cfg.MarketOverview == nil {
 		cfg.MarketOverview = marketoverviewprovider.New(eastMoneyClient, tencentClient, tencentClient, sinaClient,
-			marketoverviewprovider.WithSecondaryIndexFallback(sinaClient))
+			marketoverviewprovider.WithDomesticIndexes(tdxClient), marketoverviewprovider.WithSecondaryIndexFallback(sinaClient))
 	}
 	if cfg.SectorMap == nil {
 		mapper := sector.NewMapper(
@@ -397,9 +402,10 @@ func NewServer(config any) *Server {
 			Client:  cfg.ReviewHTTP,
 		})
 	}
+	aStockBars := newKLineChain(append(stockBarSources, cfg.KLineFallback)...)
 	s := &Server{
 		stockSuggest:            eastMoneyClient,
-		sourceHealth:            newSourceHealthCache(cfg.DuanxianxiaBaseURL, eastMoneyClient, sinaClient, tencentClient, clsClient),
+		sourceHealth:            newSourceHealthCache(cfg.DuanxianxiaBaseURL, eastMoneyClient, sinaClient, tencentClient, clsClient, aStockBars),
 		etfUnderlyingFinancials: cfg.ETFUnderlyingFinancials, etfUnderlyingValuation: cfg.ETFUnderlyingValuation,
 		etfDirectionMarket: cfg.ETFDirectionMarket, etfExecution: cfg.ETFExecution, etfProvider: cfg.ETF, etfKLinePrimary: cfg.ETFKLinePrimary, etfKLineFallback: cfg.ETFKLineFallback,
 		mux:                      http.NewServeMux(),
@@ -407,7 +413,7 @@ func NewServer(config any) *Server {
 		realtimeProvider:         cfg.Realtime,
 		kLinePrimary:             cfg.KLinePrimary,
 		kLineFallback:            cfg.KLineFallback,
-		marketKLine:              newMarketKLineChain(cfg.HongKongKLine, newKLineChain(cfg.KLinePrimary, cfg.KLineFallback)),
+		marketKLine:              newMarketKLineChain(cfg.HongKongKLine, aStockBars),
 		hongKongFinancials:       cfg.HongKongFinancials,
 		newsProvider:             cfg.News,
 		stockNewsSearch:          cfg.StockNews,
@@ -575,7 +581,7 @@ func NewServer(config any) *Server {
 	s.portfolioExpectation = portfolioinspection.NewExpectationService(cfg.PortfolioStore, cfg.ReviewStore, usageGateway, s.analyzeStock, cfg.Logger, s.analyzeHoldingResearch)
 	s.themeIndex = cfg.ThemeIndex
 	if s.themeIndex == nil {
-		history := &themeIndexHistory{primary: eastMoneyClient, fallback: tencentClient}
+		history := &themeIndexHistory{primary: adjustedDailyBars{adjustedBars}, fallback: tencentClient}
 		s.themeIndex = themeindex.New(themeindex.Config{
 			Boards: eastMoneyClient,
 			Resolve: func(ctx context.Context, theme, snapshot string) (foundation.ThemeIndexTarget, error) {

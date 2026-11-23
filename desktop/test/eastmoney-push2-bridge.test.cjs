@@ -110,3 +110,46 @@ test('main process injects the push2 bridge env the backend reads', () => {
   const builder = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'electron-builder.mjs'), 'utf8');
   assert.ok(builder.includes("'eastmoney-push2-bridge.cjs'"));
 });
+
+test('empty responses back off per endpoint, redact diagnostics and allow recovery', async (t) => {
+  let now = 0;
+  let recovered = false;
+  const calls = [];
+  const warnings = [];
+  const bridge = createEastmoneyPush2Bridge({
+    now: () => now,
+    request: async ({ url }) => {
+      calls.push(url);
+      if (recovered || url.includes('/trends2/')) return { status: 200, body: '{}' };
+      if (now === 0) throw new Error('net::ERR_EMPTY_RESPONSE at ' + url);
+      return { status: 200, body: Buffer.from('  ') };
+    },
+    logger: { warn: warning => warnings.push(warning) },
+  });
+  t.after(() => bridge.close());
+  const { baseURL, token } = await bridge.start();
+  const get = async (path) => {
+    const target = new URL(path, 'https://push2.eastmoney.com');
+    target.searchParams.set('ut', 'sensitive-value');
+    return fetch(baseURL + '/v1/eastmoney/push2?url=' + encodeURIComponent(target.href), {
+      headers: { 'X-A-Stock-Browser-Token': token },
+    });
+  };
+  const quote = '/api/qt/stock/get';
+  assert.equal((await get(quote)).status, 502);
+  const burst = await Promise.all(Array.from({ length: 8 }, () => get(quote)));
+  assert.ok(burst.every(response => response.status === 503));
+  assert.equal((await get('/api/qt/stock/trends2/get')).status, 200);
+  assert.equal(calls.length, 2);
+  now += 10_000;
+  assert.equal((await get(quote)).status, 502);
+  assert.equal((await get(quote)).status, 503);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /stage=request .*code=ERR_EMPTY_RESPONSE/);
+  assert.match(warnings[1], /stage=response .*code=EMPTY_BODY/);
+  assert.doesNotMatch(warnings.join(' '), /sensitive-value|ut=|https:/);
+  now += 20_000;
+  recovered = true;
+  assert.equal((await get(quote)).status, 200);
+  assert.equal((await get(quote)).status, 200);
+});

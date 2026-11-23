@@ -16,36 +16,6 @@ import (
 	xhtml "golang.org/x/net/html"
 )
 
-type marketIndexDefinition struct {
-	ID       string
-	SecID    string
-	Name     string
-	Region   string
-	Market   string
-	Currency string
-	Core     bool
-}
-
-var marketIndexCatalog = []marketIndexDefinition{
-	{ID: "sse", SecID: "1.000001", Name: "上证指数", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "szse", SecID: "0.399001", Name: "深证成指", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "chinext", SecID: "0.399006", Name: "创业板指", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "csi300", SecID: "1.000300", Name: "沪深300", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "sse50", SecID: "1.000016", Name: "上证50", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "csi1000", SecID: "1.000852", Name: "中证1000", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "star50", SecID: "1.000688", Name: "科创50", Region: "中国", Market: "CN", Currency: "CNY", Core: true},
-	{ID: "hsi", SecID: "100.HSI", Name: "恒生指数", Region: "中国香港", Market: "HK", Currency: "HKD", Core: true},
-	{ID: "nikkei", SecID: "100.N225", Name: "日经225", Region: "亚太", Market: "JP", Currency: "JPY"},
-	{ID: "kospi", SecID: "100.KS11", Name: "韩国综合", Region: "亚太", Market: "KR", Currency: "KRW"},
-	{ID: "taiwan", SecID: "100.TWII", Name: "台湾加权", Region: "亚太", Market: "TW", Currency: "TWD"},
-	{ID: "dow", SecID: "100.DJIA", Name: "道琼斯", Region: "美洲", Market: "US", Currency: "USD", Core: true},
-	{ID: "sp500", SecID: "100.SPX", Name: "标普500", Region: "美洲", Market: "US", Currency: "USD", Core: true},
-	{ID: "nasdaq", SecID: "100.NDX", Name: "纳斯达克", Region: "美洲", Market: "US", Currency: "USD", Core: true},
-	{ID: "ftse", SecID: "100.FTSE", Name: "英国富时100", Region: "欧洲", Market: "UK", Currency: "GBP"},
-	{ID: "dax", SecID: "100.GDAXI", Name: "德国DAX", Region: "欧洲", Market: "DE", Currency: "EUR"},
-	{ID: "cac", SecID: "100.FCHI", Name: "法国CAC40", Region: "欧洲", Market: "FR", Currency: "EUR"},
-}
-
 var eastmoneyIndustryMomentumFields = []string{
 	"change_percent", "five_day_change_percent", "twenty_day_change_percent", "turnover_rate",
 	"rising_count", "falling_count", "main_net_inflow", "leader_name", "leader_change_percent",
@@ -60,18 +30,15 @@ var eastmoneyFundFlowFields = []string{
 var eastmoneyMainNetOnlyFields = []string{"main_net_inflow"}
 
 func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
-	definitions := make([]marketIndexDefinition, 0, len(marketIndexCatalog))
-	for _, item := range marketIndexCatalog {
-		if scope == "core" && !item.Core {
-			continue
-		}
-		definitions = append(definitions, item)
-	}
+	return c.IndexSnapshots(ctx, foundation.MarketIndexDefinitions(scope))
+}
+
+func (c *Client) IndexSnapshots(ctx context.Context, definitions []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
 	secids := make([]string, 0, len(definitions))
 	for _, item := range definitions {
 		secids = append(secids, item.SecID)
 	}
-	definitionsBySecID := make(map[string]marketIndexDefinition, len(definitions))
+	definitionsBySecID := make(map[string]foundation.MarketIndexDefinition, len(definitions))
 	for _, item := range definitions {
 		definitionsBySecID[item.SecID] = item
 	}
@@ -122,7 +89,7 @@ type indexQuoteBatch struct {
 	meta  foundation.SourceMeta
 }
 
-func (c *Client) fetchIndexQuotes(ctx context.Context, secids []string, definitionsBySecID map[string]marketIndexDefinition) (indexQuoteBatch, error) {
+func (c *Client) fetchIndexQuotes(ctx context.Context, secids []string, definitionsBySecID map[string]foundation.MarketIndexDefinition) (indexQuoteBatch, error) {
 	endpoint := c.quoteBaseURL + "/api/qt/ulist.np/get"
 	params := url.Values{}
 	params.Set("fltt", "2")
@@ -162,7 +129,7 @@ func (c *Client) fetchIndexQuotes(ctx context.Context, secids []string, definiti
 }
 
 func (c *Client) MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error) {
-	definition, ok := findMarketIndex(id)
+	definition, ok := foundation.FindMarketIndex(id)
 	if !ok {
 		return foundation.MarketIndexSeries{}, fmt.Errorf("unsupported index %q", id)
 	}
@@ -1053,28 +1020,6 @@ func standardListParams(limit int) url.Values {
 	params.Set("fltt", "2")
 	params.Set("invt", "2")
 	return params
-}
-
-func findMarketIndex(id string) (marketIndexDefinition, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(id))
-	for _, item := range marketIndexCatalog {
-		if item.ID == normalized {
-			return item, true
-		}
-	}
-	// 异动口径的 A 股基准指数：主板用 A 股指数而不是上证指数/深证成指，
-	// 创业板用综指。只用于指数走势查询，不进 MarketIndexes 的列表。
-	if item, ok := benchmarkIndexAliases[normalized]; ok {
-		return item, true
-	}
-	return marketIndexDefinition{}, false
-}
-
-var benchmarkIndexAliases = map[string]marketIndexDefinition{
-	"sse_a":        {ID: "sse_a", SecID: "1.000003", Name: "上证A股指数", Region: "中国", Market: "CN", Currency: "CNY"},
-	"szse_a":       {ID: "szse_a", SecID: "0.399107", Name: "深证A股指数", Region: "中国", Market: "CN", Currency: "CNY"},
-	"chinext_comp": {ID: "chinext_comp", SecID: "0.399102", Name: "创业板综指", Region: "中国", Market: "CN", Currency: "CNY"},
-	"bse50":        {ID: "bse50", SecID: "0.899050", Name: "北证50", Region: "中国", Market: "CN", Currency: "CNY"},
 }
 
 func indexStatus(tradeTime, now time.Time) string {

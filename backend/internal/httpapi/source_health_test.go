@@ -12,8 +12,8 @@ import (
 func TestSourceHealthUsesProbeResultsAndKeepsCacheTimestamp(t *testing.T) {
 	var calls atomic.Int32
 	cache := &sourceHealthCache{checks: map[string][]sourceProbe{
-		"sina":      {{"实时行情", func(context.Context) error { calls.Add(1); return nil }}},
-		"eastmoney": {{"日 K 线", func(context.Context) error { return errors.New("network unavailable") }}},
+		"sina":      {probe("实时行情", func(context.Context) error { calls.Add(1); return nil })},
+		"eastmoney": {probe("日 K 线", func(context.Context) error { return errors.New("network unavailable") })},
 	}}
 	first := cache.load(context.Background())
 	second := cache.load(context.Background())
@@ -41,7 +41,7 @@ func TestSourceHealthUsesProbeResultsAndKeepsCacheTimestamp(t *testing.T) {
 }
 
 func TestCancelledSourceCheckDoesNotPoisonCache(t *testing.T) {
-	cache := &sourceHealthCache{checks: map[string][]sourceProbe{"sina": {{"实时行情", func(ctx context.Context) error { return ctx.Err() }}}}}
+	cache := &sourceHealthCache{checks: map[string][]sourceProbe{"sina": {probe("实时行情", func(ctx context.Context) error { return ctx.Err() })}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cache.load(ctx)
@@ -62,8 +62,8 @@ func TestEastMoneyReportsEachProbeIndependently(t *testing.T) {
 		{failure, failure, "unhealthy", "日 K 线失败 · 公司资料失败"},
 	} {
 		cache := sourceHealthCache{checks: map[string][]sourceProbe{"eastmoney": {
-			{"日 K 线", func(context.Context) error { return tc.kline }},
-			{"公司资料", func(context.Context) error { return tc.profile }},
+			probe("日 K 线", func(context.Context) error { return tc.kline }),
+			probe("公司资料", func(context.Context) error { return tc.profile }),
 		}}}
 		for _, source := range cache.load(context.Background()) {
 			if source.ID != "eastmoney" {
@@ -75,6 +75,25 @@ func TestEastMoneyReportsEachProbeIndependently(t *testing.T) {
 			if !source.OK && !strings.Contains(source.Message, failure.Error()) {
 				t.Errorf("missing diagnostic: %s", source.Message)
 			}
+		}
+	}
+}
+
+func TestDailyBarHealthReportsServingSourceAfterFallback(t *testing.T) {
+	failed := &stubKLine{err: errors.New("empty response")}
+	fallback := &stubKLine{bars: okBars(2)}
+	for i := range fallback.bars {
+		fallback.bars[i].Meta.Source = "sina"
+	}
+	cache := newSourceHealthCache("", nil, nil, nil, nil, newKLineChain(failed, fallback))
+	check := cache.checks["cn-kline"]
+	cache.checks = map[string][]sourceProbe{"cn-kline": check, "eastmoney": {probe("公司资料", func(context.Context) error { return errors.New("F10 unavailable") })}}
+	for _, s := range cache.load(context.Background()) {
+		if s.ID == "cn-kline" && (!s.OK || !strings.Contains(s.ProbeSummary, "新浪财经")) {
+			t.Fatalf("daily bars: %+v", s)
+		}
+		if s.ID == "eastmoney" && s.Status != "unhealthy" {
+			t.Fatalf("company profile: %+v", s)
 		}
 	}
 }

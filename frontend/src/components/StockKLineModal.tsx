@@ -28,6 +28,8 @@ export type StockKLineTarget = {
 	change_percent?: number;
 };
 
+const sourceNames: Record<string, string> = { tdx: '通达信', eastmoney: '东方财富', sina: '新浪财经', tencent: '腾讯财经' };
+
 type Props = {
 	stock: StockKLineTarget;
 	contextLabel: string;
@@ -47,6 +49,8 @@ export function StockKLineModal({ stock, contextLabel, description, lines, state
 		return () => window.removeEventListener('keydown', onKeyDown);
 	}, [onClose]);
 	const latest = lines.length ? [...lines].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()).at(-1) : null;
+	const source = latest?.meta?.source?.split(':')[0];
+	const sourceName = source && (sourceNames[source] || source);
 	const activePeriod = KLINE_PERIODS.find((item) => item.key === periodKey) || KLINE_PERIODS[2];
 	const periodRangeLabel = activePeriod.mode === 'intraday' ? `${activePeriod.label} · ${lines.length} 个数据点` : `${lines.length} 根${activePeriod.label}`;
 	const change = latest?.change_percent ?? stock.change_percent;
@@ -70,10 +74,10 @@ export function StockKLineModal({ stock, contextLabel, description, lines, state
 					<div><span>成交额</span><strong>{latest?.amount ? formatMoney(latest.amount) : '--'}</strong></div>
 					<div><span>换手率</span><strong>{latest?.turnover_rate != null ? `${latest.turnover_rate.toFixed(2)}%` : '--'}</strong></div>
 				</div>
-				<div className="kline-period-summary"><span>{periodRangeLabel}</span><span>前复权行情</span></div>
+				<div className="kline-period-summary"><span>{periodRangeLabel}</span><span>{source === 'sina' ? '不复权行情' : '前复权行情'}</span></div>
 				{state === 'error' && <div className="kline-modal-error"><ShieldAlert size={17} /><span>{error || `${activePeriod.label}数据加载失败`}</span></div>}
 				<KLineChart lines={lines} symbol={stock.symbol} state={state} mode={activePeriod.mode} periodLabel={activePeriod.label} />
-				<footer className="kline-modal-footer">鼠标悬浮图表可查看行情细节；数据源：东方财富 / 新浪，结果仅供研究参考。</footer>
+				<footer className="kline-modal-footer">鼠标悬浮图表可查看行情细节。{sourceName && `行情来源为${sourceName}。`}</footer>
 			</section>
 		</div>
 	);

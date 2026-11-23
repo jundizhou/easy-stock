@@ -77,7 +77,10 @@ func (c *klineChain) KLine(ctx context.Context, symbol string, period string, li
 	if clock == nil {
 		clock = time.Now
 	}
-	available := c.availableSources(clock())
+	available := c.availableSources(clock(), symbol, period)
+	if len(available) == 0 {
+		return nil, fmt.Errorf("没有支持该市场及周期的 K 线源")
+	}
 	var firstErr error
 	for position, index := range available {
 		if err := ctx.Err(); err != nil {
@@ -112,20 +115,23 @@ func (c *klineChain) KLine(ctx context.Context, symbol string, period string, li
 	return nil, firstErr
 }
 
-func (c *klineChain) availableSources(now time.Time) []int {
+func (c *klineChain) availableSources(now time.Time, symbol, period string) []int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	var supported []int
 	indices := make([]int, 0, len(c.sources))
 	for i, until := range c.openUntil {
+		if p, ok := c.sources[i].(interface{ SupportsKLine(string, string) bool }); ok && !p.SupportsKLine(symbol, period) {
+			continue
+		}
+		supported = append(supported, i)
 		if !now.Before(until) {
 			indices = append(indices, i)
 		}
 	}
 	// 所有源都在冷却时，仍按原顺序尝试。
 	if len(indices) == 0 {
-		for i := range c.sources {
-			indices = append(indices, i)
-		}
+		return supported
 	}
 	return indices
 }

@@ -11,7 +11,7 @@ import (
 
 type failingPrimary struct{}
 
-func (failingPrimary) MarketIndexes(context.Context, string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
+func (failingPrimary) IndexSnapshots(context.Context, []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
 	return nil, foundation.SourceMeta{}, fmt.Errorf("index unavailable")
 }
 func (failingPrimary) MarketIndexSeries(context.Context, string, string, int) (foundation.MarketIndexSeries, error) {
@@ -87,9 +87,9 @@ func (industryProvider) IndustryMomentum(context.Context, int) ([]foundation.Mar
 
 type indexFallback struct{}
 
-func (indexFallback) MarketIndexes(context.Context, string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
+func (indexFallback) IndexSnapshots(context.Context, []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
 	meta := foundation.SourceMeta{Source: "tencent:index"}
-	return []foundation.MarketIndexSnapshot{{ID: "sse", Name: "上证指数", Meta: meta}}, meta, nil
+	return []foundation.MarketIndexSnapshot{{ID: "sse", Name: "上证指数", Price: 3934.09, Meta: meta}}, meta, nil
 }
 
 func (indexFallback) MarketIndexSeries(context.Context, string, string, int) (foundation.MarketIndexSeries, error) {
@@ -125,11 +125,11 @@ func TestProviderUsesTencentIndustryMomentum(t *testing.T) {
 func TestProviderFallsBackForIndexes(t *testing.T) {
 	provider := New(failingPrimary{}, indexFallback{}, nil, nil)
 	items, meta, err := provider.MarketIndexes(context.Background(), "core")
-	if err != nil || len(items) != 1 || meta.Source != "tencent:index" || !strings.Contains(meta.FallbackReason, "腾讯") {
+	if err != nil || len(items) != 1 || meta.Source != "tencent:index" || !strings.Contains(meta.FallbackReason, "1/11") {
 		t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
 	}
 	series, err := provider.MarketIndexSeries(context.Background(), "sse", "day", 20)
-	if err != nil || len(series.Lines) != 1 || !strings.Contains(series.Meta.FallbackReason, "腾讯") {
+	if err != nil || len(series.Lines) != 1 || series.Meta.Source != "tencent:index-kline" || !strings.Contains(series.Meta.FallbackReason, "腾讯") {
 		t.Fatalf("series=%+v err=%v", series, err)
 	}
 }
@@ -139,5 +139,55 @@ func TestProviderFallsBackForUSSectorMomentum(t *testing.T) {
 	items, meta, err := provider.USSectorMomentum(context.Background(), 11)
 	if err != nil || len(items) != 1 || items[0].ProxySymbol != "XLK" || !strings.Contains(meta.FallbackReason, "腾讯") {
 		t.Fatalf("items=%+v meta=%+v err=%v", items, meta, err)
+	}
+}
+
+type quoteFixture struct {
+	failingPrimary
+	load func([]foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
+}
+
+func (p quoteFixture) IndexSnapshots(_ context.Context, defs []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
+	return p.load(defs)
+}
+
+func TestIndexesFillOnlyMissingIDsAndKeepRowSources(t *testing.T) {
+	source := func(name string, predicate func(foundation.MarketIndexDefinition) bool) quoteFixture {
+		return quoteFixture{load: func(defs []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
+			meta := foundation.SourceMeta{Source: name}
+			var rows []foundation.MarketIndexSnapshot
+			for _, d := range defs {
+				if predicate(d) {
+					rows = append(rows, foundation.MarketIndexSnapshot{ID: d.ID, Price: 101, Meta: meta})
+				}
+			}
+			return rows, meta, nil
+		}}
+	}
+	domestic := source("tdx:index", func(d foundation.MarketIndexDefinition) bool { return d.Market == "CN" && d.ID != "szse" })
+	second := source("tencent:index", func(d foundation.MarketIndexDefinition) bool {
+		if d.ID == "sse" {
+			t.Fatal("redundant request for Shanghai index")
+		}
+		return true
+	})
+	unused := quoteFixture{load: func([]foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
+		t.Fatal("complete batch reached East Money")
+		return nil, foundation.SourceMeta{}, nil
+	}}
+	p := New(unused, second, nil, nil, WithDomesticIndexes(domestic))
+	rows, meta, err := p.MarketIndexes(context.Background(), "core")
+	if err != nil || len(rows) != 11 || rows[0].ID != "sse" || rows[0].Meta.Source != "tdx:index" || rows[1].ID != "szse" || rows[1].Meta.Source != "tencent:index" || meta.FallbackReason != "" {
+		t.Fatalf("rows=%v meta=%v err=%v", rows, meta, err)
+	}
+}
+
+func TestIndexSnapshotsAndSeriesExposeTotalOutage(t *testing.T) {
+	p := New(failingPrimary{}, failingPrimary{}, nil, nil, WithDomesticIndexes(failingPrimary{}))
+	if rows, _, err := p.MarketIndexes(context.Background(), "core"); len(rows) > 0 || err == nil {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+	if _, err := p.MarketIndexSeries(context.Background(), "sse", "day", 2); err == nil {
+		t.Fatal("reported empty series as healthy")
 	}
 }

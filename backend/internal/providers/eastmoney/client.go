@@ -300,7 +300,11 @@ func (c *Client) getJSONWithRetry(ctx context.Context, requestURL string, target
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(150 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(150 * time.Millisecond):
+			}
 		}
 		client := c.httpClient
 		// 第一次失败后换地址族再试：东财部分域名只有一个地址族可达，
@@ -361,11 +365,23 @@ func (c *Client) getJSONWithClientHeaders(ctx context.Context, client *http.Clie
 				return nil
 			}
 		}
+		parsed, _ := url.Parse(requestURL)
+		endpoint := parsed.Hostname() + parsed.Path
+		if errors.Is(proxyErr, errPush2Cooldown) && c.push2Proxy.directCoolingDown(endpoint) {
+			return errPush2Cooldown
+		}
 		directErr := c.decodeJSON(ctx, client, requestURL, headers, target)
 		if directErr == nil {
 			return nil
 		}
 		if proxyErr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			c.push2Proxy.recordDirectFailure(endpoint)
+			if errors.Is(proxyErr, errPush2Cooldown) {
+				return errPush2Cooldown
+			}
 			return fmt.Errorf("%w（桌面端 push2 桥接: %v）", directErr, proxyErr)
 		}
 		return directErr

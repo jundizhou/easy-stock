@@ -265,3 +265,33 @@ func TestClientDoesNotProxyNonPush2Hosts(t *testing.T) {
 		t.Fatalf("forwarded = %d, want 0", forwarded)
 	}
 }
+
+func TestPush2CooldownPreservesWorkingDirectRouteAndBoundsRetries(t *testing.T) {
+	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		io.WriteString(w, `{"ok":false,"error":"push2_cooldown"}`)
+	}))
+	defer bridge.Close()
+	const target = "https://push2.eastmoney.com/api/qt/stock/get?secid=1.000001"
+	for _, working := range []bool{false, true} {
+		calls := 0
+		httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			if !working {
+				return nil, io.EOF
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"price":10}`))}, nil
+		})}
+		client := NewClient(WithPush2Proxy(NewPush2Proxy(bridge.URL, "")), WithHTTPClient(httpClient))
+		for i := 0; i < 2; i++ {
+			var data map[string]int
+			err := client.getJSONWithRetry(context.Background(), target, &data)
+			if working && (err != nil || data["price"] != 10) || !working && !errors.Is(err, errPush2Cooldown) {
+				t.Fatalf("working=%t data=%v err=%v", working, data, err)
+			}
+		}
+		if !working && calls != 1 || working && calls != 2 {
+			t.Fatalf("working=%t direct attempts=%d", working, calls)
+		}
+	}
+}

@@ -60,7 +60,7 @@ beforeEach(() => {
 
 type KLinePayload = { data: KLine[] };
 function testKLine(symbol = '600002.SH', close = 12.34, time = '2026-11-02T15:00:00+08:00'): KLine {
-	return { symbol, time, open: close - 1, high: close + 1, low: close - 2, close, volume: 10000, amount: 120000, change_percent: 1.5, meta };
+	return { symbol, time, open: close - 1, high: close + 1, low: close - 2, close, volume: 10000, amount: 120000, change_percent: 1.5, meta: { ...meta, source: 'tdx:kline' } };
 }
 function mockKLineRequests(load: (path: string, init?: RequestInit) => Promise<KLinePayload> = async (path) => ({ data: [testKLine(new URL(path, config.backendUrl).searchParams.get('symbol')!)] })) {
 	vi.mocked(requestJSON).mockImplementation((_config, path, init) => {
@@ -92,6 +92,8 @@ describe('个股资金 K 线弹窗', () => {
 		expect(within(dialog).getByRole('tab', { name: '日K' }).getAttribute('aria-selected')).toBe('true');
 		expect(within(dialog).getByText('最新').parentElement?.querySelector('strong')?.textContent).toBe('12.34');
 		expect(within(dialog).getByText('个股资金 · 日K')).toBeTruthy();
+		expect(within(dialog).getByText(/行情来源为通达信/)).toBeTruthy();
+		expect(dialog.querySelector('.kline-modal-error')).toBeNull();
 		expect(within(dialog).getByText(`资金${direction === 'outflow' ? '流出' : '流入'}榜 · 新浪总资金 / 主力 / 散户`)).toBeTruthy();
 		expect(kLineCalls()).toHaveLength(1);
 		expect(kLineCalls()[0][0]).toBe(config);

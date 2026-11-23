@@ -567,7 +567,7 @@ export function App() {
 							{sources.map((source) => (
 								<div className={source.status === 'partial' ? 'partial' : source.ok ? 'healthy' : 'unhealthy'} key={source.id}>
 									<i aria-hidden="true" />
-									<span><strong>{source.name}</strong><small>{source.status === 'partial' && source.probe_summary ? source.probe_summary : sourceCategoryLabel(source.category)}</small></span>
+									<span><strong>{source.name}</strong><small>{(source.status === 'partial' || source.id === 'cn-kline') && source.probe_summary ? source.probe_summary : sourceCategoryLabel(source.category)}</small></span>
 									<em title={source.message || sourceStatusLabel(source)}>{sourceStatusLabel(source)}</em>
 								</div>
 							))}
@@ -781,7 +781,7 @@ export function App() {
 
 			<footer className="data-footer">
 				<div><Wifi size={15} aria-hidden="true" /><span>{config?.backendUrl || '连接本地数据服务中'}</span></div>
-					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'cockpit' ? 'AI 总控台各卡片标注数据源与更新时间 · AI 总控简报只读取页面已加载的汇总数据，不构成投资建议' : workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · K线与领导力：东方财富/新浪' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '股票与 ETF 行情：东方财富/新浪 · ETF 档案与净值：天天基金 · AI 基于冻结证据研究' : workspaceMode === 'portfolio-inspection' ? '复用成功个股研究 · AI 按统一标准评估组合 · 事实与评分均可追溯' : workspaceMode === 'monitor' ? '行情与快照：东方财富/新浪 · 异动口径：交易所异常波动标准 · 通知：飞书/钉钉 · 提示不构成投资建议' : workspaceMode === 'market' ? '行情与行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : workspaceMode === 'token-usage' ? '真实用量来自模型返回的 usage · 本地估算单独记录，不并入真实总量' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
+					<div><Radio size={15} aria-hidden="true" /><span>{workspaceMode === 'cockpit' ? 'AI 总控台各卡片标注数据源与更新时间 · AI 总控简报只读取页面已加载的汇总数据，不构成投资建议' : workspaceMode === 'themes' ? '题材与龙一至龙五：开盘啦 · 实时行情：新浪 · 沪深 K 线与领导力：通达信优先' : workspaceMode === 'limit-up' ? '当日涨停池与逐股题材：开盘啦优先 · 历史梯队、缺失股票与行情字段：东方财富补充 · 默认剔除ST' : workspaceMode === 'reviews' ? '复盘文章：本地 SQLite 归档 · 原文观点不代表系统结论' : workspaceMode === 'stock-ai' ? '沪深股票 K 线：通达信优先 · ETF 行情：东方财富/新浪 · ETF 档案与净值：天天基金 · AI 基于冻结证据研究' : workspaceMode === 'portfolio-inspection' ? '复用成功个股研究 · AI 按统一标准评估组合 · 事实与评分均可追溯' : workspaceMode === 'monitor' ? '行情与快照：东方财富/新浪 · 异动口径：交易所异常波动标准 · 通知：飞书/钉钉 · 提示不构成投资建议' : workspaceMode === 'market' ? '沪深指数：通达信优先 · 行业强度：腾讯/东方财富 · 资金与领涨标的：新浪/东方财富 · 龙虎榜、公告与研报：东方财富 · 盘面快讯：财联社 · AI 只读取带时间和来源的证据' : workspaceMode === 'token-usage' ? '真实用量来自模型返回的 usage · 本地估算单独记录，不并入真实总量' : '模型请求由本地后端转发 · API Key 不会暴露给页面 · 对话历史保存在当前设备'}</span></div>
 			</footer>
 			</div>
 			{masteryOpen && <TradingMasteryDialog config={config} onAskAI={askMasteryAI} onClose={closeMastery} />}

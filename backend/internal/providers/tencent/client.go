@@ -86,19 +86,25 @@ var indexCatalog = []indexDefinition{
 	{ID: "hsi", QuoteKey: "r_hkHSI", KLineKey: "hkHSI", Code: "HSI", Name: "恒生指数", Region: "中国香港", Market: "HK", Currency: "HKD", Core: true},
 	{ID: "dow", QuoteKey: "usDJI", KLineKey: "usDJI", Code: ".DJI", Name: "道琼斯", Region: "美洲", Market: "US", Currency: "USD", Core: true},
 	{ID: "sp500", QuoteKey: "usINX", KLineKey: "usINX", Code: ".INX", Name: "标普500", Region: "美洲", Market: "US", Currency: "USD", Core: true},
-	{ID: "nasdaq", QuoteKey: "usIXIC", KLineKey: "usIXIC", Code: ".IXIC", Name: "纳斯达克", Region: "美洲", Market: "US", Currency: "USD", Core: true},
+	{ID: "nasdaq", QuoteKey: "usNDX", KLineKey: "usNDX", Code: ".NDX", Name: "纳斯达克100", Region: "美洲", Market: "US", Currency: "USD", Core: true},
 	{ID: "ftse", QuoteKey: "ukUKX", KLineKey: "ukUKX", Code: "UKX", Name: "英国富时100", Region: "欧洲", Market: "UK", Currency: "GBP"},
 }
 
 func (c *Client) MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
-	definitions := make([]indexDefinition, 0, len(indexCatalog))
-	keys := make([]string, 0, len(indexCatalog))
-	for _, definition := range indexCatalog {
-		if scope == "core" && !definition.Core {
-			continue
+	return c.IndexSnapshots(ctx, foundation.MarketIndexDefinitions(scope))
+}
+
+func (c *Client) IndexSnapshots(ctx context.Context, requested []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
+	var definitions []indexDefinition
+	var keys []string
+	for _, index := range requested {
+		if definition, ok := findIndex(index.ID); ok {
+			definitions = append(definitions, definition)
+			keys = append(keys, definition.QuoteKey)
 		}
-		definitions = append(definitions, definition)
-		keys = append(keys, definition.QuoteKey)
+	}
+	if len(keys) == 0 {
+		return nil, foundation.SourceMeta{}, nil
 	}
 	values := url.Values{}
 	values.Set("q", strings.Join(keys, ","))

@@ -3,14 +3,18 @@ package eastmoney
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
+
+var errPush2Cooldown = errors.New("东方财富行情接口正在冷却")
 
 const (
 	// 桌面端 push2 转发桥（Electron 用 Chromium 网络栈代发请求）的地址与令牌，
@@ -31,9 +35,11 @@ const (
 // 同一出口 IP 的浏览器请求正常返回。桌面端因此提供本机桥接，后端只与它通信。
 // 没有桥接（网页版、命令行）时返回 nil，保持原有直连行为。
 type Push2Proxy struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL          string
+	token            string
+	client           *http.Client
+	mu               sync.Mutex
+	directRetryAfter map[string]time.Time
 }
 
 // NewPush2Proxy 构造桥接客户端；地址为空时返回 nil，表示没有可用的转发通道。
@@ -52,6 +58,23 @@ func NewPush2Proxy(baseURL string, token string) *Push2Proxy {
 // NewPush2ProxyFromEnv 读取桌面端注入的桥接配置。
 func NewPush2ProxyFromEnv() *Push2Proxy {
 	return NewPush2Proxy(os.Getenv(push2BridgeEnvURL), os.Getenv(push2BridgeEnvToken))
+}
+
+// Remember a failed direct fallback only for the affected endpoint. A working
+// direct path remains available while the desktop transport is cooling down.
+func (p *Push2Proxy) directCoolingDown(endpoint string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return time.Now().Before(p.directRetryAfter[endpoint])
+}
+
+func (p *Push2Proxy) recordDirectFailure(endpoint string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.directRetryAfter == nil {
+		p.directRetryAfter = make(map[string]time.Time)
+	}
+	p.directRetryAfter[endpoint] = time.Now().Add(10 * time.Second)
 }
 
 // accepts 判断请求是否属于需要走桥接的 push2 报价接口。
@@ -113,6 +136,12 @@ func (p *Push2Proxy) get(ctx context.Context, rawURL string) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(response.Body, push2BridgeMaxBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("读取东方财富 push2 桥接响应失败: %w", err)
+	}
+	if response.StatusCode == http.StatusServiceUnavailable {
+		var failure struct{ Error string }
+		if json.Unmarshal(body, &failure) == nil && failure.Error == "push2_cooldown" {
+			return nil, errPush2Cooldown
+		}
 	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("东方财富 push2 桥接返回 %d: %s", response.StatusCode, strings.TrimSpace(string(body)))

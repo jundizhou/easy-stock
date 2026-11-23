@@ -2,14 +2,17 @@ package marketoverview
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"time"
 
 	"easy-stock/backend/internal/foundation"
 )
 
 type Primary interface {
-	MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
-	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
+	IndexProvider
 	IndustryMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error)
 	MarketFundFlows(ctx context.Context, dimension string, sortKey string, limit int) ([]foundation.MarketFundFlow, foundation.SourceMeta, error)
 	MarketMarginSeries(ctx context.Context, limit int) ([]foundation.MarketMarginPoint, foundation.SourceMeta, error)
@@ -31,8 +34,8 @@ type USSectorMomentumProvider interface {
 	USSectorMomentum(ctx context.Context, limit int) ([]foundation.MarketUSSectorMomentum, foundation.SourceMeta, error)
 }
 
-type IndexFallback interface {
-	MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
+type IndexProvider interface {
+	IndexSnapshots(ctx context.Context, requested []foundation.MarketIndexDefinition) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error)
 	MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error)
 }
 
@@ -43,8 +46,9 @@ type IndexSeriesProvider interface {
 }
 
 type Provider struct {
+	domestic         IndexProvider
 	primary          Primary
-	indexFallback    IndexFallback
+	indexFallback    IndexProvider
 	indexFallback2   IndexSeriesProvider
 	industryProvider IndustryMomentumProvider
 	fundFlowProvider FundFlowProvider
@@ -59,7 +63,11 @@ func WithSecondaryIndexFallback(fallback IndexSeriesProvider) Option {
 	return func(p *Provider) { p.indexFallback2 = fallback }
 }
 
-func New(primary Primary, indexFallback IndexFallback, industryProvider IndustryMomentumProvider, fundFlowProvider FundFlowProvider, opts ...Option) *Provider {
+func WithDomesticIndexes(provider IndexProvider) Option {
+	return func(p *Provider) { p.domestic = provider }
+}
+
+func New(primary Primary, indexFallback IndexProvider, industryProvider IndustryMomentumProvider, fundFlowProvider FundFlowProvider, opts ...Option) *Provider {
 	provider := &Provider{primary: primary, indexFallback: indexFallback, industryProvider: industryProvider, fundFlowProvider: fundFlowProvider}
 	for _, opt := range opts {
 		opt(provider)
@@ -68,57 +76,103 @@ func New(primary Primary, indexFallback IndexFallback, industryProvider Industry
 }
 
 func (p *Provider) MarketIndexes(ctx context.Context, scope string) ([]foundation.MarketIndexSnapshot, foundation.SourceMeta, error) {
-	items, meta, err := p.primary.MarketIndexes(ctx, scope)
-	if err == nil || p.indexFallback == nil {
-		return items, meta, err
+	requested := foundation.MarketIndexDefinitions(scope)
+	missing := slices.Clone(requested)
+	byID := make(map[string]foundation.MarketIndexSnapshot, len(requested))
+	var sources []string
+	var errs []error
+	started := time.Now()
+	var meta foundation.SourceMeta
+	providers := []IndexProvider{p.primary, p.indexFallback}
+	if p.domestic != nil {
+		providers = []IndexProvider{p.domestic, p.indexFallback, p.primary}
 	}
-	fallbackItems, fallbackMeta, fallbackErr := p.indexFallback.MarketIndexes(ctx, scope)
-	if fallbackErr != nil {
-		return nil, foundation.SourceMeta{}, fmt.Errorf("primary indexes failed: %v; fallback failed: %w", err, fallbackErr)
+	for _, provider := range providers {
+		if provider == nil || len(missing) == 0 {
+			continue
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		// One slow market must not consume the entire overview request budget.
+		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
+		rows, m, err := provider.IndexSnapshots(attempt, missing)
+		cancel()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		added := false
+		for _, row := range rows {
+			if _, exists := byID[row.ID]; !exists && row.Price > 0 {
+				byID[row.ID] = row
+				added = true
+			}
+		}
+		if added {
+			sources = append(sources, m.Source)
+			meta = m
+		}
+		missing = slices.DeleteFunc(missing, func(d foundation.MarketIndexDefinition) bool {
+			_, ok := byID[d.ID]
+			return ok
+		})
 	}
-	fallbackMeta.FallbackReason = "东方财富指数快照不可用，已切换腾讯行情；备用目录暂不包含部分亚太与欧洲指数"
-	for index := range fallbackItems {
-		fallbackItems[index].Meta = fallbackMeta
+	if err := ctx.Err(); err != nil && (len(byID) == 0 || errors.Is(err, context.Canceled)) {
+		return nil, foundation.SourceMeta{}, err
 	}
-	return fallbackItems, fallbackMeta, nil
+	var result []foundation.MarketIndexSnapshot
+	for _, d := range requested {
+		if row, ok := byID[d.ID]; ok {
+			result = append(result, row)
+		}
+	}
+	if len(result) == 0 {
+		return nil, foundation.SourceMeta{}, errors.Join(append(errs, errors.New("未取得指数行情"))...)
+	}
+	if len(sources) > 1 {
+		meta = foundation.SourceMeta{Source: strings.Join(sources, " + "), FetchedAt: time.Now(), LatencyMS: time.Since(started).Milliseconds()}
+	}
+	if len(missing) > 0 {
+		meta.FallbackReason = fmt.Sprintf("已取得 %d/%d 个指数行情", len(result), len(requested))
+	}
+	return result, meta, nil
 }
 
 func (p *Provider) MarketIndexSeries(ctx context.Context, id string, period string, limit int) (foundation.MarketIndexSeries, error) {
-	series, err := p.primary.MarketIndexSeries(ctx, id, period, limit)
-	if err == nil {
-		return series, nil
-	}
-	reasons := fmt.Sprintf("东方财富指数走势不可用: %v", err)
-	fallbacks := make([]struct {
-		label  string
-		series IndexSeriesProvider
-	}, 0, 2)
-	if p.indexFallback != nil {
-		fallbacks = append(fallbacks, struct {
-			label  string
-			series IndexSeriesProvider
-		}{"腾讯 K 线", p.indexFallback})
-	}
-	if p.indexFallback2 != nil {
-		fallbacks = append(fallbacks, struct {
-			label  string
-			series IndexSeriesProvider
-		}{"新浪指数通道", p.indexFallback2})
-	}
-	for _, fallback := range fallbacks {
-		result, fallbackErr := fallback.series.MarketIndexSeries(ctx, id, period, limit)
-		if fallbackErr != nil {
-			reasons += "; " + fallbackErr.Error()
+	// Keep the existing overseas index periods and benchmarks. Domestic
+	// benchmarks can use the MAC index protocol before falling back.
+	var errs []error
+	for i, source := range []struct {
+		provider IndexSeriesProvider
+		label    string
+	}{
+		{p.domestic, "通达信"}, {p.primary, "东方财富"}, {p.indexFallback, "腾讯 K 线"}, {p.indexFallback2, "新浪指数通道"},
+	} {
+		if source.provider == nil {
 			continue
 		}
-		result.Meta.FallbackReason = "东方财富指数走势不可用，已切换" + fallback.label
-		result.Index.Meta = result.Meta
-		for lineIndex := range result.Lines {
-			result.Lines[lineIndex].Meta = result.Meta
+		if err := ctx.Err(); err != nil {
+			return foundation.MarketIndexSeries{}, err
 		}
-		return result, nil
+		attempt, cancel := context.WithTimeout(ctx, 4*time.Second)
+		series, err := source.provider.MarketIndexSeries(attempt, id, period, limit)
+		cancel()
+		if err == nil && len(series.Lines) > 0 {
+			if i >= 2 {
+				series.Meta.FallbackReason = "指数走势已切换" + source.label
+				series.Index.Meta = series.Meta
+				for j := range series.Lines {
+					series.Lines[j].Meta = series.Meta
+				}
+			}
+			return series, nil
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return foundation.MarketIndexSeries{}, fmt.Errorf("index series unavailable: %s", reasons)
+	return foundation.MarketIndexSeries{}, errors.Join(append(errs, errors.New("未取得指数走势"))...)
 }
 
 func (p *Provider) IndustryMomentum(ctx context.Context, limit int) ([]foundation.MarketIndustryMomentum, foundation.SourceMeta, error) {

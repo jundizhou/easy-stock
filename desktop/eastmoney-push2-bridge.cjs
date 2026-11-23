@@ -3,6 +3,10 @@ const http = require('node:http');
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const QUOTE_PATHS = new Set([
+  '/api/qt/stock/get', '/api/qt/stock/kline/get', '/api/qt/stock/fflow/kline/get',
+  '/api/qt/stock/trends2/get', '/api/qt/clist/get', '/api/qt/ulist.np/get',
+]);
 
 // 东方财富 push2 系列（含编号镜像）的报价接口带浏览器指纹门禁：
 // Go / curl / Node 这类非浏览器 TLS 客户端会在请求发出后被直接断连（EOF），
@@ -36,6 +40,7 @@ function createChromiumRequester(session) {
     const { net } = require('electron');
     return await new Promise((resolve, reject) => {
       let settled = false;
+      let stage = 'request';
       let timer;
       const settle = (fn, value) => {
         if (settled) return;
@@ -56,13 +61,14 @@ function createChromiumRequester(session) {
         } catch {
           // 已结束的请求无法 abort，交由 settled 标记兜底。
         }
-        settle(reject, new Error('东方财富 push2 请求超时'));
+        settle(reject, Object.assign(new Error('东方财富 push2 请求超时'), { code: 'ETIMEDOUT', stage }));
       }, Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
 
       for (const [name, value] of Object.entries(headers || {})) {
         if (value) request.setHeader(name, value);
       }
       request.on('response', (response) => {
+        stage = 'response';
         const chunks = [];
         let total = 0;
         response.on('data', (chunk) => {
@@ -73,7 +79,7 @@ function createChromiumRequester(session) {
             } catch {
               // 同上。
             }
-            settle(reject, new Error('东方财富 push2 响应过大'));
+            settle(reject, Object.assign(new Error('东方财富 push2 响应过大'), { stage, code: 'EMSGSIZE' }));
             return;
           }
           chunks.push(chunk);
@@ -85,7 +91,7 @@ function createChromiumRequester(session) {
             body: Buffer.concat(chunks),
           });
         });
-        response.on('error', (error) => settle(reject, error));
+        response.on('error', (error) => settle(reject, Object.assign(error, { stage })));
       });
       request.on('error', (error) => settle(reject, error));
       request.end();
@@ -93,7 +99,8 @@ function createChromiumRequester(session) {
   };
 }
 
-function createEastmoneyPush2Bridge({ request, session, logger = console } = {}) {
+function createEastmoneyPush2Bridge({ request, session, logger = console, now = Date.now } = {}) {
+  const failures = new Map();
   const token = crypto.randomBytes(24).toString('hex');
   const forward = typeof request === 'function' ? request : createChromiumRequester(session);
   let server;
@@ -118,8 +125,18 @@ function createEastmoneyPush2Bridge({ request, session, logger = console } = {})
       writeJSON(response, 400, { ok: false, error: 'unsupported push2 url' });
       return;
     }
+    const { hostname: host, pathname } = new URL(target);
+    const route = QUOTE_PATHS.has(pathname) ? pathname : '/api/other';
+    const key = host + route;
+    const previous = failures.get(key);
+    if (previous && (previous.retryAt > now() || previous.probing)) {
+      writeJSON(response, 503, { ok: false, error: 'push2_cooldown' });
+      return;
+    }
+    if (previous) previous.probing = true;
+    let stage = 'request';
     try {
-      const startedAt = Date.now();
+      const startedAt = now();
       const result = await forward({
         url: target,
         headers: {
@@ -129,28 +146,42 @@ function createEastmoneyPush2Bridge({ request, session, logger = console } = {})
         },
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
+      stage = 'response';
+      const body = Buffer.isBuffer(result?.body) ? result.body.toString('utf8') : String(result?.body || '');
+      if (result?.status === 200 && !body.trim()) {
+        throw Object.assign(new Error('empty response'), { code: 'EMPTY_BODY' });
+      }
+      failures.delete(key);
       writeJSON(response, 200, {
         ok: true,
         data: {
           status: Number(result?.status) || 0,
           content_type: String(result?.contentType || ''),
-          body: Buffer.isBuffer(result?.body) ? result.body.toString('utf8') : String(result?.body || ''),
-          duration_ms: Date.now() - startedAt,
+          body,
+          duration_ms: now() - startedAt,
         },
       });
     } catch (error) {
-      logger.warn?.(`eastmoney push2 bridge failed: ${error.message}`);
-      writeJSON(response, 502, { ok: false, error: error.message || '东方财富 push2 请求失败' });
+      if (error?.stage === 'response') stage = 'response';
+      const code = /^E[A-Z0-9_]{1,50}$/.test(error?.code) ? error.code
+        : /\bnet::(ERR_[A-Z0-9_]+)/.exec(String(error?.message))?.[1] || 'NETWORK_ERROR';
+      // Concurrent failures from the same outage share a single warning and retry window.
+      if (failures.get(key) === previous) {
+        const delay = Math.min((previous?.delay || 5_000) * 2, 60_000);
+        failures.set(key, { retryAt: now() + delay, delay, probing: false });
+        logger.warn?.(`eastmoney push2 bridge stage=${stage} host=${host} route=${route} code=${code} retry_ms=${delay}`);
+      }
+      writeJSON(response, 502, { ok: false, error: code });
     }
   }
 
   async function start() {
     if (server) return { baseURL, token };
     server = http.createServer((request, response) => {
-      handle(request, response).catch((error) => {
-        logger.warn?.(`eastmoney push2 bridge failed: ${error.message}`);
+      handle(request, response).catch(() => {
+        logger.warn?.('eastmoney push2 bridge stage=handler code=INTERNAL_ERROR');
         if (!response.headersSent) {
-          writeJSON(response, 500, { ok: false, error: error.message || 'internal error' });
+          writeJSON(response, 500, { ok: false, error: 'internal error' });
         } else {
           response.destroy();
         }
