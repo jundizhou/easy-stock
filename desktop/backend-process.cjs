@@ -132,7 +132,7 @@ async function terminateChild(child, timeoutMS = 10000, { platform = process.pla
   }
 }
 
-async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
+async function waitForHealth(backendUrl, timeoutMS = 30000, child) {
   const startedAt = Date.now();
   let lastError;
   let processError;
@@ -157,7 +157,11 @@ async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(0, timeoutMS - (Date.now() - startedAt)))));
     }
-    throw lastError || new Error('backend health check timed out');
+    if (child?.pid) {
+      await terminateChild(child).catch(() => {});
+    }
+    const reason = lastError?.message ? `: ${lastError.message}` : '';
+    throw new Error(`backend health check timed out after ${timeoutMS}ms${reason}`);
   } finally {
     child?.removeListener('error', onError);
     child?.removeListener('exit', onExit);

@@ -134,7 +134,7 @@ async function bootBackend() {
 	backendProcess.once('error', (error) => desktopLogger.event('error', 'backend-process', 'process error', error));
 	backendProcess.once('exit', (code, signal) => desktopLogger.event(app.isQuitting ? 'info' : 'error', 'backend-process', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`));
 
-  await waitForHealth(backendUrl, 15000, backendProcess);
+  await waitForHealth(backendUrl, 30000, backendProcess);
   backendConfig = { backendUrl, token };
 	desktopLogger.event('info', 'backend-process', 'ready');
   return backendConfig;

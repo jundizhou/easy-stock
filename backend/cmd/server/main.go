@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -114,6 +115,7 @@ func main() {
 	if monitorDBPath == "" {
 		monitorDBPath = dataPath(dataDir, "monitor.db")
 	}
+	dbPaths := []string{reviewDBPath, portfolioDBPath, stockResearchDBPath, marketEmotionDBPath, themeRadarDBPath, themeLibraryDBPath, sectorFlowSampleDBPath, monitorDBPath}
 	server := httpapi.NewServer(httpapi.Config{
 		MonitorDBPath:            monitorDBPath,
 		Token:                    os.Getenv("A_STOCK_TOKEN"),
@@ -156,13 +158,30 @@ func main() {
 		defer shutdownCancel()
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Health must answer immediately; merge a leftover WAL afterwards so a
+	// large log left by a force-quit cannot slow the next start.
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+		checkpointLargeWALs(ctx, dbPaths, walCheckpointThreshold, log.Default())
+	}()
 	log.Printf("easy-stock data foundation listening on http://%s", addr)
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 	if err := server.Close(); err != nil {
 		log.Printf("close persistent data: %v", err)
 	}
+	shutdownCheckpoint, cancelCheckpoint := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelCheckpoint()
+	checkpointLargeWALs(shutdownCheckpoint, dbPaths, 0, log.Default())
 }
 
 func runtimeVersion() string {
