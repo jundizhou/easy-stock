@@ -2,6 +2,9 @@ const { spawn } = require('node:child_process');
 const net = require('node:net');
 const path = require('node:path');
 
+const BACKEND_HEALTH_TIMEOUT_MS = 30000;
+const childTerminations = new WeakMap();
+
 function buildBackendEnv({ addr, token, baseEnv = process.env, extraEnv = {} }) {
   return {
     ...baseEnv,
@@ -68,9 +71,22 @@ function hasExited(child) {
   return child.exitCode != null || child.signalCode != null;
 }
 
-async function terminateChild(child, timeoutMS = 10000, { platform = process.platform, spawnImpl = spawn } = {}) {
+async function terminateChild(child, timeoutMS = 10000, options) {
+  if (!child?.pid) return;
+  const pending = childTerminations.get(child);
+  if (pending) return pending;
   // `killed` only means a signal was sent; it does not mean the process exited.
-  if (!child?.pid || hasExited(child)) return;
+  if (hasExited(child)) return;
+  const termination = terminateChildOnce(child, timeoutMS, options);
+  childTerminations.set(child, termination);
+  try {
+    await termination;
+  } finally {
+    childTerminations.delete(child);
+  }
+}
+
+async function terminateChildOnce(child, timeoutMS, { platform = process.platform, spawnImpl = spawn } = {}) {
   let exited = false;
   let exitTimer;
   let forceTimer;
@@ -132,7 +148,7 @@ async function terminateChild(child, timeoutMS = 10000, { platform = process.pla
   }
 }
 
-async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
+async function waitForHealth(backendUrl, timeoutMS = BACKEND_HEALTH_TIMEOUT_MS, child, { onCleanupError } = {}) {
   const startedAt = Date.now();
   let lastError;
   let processError;
@@ -142,7 +158,7 @@ async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
   child?.once('error', onError);
   child?.once('exit', onExit);
   try {
-    if (child && child.exitCode !== null && child.exitCode !== undefined) onExit(child.exitCode);
+    if (child && hasExited(child)) onExit(child.exitCode, child.signalCode);
     while (Date.now() - startedAt < timeoutMS) {
       if (processError) throw processError;
       try {
@@ -157,7 +173,14 @@ async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(0, timeoutMS - (Date.now() - startedAt)))));
     }
-    throw lastError || new Error('backend health check timed out');
+    if (processError) throw processError;
+    try {
+      await terminateChild(child);
+    } catch (error) {
+      onCleanupError?.(error);
+    }
+    const reason = lastError?.message ? `: ${lastError.message}` : '';
+    throw new Error(`backend health check timed out after ${timeoutMS}ms${reason}`, { cause: lastError });
   } finally {
     child?.removeListener('error', onError);
     child?.removeListener('exit', onExit);
@@ -166,6 +189,7 @@ async function waitForHealth(backendUrl, timeoutMS = 15000, child) {
 }
 
 module.exports = {
+  BACKEND_HEALTH_TIMEOUT_MS,
   buildBackendEnv,
   findFreePort,
   resolveBackendCommand,

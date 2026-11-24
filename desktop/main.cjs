@@ -4,6 +4,7 @@ const path = require('node:path');
 const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const {
+  BACKEND_HEALTH_TIMEOUT_MS,
   findFreePort,
   resolveBackendCommand,
   startBackend,
@@ -134,7 +135,9 @@ async function bootBackend() {
 	backendProcess.once('error', (error) => desktopLogger.event('error', 'backend-process', 'process error', error));
 	backendProcess.once('exit', (code, signal) => desktopLogger.event(app.isQuitting ? 'info' : 'error', 'backend-process', `process exited code=${code ?? 'none'} signal=${signal || 'none'} quitting=${Boolean(app.isQuitting)}`));
 
-  await waitForHealth(backendUrl, 15000, backendProcess);
+  await waitForHealth(backendUrl, BACKEND_HEALTH_TIMEOUT_MS, backendProcess, {
+    onCleanupError: (error) => desktopLogger.event('error', 'backend-process', 'startup timeout cleanup failed', error),
+  });
   backendConfig = { backendUrl, token };
 	desktopLogger.event('info', 'backend-process', 'ready');
   return backendConfig;

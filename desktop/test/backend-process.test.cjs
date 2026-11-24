@@ -6,15 +6,43 @@ const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { buildBackendEnv, findFreePort, resolveBackendCommand, terminateChild, waitForHealth } = require('../backend-process.cjs');
 
-test('health checks time out even when the server accepts but never responds', async () => {
+test('backend health checks allow startup beyond the former 15-second deadline', async (t) => {
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  const fetchHealth = t.mock.method(globalThis, 'fetch', async () => {
+    if (now > 0) return { ok: true };
+    now = 23500;
+    return { ok: false, status: 503 };
+  });
+  await waitForHealth('http://127.0.0.1:20000');
+  assert.equal(fetchHealth.mock.callCount(), 2);
+});
+
+test('health checks time out and stop the backend even when the server never responds', async () => {
   const server = http.createServer(() => {});
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true });
   try {
-    await assert.rejects(waitForHealth(`http://127.0.0.1:${server.address().port}`, 100));
+    await assert.rejects(waitForHealth(`http://127.0.0.1:${server.address().port}`, 100, child), /health check timed out after 100ms/);
+    assert.ok(child.exitCode !== null || child.signalCode !== null);
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
+    await terminateChild(child);
   }
+});
+
+test('timeout reports cleanup failures and preserves the last health error', { skip: process.platform === 'win32' }, async (t) => {
+  const healthError = new TypeError('fetch failed');
+  const cleanupError = new Error('stop failed');
+  const child = fakeProcess();
+  child.kill = () => { throw cleanupError; };
+  const cleanupErrors = [];
+  t.mock.method(globalThis, 'fetch', async () => { throw healthError; });
+  await assert.rejects(waitForHealth('http://127.0.0.1:20000', 10, child, {
+    onCleanupError: (error) => cleanupErrors.push(error),
+  }), { message: 'backend health check timed out after 10ms: fetch failed', cause: healthError });
+  assert.deepEqual(cleanupErrors, [cleanupError]);
 });
 
 test('backend process errors immediately stop health checks', async () => {
@@ -86,11 +114,12 @@ test('Windows shutdown waits for both the process tree command and the parent ex
     assert.equal(options.windowsHide, true);
     return killer;
   } }).then(() => { resolved = true; });
+  const concurrentStop = terminateChild(child, 1000, { platform: 'win32', spawnImpl: () => assert.fail('duplicate taskkill') });
   child.emit('exit', 0);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(resolved, false, 'parent exit alone cannot confirm descendant cleanup');
   killer.emit('close', 0);
-  await stop;
+  await Promise.all([stop, concurrentStop]);
   assert.equal(child.listenerCount('exit'), 0);
 });
 
