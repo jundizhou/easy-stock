@@ -31,7 +31,7 @@
 
 | 工具 | 使用场景 |
 | --- | --- |
-| Python 3.11 与 `uv` | 准备包含 Hermes 的桌面发布包 |
+| `uv` 与 `curl` | 准备 Hermes 运行时，`uv` 会安装所需的 Python 3.14 |
 | Hermes Runtime | 本地调试 AI 对话、文章分析、每日共识和模型连接 |
 | macOS `hdiutil` | 生成 macOS DMG |
 | PowerShell | 生成 Windows 发布压缩包 |
@@ -161,13 +161,21 @@ Electron 桌面模式
 
 ### Hermes 开发配置
 
+`npm run dev:desktop` 会自动准备 Hermes。用 `npm run restart` 或 `npm run dev:backend` 调试 AI 功能时，先在仓库根目录准备运行时，再启动后端。
+
+```bash
+node desktop/scripts/ensure-hermes-runtime.mjs
+```
+
+默认运行时位于 `desktop/resources/hermes-runtime`。需要自定义位置时，可以设置以下变量。
+
 ```bash
 export A_STOCK_HERMES_RUNTIME_ROOT=/absolute/path/to/hermes-runtime
 export A_STOCK_HERMES_HOME="$PWD/.runtime/hermes-home"
 export A_STOCK_HERMES_WORKDIR="$PWD/.runtime/hermes-workspace"
 ```
 
-可选的 `A_STOCK_HERMES_PYTHON` 用于指定 Runtime 中的 Python。随后在应用的「系统设置 → 模型服务」中配置服务商、模型、Base URL 和 API Key。
+默认使用运行时自带的 Python 启动入口。若通过 `A_STOCK_HERMES_PYTHON` 指定其他 Python，该解释器须能加载 Hermes 源码和依赖。随后在应用的「系统设置 → 模型服务」中配置服务商、模型、Base URL 和 API Key。
 
 模型 API Key 只应保存在 Hermes Home 的 `.env` 中。不要把 `.runtime`、数据库、Cookie、浏览器状态、设置文件或任何密钥提交到 Git。
 
@@ -231,7 +239,7 @@ npm run prepare:desktop-package
 HERMES_RUNTIME_SOURCE=/absolute/path/to/hermes-runtime npm run prepare:desktop-package
 ```
 
-未指定 Runtime 来源时，脚本会通过 `uv` 创建 Python 3.11 可迁移环境并安装项目锁定的 Hermes 版本。
+未指定 Runtime 来源时，脚本会通过 `uv` 创建 Python 3.14 可迁移环境并安装项目锁定的 Hermes 版本。
 
 ### macOS
 
@@ -335,7 +343,7 @@ tail -f .runtime/backend.log
 
 ### AI 功能不可用
 
-确认 `A_STOCK_HERMES_RUNTIME_ROOT` 指向完整 Runtime，并在设置页执行模型连接测试。更详细的运行链路和密钥规则见 [Hermes 集成文档](../backend/docs/hermes-integration.md)。
+如果报错提示 Hermes 未就绪或无法加载 `providers`，请检查 `A_STOCK_HERMES_RUNTIME_ROOT` 和 `A_STOCK_HERMES_PYTHON`。使用默认运行时的源码开发环境可以取消这两项覆盖，重新运行 `node desktop/scripts/ensure-hermes-runtime.mjs` 并重启后端。桌面安装版的运行时损坏时，请重新安装对应架构的安装包。恢复后，在「系统设置 → 模型服务」中执行连接测试。[Hermes 集成文档](../backend/docs/hermes-integration.md)
 
 ### 行情或题材数据暂时为空
 

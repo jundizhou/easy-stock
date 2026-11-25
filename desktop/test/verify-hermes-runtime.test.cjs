@@ -25,6 +25,7 @@ async function fixture(t) {
 	const source = path.join(runtimeRoot, 'source');
 	const files = {
 		'hermes_cli/__init__.py': `__version__ = '${HERMES_AGENT_VERSION}'\n`,
+		'providers/__init__.py': 'def get_provider_profile(): pass\ndef register_provider(): pass\n',
 		'tui_gateway/__init__.py': '',
 		'tui_gateway/entry.py': '',
 	};
@@ -108,6 +109,14 @@ test('rejects an imported version that disagrees with the source stamp', async (
 	fs.writeFileSync(path.join(data.source, 'hermes_cli/__init__.py'), contents);
 	data.hashes['hermes_cli/__init__.py'] = crypto.createHash('sha256').update(contents).digest('hex');
 	assert.throws(() => verifyHermesRuntime(data.runtimeRoot, data.hashes), /Hermes version 0\.19\.0; expected/);
+});
+
+test('rejects a runtime missing the providers required by the launcher', async (t) => {
+	const data = await fixture(t); if (!data) return;
+	const { verifyHermesRuntime } = await import('../scripts/verify-hermes-runtime.mjs');
+	fs.rmSync(path.join(data.source, 'providers'), { recursive: true });
+	delete data.hashes['providers/__init__.py'];
+	assert.throws(() => verifyHermesRuntime(data.runtimeRoot, data.hashes), /No module named 'providers'/);
 });
 
 test('rejects modules imported from outside the bundled source', async (t) => {

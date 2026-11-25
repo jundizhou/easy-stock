@@ -143,9 +143,10 @@ export function verifyHermesPython(runtimeRoot, expectedFiles = HERMES_SOURCE_FI
 import json, sys
 from pathlib import Path
 output = sys.stdout
-import hermes_cli, tui_gateway, tui_gateway.entry
+import hermes_cli, providers, tui_gateway, tui_gateway.entry
+from providers import get_provider_profile, register_provider
 root = Path(sys.argv[1]).resolve() / "source"
-for module in (hermes_cli, tui_gateway, tui_gateway.entry):
+for module in (hermes_cli, providers, tui_gateway, tui_gateway.entry):
     if not Path(module.__file__).resolve().is_relative_to(root):
         raise RuntimeError(f"Hermes module outside bundled source: {module.__file__}")
 if sys.version_info[:2] != (3, 14):

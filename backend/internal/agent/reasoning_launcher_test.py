@@ -297,6 +297,19 @@ func main() {
         self.assertIs(self.discovery._find_agent_browser, original)
 
 
+class RuntimeStartupTests(unittest.TestCase):
+    def test_missing_providers_reports_repair_before_gateway_start(self):
+        launcher = Path(bridge.__file__).resolve()
+        result = subprocess.run(
+            [sys.executable, '-I', '-S', '-B', str(launcher)],
+            env={**os.environ, 'EASY_STOCK_REASONING_POLICY': '{"config":{},"capability":{}}'},
+            capture_output=True, check=True, timeout=15,
+        )
+        params = json.loads(result.stdout)['params']
+        self.assertEqual(params['type'], 'gateway.error')
+        self.assertIn('ensure-hermes-runtime.mjs', params['payload']['message'])
+
+
 class UnattendedOnboardingTests(unittest.TestCase):
     def test_fresh_sandbox_does_not_append_interactive_notes(self):
         from agent import onboarding

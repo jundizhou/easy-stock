@@ -9,8 +9,14 @@ function runtimePython(runtimeRoot, platform = process.platform) {
 
 function validRuntimeRoot(runtimeRoot, platform = process.platform) {
   if (!runtimeRoot) return false;
+  const source = path.join(runtimeRoot, 'source');
   try {
-    return fs.statSync(runtimePython(runtimeRoot, platform)).isFile();
+    return [
+      runtimePython(runtimeRoot, platform),
+      path.join(source, 'providers', '__init__.py'),
+      path.join(source, 'hermes_cli', '__init__.py'),
+      path.join(source, 'tui_gateway', 'entry.py'),
+    ].every((file) => fs.statSync(file).isFile());
   } catch {
     return false;
   }

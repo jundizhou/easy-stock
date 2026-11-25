@@ -166,7 +166,12 @@ type fakeNarrator struct {
 	err       error
 }
 
-func (f *fakeNarrator) Available() bool { return f.available }
+func (f *fakeNarrator) UnavailableReason() string {
+	if !f.available {
+		return "AI 运行时不可用"
+	}
+	return ""
+}
 
 func (f *fakeNarrator) Narrate(ctx context.Context, prompt string) (string, error) {
 	f.mu.Lock()
@@ -239,6 +244,9 @@ func TestTickRunsOncePerSlotWithFactsOnlyWhenAIUnavailable(t *testing.T) {
 	brief := briefs[0]
 	if brief.Key != "2026-10-20|10:10" || brief.NarrativeStatus != "unavailable" || brief.Narrative != "" {
 		t.Fatalf("unexpected brief %+v", brief)
+	}
+	if brief.Error != "AI 运行时不可用" {
+		t.Fatalf("brief did not preserve the runtime error: %+v", brief)
 	}
 	if len(brief.Facts.CNIndexes) != 1 || brief.Facts.Intraday == nil {
 		t.Fatalf("facts missing: %+v", brief.Facts)

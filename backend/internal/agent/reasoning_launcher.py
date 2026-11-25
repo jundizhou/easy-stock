@@ -208,7 +208,20 @@ def main():
         print(json.dumps(result))
         return
     policy = json.loads(os.environ["EASY_STOCK_REASONING_POLICY"])
-    install_profile(policy["config"], policy["capability"])
+    try:
+        install_profile(policy["config"], policy["capability"])
+    except ModuleNotFoundError as error:
+        if error.name != "providers":
+            raise
+        message = (
+            "Hermes 的 Python 无法加载 providers。源码开发请检查 A_STOCK_HERMES_PYTHON 和 A_STOCK_HERMES_RUNTIME_ROOT，"
+            "运行 node desktop/scripts/ensure-hermes-runtime.mjs 后重启后端。桌面安装版请重新安装应用。"
+        )
+        print(json.dumps({"jsonrpc": "2.0", "method": "event", "params": {
+            "type": "gateway.error",
+            "payload": {"message": message},
+        }}), flush=True)
+        return
     install_browser_adapter()
     install_unattended_policy()
     runpy.run_module("tui_gateway.entry", run_name="__main__")

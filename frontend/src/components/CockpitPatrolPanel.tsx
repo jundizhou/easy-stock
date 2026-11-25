@@ -620,7 +620,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 	const intervalMinutes = patrol.status?.interval_minutes;
 	const patrolSetting = patrol.status?.auto_patrol_enabled === false ? 'off' : autoOn && intervalMinutes && patrolIntervalMinutes.some((minutes) => minutes === intervalMinutes) ? String(intervalMinutes) : '';
 	const PatrolSwitchIcon = patrol.status?.auto_patrol_enabled === false ? ToggleLeft : autoOn ? ToggleRight : Power;
-	const patrolHint = !patrol.status ? ' · 读取中' : autoOn ? ` · 下次 ${nextRun}${patrol.status.ai_available ? '' : ' · AI 未配置'}` : '';
+	const patrolHint = !patrol.status ? ' · 读取中' : autoOn ? ` · 下次 ${nextRun}${patrol.status.ai_available ? '' : ' · AI 不可用'}` : '';
 	const nextIntraday = intradayNextRunTime(autoOn, patrol.status?.next_run_at, nextRunLabel);
 
 	if (!config) return null;
@@ -789,7 +789,7 @@ function CockpitPatrolContent({ config, refreshKey }: Props) {
 						)}
 
 						{!narrative && selected.narrative_status && selected.narrative_status !== 'ready' && (
-							<p className="patrol-empty">{narrativeFallback(selected.narrative_status)}</p>
+							<p className="patrol-empty">{narrativeFallback(selected.narrative_status, selected.error)}</p>
 						)}
 					</article>
 				)}
@@ -943,10 +943,10 @@ export function NarrativeSnapshot({ snapshot, expanded = true, brief }: { snapsh
 	);
 }
 
-function narrativeFallback(status: string): string {
+function narrativeFallback(status: string, error?: string): string {
 	switch (status) {
 		case 'unavailable':
-			return '本次巡查未生成 AI 叙述（AI 未配置或调用失败），下方固定模块仍是本次采集到的真实数据。';
+			return error || 'AI 不可用，已保存本次巡查采集的事实数据。';
 		case 'failed':
 			return '本次巡查的 AI 叙述生成失败，事实数据仍已保存，可在下方固定模块查看。';
 		case 'running':

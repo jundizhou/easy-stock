@@ -6,10 +6,12 @@ const test = require('node:test');
 
 const { resolveHermesRuntimeRoot } = require('../hermes-runtime-root.cjs');
 
-function createRuntime(root) {
-  const runtimeRoot = path.join(root, 'desktop', 'resources', 'hermes-runtime');
-  fs.mkdirSync(path.join(runtimeRoot, 'venv', 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(runtimeRoot, 'venv', 'bin', 'python'), 'python');
+function createRuntime(runtimeRoot) {
+  for (const file of ['venv/bin/python', 'source/providers/__init__.py', 'source/hermes_cli/__init__.py', 'source/tui_gateway/entry.py']) {
+    const target = path.join(runtimeRoot, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, '');
+  }
   return runtimeRoot;
 }
 
@@ -22,7 +24,7 @@ test('resolves Hermes runtime from the main checkout when running inside a git w
   fs.mkdirSync(worktreeGitDir, { recursive: true });
   fs.writeFileSync(path.join(worktreeRoot, '.git'), `gitdir: ${worktreeGitDir}\n`);
   fs.writeFileSync(path.join(worktreeGitDir, 'commondir'), '../..\n');
-  const runtimeRoot = createRuntime(mainRoot);
+  const runtimeRoot = createRuntime(path.join(mainRoot, 'desktop', 'resources', 'hermes-runtime'));
 
   assert.equal(resolveHermesRuntimeRoot({ projectRoot: worktreeRoot, platform: 'darwin' }), runtimeRoot);
 });
@@ -31,17 +33,25 @@ test('prefers an explicitly configured valid Hermes runtime', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-explicit-runtime-'));
   const configuredRoot = createRuntime(path.join(tempRoot, 'configured'));
   const bundledRoot = path.join(tempRoot, 'bundle');
-  createRuntime(bundledRoot);
+  createRuntime(path.join(bundledRoot, 'hermes-runtime'));
 
-  assert.equal(resolveHermesRuntimeRoot({ configuredRoot, bundledRoot: path.join(bundledRoot, 'desktop', 'resources'), platform: 'darwin' }), configuredRoot);
+  assert.equal(resolveHermesRuntimeRoot({ configuredRoot, bundledRoot, platform: 'darwin' }), configuredRoot);
 });
 
 test('resolves the Hermes runtime bundled inside a packaged resources directory', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-packaged-runtime-'));
-  const resourcesRoot = path.join(tempRoot, 'easy-stock.app', 'Contents', 'Resources', 'resources');
-  const runtimeRoot = path.join(resourcesRoot, 'hermes-runtime');
-  fs.mkdirSync(path.join(runtimeRoot, 'venv', 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(runtimeRoot, 'venv', 'bin', 'python'), 'python');
+  const runtimeRoot = createRuntime(path.join(tempRoot, 'easy-stock.app', 'Contents', 'Resources', 'resources', 'hermes-runtime'));
 
-  assert.equal(resolveHermesRuntimeRoot({ bundledRoot: resourcesRoot, platform: 'darwin' }), runtimeRoot);
+  assert.equal(resolveHermesRuntimeRoot({ bundledRoot: path.dirname(runtimeRoot), platform: 'darwin' }), runtimeRoot);
+});
+
+test('skips a partially installed Hermes runtime that still has Python', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'easy-stock-incomplete-runtime-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const configuredRoot = createRuntime(path.join(root, 'configured'));
+  const bundledRoot = createRuntime(path.join(root, 'bundle', 'hermes-runtime'));
+  fs.unlinkSync(path.join(configuredRoot, 'source', 'providers', '__init__.py'));
+
+  assert.equal(resolveHermesRuntimeRoot({ configuredRoot, platform: 'darwin' }), '');
+  assert.equal(resolveHermesRuntimeRoot({ configuredRoot, bundledRoot: path.dirname(bundledRoot), platform: 'darwin' }), bundledRoot);
 });

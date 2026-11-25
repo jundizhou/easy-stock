@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { requestJSON } from '../lib/backend';
-import type { PatrolSetting, PatrolStatus } from '../lib/cockpit-patrol';
+import type { PatrolBrief, PatrolSetting, PatrolStatus } from '../lib/cockpit-patrol';
 import { useCockpitPatrol } from '../lib/use-cockpit-patrol';
 import { CockpitPatrolPanel } from './CockpitPatrolPanel';
 
@@ -15,6 +15,7 @@ vi.mock('../lib/use-cockpit-live-facts', () => ({
 
 const config = { backendUrl: 'http://fixture.invalid', token: '' };
 let serverStatus: PatrolStatus;
+let serverBriefs: PatrolBrief[];
 let saveError: Error | null;
 let saveGate: ReturnType<typeof deferred<void>> | null;
 let delayedStatus: { at: number; gate: ReturnType<typeof deferred<{ data: PatrolStatus }>> } | null;
@@ -29,6 +30,7 @@ function deferred<T>() {
 beforeEach(() => {
 	vi.clearAllMocks();
 	serverStatus = { phase: 'intraday', session_date: '2026-11-03', trading_day: true, running: false, ai_available: true, auto_patrol_enabled: false, interval_minutes: 30 };
+	serverBriefs = [];
 	saveError = null;
 	saveGate = null;
 	delayedStatus = null;
@@ -39,7 +41,7 @@ beforeEach(() => {
 			if (delayedStatus?.at === statusReads) return delayedStatus.gate.promise as never;
 			return { data: { ...serverStatus } } as never;
 		}
-		if (path.startsWith('/api/v1/cockpit/briefs?')) return { data: [] } as never;
+		if (path.startsWith('/api/v1/cockpit/briefs?')) return { data: serverBriefs } as never;
 		if (path === '/api/v1/cockpit/auto-patrol') {
 			expect(init?.method).toBe('PUT');
 			const body = JSON.parse(String(init?.body));
@@ -210,13 +212,25 @@ describe('统一自动巡查设置', () => {
 		expect(within(screen.getByRole('listbox')).getAllByRole('option').every((option) => option.getAttribute('aria-selected') === 'false')).toBe(true);
 	});
 
-	it('选择频率开启后仍如实显示 AI 未配置', async () => {
+	it('选择频率开启后仍显示 AI 不可用', async () => {
 		serverStatus.ai_available = false;
 		await loadedPanel();
 		await chooseSetting(10);
-		await waitFor(() => expect(screen.getByText(/会话 2026-11-03/).textContent).toContain('AI 未配置'));
+		await waitFor(() => expect(screen.getByText(/会话 2026-11-03/).textContent).toContain('AI 不可用'));
 		expect(intervalButton().textContent).toContain('10 分钟/次');
 		expect(screen.queryByText('AI 已连接')).toBeNull();
+	});
+
+	it('简报显示运行时不可用的具体原因', async () => {
+		const error = 'Hermes 运行时未就绪。请运行 node desktop/scripts/ensure-hermes-runtime.mjs。';
+		serverStatus.ai_available = false;
+		serverBriefs = [{
+			id: 'runtime-unavailable', key: '2026-11-03|10:10', phase: 'intraday', session_date: '2026-11-03',
+			label: '盘中巡查', trigger: 'manual', status: 'ready', narrative_status: 'unavailable',
+			error, facts: { sources: [] }, started_at: '2026-11-03T10:10:00+08:00',
+		}];
+		await loadedPanel();
+		expect(await screen.findByText(error)).toBeTruthy();
 	});
 
 	it('手动巡查继续使用原接口，不发送频率设置', async () => {

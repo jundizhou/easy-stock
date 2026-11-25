@@ -143,6 +143,8 @@ type HermesConfig struct {
 	PythonPath  string
 }
 
+const hermesRuntimeRepairMessage = "Hermes 运行时未就绪。源码开发请在仓库根目录运行 node desktop/scripts/ensure-hermes-runtime.mjs 后重启后端。桌面安装版请重新安装应用。"
+
 type HermesRuntime struct {
 	runtimeRoot string
 	home        string
@@ -164,7 +166,7 @@ func NewHermesRuntime(cfg HermesConfig) *HermesRuntime {
 	workDir := strings.TrimSpace(cfg.WorkDir)
 	pythonPath := strings.TrimSpace(cfg.PythonPath)
 	if pythonPath == "" && runtimeRoot != "" {
-		pythonPath = runtimePython(runtimeRoot)
+		pythonPath = BundledHermesPython(runtimeRoot)
 	}
 	return &HermesRuntime{
 		runtimeRoot: runtimeRoot,
@@ -182,12 +184,16 @@ func (r *HermesRuntime) Status() Status {
 
 	status := Status{Runtime: "hermes", Configured: configured, APIKeyConfigured: hasAPIKey, Version: r.runtimeVersion()}
 	if r.pythonPath == "" {
-		status.Message = "未配置 Hermes 运行时路径"
+		status.Message = hermesRuntimeRepairMessage
 		return status
 	}
-	info, err := os.Stat(r.pythonPath)
-	if err != nil || info.IsDir() {
-		status.Message = "Hermes 运行时不可用"
+	if r.runtimeRoot != "" && r.pythonPath == BundledHermesPython(r.runtimeRoot) {
+		if !HasBundledHermesRuntime(r.runtimeRoot) {
+			status.Message = hermesRuntimeRepairMessage
+			return status
+		}
+	} else if info, err := os.Stat(r.pythonPath); err != nil || info.IsDir() {
+		status.Message = "Hermes 指定的 Python 不可用，请检查 A_STOCK_HERMES_PYTHON。"
 		return status
 	}
 	status.Available = true
@@ -805,6 +811,8 @@ func (r *HermesRuntime) prompt(ctx context.Context, prompt, browserStatePath str
 				continue
 			}
 			switch eventType(frame) {
+			case "gateway.error":
+				return failure(r.hermesFailure(firstNonEmpty(eventText(frame, "message"), "Hermes 运行时启动失败"), diagnostics.String()))
 			case "approval":
 				if !options.AutoApprove || frame.ID == "" {
 					continue
@@ -1321,8 +1329,28 @@ func defaultModel(provider string) string {
 	}
 }
 
-func runtimePython(root string) string {
+// BundledHermesPython is the interpreter entry point in a prepared runtime.
+func BundledHermesPython(root string) string {
 	return runtimePythonForOS(root, runtime.GOOS)
+}
+
+// HasBundledHermesRuntime checks the local layout without starting Python.
+func HasBundledHermesRuntime(root string) bool {
+	if root == "" {
+		return false
+	}
+	for _, file := range []string{
+		BundledHermesPython(root),
+		filepath.Join(root, "source", "providers", "__init__.py"),
+		filepath.Join(root, "source", "hermes_cli", "__init__.py"),
+		filepath.Join(root, "source", "tui_gateway", "entry.py"),
+	} {
+		info, err := os.Stat(file)
+		if err != nil || !info.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
 }
 
 func runtimePythonForOS(root, goos string) string {

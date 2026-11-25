@@ -20,9 +20,9 @@ var (
 	ErrInvalidPatrolInterval = errors.New("巡查间隔必须为 5、10、15、30 或 60 分钟")
 )
 
-// Narrator 由 AI 运行时实现。Available 为 false 时只保留事实，不调用模型。
+// Narrator 由 AI 运行时实现。返回不可用原因时，巡查只保留事实数据。
 type Narrator interface {
-	Available() bool
+	UnavailableReason() string
 	Narrate(ctx context.Context, prompt string) (string, error)
 }
 
@@ -115,7 +115,7 @@ func (s *Service) Status() Status {
 	settings := s.settings.Snapshot()
 	s.mu.Unlock()
 	interval := appsettings.NormalizeCockpitPatrolIntervalMinutes(settings.CockpitPatrolIntervalMinutes)
-	status := Status{AutoPatrolEnabled: settings.CockpitAutoPatrolEnabled, IntervalMinutes: interval, Phase: state.Phase, SessionDate: state.SessionDate, TradingDay: state.TradingDay, Running: running, AIAvailable: s.narratorAvailable()}
+	status := Status{AutoPatrolEnabled: settings.CockpitAutoPatrolEnabled, IntervalMinutes: interval, Phase: state.Phase, SessionDate: state.SessionDate, TradingDay: state.TradingDay, Running: running, AIAvailable: s.narratorUnavailableReason() == ""}
 	if at, name := NextRun(now, interval); settings.CockpitAutoPatrolEnabled && !at.IsZero() {
 		status.NextRunAt = &at
 		status.NextRunName = name
@@ -184,11 +184,10 @@ func (s *Service) execute(brief Brief) {
 		prompt = "数据时效说明：" + brief.Caveat + "。请在简报开头写明这一点，不得把盘中快照写成收盘结论。\n\n" + prompt
 	}
 
-	switch {
-	case !s.narratorAvailable():
+	if reason := s.narratorUnavailableReason(); reason != "" {
 		brief.NarrativeStatus = "unavailable"
-		brief.Error = "AI 模型未配置，仅保留采集到的事实数据"
-	default:
+		brief.Error = reason
+	} else {
 		text, err := s.narrator.Narrate(ctx, prompt)
 		text = strings.TrimSpace(text)
 		if err != nil || text == "" {
@@ -223,8 +222,11 @@ func (s *Service) release() {
 	s.mu.Unlock()
 }
 
-func (s *Service) narratorAvailable() bool {
-	return s.narrator != nil && s.narrator.Available()
+func (s *Service) narratorUnavailableReason() string {
+	if s.narrator == nil {
+		return "AI 运行时不可用"
+	}
+	return s.narrator.UnavailableReason()
 }
 
 func (s *Service) logf(format string, args ...any) {

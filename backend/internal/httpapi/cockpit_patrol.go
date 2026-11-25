@@ -95,12 +95,18 @@ type cockpitNarrator struct {
 	usage   agent.Gateway
 }
 
-func (n cockpitNarrator) Available() bool {
+func (n cockpitNarrator) UnavailableReason() string {
 	if n.gateway == nil {
-		return false
+		return "AI 运行时不可用"
 	}
 	status := n.gateway.Status()
-	return status.Available && status.Configured
+	if !status.Available {
+		return firstNonEmpty(status.Message, "AI 运行时不可用")
+	}
+	if !status.Configured {
+		return firstNonEmpty(status.Message, "AI 模型未配置")
+	}
+	return ""
 }
 
 func (n cockpitNarrator) Narrate(ctx context.Context, prompt string) (string, error) {
